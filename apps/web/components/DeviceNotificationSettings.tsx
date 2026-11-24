@@ -128,7 +128,7 @@ export function DeviceNotificationSettings() {
             {state === 'SUBSCRIBED' ? (
               <>
                 <div style={{ fontSize: 13, color: '#e2e8f0' }}>On</div>
-                <div style={{ fontSize: 11, color: '#64748b' }}>Reminders will reach this device, even when Aura is closed</div>
+                <div style={{ fontSize: 11, color: '#64748b' }}>Aura will send reminders to this device, even when it&apos;s closed</div>
               </>
             ) : (
               <>

@@ -47,7 +47,7 @@ The server now reports `backgroundDelivery`, which is one of three values:
 | State | What the user sees |
 |---|---|
 | Not requested | "Get reminders on this device, even when Aura is closed." + **Enable notifications** (the only place a prompt can happen) |
-| Granted, working | **On** — "Reminders will reach this device, even when Aura is closed" + Turn off |
+| Granted, working | **On** — "Aura will send reminders to this device, even when it's closed" + Turn off. Worded as what Aura sends: "On" means keys, a recent scheduler run and an active subscription, not verified device delivery (§4.3) |
 | Granted, scheduler not running | **Not working yet** — "This device is set up, but Aura can't send notifications while it's closed yet. Reminders still appear in Aura while it's open." |
 | Denied | How to allow notifications in the browser's site settings. No button that re-prompts. The state is re-read when the user returns to the tab, so recovery needs no reload |
 | Unsupported browser / native app shell | Says so, plus the in-app fallback |
@@ -174,7 +174,11 @@ Local production build (`next build` + `next start`, so the service worker regis
    - confirm the notification arrives 10–15 minutes before, and tapping it opens Aura.
 5. Until steps 1–4 are done, **keep the participant guide's disclosure** ("Aura won't notify you when it's closed"). With this PR, the app itself now shows "aren't available yet" or "Not working yet" instead of a false "Enabled".
 
-## 7. PR and CI
+## 7. Roadmap
+
+- **REM-02 — Native Android and iOS notifications** (future; not started). The Capacitor shells have no Web Push, so native background reminders would need FCM/APNs push or scheduled local notifications. Until REM-02, native apps show "unsupported" and **no native background notification support is claimed**.
+
+## 8. PR and CI
 
 - **PR:** the single PR for branch `feature/aura-rem-01-reminder-reliability`. This report can't contain its own commit hash; the exact head and CI result are in the PR and the session summary.
 - **CI:** see the PR checks. The new steps are "Run REM-01 notification settings (jsdom) test" and "Run REM-01 reminder reliability DB test"; the 9 existing reminder suites are newly added too.

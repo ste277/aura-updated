@@ -172,7 +172,7 @@ async function main() {
   }
   {
     const r = await render({ permission: 'granted', browserSubscription: true, serverActive: true, delivery: 'AVAILABLE' });
-    check('S7. Subscribed and background delivery running: "On"', r.state() === 'SUBSCRIBED' && r.text().includes('even when Aura is closed') && !!r.button('Turn off'));
+    check('S7. Subscribed and background delivery running: "On" -- worded as what Aura sends, not as verified device delivery', r.state() === 'SUBSCRIBED' && r.text().includes('Aura will send reminders to this device') && !r.text().includes('will reach') && !!r.button('Turn off'));
     await r.h.unmount();
   }
   {
@@ -203,7 +203,7 @@ async function main() {
     const r = await render({ permission: 'default', delivery: 'SCHEDULER_INACTIVE' });
     await click(r.button('Enable notifications')!);
     await flush();
-    check('E2. Enable while the scheduler is not running: device set up, but shown as not working yet (no false success)', r.state() === 'BACKGROUND_UNAVAILABLE' && !r.text().includes('Reminders will reach this device'));
+    check('E2. Enable while the scheduler is not running: device set up, but shown as not working yet (no false success)', r.state() === 'BACKGROUND_UNAVAILABLE' && !r.text().includes('Aura will send reminders to this device'));
     await r.h.unmount();
   }
   {
