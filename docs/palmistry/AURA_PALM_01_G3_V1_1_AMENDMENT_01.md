@@ -13,9 +13,11 @@ The sources and locators are unchanged: Hastasañjīvana 3.2.80–82; Sāmudrika
 
 **Please check:** is the new summary historically accurate and adequately supported by these sources? Is "direction" appropriate, or should it read "course"?
 
-## 2. Proposed wording changes (unchanged from v1.1; please accept, amend or reject)
+## 2. Wording changes W1–W4: APPLIED 2026-11-24 (commit `f723942`) by Product Owner direction
 
-| ID | Where | Proposed |
+Applied exactly as proposed in v1.1 §6. No reviewer has accepted them; the Product Owner's final-content review covers them (`AURA_PALM_01_G3_FINAL_CONTENT_REVIEW.md`). The same commit also restates two uncertainties neutrally (father line, ST 1.155) and removes internal workflow wording ("awaiting expert review") from user-facing text.
+
+| ID | Where | Applied |
 |---|---|---|
 | W1 | Barleycorn, "In this tradition" | "The Bṛhatsaṃhitā also links a barleycorn at the thumb's root with having sons, reflecting the concerns of texts of that period." |
 | W2 | Prosperity line, "Context and uncertainty" | "Here "wealth" is a traditional category, not a forecast of anyone's finances." |
@@ -23,6 +25,8 @@ The sources and locators are unchanged: Hastasañjīvana 3.2.80–82; Sāmudrika
 | W4 | General disclosure | Same, plus: "Please don't use it for decisions about health, money or relationships." |
 
 ## 3. Scholarly questions (PDF §5): effect of this amendment
+
+Actual dispositions as of 2026-11-24: `AURA-PALM-01-G3-SCHOLAR-WAIVER.md` §3.
 
 - **Still open:** Q1–Q5, Q7–Q13.
   - **Material:** Q1 (āyurlekhā), Q2 (dhanamātṛlekhā), Q5 (ST 1.155, ring finger versus forefinger; still in the upward-line context note), Q9 (chatra).
@@ -34,3 +38,4 @@ The sources and locators are unchanged: Hastasañjīvana 3.2.80–82; Sāmudrika
 - The Product Owner approved `AURA-PALM-01-G3-C-WAIVER.md` on 2026-11-24 (waiver §4). The **Licensing reviewer** row in PDF §8 is therefore **replaced by that Product Owner risk acceptance**. External copyright counsel sign-off is no longer an internal publication prerequisite for the content-only guide.
 - **Still required:** the **Primary scholarly reviewer** and the **Editorial / cultural reviewer** sign-offs. The owner stated that "Scholarly review, editorial review, attribution, applicable licence compliance and separate publication authorization remain mandatory."
 - Reviewer sign-offs are **not** recorded here. They are completed only by the actual reviewers.
+- **Proposed (not approved), 2026-11-24:** `AURA-PALM-01-G3-SCHOLAR-WAIVER.md` would remove the Primary scholarly reviewer as an internal prerequisite and require the Product Owner's own editorial and cultural review instead. Until the owner approves it, the paragraph above stands. The §11 scholarly reviewer fields stay blank and unsigned either way.
