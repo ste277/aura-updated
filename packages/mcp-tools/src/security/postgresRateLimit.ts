@@ -1,5 +1,5 @@
 import type { PgQueryable } from '../auth/postgresAdapter';
-import { boundedMs, commitConfirmed, singleFlight, transactionTimeouts } from './deadline';
+import { boundedMs, commitConfirmed, guardClient, monotonicNow, singleFlight, transactionTimeouts, type BoundedClient } from './deadline';
 import type { McpRateLimiter, RateLimitDecision, RateLimitRule } from './rateLimit';
 
 /**
@@ -90,7 +90,10 @@ export interface PostgresRateLimiter extends McpRateLimiter {
 }
 
 const TABLE = '"McpRateLimitWindow"';
-const UNAVAILABLE: RateLimitDecision = Object.freeze({ allowed: false, retryAfterSeconds: 1, limitedBy: 'unavailable' });
+type UnavailableCause = NonNullable<RateLimitDecision['cause']>;
+const unavailable = (cause: UnavailableCause): RateLimitDecision => Object.freeze({ allowed: false, retryAfterSeconds: 1, limitedBy: 'unavailable', cause });
+/** I2b-S11: a phase reached after the decision's absolute deadline. */
+class DecisionExpired extends Error {}
 /** Fast path, then INSERT path, then one more INSERT path if cleanup removed a row in between. */
 const MAX_ATTEMPTS = 3;
 
@@ -143,7 +146,7 @@ export function createPostgresRateLimiter(options: PostgresRateLimiterOptions): 
    * exist): BEGIN, DECIDE, COMMIT. Returns null when a row was missing at
    * decision time; the caller retries with `ensureRows` (INSERT first).
    */
-  async function attempt(client: PooledClient, ensureRows: boolean, keys: string[], limits: number[], byKey: Map<string, number>, seconds: number): Promise<RateLimitDecision | null> {
+  async function attempt(client: PooledClient, ensureRows: boolean, keys: string[], limits: number[], byKey: Map<string, number>, seconds: number, phase: { deadlineAt: number; commitSent: boolean }): Promise<RateLimitDecision | null> {
     await client.query(BEGIN);
     if (ensureRows) await client.query(ENSURE_ROWS, [keys, seconds]);
     const r = await client.query<{ key: string; cnt: number; retry: number; ok: boolean | null; bumped: number }>(DECIDE, [keys, limits, seconds]);
@@ -156,9 +159,16 @@ export function createPostgresRateLimiter(options: PostgresRateLimiterOptions): 
     const ok = r.rows[0]?.ok === true;
     if (ok) {
       if (r.rows.length !== keys.length || r.rows[0].bumped !== keys.length) throw new Error('rate-limit invariant violated');
+      // I2b-S11 (P3-1): never send COMMIT past the absolute deadline, even if
+      // its timer has not run yet (the caller discards the connection, so the
+      // transaction rolls back and nothing is counted).
+      if (monotonicNow() >= phase.deadlineAt) throw new DecisionExpired();
+      phase.commitSent = true;
       // I2b-S8 (S5): admit only on a CONFIRMED commit (tag "COMMIT"); an
       // unconfirmed outcome is a deny, which can only over-count.
-      if (!commitConfirmed(await client.query('COMMIT'))) throw new Error('commit not confirmed');
+      if (!commitConfirmed(await client.query('COMMIT'))) return unavailable('commit_unknown');
+      // A confirmed but LATE acknowledgement is not an admission (counted, not admitted: over-count only).
+      if (monotonicNow() > phase.deadlineAt) return unavailable('commit_unknown');
       return { allowed: true, retryAfterSeconds: 0 };
     }
     await client.query('ROLLBACK');
@@ -189,8 +199,9 @@ export function createPostgresRateLimiter(options: PostgresRateLimiterOptions): 
 
     return new Promise<RateLimitDecision>((resolve) => {
       let answered = false;
-      let client: PooledClient | undefined;
-      let released = false;
+      let guard: ReturnType<typeof guardClient> | undefined;
+      // I2b-S11 (P3-1): absolute monotonic deadline; the timer only wakes us.
+      const phase = { deadlineAt: monotonicNow() + decisionDeadlineMs, commitSent: false };
       const answer = (d: RateLimitDecision) => {
         if (answered) return;
         answered = true;
@@ -199,47 +210,53 @@ export function createPostgresRateLimiter(options: PostgresRateLimiterOptions): 
       };
       // Ends the connection (pg-pool removes a client released with an error):
       // an abandoned or failed transaction is never reused.
-      const destroy = (c: PooledClient | undefined) => {
-        if (!c || released) return;
-        released = true;
-        try {
-          c.release(new Error('rate-limit decision abandoned'));
-        } catch {
-          // already gone
-        }
+      const fail = (cause: UnavailableCause) => {
+        guard?.discard();
+        answer(unavailable(phase.commitSent && cause !== 'checkout' ? 'commit_unknown' : cause));
       };
-      const timer = setTimeout(() => {
-        answer(UNAVAILABLE);
-        destroy(client);
-      }, decisionDeadlineMs);
+      const timer = setTimeout(() => fail('deadline'), decisionDeadlineMs);
 
       (async () => {
+        let c: PooledClient;
         try {
-          const c = await pool.connect();
-          if (answered) {
-            // The deadline already answered. The late connection was never
-            // used (no transaction), so it is clean: return it to the pool.
+          c = await pool.connect();
+        } catch {
+          fail('checkout');
+          return;
+        }
+        if (answered || monotonicNow() >= phase.deadlineAt) {
+          // Late checkout: never used (no transaction), so it is clean: return it to the pool.
+          try {
             c.release();
-            return;
+          } catch {
+            // ignore
           }
-          client = c;
+          fail('deadline');
+          return;
+        }
+        // I2b-S11 (P2-1): a checked-out connection that dies emits 'error'; handle it, never crash.
+        guard = guardClient(c as unknown as BoundedClient, () => fail('driver'));
+        try {
           let decision: RateLimitDecision | null = null;
-          for (let i = 0; i < MAX_ATTEMPTS && decision === null && !answered; i += 1) decision = await attempt(c, i > 0, keys, limits, byKey, seconds);
+          for (let i = 0; i < MAX_ATTEMPTS && decision === null && !answered; i += 1) decision = await attempt(c, i > 0, keys, limits, byKey, seconds, phase);
           if (answered) {
-            destroy(c);
+            guard.discard();
             return;
           }
-          released = true;
-          c.release();
+          if (decision?.limitedBy === 'unavailable') {
+            guard.discard();
+            answer(decision);
+            return;
+          }
+          guard.releaseClean();
           if (decision?.allowed) {
             admitted += 1;
             if (cleanupEvery > 0 && admitted % cleanupEvery === 0) backgroundCleanup().catch(() => undefined);
           }
-          answer(decision ?? UNAVAILABLE);
-        } catch {
+          answer(decision ?? unavailable('internal'));
+        } catch (err) {
           // Fail closed: a limiter that cannot decide denies.
-          destroy(client);
-          answer(UNAVAILABLE);
+          fail(err instanceof DecisionExpired ? 'deadline' : err instanceof Error && err.message === 'rate-limit invariant violated' ? 'internal' : 'driver');
         }
       })();
     });

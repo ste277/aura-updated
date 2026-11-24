@@ -38,25 +38,23 @@ import { constants, createPrivateKey, createPublicKey, generateKeyPairSync, rand
  *     its PUBLIC members only (what /oauth/jwks publishes);
  *   - secrets (every cookie key -- current AND retained rotation keys --,
  *     the pairwise salt and the audit key): >= 32 characters and >= 128
- *     bits by the estimate of `assessSecret` (I2b-S10), which is FORMAT-
- *     AWARE so genuine CSPRNG output is never refused:
- *       hex (one case, >= 1 letter)        4 bits per character
- *       base64 / base64url (>= 2 of lower,
- *         upper, digit; padding allowed)   6 bits per character
- *       anything else                      the S8 character-frequency
- *                                          (Shannon) estimate, >= 10
- *                                          distinct characters
- *     A secret passes on EITHER estimate (so nothing the S8 rule accepted
- *     is newly refused), subject to mistake vetoes: no repeated block, and
- *     for hex / base64 no run of >= 12 characters that repeat or step by
- *     one in the format's own alphabet and no character far more frequent
- *     than chance allows (a uniform random string trips a veto with
- *     probability < 1e-11).
- *     Supported formats: `openssl rand -hex 16` (or longer) and
- *     `openssl rand -base64 24` / `-base64 32` (or base64url). This is a
- *     floor against obvious mistakes, not a proof of randomness: a derived
- *     or hand-picked string in one of these formats can pass, so generate
- *     secrets with a CSPRNG.
+ *     bits by `assessSecret`, an OBVIOUS-MISTAKE FILTER, not proof of
+ *     entropy (I2b-S10 / S11):
+ *       SUPPORTED formats (canonical encodings of CSPRNG bytes; strength =
+ *       8 x decoded bytes): hex (even length, one case), base64 (padded,
+ *       canonical), base64url (unpadded, canonical) -- e.g.
+ *       `openssl rand -hex 16|32`, `openssl rand -base64 24|32`;
+ *       LEGACY values (anything else) keep the S8 rule: Shannon estimate
+ *       >= 128 bits and >= 10 distinct characters.
+ *     Accepted on EITHER estimate, subject to mistake vetoes: no repeated
+ *     block; for supported formats no run of >= 12 repeating / one-step
+ *     characters in the format's alphabet and no character far more frequent
+ *     than chance (a uniform random encoding trips a veto with p < 1e-11).
+ *     Legacy policy (explicit): an S8-accepted value is refused ONLY if it
+ *     trips a veto -- such a value is patterned, not random, and must be
+ *     regenerated. A deterministic or derived value in a supported format
+ *     cannot be detected: provenance (CSPRNG generation, custody) is owner
+ *     decision D9.
  * Error messages name the variable and the kid only, never a value.
  *
  * `ephemeralOAuthKeys()` is for local development and tests only: fresh
@@ -184,13 +182,26 @@ export function assessSecret(v: string): SecretAssessment {
   let format: SecretFormat = 'text';
   let bits: number;
   let core = v;
-  if (/^(?:[0-9a-f]+|[0-9A-F]+)$/.test(v) && /[a-fA-F]/.test(v)) {
+  // I2b-S11 (S10 review P3-2): a format estimate applies only to a CANONICAL
+  // encoding, and strength is counted from the DECODED length:
+  //   hex       even length, one case, at least one letter      8 bits/byte
+  //   base64    length % 4 == 0, correct padding, canonical pad bits
+  //             (decode + re-encode reproduces it exactly)        8 bits/byte
+  //   base64url unpadded, length % 4 != 1, canonical pad bits    8 bits/byte
+  // (base64 / base64url additionally need >= 2 of lower, upper, digit).
+  // Anything else -- odd-length hex, impossible lengths, non-canonical pad
+  // bits, text -- is LEGACY and judged by the unchanged S8 rule.
+  const b64Groups = [/[a-z]/, /[A-Z]/, /[0-9]/].filter(hasCase).length >= 2;
+  if (/^(?:[0-9a-f]{2})+$/.test(v) || /^(?:[0-9A-F]{2})+$/.test(v) ? /[a-fA-F]/.test(v) : false) {
     format = 'hex';
-    bits = 4 * v.length;
-  } else if ((/^[A-Za-z0-9+/]+={0,2}$/.test(v) || /^[A-Za-z0-9_-]+$/.test(v)) && [/[a-z]/, /[A-Z]/, /[0-9]/].filter(hasCase).length >= 2) {
+    bits = 8 * (v.length / 2);
+  } else if (b64Groups && /^[A-Za-z0-9+/]+={0,2}$/.test(v) && v.length % 4 === 0 && Buffer.from(v, 'base64').toString('base64') === v) {
     format = 'base64';
     core = v.replace(/=+$/, '');
-    bits = 6 * core.length;
+    bits = 8 * Buffer.from(v, 'base64').length;
+  } else if (b64Groups && /^[A-Za-z0-9_-]+$/.test(v) && v.length % 4 !== 1 && Buffer.from(v, 'base64url').toString('base64url') === v) {
+    format = 'base64';
+    bits = 8 * Buffer.from(v, 'base64url').length;
   } else {
     bits = estimateSecretBits(v);
   }
