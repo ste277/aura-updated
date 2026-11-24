@@ -82,7 +82,7 @@ The callback must also be registered for that client. At `finish`, the hand-off 
 
 **Scope:** these bounds cover database work. The HTTP response lifecycle (`finish` / `close`) is unchanged and is validated live in V2, V4 and V6.
 
-### R-P3-2 Secret-format ambiguity: resolved
+### R-P3-2 Secret-format ambiguity: resolved (corrected after the focused review)
 **Policy (deterministic, `assessConfiguredSecret`).**
 - **New configuration must declare its format:** `hex:`, `base64:` or `base64url:`. The body must be a canonical encoding with at least 16 decoded bytes and must pass the vetoes: repeated block, step runs, skew, and a new **low-variety** veto (fewer than half the distinct characters expected for the declared alphabet; P(false refusal) ≤ 3e-9 for 16-byte values, far smaller for longer ones).
 - **The string is used verbatim**, tag included. Nothing is decoded, stripped or transformed.
@@ -100,13 +100,44 @@ The callback must also be registered for that client. At `finish`, the hand-off 
 - An untagged retained key is accepted, and returned byte for byte.
 - 10,000 CSPRNG samples for each of 6 declared formats were all accepted.
 
+### R-P3-2 correction (focused review §4.1, owner-approved within PR #390)
+The fresh-subagent focused review (`AURA_MCP_02_I2B_S12_INDEPENDENT_REVIEW/`, preserved unchanged) rated R-P3-2 **PARTIAL**, because the same mistake class still earned inflated credit.
+
+**Before** (author reproduction at `b1f8e337`, 5,000 samples each):
+
+| Case | Result |
+|---|---|
+| `base64:` + `openssl rand -hex 12` | 4,749 accepted, credited 144 bits (about 96 real) |
+| `base64url:` + `openssl rand -hex 16` | 4,528 accepted, credited 192 bits (about 128 real) |
+| untagged retained key of 32 characters from `ghijGHIJ` | 5,000 accepted, credited 192 bits (about 96 real) |
+
+**Change** (no material transformed, no value echoed):
+- **Hex-heavy ambiguity.** A body declared base64 or base64url is refused (`ambiguous_encoding`, with the advice to declare `hex:`) if its count of hex-alphabet characters has P(X ≥ k | n, 22/64) ≤ 1e-8.
+  - This covers all-hex bodies, padded bodies and a few edited characters.
+  - For a 22-character (16-byte) body the threshold is 21 or more hex characters; for 43 characters it is 34 or more.
+  - The real false-refusal probability for CSPRNG output is ≤ 2.7e-9 for 16-byte bodies, and smaller for longer ones.
+  - On the untagged path, a hex-heavy value earns no base64 credit and is judged by the legacy rule.
+- **Untagged low variety.** The low-variety veto now also applies to retained untagged hex and base64-class values. Expected variety is computed from the character groups the value actually uses (lower, upper, digits, symbols), so a legitimate lower-case-alphanumeric generator key isn't judged against 64 symbols.
+  - Worst-case false refusal across generator alphabets: 4.6e-9 (32 lower-case characters, which don't reach this path anyway).
+  - About 4e-10 or below for every other alphabet.
+  - The first version used a fixed 64-symbol alphabet and newly refused 5 of about 28,700 S8-accepted mixed-alphabet strings (S10 compatibility check). That was corrected before commit, and the check now reports 0 in 5 of 5 runs.
+
+**After** (5,000 samples each): all three cases are **0 accepted**. Boundary tests (43 characters: 33 hex-alphabet characters accepted, 34 refused), padded all-hex, near-hex (21 + 1) and untagged near-hex are all refused. There were no false refusals in 10,000 CSPRNG samples for each of 3 declared and 3 untagged retained formats. Loader errors don't echo values, and a legitimate retained key is returned byte for byte.
+
+**Remaining limitation (inherent):** format tags, decoded length, hex-heaviness and character variety are defensive checks, not proof of entropy. A deterministic or derived value in a supported format can still pass. CSPRNG generation and custody remain owner decision D9.
+
+**Non-blocking follow-ups recorded (focused review §4.2, §4.3), not addressed here:**
+- **P4:** `validateAuthorizationRedirect`'s origin comparison treats custom-scheme URLs as origin "null". This is unreachable, because client policy allows only https and loopback http.
+- **P4:** the SQLSTATE pattern `/^[0-9A-Z]{5}$/` also matches errno codes such as `EPIPE`, so a lost connection could be labelled `commit_failed` instead of `commit_lost`. This is diagnostic only; both labels fail the gate.
+- **Observation (pre-existing, outside S12):** the S8 offline check "address bucket is a keyed hash" refuses any random 32-hex-character hash that happens to contain the substring `db8` or `2001`, so it fails on about 0.7% of runs. It was seen once during this correction and left unchanged.
+
 ## 2. Verification (isolated PostgreSQL 16.14, socket only, TCP off, `LC_ALL=C`; Node 26.5.0; synthetic only)
 
 | Suite | Result |
 |---|---|
 | mcpRemoteTransport | all passed |
 | mcpOAuthLocal / SecurityRegression / I2b / StagingBlockers / S8 / S10 / S11 | 119 / 34 / 116 / 52 / 54 / 125 / 31 |
-| **mcpOAuthS12 (new, offline)** | **67/67** |
+| **mcpOAuthS12 (new, offline)** | **84/84** (67 + 17 P3-correction checks) |
 | mcpOAuthPostgresDb / StorageProtectionDb / StoreS4Db / CodeS6Db / S8Db | 36 / 42 / 13 / 14 / 11 |
 | mcpOAuthStagingBlockersDb | 45/45 (independent-floor gate, shared versus limiter-only slowdown, post-send loss, explicit refusal, negative controls, exactness) |
 | mcpOAuthS10Db / S11Db | 21 / 19 (S11 closed findings preserved) |

@@ -40,12 +40,16 @@ import { constants, createPrivateKey, createPublicKey, generateKeyPairSync, rand
  *     the pairwise salt and the audit key MUST declare their format --
  *     "hex:<hex>", "base64:<base64>" or "base64url:<base64url>" -- and the
  *     body must be a canonical encoding with >= 16 decoded bytes that passes
- *     the mistake vetoes (repeated block, step runs, skew, low variety). The
+ *     the mistake vetoes (repeated block, step runs, skew, low variety); a
+ *     body declared base64 / base64url that is all or almost all hex
+ *     characters is refused as ambiguous (declare it "hex:"). The
  *     whole string, tag included, is the secret: nothing is decoded,
  *     stripped or transformed. RETAINED cookie keys may also be untagged
  *     legacy values (compatibility path): >= 32 characters, judged by the
  *     legacy rule (S8 estimate, or canonical-format credit where a
- *     hex-lexical value earns hex credit only). Generate with a CSPRNG, e.g.
+ *     hex-lexical or hex-heavy value earns no base64 credit, with the same
+ *     low-variety veto judged against the character groups the value uses).
+ *     Generate with a CSPRNG, e.g.
  *     "hex:$(openssl rand -hex 32)" or "base64:$(openssl rand -base64 32)".
  *     Format validation and pattern checks cannot establish the entropy of a
  *     real key; provenance and custody are owner decision D9.
@@ -161,7 +165,7 @@ export interface SecretAssessment {
   /** Estimated strength, bits (format-aware; see the module comment). */
   bits: number;
   /** Why it was refused (a code, never the value). */
-  reason?: 'short' | 'weak' | 'repeated_block' | 'run' | 'skewed' | 'low_variety' | 'not_canonical';
+  reason?: 'short' | 'weak' | 'repeated_block' | 'run' | 'skewed' | 'low_variety' | 'not_canonical' | 'ambiguous_encoding';
 }
 
 /**
@@ -171,6 +175,41 @@ export interface SecretAssessment {
  * secret and about 1 in 6000 24-byte base64 / 20-byte hex secrets).
  * Strings outside the supported formats keep the S8 rule unchanged.
  */
+/**
+ * I2b-S12: far fewer distinct characters than uniform draws from the
+ * alphabet would give (< 1/2 of the expected count). P(false refusal) for a
+ * CSPRNG encoding <= 3e-9 (16-byte values; << 1e-11 from 24 bytes).
+ * Tagged values use the declared alphabet (16 / 64); untagged base64-class
+ * values use `groupAlphabet`.
+ */
+/**
+ * I2b-S12: "hex-heavy" -- far more hex-alphabet characters (22 of the 64
+ * base64 symbols: 0-9 A-F a-f) than a uniform base64 / base64url string of
+ * this length would contain: P(X >= observed | n, 22/64) <= 1e-8. Catches hex
+ * output under a base64 tag, including with a few characters edited (for a
+ * 16-byte / 22-char body: >= 21 hex-alphabet chars; P(false refusal) for
+ * CSPRNG output there = 2.7e-9, and smaller for longer bodies).
+ */
+function hexHeavy(core: string): boolean {
+  if (core.length === 0) return false;
+  const k = [...core].filter((ch) => /[0-9A-Fa-f]/.test(ch)).length;
+  return logBinomialTail(core.length, 22 / 64, k) <= Math.log(1e-8);
+}
+
+/**
+ * I2b-S12: the alphabet an UNTAGGED base64-class value plausibly came from --
+ * the sum of the character groups it actually uses (lower 26, upper 26,
+ * digits 10, the two symbols 2). A legitimate key from a lower-case
+ * alphanumeric generator is then judged against ~38 symbols, not 64.
+ */
+function groupAlphabet(core: string): number {
+  return (/[a-z]/.test(core) ? 26 : 0) + (/[A-Z]/.test(core) ? 26 : 0) + (/[0-9]/.test(core) ? 10 : 0) + (/[-_+/]/.test(core) ? 2 : 0);
+}
+
+function lowVariety(core: string, alphabetSize: number): boolean {
+  return new Set(core).size < 0.5 * alphabetSize * (1 - Math.pow(1 - 1 / alphabetSize, core.length));
+}
+
 export function assessSecret(v: string): SecretAssessment {
   const hasCase = (re: RegExp) => re.test(v);
   let format: SecretFormat = 'text';
@@ -194,6 +233,9 @@ export function assessSecret(v: string): SecretAssessment {
     format = 'hex';
     bits = 8 * (v.length / 2);
   } else if (hexLexical) {
+    bits = estimateSecretBits(v);
+  } else if (hexHeavy(v.replace(/=+$/, ''))) {
+    // I2b-S12: hex-heavy text earns no base64 credit (legacy rule only).
     bits = estimateSecretBits(v);
   } else if (b64Groups && /^[A-Za-z0-9+/]+={0,2}$/.test(v) && v.length % 4 === 0 && Buffer.from(v, 'base64').toString('base64') === v) {
     format = 'base64';
@@ -220,6 +262,10 @@ export function assessSecret(v: string): SecretAssessment {
       if (c > max) max = c;
     }
     if (max >= maxCountLimit(core.length, format === 'hex' ? 16 : 64)) return out('skewed');
+    // I2b-S12 (S12 review P3 §4.1): a value recognised as hex / base64 that uses
+    // far fewer symbols than that alphabet gives (e.g. 32 chars of
+    // "ghijGHIJ") is patterned -- refused on the retained-key path too.
+    if (lowVariety(core, format === 'hex' ? 16 : groupAlphabet(core))) return out('low_variety');
   }
   // Accept on the S8 estimate (unchanged, so nothing S8 accepted is newly refused) OR on the format-aware one.
   const s8 = new Set(v).size >= MIN_DISTINCT && estimateSecretBits(v) >= MIN_SECRET_BITS;
@@ -270,6 +316,11 @@ export function assessConfiguredSecret(raw: string): ConfiguredSecretAssessment 
   const bytes = canonicalBytes(body, declared);
   const out = (bits: number, reason?: SecretAssessment['reason']): ConfiguredSecretAssessment => ({ ok: !reason, format: declared === 'hex' ? 'hex' : 'base64', bits, declared, ...(reason ? { reason } : {}) });
   if (bytes === null) return out(0, 'not_canonical');
+  // I2b-S12 (S12 review P3 §4.1): a body declared base64 / base64url that is
+  // all-hex or hex-heavy is ambiguous -- almost certainly hex output under the
+  // wrong tag (its real strength is 4 bits per character, not 6). Refused, not
+  // reinterpreted: declare it "hex:". P(false refusal) for CSPRNG output <= 1e-9.
+  if (declared !== 'hex' && hexHeavy(body.replace(/=+$/, ''))) return out(0, 'ambiguous_encoding');
   const bits = 8 * bytes;
   if (bits < MIN_SECRET_BITS) return out(bits, 'weak');
   if (periodic(body)) return out(bits, 'repeated_block');
@@ -288,8 +339,7 @@ export function assessConfiguredSecret(raw: string): ConfiguredSecretAssessment 
   // alphabet give (< 1/2 of the expected count) -- e.g. a hex-looking string
   // declared as base64url. P(false refusal) for CSPRNG output <= 3e-9 (16-byte
   // values; << 1e-11 from 24 bytes).
-  const a = declared === 'hex' ? 16 : 64;
-  if (new Set(core).size < 0.5 * a * (1 - Math.pow(1 - 1 / a, core.length))) return out(bits, 'low_variety');
+  if (lowVariety(core, declared === 'hex' ? 16 : 64)) return out(bits, 'low_variety');
   return out(bits);
 }
 
@@ -302,6 +352,7 @@ function checkSecret(name: string, raw: string, allowUntagged: boolean): void {
   if (!tagged && raw.length < MIN_SECRET) throw new TypeError(`${name}: every key must be at least ${MIN_SECRET} characters`);
   const a = assessConfiguredSecret(raw);
   if (a.reason === 'not_canonical') throw new TypeError(`${name}: a key is not a canonical encoding in its declared format`);
+  if (a.reason === 'ambiguous_encoding') throw new TypeError(`${name}: a key declared as base64/base64url is all or almost all hex characters -- if it is hex, declare it as "hex:" (4 bits per character)`);
   if (!a.ok) throw new TypeError(`${name}: a key is too predictable (needs >= ${MIN_SECRET_BITS} bits; use a CSPRNG)`);
 }
 

@@ -233,6 +233,90 @@ async function main() {
     check('R-P2-2 a raw error string in the cause field is DROPPED (never logged)', raw.cause === undefined && !JSON.stringify(raw).includes('password'), raw);
   }
 
+  // ------------------------------------------------------------------ S12 review P3 §4.1 correction
+  {
+    const HEX = '0123456789abcdefABCDEF';
+    const NONHEX_URL = 'GHIJKLMNOPQRSTUVWXYZghijklmnopqrstuvwxyz-_';
+    const pick = (alpha: string) => alpha[randomBytes(1)[0] % alpha.length];
+    // The two reported cases (and the base64url variant): refused, with the right reason.
+    let r1 = 0;
+    let r2 = 0;
+    let r3 = 0;
+    for (let k = 0; k < 2000; k += 1) {
+      if (assessConfiguredSecret(`base64:${randomBytes(12).toString('hex')}`).reason === 'ambiguous_encoding') r1 += 1;
+      if (assessConfiguredSecret(`base64url:${randomBytes(16).toString('hex')}`).reason === 'ambiguous_encoding') r2 += 1;
+      if (!assessSecret(Array.from(randomBytes(32), (b) => 'ghijGHIJ'[b % 8]).join('')).ok) r3 += 1;
+    }
+    check('P3-corr reported case 1: "base64:" + openssl rand -hex 12 -> refused (ambiguous_encoding) 2000/2000', r1 === 2000, r1);
+    check('P3-corr variant: "base64url:" + openssl rand -hex 16 -> refused (ambiguous_encoding) 2000/2000', r2 === 2000, r2);
+    check('P3-corr reported case 2: untagged 32 chars of "ghijGHIJ" (retained-key path) -> refused 2000/2000', r3 === 2000, r3);
+    // Near-hex (a few characters edited) and padded forms are refused too.
+    const nearHexUrl = `base64url:${Array.from({ length: 21 }, () => pick(HEX)).join('')}g`; // 22 chars; 'g' keeps it canonical
+    check('P3-corr near-hex: 21 hex chars + 1 non-hex under "base64url:" -> ambiguous_encoding', assessConfiguredSecret(nearHexUrl).reason === 'ambiguous_encoding', assessConfiguredSecret(nearHexUrl));
+    const paddedAllHex = `base64:${Array.from({ length: 21 }, () => pick(HEX)).join('')}A==`; // canonical 16-byte base64 made of hex-alphabet chars
+    check('P3-corr a PADDED canonical base64 body made only of hex-alphabet chars -> ambiguous_encoding (padding ignored)', Buffer.from(paddedAllHex.slice(7), 'base64').toString('base64') === paddedAllHex.slice(7) && assessConfiguredSecret(paddedAllHex).reason === 'ambiguous_encoding', paddedAllHex);
+    const untaggedNear = `${randomBytes(16).toString('hex').slice(0, 31)}g`;
+    check('P3-corr untagged near-hex (31 hex + "g"): no base64 credit (legacy rule) and refused', assessSecret(untaggedNear).format === 'text' && !assessSecret(untaggedNear).ok, assessSecret(untaggedNear));
+    check('P3-corr "hex:" with a hex body is unaffected (accepted, 128 bits)', assessConfiguredSecret(`hex:${randomBytes(16).toString('hex')}`).bits === 128 && assessConfiguredSecret(`hex:${randomBytes(16).toString('hex')}`).ok);
+    // Exact boundary of the hex-heavy test (P(X >= k | n, 22/64) <= 1e-8), for a 43-char base64url body.
+    const lnC = (n: number, j: number) => { let r = 0; for (let i = 1; i <= j; i += 1) r += Math.log(n - j + i) - Math.log(i); return r; };
+    const tail = (n: number, k: number) => { let t = 0; for (let j = k; j <= n; j += 1) t += Math.exp(lnC(n, j) + j * Math.log(22 / 64) + (n - j) * Math.log(42 / 64)); return t; };
+    const n = 43;
+    let thr = 0;
+    while (tail(n, thr) > 1e-8) thr += 1;
+    const build = (hexCount: number) => {
+      for (let attempt = 0; attempt < 200; attempt += 1) {
+        const chars = [...Array.from({ length: hexCount }, () => pick(HEX)), ...Array.from({ length: n - 1 - hexCount }, () => pick(NONHEX_URL))];
+        for (let i = chars.length - 1; i > 0; i -= 1) {
+          const j = randomBytes(1)[0] % (i + 1);
+          [chars[i], chars[j]] = [chars[j], chars[i]];
+        }
+        const v = `${chars.join('')}w`; // 'w' (index 48) keeps 43 chars canonical; not hex
+        const a = assessConfiguredSecret(`base64url:${v}`);
+        if (a.reason !== 'run' && a.reason !== 'skewed' && a.reason !== 'low_variety') return a;
+      }
+      return null;
+    };
+    const below = build(thr - 1);
+    const at = build(thr);
+    check(`P3-corr boundary (n=43): ${thr - 1} hex-alphabet chars accepted, ${thr} refused as ambiguous_encoding`, !!below && below.ok === true && !!at && at.reason === 'ambiguous_encoding', { thr, below, at });
+    // Legitimate secrets: no false refusals from the new checks.
+    for (const [label, gen, f] of [
+      ['declared base64: 16 B', () => `base64:${randomBytes(16).toString('base64')}`, assessConfiguredSecret],
+      ['declared base64url: 16 B', () => `base64url:${randomBytes(16).toString('base64url')}`, assessConfiguredSecret],
+      ['declared base64url: 32 B', () => `base64url:${randomBytes(32).toString('base64url')}`, assessConfiguredSecret],
+      ['untagged retained base64url 32 B', () => randomBytes(32).toString('base64url'), assessSecret],
+      ['untagged retained base64 24 B', () => randomBytes(24).toString('base64'), assessSecret],
+      ['untagged retained hex 16 B', () => randomBytes(16).toString('hex'), assessSecret],
+    ] as [string, () => string, (v: string) => { ok: boolean }][]) {
+      let refused = 0;
+      for (let k = 0; k < 10_000; k += 1) if (!f(gen()).ok) refused += 1;
+      check(`P3-corr no false refusal: ${label} (10,000 CSPRNG samples)`, refused === 0, refused);
+    }
+    // Loader: refusals never echo the value; a legitimate retained key passes unchanged.
+    const jwks = JSON.stringify(sharedKeys().jwks);
+    const tagged = () => `base64url:${randomBytes(32).toString('base64url')}`;
+    const env = (o: Record<string, string>) => ({ AURA_MCP_OAUTH_JWKS: jwks, AURA_MCP_OAUTH_COOKIE_KEYS: tagged(), AURA_MCP_OAUTH_PAIRWISE_SALT: tagged(), AURA_MCP_AUDIT_KEY: tagged(), ...o });
+    const msg = (o: Record<string, string>) => {
+      try {
+        loadOAuthKeysFromEnv(env(o));
+        return null;
+      } catch (e) {
+        return (e as Error).message;
+      }
+    };
+    const hexUnderB64 = `base64:${randomBytes(12).toString('hex')}`;
+    const m1 = msg({ AURA_MCP_AUDIT_KEY: hexUnderB64 });
+    check('P3-corr loader: hex under "base64:" refused, advises "hex:", value not echoed', !!m1 && /declare it as "hex:"/.test(m1) && !m1.includes(hexUnderB64.slice(7)), m1);
+    const lowVar = Array.from(randomBytes(32), (b) => 'ghijGHIJ'[b % 8]).join('');
+    const cur = tagged();
+    const m2 = msg({ AURA_MCP_OAUTH_COOKIE_KEYS: `${cur},${lowVar}` });
+    check('P3-corr loader: low-variety untagged RETAINED key refused, value not echoed', !!m2 && !m2.includes(lowVar), m2);
+    const legacy = randomBytes(32).toString('base64url');
+    const kept = loadOAuthKeysFromEnv(env({ AURA_MCP_OAUTH_COOKIE_KEYS: `${cur},${legacy}` }));
+    check('P3-corr loader: a legitimate untagged retained key is accepted and returned byte for byte', kept.cookieKeys[1] === legacy && kept.cookieKeys[0] === cur);
+  }
+
   summary('AURA-MCP-02-I2b-S12 offline');
 }
 
