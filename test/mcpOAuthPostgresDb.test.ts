@@ -56,6 +56,9 @@ async function main() {
       const Grant0 = new stores[0].factory('Grant');
       await Grant0.upsert('grant-db-1', { accountId: USER_A, clientId: CLIENT, iat: 1 }, 3600);
       await Code0.upsert('code-db-1', { grantId: 'grant-db-1', accountId: USER_A, jti: 'code-db-1' }, 60);
+      // I2b-S10: a new code is PENDING (never consumable) until its activation commits.
+      const act = await stores[0].beginIssuedActivation?.('AuthorizationCode', 'code-db-1');
+      check('F6 DB: the seeded code is activated through the issuance path (held activation committed)', !!act && (await act.commit()) === 'committed');
       const races = await Promise.allSettled(Array.from({ length: 40 }, (_, i) => (i % 2 ? Code0 : Code1).consume('code-db-1')));
       const ok = races.filter((r) => r.status === 'fulfilled').length;
       check('F6 DB: 40 concurrent consumes on two pools -> exactly 1 succeeds', ok === 1, ok);

@@ -36,12 +36,27 @@ import { constants, createPrivateKey, createPublicKey, generateKeyPairSync, rand
  *   - EC: the public point is the one derived from `d`;
  *   - every key must sign a probe that VERIFIES against a key built from
  *     its PUBLIC members only (what /oauth/jwks publishes);
- *   - secrets (cookie keys, pairwise salt, audit key): >= 32 characters AND
- *     >= 128 bits of estimated entropy (character-frequency estimate, at
- *     least 10 distinct characters, not a repeated block), so "aaaa..." or
- *     a short repeated pattern is refused. This is a floor against obvious mistakes, not a
- *     proof of randomness: generate secrets with a CSPRNG (e.g.
- *     `openssl rand -base64 32`).
+ *   - secrets (every cookie key -- current AND retained rotation keys --,
+ *     the pairwise salt and the audit key): >= 32 characters and >= 128
+ *     bits by the estimate of `assessSecret` (I2b-S10), which is FORMAT-
+ *     AWARE so genuine CSPRNG output is never refused:
+ *       hex (one case, >= 1 letter)        4 bits per character
+ *       base64 / base64url (>= 2 of lower,
+ *         upper, digit; padding allowed)   6 bits per character
+ *       anything else                      the S8 character-frequency
+ *                                          (Shannon) estimate, >= 10
+ *                                          distinct characters
+ *     A secret passes on EITHER estimate (so nothing the S8 rule accepted
+ *     is newly refused), subject to mistake vetoes: no repeated block, and
+ *     for hex / base64 no run of >= 12 characters that repeat or step by
+ *     one in the format's own alphabet and no character far more frequent
+ *     than chance allows (a uniform random string trips a veto with
+ *     probability < 1e-11).
+ *     Supported formats: `openssl rand -hex 16` (or longer) and
+ *     `openssl rand -base64 24` / `-base64 32` (or base64url). This is a
+ *     floor against obvious mistakes, not a proof of randomness: a derived
+ *     or hand-picked string in one of these formats can pass, so generate
+ *     secrets with a CSPRNG.
  * Error messages name the variable and the kid only, never a value.
  *
  * `ephemeralOAuthKeys()` is for local development and tests only: fresh
@@ -93,8 +108,117 @@ function periodic(v: string): boolean {
   return false;
 }
 
+const HEX_ALPHABET = '0123456789abcdef';
+const B64_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+const B64URL_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+/** Longest run (in the format's alphabet order) whose steps are all the same value in {-1, 0, +1}: "aaaa", "0123", "fedc", "WXYZab". */
+function longestStepRun(v: string, alphabet: string): number {
+  let best = 1;
+  let run = 1;
+  let step = 0;
+  for (let i = 1; i < v.length; i += 1) {
+    const d = alphabet.indexOf(v[i]) - alphabet.indexOf(v[i - 1]);
+    if (d >= -1 && d <= 1) {
+      run = run > 1 && d === step ? run + 1 : 2;
+      step = d;
+    } else run = 1;
+    if (run > best) best = run;
+  }
+  return best;
+}
+
+/** log P(X >= k) for X ~ Binomial(n, p). */
+function logBinomialTail(n: number, p: number, k: number): number {
+  const lg = (x: number) => logGamma(x + 1);
+  let m = -Infinity;
+  const terms: number[] = [];
+  for (let j = k; j <= n; j += 1) {
+    const t = lg(n) - lg(j) - lg(n - j) + j * Math.log(p) + (n - j) * Math.log(1 - p);
+    terms.push(t);
+    if (t > m) m = t;
+  }
+  return m + Math.log(terms.reduce((acc, t) => acc + Math.exp(t - m), 0));
+}
+/** Lanczos log-gamma (sufficient precision for these bounds). */
+function logGamma(z: number): number {
+  const g = 7;
+  const c = [0.99999999999980993, 676.5203681218851, -1259.1392167224028, 771.32342877765313, -176.61503916999185, 12.507343278686905, -0.13857109526572012, 9.9843695780195716e-6, 1.5056327351493116e-7];
+  if (z < 0.5) return Math.log(Math.PI / Math.sin(Math.PI * z)) - logGamma(1 - z);
+  z -= 1;
+  let x = c[0];
+  for (let i = 1; i < g + 2; i += 1) x += c[i] / (z + i);
+  const t = z + g + 0.5;
+  return 0.5 * Math.log(2 * Math.PI) + (z + 0.5) * Math.log(t) - t + Math.log(x);
+}
+const freqLimits = new Map<string, number>();
+/** Smallest count k such that SOME character appearing >= k times has probability <= 1e-12 for a uniform random string. */
+function maxCountLimit(n: number, alphabetSize: number): number {
+  const key = `${n}:${alphabetSize}`;
+  const hit = freqLimits.get(key);
+  if (hit !== undefined) return hit;
+  let k = 1;
+  while (k <= n && Math.log(alphabetSize) + logBinomialTail(n, 1 / alphabetSize, k) > Math.log(1e-12)) k += 1;
+  freqLimits.set(key, k);
+  return k;
+}
+
+export type SecretFormat = 'hex' | 'base64' | 'text';
+export interface SecretAssessment {
+  ok: boolean;
+  format: SecretFormat;
+  /** Estimated strength, bits (format-aware; see the module comment). */
+  bits: number;
+  /** Why it was refused (a code, never the value). */
+  reason?: 'short' | 'weak' | 'repeated_block' | 'run' | 'skewed' | 'low_variety';
+}
+
+/**
+ * I2b-S10 (I2b-R-6 compatibility): format-aware secret strength. Genuine
+ * CSPRNG output in a supported format is accepted with probability
+ * > 1 - 1e-11 (the S8 character-frequency floor refused EVERY 16-byte hex
+ * secret and about 1 in 6000 24-byte base64 / 20-byte hex secrets).
+ * Strings outside the supported formats keep the S8 rule unchanged.
+ */
+export function assessSecret(v: string): SecretAssessment {
+  const hasCase = (re: RegExp) => re.test(v);
+  let format: SecretFormat = 'text';
+  let bits: number;
+  let core = v;
+  if (/^(?:[0-9a-f]+|[0-9A-F]+)$/.test(v) && /[a-fA-F]/.test(v)) {
+    format = 'hex';
+    bits = 4 * v.length;
+  } else if ((/^[A-Za-z0-9+/]+={0,2}$/.test(v) || /^[A-Za-z0-9_-]+$/.test(v)) && [/[a-z]/, /[A-Z]/, /[0-9]/].filter(hasCase).length >= 2) {
+    format = 'base64';
+    core = v.replace(/=+$/, '');
+    bits = 6 * core.length;
+  } else {
+    bits = estimateSecretBits(v);
+  }
+  const out = (reason?: SecretAssessment['reason']): SecretAssessment => ({ ok: !reason, format, bits, ...(reason ? { reason } : {}) });
+  if (v.length < MIN_SECRET) return out('short');
+  if (periodic(v)) return out('repeated_block');
+  if (format !== 'text') {
+    // Mistake vetoes for the CSPRNG formats; a uniform random string trips them with probability < 1e-11.
+    const alphabet = format === 'hex' ? HEX_ALPHABET : /[-_]/.test(core) ? B64URL_ALPHABET : B64_ALPHABET;
+    if (longestStepRun(format === 'hex' ? core.toLowerCase() : core, alphabet) >= 12) return out('run');
+    const counts = new Map<string, number>();
+    let max = 0;
+    for (const ch of core) {
+      const c = (counts.get(ch) ?? 0) + 1;
+      counts.set(ch, c);
+      if (c > max) max = c;
+    }
+    if (max >= maxCountLimit(core.length, format === 'hex' ? 16 : 64)) return out('skewed');
+  }
+  // Accept on the S8 estimate (unchanged, so nothing S8 accepted is newly refused) OR on the format-aware one.
+  const s8 = new Set(v).size >= MIN_DISTINCT && estimateSecretBits(v) >= MIN_SECRET_BITS;
+  if (s8) return { ...out(), bits: Math.max(bits, estimateSecretBits(v)) };
+  if (format !== 'text' && bits >= MIN_SECRET_BITS) return out();
+  return out(new Set(v).size < MIN_DISTINCT && format === 'text' ? 'low_variety' : 'weak');
+}
+
 function strongEnough(v: string): boolean {
-  return v.length >= MIN_SECRET && new Set(v).size >= MIN_DISTINCT && !periodic(v) && estimateSecretBits(v) >= MIN_SECRET_BITS;
+  return assessSecret(v).ok;
 }
 
 function secretList(name: string, value: string | undefined): string[] {

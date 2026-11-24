@@ -173,16 +173,63 @@ async function main() {
       check('I2b-1 exactness: 300 concurrent decisions on 3 instances, one address limit 50 -> exactly 50', perAddr.filter((d) => d.allowed).length === 50, perAddr.filter((d) => d.allowed).length);
       check('I2b-1 exactness: global shards counted exactly the admitted requests', (await counts('preauth-mcp:global:%')) === 50);
 
-      await admin.query('TRUNCATE "McpRateLimitWindow"');
+      // I2b-S10 (run 45372768632): the aggregate flood is checked twice, at the
+      // SAME concurrency. (a) SAFETY with the production 1250 ms decision
+      // deadline: on a slow runner some of the 2000 decisions (queued behind
+      // 18 connections) may hit the deadline and fail closed as "unavailable"
+      // (503) -- that is the designed load shedding, so it is asserted as
+      // safety, never as exactness. (b) EXACTNESS with an explicit large
+      // budget, so correctness of cross-instance aggregation is not coupled
+      // to runner speed. No assertion was weakened; none depends on timing.
       const G = 480;
-      const flood = await Promise.all(
-        Array.from({ length: 2000 }, (_, i) => instances[i % 3].check(buildPreAuthRules('preauth-mcp', `2001:db8:${(i % 500).toString(16)}::${i}`, { perAddress: 480, global: G, globalShards: 16 }))),
-      );
-      const admitted = flood.filter((d) => d.allowed).length;
-      const shardRows = await q(`SELECT "key", "count" FROM "McpRateLimitWindow" WHERE "key" LIKE 'preauth-mcp:global:%'`);
-      check('I2b-1 aggregate: 2000 concurrent decisions from 500 networks on 3 instances -> exactly G (480) admitted, never more', admitted === G && (await counts('preauth-mcp:global:%')) === G, admitted);
-      check('I2b-1 aggregate: every one of the 16 shards stopped at its own limit (30)', shardRows.length === 16 && shardRows.every((r) => r.count === 30), shardRows.map((r) => r.count));
-      check('I2b-1 aggregate: rejections were limits (429), not failures', flood.every((d) => d.allowed || d.limitedBy === 'preauth-mcp'));
+      const flood = async (limiters: PostgresRateLimiter[]) => {
+        await admin.query('TRUNCATE "McpRateLimitWindow"');
+        const t0 = Date.now();
+        const out = await Promise.all(
+          Array.from({ length: 2000 }, (_, i) => limiters[i % 3].check(buildPreAuthRules('preauth-mcp', `2001:db8:${(i % 500).toString(16)}::${i}`, { perAddress: 480, global: G, globalShards: 16 }))),
+        );
+        const by: Record<string, number> = {};
+        for (const d of out) {
+          const k = d.allowed ? 'admitted' : String(d.limitedBy);
+          by[k] = (by[k] ?? 0) + 1;
+        }
+        const shardRows = await q(`SELECT "key", "count" FROM "McpRateLimitWindow" WHERE "key" LIKE 'preauth-mcp:global:%'`);
+        return { out, admitted: by.admitted ?? 0, by, ms: Date.now() - t0, shardRows, shardSum: await counts('preauth-mcp:global:%') };
+      };
+      const safe = await flood(instances);
+      const diag = { elapsedMs: safe.ms, outcomes: safe.by, shardSum: safe.shardSum };
+      console.log(`  I2b-1 aggregate (production deadline) diagnostics: ${JSON.stringify(diag)}`);
+      // A decision whose deadline fires while its COMMIT is in flight is reported
+      // as a deny but may still land: the counters may OVER-count (fail closed),
+      // never under-count, and the database caps every shard -- so the exact
+      // safety invariant is admitted <= counted <= G.
+      check('I2b-1 aggregate safety (production 1250 ms deadline): admitted <= counted <= G (an ambiguous COMMIT may over-count, never over-admit)', safe.admitted <= safe.shardSum && safe.shardSum <= G, diag);
+      check('I2b-1 aggregate safety: every denial is the limit (429) or a fail-closed deadline denial ("unavailable", 503) -- nothing else', safe.out.every((d) => d.allowed || d.limitedBy === 'preauth-mcp' || d.limitedBy === 'unavailable'), diag);
+      // Reproduction of the CI failure class (run 45372768632, 188 / 480):
+      // the same flood with the production deadline on a SLOW database
+      // (+10 ms per statement, standing in for a starved runner). Expected:
+      // under-admission with fail-closed "unavailable" denials -- and the
+      // safety invariants still hold.
+      const slowPool = () => {
+        const real = pool({ max: 6 });
+        return { connect: async () => {
+          const c = await real.connect();
+          return { query: async (t: string, p2?: unknown[]) => {
+            await sleep(10);
+            return c.query(t, p2 as unknown[]);
+          }, release: (e?: unknown) => c.release(e as Error | undefined) };
+        } };
+      };
+      const slow = await flood([0, 1, 2].map(() => createPostgresRateLimiter({ pool: slowPool() as never, windowMs: 60_000 })));
+      const slowDiag = { elapsedMs: slow.ms, outcomes: slow.by, shardSum: slow.shardSum };
+      console.log(`  I2b-1 aggregate (slow database, production deadline) diagnostics: ${JSON.stringify(slowDiag)}`);
+      check('I2b-1 slow-runner reproduction: fewer than G admitted, the shortfall is fail-closed "unavailable" denials, admitted <= counted <= G', slow.admitted < G && (slow.by.unavailable ?? 0) > 0 && slow.admitted <= slow.shardSum && slow.shardSum <= G && slow.out.every((d) => d.allowed || d.limitedBy === 'preauth-mcp' || d.limitedBy === 'unavailable'), slowDiag);
+      const roomy = [0, 1, 2].map(() => createPostgresRateLimiter({ pool: pool({ max: 6 }), windowMs: 60_000, decisionDeadlineMs: 30_000, lockTimeoutMs: 5000, statementTimeoutMs: 6000 }));
+      const exact = await flood(roomy);
+      console.log(`  I2b-1 aggregate (explicit budget) diagnostics: ${JSON.stringify({ elapsedMs: exact.ms, outcomes: exact.by })}`);
+      check('I2b-1 aggregate: 2000 concurrent decisions from 500 networks on 3 instances -> exactly G (480) admitted, never more', exact.admitted === G && exact.shardSum === G, { admitted: exact.admitted, outcomes: exact.by, elapsedMs: exact.ms });
+      check('I2b-1 aggregate: every one of the 16 shards stopped at its own limit (30)', exact.shardRows.length === 16 && exact.shardRows.every((r) => r.count === 30), exact.shardRows.map((r) => r.count));
+      check('I2b-1 aggregate: rejections were limits (429), not failures', exact.out.every((d) => d.allowed || d.limitedBy === 'preauth-mcp'), exact.by);
 
       await admin.query('TRUNCATE "McpRateLimitWindow"');
       const big = 1_000_000;

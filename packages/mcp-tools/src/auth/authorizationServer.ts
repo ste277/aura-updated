@@ -5,13 +5,13 @@ import Provider, { errors, interactionPolicy, type InteractionDetails } from 'oi
 import { MCP_SCOPE, type AccessTokenVerifier } from '../http/remoteMcpHandler';
 import { noopAuditSink, type McpAuditSink } from '../security/audit';
 import { nodeAddressRequest, resolveClientAddressDetailed, type ClientAddressSource } from '../security/clientAddress';
-import { isStoreUnavailableError } from '../security/deadline';
+import { isStoreUnavailableError, outsideRequestBudget, runWithRequestBudget } from '../security/deadline';
 import { buildPreAuthRules, type BucketHasher } from '../security/preAuthRules';
 import type { McpRateLimiter } from '../security/rateLimit';
 import { validateClientRegistry } from './clientPolicy';
 import { ephemeralOAuthKeys, type OAuthKeyMaterial } from './keys';
 import { createMemoryAdapterStore } from './memoryAdapter';
-import type { OAuthStore } from './oauthStore';
+import type { IssuedActivation, OAuthStore } from './oauthStore';
 
 /**
  * AURA-MCP-02-I2a -- Aura OAuth authorization server foundation
@@ -157,6 +157,13 @@ export interface AuraOAuthServerOptions {
   /** Default: no refresh tokens (I2a behaviour). */
   refreshTokens?: RefreshTokenPolicy;
   /** Default: none (local loopback only). */
+  /**
+   * I2b-S10: total time budget for the store calls of ONE request (after the
+   * pre-auth throttle), ms (default 5000, 500..30000). Each store call is
+   * also bounded by its own deadline; the budget caps their sum. The code
+   * activation COMMIT after hand-off is bounded separately by the store.
+   */
+  requestBudgetMs?: number;
   preAuth?: PreAuthThrottle;
   /** Same-origin path of the connected-assistants page, linked from the consent page. */
   connectionsUrl?: string;
@@ -434,52 +441,55 @@ export function createAuraOAuthServer(options: AuraOAuthServerOptions): AuraOAut
   });
 
   /**
-   * I2b-S4 (S3-1): a code reaches the client only in a response that fully
-   * succeeded. `oidc-provider` writes the code, sets the redirect, and only
-   * then saves the session; if a later store write fails, its error handler
-   * changes the status but keeps the success `Location` (with the code).
-   * This outermost middleware runs after every provider route:
-   *   - a code created by this request (any route but the token endpoint)
-   *     is ACTIVATED only if the final response is < 400, actually carries
-   *     it (Location or form_post body) and the client is still connected.
-   *     The store writes new codes as pending, so until activation they
-   *     cannot be redeemed;
-   *   - every response >= 400 loses its Location header.
+   * I2b-S4 / S10 (S3-1): authorization-code issuance is fail-closed by
+   * database state, on every instance, with no write needed on failure.
    *
-   * I2b-S6: an activation the server cannot confirm may still have
-   * committed (lost COMMIT acknowledgement, timeout), and a committed
-   * activation does not mean the response was delivered. So whenever the
-   * server decides the code is NOT delivered -- activation failed or is
-   * uncertain, the response failed or carries no code, or the client
-   * connection closed before the response was fully written -- the code is
-   * REVOKED (deleted whether pending or active; retried once), never just
-   * left pending. Invariant: a code is redeemable only if the server wrote
-   * it into a < 400 response on an open connection after a confirmed
-   * activation; a code that never left the server is revoked unless every
-   * revocation attempt also fails (audited `CodeRevocationFailed`; it then
-   * expires with its 60 s TTL, and nobody outside the server holds it).
-   * No code value is logged.
+   * `oidc-provider` writes the code (the store makes it PENDING: not
+   * findable, not consumable), sets the redirect, saves the session, and
+   * Koa writes the response only after this outermost middleware returns.
+   * For a code created by this request (any route but the token endpoint):
+   *   1. It is deliverable only if the final response is < 400, actually
+   *      carries the code (Location or form_post body), headers are not yet
+   *      sent and the client is still connected. Otherwise the code is
+   *      never sent and stays pending.
+   *   2. Before the response is written, `beginIssuedActivation` runs the
+   *      activation UPDATE in a transaction that is NOT committed (it also
+   *      proves the live pending row exists; if not, 503 and nothing sent).
+   *   3. The response is written. Only when it has been COMPLETELY handed
+   *      to the runtime (`finish`) with the same < 400 status that still
+   *      carries the code is the activation COMMITTED: the code is "issued".
+   *      Any other outcome -- close before finish (disconnect, partial
+   *      write), a response Koa replaced with an error, a hand-off that
+   *      never comes, a crash or freeze of this process, an unreachable
+   *      database -- ABANDONS it: the transaction is never committed and the
+   *      database rolls it back, so the code stays pending on every
+   *      instance. Nothing depends on instance memory, a deny list or a
+   *      revocation write that could fail in the same outage.
+   *
+   * What is and is not claimed:
+   *   - "issued" means handed to the runtime, not received: hand-off cannot
+   *     prove receipt (no atomicity between persistence and HTTP delivery
+   *     is claimed). An issued code the client never received stays
+   *     redeemable only with its PKCE verifier, once, until its 60 s TTL.
+   *   - A partial write may have put code bytes on the wire; such a code is
+   *     abandoned (pending), so it cannot be redeemed anywhere.
+   *   - The COMMIT itself can be lost after hand-off ('unknown'): the code
+   *     is then either redeemable (issued) or pending (the client's
+   *     redemption fails, fail-closed). Both are safe.
+   * Every response >= 400 loses its Location header. No code value is logged.
    */
-  const REVOKE_ATTEMPTS = 2;
-  const revokeCode = async (code: string): Promise<void> => {
-    if (!adapterStore.revokeIssued) return;
-    for (let attempt = 0; attempt < REVOKE_ATTEMPTS; attempt += 1) {
-      try {
-        await adapterStore.revokeIssued('AuthorizationCode', code);
-        return;
-      } catch {
-        // retry: the first attempt can time out on the row lock of an in-flight activation COMMIT
-      }
-    }
-    audit({ event: 'oauth.error', outcome: 'store_unavailable', errorCode: 'CodeRevocationFailed' });
-    // I2b-S8 (S3-1 residual): refuse it on this instance and keep retrying.
-    try {
-      adapterStore.holdUnrevoked?.('AuthorizationCode', code);
-    } catch {
-      // never fails the response
-    }
-  };
   const connectionGone = (ctx: ProviderCtx) => ctx.res.destroyed === true || ctx.req.socket?.destroyed === true;
+  /** Per response: settles once the activation of its code is committed or abandoned (handle() awaits it). */
+  const issuance = new WeakMap<ServerResponse, Promise<void>>();
+  const unavailable = (ctx: ProviderCtx) => {
+    if (ctx.res.headersSent) return; // nothing can be changed; the code stays pending (never activated)
+    ctx.remove('Location');
+    ctx.status = 503;
+    ctx.set('cache-control', 'no-store');
+    ctx.set('retry-after', '1');
+    ctx.type = 'json';
+    ctx.body = JSON.stringify({ error: 'temporarily_unavailable' });
+  };
 
   provider.use(async (ctx: ProviderCtx, next: () => Promise<void>) => {
     await next();
@@ -493,38 +503,69 @@ export function createAuraOAuthServer(options: AuraOAuthServerOptions): AuraOAut
     if (code) {
       const location = String(ctx.response.get('Location') ?? '');
       const body = typeof ctx.body === 'string' ? ctx.body : '';
-      const deliverable = ctx.status < 400 && (location.includes(code) || body.includes(code)) && !connectionGone(ctx);
-      let activated = !adapterStore.activateIssued; // stores without pending codes cannot fail part-way
-      if (deliverable && adapterStore.activateIssued) {
+      const inLocation = location.includes(code);
+      const carries = inLocation || body.includes(code);
+      const deliverable = ctx.status < 400 && carries && !connectionGone(ctx) && !ctx.res.headersSent;
+      let activation: IssuedActivation | null = null;
+      let ready = !adapterStore.beginIssuedActivation; // stores without pending codes write them active
+      if (deliverable && adapterStore.beginIssuedActivation) {
         try {
-          activated = await adapterStore.activateIssued('AuthorizationCode', code);
+          activation = await adapterStore.beginIssuedActivation('AuthorizationCode', code);
         } catch {
-          activated = false; // failed OR uncertain: it may have committed, so revoke below
+          activation = null; // store unavailable: nothing was written, the code stays pending
         }
+        ready = activation !== null;
       }
-      if (!deliverable || !activated || connectionGone(ctx)) {
-        await revokeCode(code);
-        if (deliverable && !activated) {
-          audit({ event: 'oauth.error', outcome: 'store_unavailable', errorCode: 'CodeActivationFailed' });
-          ctx.remove('Location');
-          ctx.status = 503;
-          ctx.set('cache-control', 'no-store');
-          ctx.set('retry-after', '1');
-          ctx.type = 'json';
-          ctx.body = JSON.stringify({ error: 'temporarily_unavailable' });
-        } else if (deliverable) {
-          // Activated, but the client left meanwhile: nothing is sent.
-          ctx.remove('Location');
-          ctx.status = 503;
-          ctx.body = '';
-        }
-      } else if (adapterStore.revokeIssued) {
-        // The response is written after this middleware returns; if the
-        // connection closes before it is fully handed to the OS, revoke.
-        const issued = code;
-        ctx.res.once('close', () => {
-          if (!ctx.res.writableFinished) void revokeCode(issued);
-        });
+      if (deliverable && ready && connectionGone(ctx)) {
+        // The client left during activation: nothing is sent.
+        activation?.abort();
+        audit({ event: 'oauth.error', outcome: 'not_delivered', errorCode: 'CodeDeliveryAbandoned' });
+        ctx.remove('Location');
+        ctx.status = 503;
+        ctx.body = '';
+      } else if (deliverable && !ready) {
+        audit({ event: 'oauth.error', outcome: 'store_unavailable', errorCode: 'CodeActivationFailed' });
+        unavailable(ctx);
+      } else if (!deliverable) {
+        // Never sent (error response, no code in it, or client gone): pending forever.
+        if (carries) unavailable(ctx);
+      } else if (activation) {
+        const held = activation;
+        const res = ctx.res;
+        const status = ctx.status;
+        const issuedCode = code;
+        issuance.set(
+          res,
+          new Promise<void>((resolve) => {
+            let done = false;
+            const settle = () => {
+              if (done) return;
+              done = true;
+              clearTimeout(backstop);
+              resolve();
+            };
+            const abandon = () => {
+              held.abort();
+              audit({ event: 'oauth.error', outcome: 'not_delivered', errorCode: 'CodeDeliveryAbandoned' });
+              settle();
+            };
+            // Backstop only: a hand-off that never comes is abandoned (the store aborts it too).
+            const backstop = setTimeout(abandon, 10_000);
+            (backstop as { unref?: () => void }).unref?.();
+            res.once('finish', () => {
+              const intact = res.statusCode === status && res.statusCode < 400 && (!inLocation || String(res.getHeader('location') ?? '').includes(issuedCode));
+              if (!intact) return abandon(); // replaced (e.g. Koa error handler): never committed
+              // The request budget does not apply: the response is already out.
+              outsideRequestBudget(() => held.commit()).then((outcome) => {
+                if (outcome !== 'committed') audit({ event: 'oauth.error', outcome: 'store_unavailable', errorCode: outcome === 'unknown' ? 'CodeActivationUnconfirmed' : 'CodeActivationNotCommitted' });
+                settle();
+              }, settle);
+            });
+            res.once('close', () => {
+              if (!res.writableFinished) abandon(); // disconnect / partial write: never committed
+            });
+          }),
+        );
       }
     }
     if (ctx.status >= 400) ctx.remove('Location');
@@ -544,6 +585,8 @@ export function createAuraOAuthServer(options: AuraOAuthServerOptions): AuraOAut
    * only from configuration.) Pre-auth address resolution runs before this
    * and reads only its configured source.
    */
+  const requestBudgetMs = options.requestBudgetMs ?? 5000;
+  if (!Number.isInteger(requestBudgetMs) || requestBudgetMs < 500 || requestBudgetMs > 30_000) throw new TypeError('requestBudgetMs must be an integer between 500 and 30000');
   const issuerUrl = new URL(issuer);
   provider.proxy = true;
   const ORIGIN_HEADERS = ['host', 'x-forwarded-host', 'x-forwarded-proto', 'x-forwarded-port', 'x-forwarded-for', 'forwarded'];
@@ -768,15 +811,24 @@ ${duration}${manage}
         }
       }
       pinRequestOrigin(req);
-      if (path.startsWith(INTERACTION_PREFIX)) return await handleInteraction(req, res, path);
-      // RFC 8414 discovery is served from the same document as OIDC discovery.
-      const providerPath = path === '/.well-known/oauth-authorization-server' ? '/.well-known/openid-configuration' : path;
-      req.url = `${providerPath}${authorizationSearch(providerPath, search)}`;
-      await new Promise<void>((resolve) => {
-        res.once('finish', resolve);
-        res.once('close', resolve);
-        providerCallback(req, res);
+      // I2b-S10: every store call of this request shares ONE budget (requestBudgetMs).
+      await runWithRequestBudget(requestBudgetMs, async () => {
+        if (path.startsWith(INTERACTION_PREFIX)) {
+          await handleInteraction(req, res, path);
+          return;
+        }
+        // RFC 8414 discovery is served from the same document as OIDC discovery.
+        const providerPath = path === '/.well-known/oauth-authorization-server' ? '/.well-known/openid-configuration' : path;
+        req.url = `${providerPath}${authorizationSearch(providerPath, search)}`;
+        await new Promise<void>((resolve) => {
+          res.once('finish', resolve);
+          res.once('close', resolve);
+          providerCallback(req, res);
+        });
       });
+      // I2b-S10: stay alive until this response's code is committed or abandoned
+      // (bounded: activation hold + COMMIT bound in the store).
+      await issuance.get(res);
     } catch (err) {
       // I2b-S2: an unavailable OAuth state store is a 503; nothing was issued.
       const unavailable = isStoreUnavailableError(err);

@@ -1,5 +1,6 @@
 /// <reference path="./oidc-provider.d.ts" />
 import { errors, type Adapter } from 'oidc-provider';
+import type { HeldCommitOutcome } from '../security/deadline';
 
 /**
  * AURA-MCP-02-I2b -- storage contract for the Aura authorization server.
@@ -25,31 +26,40 @@ export interface UserGrantSummary {
   createdAt?: number;
 }
 
+/** I2b-S10: a prepared, uncommitted activation of one authorization code (see OAuthStore). */
+export interface IssuedActivation {
+  commit(): Promise<HeldCommitOutcome>;
+  abort(): void;
+}
+
 export interface OAuthStore {
   /** Adapter class passed to the provider's `adapter` configuration. */
   factory: new (name: string) => Adapter;
   /**
-   * I2b-S4 (S3-1), optional: stores that can fail part-way through a request
-   * write new authorization codes as PENDING (not findable, so not
-   * redeemable). The authorization server activates a code only once the
-   * response that delivers it has succeeded; otherwise it revokes it.
-   * `activateIssued` resolves true only if exactly that live, pending row
-   * was activated.
-   * I2b-S6: `revokeIssued` deletes that code whether pending OR already
-   * activated -- an activation whose outcome the server could not confirm
-   * (lost COMMIT acknowledgement, timeout) may have committed.
+   * I2b-S4 / S10 (S3-1), optional: stores that can fail part-way through a
+   * request write new authorization codes as PENDING (not findable, not
+   * consumable, so not redeemable on any instance).
+   *
+   * `beginIssuedActivation` prepares the activation of one pending code and
+   * resolves null if that live, pending row does not exist (then the code
+   * must not be delivered). The authorization server calls it BEFORE writing
+   * the response and then exactly one of:
+   *   - `commit()` -- only after the complete response carrying the code
+   *     has been handed to the runtime ("issued"; receipt by the client is
+   *     NOT proven and not claimed). Never throws:
+   *       'committed'      the code is now redeemable;
+   *       'not_committed'  it stays pending (never redeemable);
+   *       'unknown'        COMMIT outcome not confirmed: the code may or may
+   *                        not be redeemable -- both are safe, because the
+   *                        response had already been handed off;
+   *   - `abort()` -- for every other outcome ("abandoned"). Synchronous,
+   *     idempotent, never throws, and performs NO write: the activation is
+   *     simply never committed, so the code stays pending everywhere even if
+   *     the database is unreachable.
+   * Stores without this method (the per-process memory store) write codes
+   * already active.
    */
-  activateIssued?(model: string, id: string): Promise<boolean>;
-  revokeIssued?(model: string, id: string): Promise<void>;
-  /**
-   * I2b-S8 (S3-1 residual), optional: the server decided NOT to deliver this
-   * code but every `revokeIssued` attempt failed. The store refuses the code
-   * on this instance until it expires and keeps retrying the revocation in
-   * the background. Synchronous and never throws.
-   */
-  holdUnrevoked?(model: string, id: string): void;
-  /** I2b-S8: number of codes currently held by `holdUnrevoked` (monitoring/tests). */
-  pendingRevocations?(): number;
+  beginIssuedActivation?(model: string, id: string): Promise<IssuedActivation | null>;
   /** Grants a user currently holds (connected assistants). */
   listUserGrants(userId: string): Promise<UserGrantSummary[]>;
   /** Revokes every grant (and its codes and tokens) a user holds for a client. Returns the number of grants revoked. */

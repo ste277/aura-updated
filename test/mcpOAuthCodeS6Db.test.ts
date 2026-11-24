@@ -21,6 +21,23 @@
  *   9  correct and incorrect PKCE verifier
  *  10  normal flow and token exchange
  *
+ * I2b-S10 update (S3-1 closure): activation is now a held transaction that
+ * is COMMITTED only after the response carrying the code was completely
+ * handed off; nothing is revoked or deleted any more. Expectations changed
+ * accordingly -- each is at least as strict as before:
+ *   2, 5a  a pre-COMMIT fault leaves the code PENDING (was: deleted) -- no
+ *          write is needed, and it is refused everywhere;
+ *   3, 4   a lost / late COMMIT acknowledgement can only happen AFTER the
+ *          hand-off, so the code was delivered and is "issued, outcome
+ *          unknown" (audited CodeActivationUnconfirmed), redeemable once
+ *          by the PKCE-verifier holder -- the S5 failure mode (a live code
+ *          behind a 503) can no longer occur;
+ *   5b     revocation no longer exists, so it cannot fail;
+ *   6, 7   disconnects the server observes before the response is written
+ *          leave the code PENDING (was: deleted);
+ *   8      concurrent flows fault the activation UPDATE of every 2nd flow.
+ * The full cross-instance matrix is test/mcpOAuthS10Db.test.ts.
+ *
  * For every case: HTTP outcome (server status vs client-side abort), whether
  * the code left the server, the code's database state, and whether
  * redeeming the real code (captured with a test-only spy, i.e. with
@@ -60,10 +77,12 @@ interface Faults {
   everyNth: number;
   sessionRejectAfterCode: boolean;
   revokeFails: boolean;
-  onActivationStart?: () => void;
-  onActivationCommitted?: () => Promise<void>;
+  /** Awaited before the activation UPDATE is sent. */
+  onActivationStart?: () => Promise<void>;
+  /** Awaited after the activation UPDATE returned (still uncommitted), before the response is written. */
+  onActivationUpdated?: () => Promise<void>;
 }
-const isActivation = (t: string, p?: unknown[]) => /^\s*UPDATE/i.test(t) && p?.[0] === 'AuthorizationCode' && t.includes('auraIssuePending');
+const isActivation = (t: string, p?: unknown[]) => /^\s*UPDATE/i.test(t) && p?.[0] === 'AuthorizationCode' && t.includes(`"payload" = "payload" - 'auraIssuePending'`); // the activation statement only (not consume's pending filter)
 
 /** A pg Pool whose clients fault the activation transaction (and optionally Session / code DELETE) at the wire. */
 function faultPool(real: Pool, f: Faults) {
@@ -86,8 +105,11 @@ function faultPool(real: Pool, f: Faults) {
           if (isActivation(text, params)) {
             st.activations += 1;
             activationTx = st.activations % f.everyNth === 0 ? f.activation : 'none';
-            f.onActivationStart?.();
+            await f.onActivationStart?.();
             if (activationTx === 'update-reject') throw new Error('injected activation fault');
+            const r = await c.query(text, params as unknown[]);
+            await f.onActivationUpdated?.();
+            return r;
           }
           if (/^\s*COMMIT/i.test(text) && activationTx) {
             const mode = activationTx;
@@ -99,7 +121,6 @@ function faultPool(real: Pool, f: Faults) {
               throw new Error('injected commit timeout (outcome unknown)');
             }
             const r = await c.query('COMMIT');
-            if (f.onActivationCommitted) await f.onActivationCommitted();
             if (mode === 'ack-lost') throw new Error('injected lost COMMIT acknowledgement');
             return r;
           }
@@ -249,19 +270,19 @@ async function main() {
     // 2. activation fails before COMMIT
     {
       const { row } = await runCase('2 activation fails before COMMIT', { activation: 'update-reject' });
-      check('2 activation pre-COMMIT fault: 503, code not exposed, code removed, not redeemable', row.outcome === 'server 503' && !row.exposed && row.dbBeforeRedeem === 'absent' && row.redeemWithServerKnownCode === 400 && !row.tokenIssued, row);
+      check('2 activation pre-COMMIT fault: 503, code not exposed, code stays PENDING (no write needed), not redeemable', row.outcome === 'server 503' && !row.exposed && row.dbBeforeRedeem === 'pending' && row.redeemWithServerKnownCode === 400 && !row.tokenIssued && row.tokensInDb === 0, row);
     }
 
     // 3. activation COMMIT lands, acknowledgement lost
     {
       const { row } = await runCase('3 activation COMMIT ack lost', { activation: 'ack-lost' });
-      check('3 ack lost: 503, code not exposed, the committed activation is revoked (code absent), not redeemable', row.outcome === 'server 503' && !row.exposed && row.dbBeforeRedeem === 'absent' && row.redeemWithServerKnownCode === 400 && !row.tokenIssued && row.tokensInDb === 0, row);
+      check('3 ack lost: only possible after hand-off now -- delivered (303), audited unconfirmed, the code is issued (active) and redeems once', /^server 30\d$/.test(row.outcome) && row.exposed && (row.audits as string[]).includes('CodeActivationUnconfirmed') && row.dbBeforeRedeem === 'active' && row.redeemWithServerKnownCode === 200 && row.tokenIssued, row);
     }
 
     // 4. activation outcome uncertain: app gives up, COMMIT lands 300 ms later
     {
       const { row } = await runCase('4 activation outcome uncertain', { activation: 'uncertain' });
-      check('4 uncertain: 503, code not exposed, revocation ordered after the late COMMIT (code absent), not redeemable', row.outcome === 'server 503' && !row.exposed && row.dbBeforeRedeem === 'absent' && row.redeemWithServerKnownCode === 400 && !row.tokenIssued, row);
+      check('4 uncertain: only possible after hand-off now -- delivered, audited unconfirmed; the late COMMIT landed, so the code is issued and redeems once', /^server 30\d$/.test(row.outcome) && row.exposed && (row.audits as string[]).includes('CodeActivationUnconfirmed') && row.dbBeforeRedeem === 'active' && row.redeemWithServerKnownCode === 200 && row.tokenIssued, row);
     }
 
     // 5. cleanup failure
@@ -269,32 +290,36 @@ async function main() {
       const a = await runCase('5a pre-COMMIT fault + revoke fails', { activation: 'update-reject', revokeFails: true });
       check('5a revoke fails after a pre-COMMIT activation fault: 503, not exposed, code stays PENDING, not redeemable', a.row.outcome === 'server 503' && !a.row.exposed && a.row.dbBeforeRedeem === 'pending' && a.row.redeemWithServerKnownCode === 400, a.row);
       const b = await runCase('5b ack lost + revoke fails (residual)', { activation: 'ack-lost', revokeFails: true });
-      check('5b ack lost and revoke fails: 503 and the code never leaves the server (it is the documented residual: active until its 60 s TTL)', b.row.outcome === 'server 503' && !b.row.exposed, b.row);
-      check('5b the failed revocation is audited without the code value', (b.row.audits as string[]).includes('CodeRevocationFailed'), b.row);
+      check('5b ack lost (+ a failing DELETE path): delivered and issued; no revocation is attempted any more, so nothing can fail (no CodeRevocationFailed)', /^server 30\d$/.test(b.row.outcome) && b.row.dbBeforeRedeem === 'active' && !(b.row.audits as string[]).includes('CodeRevocationFailed'), b.row);
     }
 
     // 6. client disconnects before activation
     {
-      const { row } = await runCase('6 client disconnect before activation', {}, (ctl) => ({ onActivationStart: () => ctl.current?.abort() }));
-      check('6 disconnect before activation: client-side abort, no code received, code absent, not redeemable', row.outcome === 'client aborted' && !row.exposed && row.dbBeforeRedeem === 'absent' && row.redeemWithServerKnownCode === 400 && !row.tokenIssued, row);
+      const { row } = await runCase('6 client disconnect before activation', {}, (ctl) => ({
+        onActivationStart: async () => {
+          ctl.current?.abort();
+          await sleep(200); // the server observes the closed connection
+        },
+      }));
+      check('6 disconnect before activation: client-side abort, no code received, code stays PENDING, not redeemable', row.outcome === 'client aborted' && !row.exposed && row.dbBeforeRedeem === 'pending' && row.redeemWithServerKnownCode === 400 && !row.tokenIssued, row);
     }
 
-    // 7. client disconnects after activation committed, before the response is written
+    // 7. client disconnects after the activation UPDATE (uncommitted), before the response is written
     {
       const { row } = await runCase('7 disconnect after activation', {}, (ctl) => ({
-        onActivationCommitted: async () => {
+        onActivationUpdated: async () => {
           ctl.current?.abort();
           await sleep(200);
         },
       }));
-      check('7 disconnect after activation: client-side abort, the activated code is revoked (absent), not redeemable', row.outcome === 'client aborted' && !row.exposed && row.dbBeforeRedeem === 'absent' && row.redeemWithServerKnownCode === 400 && !row.tokenIssued, row);
+      check('7 disconnect after the activation UPDATE: client-side abort, the activation is never committed (PENDING), not redeemable', row.outcome === 'client aborted' && !row.exposed && row.dbBeforeRedeem === 'pending' && row.redeemWithServerKnownCode === 400 && !row.tokenIssued, row);
     }
 
-    // 8. concurrent flows; every other activation loses its COMMIT acknowledgement
+    // 8. concurrent flows; the activation of every other flow fails
     {
       await admin.query('TRUNCATE "McpOAuthPayload"');
       const real = mkPool('aura-s6-concurrent');
-      const { pool } = faultPool(real, { activation: 'ack-lost', everyNth: 2, sessionRejectAfterCode: false, revokeFails: false });
+      const { pool } = faultPool(real, { activation: 'update-reject', everyNth: 2, sessionRejectAfterCode: false, revokeFails: false });
       const { store, codes } = spyCodes(createPostgresAdapterStore({ db: pool as never, fieldKeys: keys.cookieKeys, cleanupEvery: 0 }));
       const c: Cluster = await startCluster(2, { keys }, () => ({ adapterStore: store }));
       try {
@@ -312,7 +337,7 @@ async function main() {
           badRedeem.push(tries.find((t) => t.status === 200) ?? tries[0] ?? { status: 0 });
         }
         const tokens = await tokenCount();
-        const row = { case: '8 concurrent (8 flows, 2 instances, every 2nd activation ack-lost)', delivered: delivered.length, failed503: failed.filter((o) => o.outcome === 'server 503').length, dbAfterFlows: states.join(','), deliveredRedeemed200: okRedeem.filter((r) => r.status === 200).length, undeliveredRedeemed: badRedeem.map((r) => r.status).join(','), leaked, tokensInDb: tokens };
+        const row = { case: '8 concurrent (8 flows, 2 instances, every 2nd activation fails)', delivered: delivered.length, failed503: failed.filter((o) => o.outcome === 'server 503').length, dbAfterFlows: states.join(','), deliveredRedeemed200: okRedeem.filter((r) => r.status === 200).length, undeliveredRedeemed: badRedeem.map((r) => r.status).join(','), leaked, tokensInDb: tokens };
         table.push(row);
         check('8 concurrent: 4 delivered and 4 failed with 503 (faults hit only their own flow)', delivered.length === 4 && failed.length === 4 && row.failed503 === 4, row);
         check('8 concurrent: every delivered code redeems to 200; no undelivered code leaked or redeems; tokens only for delivered codes', okRedeem.every((r) => r.status === 200) && undelivered.length === 4 && badRedeem.every((r) => r.status === 400) && !leaked && tokens === 4 * (okRedeem[0]?.json.refresh_token ? 2 : 1), row);

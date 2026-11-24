@@ -93,6 +93,13 @@ jobs:
       # keys (S3-7), COMMIT confirmed by its tag and bounded (S5). No DB.
       - name: Run I2b-S8 offline security test
         run: npx ts-node test/mcpOAuthS8.test.ts
+      # I2b-S10: secret formats (every supported CSPRNG format accepted for
+      # every role incl. retained rotation keys; S8 weak patterns refused; no
+      # newly refused S8-accepted value), the per-request time budget, ONE
+      # deadline through COMMIT, connection recovery, and the held activation
+      # transaction (commit / unknown / not_committed / abort / expiry). No DB.
+      - name: Run I2b-S10 offline activation-readiness test
+        run: npx ts-node test/mcpOAuthS10.test.ts
       - name: Run panchang day service test
         run: npx ts-node test/panchangDay.test.ts
       - name: Run panchang month service test
@@ -1115,6 +1122,15 @@ jobs:
       # client address and name G/N (S3-6, S3-7). Touches only the MCP tables.
       - name: Run I2b-S8 security DB test
         run: npx ts-node test/mcpOAuthS8Db.test.ts
+      # I2b-S10 (S3-1 closure): an abandoned code -- activation failure,
+      # database outage, disconnect, partial delivery, replaced response,
+      # frozen process -- stays PENDING and is refused on ANOTHER instance even
+      # with the server-known code + verifier; issued codes (hand-off without
+      # proof of receipt) redeem once; a racing redemption waits for the
+      # in-flight activation; the request budget bounds a slow flow. Two
+      # instances with separate stores and pools. Touches only the MCP tables.
+      - name: Run I2b-S10 cross-instance code safety DB test
+        run: npx ts-node test/mcpOAuthS10Db.test.ts
       - name: Verify every repository migration was recorded as applied
         run: |
           set -euo pipefail
