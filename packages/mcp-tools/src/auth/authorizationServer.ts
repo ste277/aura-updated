@@ -81,12 +81,60 @@ interface ProviderCtx {
   status: number;
   body: unknown;
   type: string;
-  oidc?: { route?: string; entities?: unknown };
+  oidc?: { route?: string; entities?: unknown; params?: Record<string, unknown>; client?: { clientId?: string } };
   req: IncomingMessage;
   res: ServerResponse;
   response: { get(name: string): string };
   remove(name: string): void;
   set(name: string, value: string): void;
+}
+
+/** I2b-S12: the redirect statuses the provider uses for an authorization response. */
+const AUTHORIZATION_REDIRECT_STATUSES: ReadonlySet<number> = new Set([302, 303]);
+
+/**
+ * AURA-MCP-02-I2b-S12 (S11 review R-P2-1): STRUCTURED validation of the
+ * authorization-response redirect that carries a code -- no substring
+ * matching. Valid only if ALL hold:
+ *   - status 302 or 303;
+ *   - `location` is an absolute URL whose origin and path are EXACTLY the
+ *     registered callback's, with no userinfo and no fragment;
+ *   - every query parameter registered on the callback is present with the
+ *     same values (as a multiset);
+ *   - exactly one `code` parameter, equal to the code; exactly one `state`
+ *     equal to the requested state if one was requested, none otherwise; at
+ *     most one `iss`, equal to the issuer (RFC 9207); nothing else;
+ *   - the code occurs exactly ONCE in the whole location string (so it cannot
+ *     also survive in the path, the fragment or another parameter).
+ */
+export function validateAuthorizationRedirect(x: { status: number; location: string; code: string; redirectUri: string; state?: string; issuer: string }): boolean {
+  if (!AUTHORIZATION_REDIRECT_STATUSES.has(x.status) || typeof x.location !== 'string' || x.code.length === 0) return false;
+  if (x.location.split(x.code).length - 1 !== 1) return false;
+  let loc: URL;
+  let reg: URL;
+  try {
+    loc = new URL(x.location);
+    reg = new URL(x.redirectUri);
+  } catch {
+    return false;
+  }
+  if (loc.username || loc.password || loc.hash || x.location.includes('#')) return false;
+  if (loc.origin !== reg.origin || loc.pathname !== reg.pathname) return false;
+  const remaining = new Map<string, string[]>();
+  for (const [k, v] of loc.searchParams) remaining.set(k, [...(remaining.get(k) ?? []), v]);
+  const take = (k: string, v: string) => {
+    const vals = remaining.get(k);
+    const i = vals ? vals.indexOf(v) : -1;
+    if (!vals || i < 0) return false;
+    vals.splice(i, 1);
+    if (vals.length === 0) remaining.delete(k);
+    return true;
+  };
+  for (const [k, v] of reg.searchParams) if (!take(k, v)) return false; // registered parameters preserved
+  if (!take('code', x.code)) return false;
+  if (x.state !== undefined && !take('state', x.state)) return false;
+  if (remaining.has('iss') && !take('iss', x.issuer)) return false;
+  return remaining.size === 0; // no duplicate code / state / iss, nothing else
 }
 
 export interface AuraOAuthClient {
@@ -509,12 +557,17 @@ export function createAuraOAuthServer(options: AuraOAuthServerOptions): AuraOAut
     if (code) {
       const location = String(ctx.response.get('Location') ?? '');
       const body = typeof ctx.body === 'string' ? ctx.body : '';
-      const inLocation = location.includes(code);
-      const carries = inLocation || body.includes(code);
-      // I2b-S11 (P2-2): only a code carried in the redirect Location is
-      // deliverable -- its final hand-off can be verified. A body-carried code
-      // (a response mode Aura does not offer) is never sent or activated.
-      const deliverable = ctx.status < 400 && inLocation && !connectionGone(ctx) && !ctx.res.headersSent;
+      // Any trace of the code anywhere: an undeliverable response is scrubbed (503).
+      const carries = location.includes(code) || body.includes(code);
+      // I2b-S12 (R-P2-1): deliverable only as a structurally valid query-mode
+      // redirect to a callback REGISTERED for this client (S11: query mode only).
+      const params = ctx.oidc?.params ?? {};
+      const redirectUri = typeof params.redirect_uri === 'string' ? params.redirect_uri : '';
+      const clientId = ctx.oidc?.client?.clientId;
+      const registered = options.clients.some((c) => c.client_id === clientId && c.redirect_uris.includes(redirectUri));
+      const state = typeof params.state === 'string' ? params.state : undefined;
+      const validRedirect = registered && validateAuthorizationRedirect({ status: ctx.status, location, code, redirectUri, state, issuer });
+      const deliverable = validRedirect && !connectionGone(ctx) && !ctx.res.headersSent;
       let activation: IssuedActivation | null = null;
       let ready = !adapterStore.beginIssuedActivation; // stores without pending codes write them active
       if (deliverable && adapterStore.beginIssuedActivation) {
@@ -542,7 +595,8 @@ export function createAuraOAuthServer(options: AuraOAuthServerOptions): AuraOAut
         const held = activation;
         const res = ctx.res;
         const status = ctx.status;
-        const issuedCode = code;
+        // The exact redirect validated above: the hand-off must match it byte for byte.
+        const validatedLocation = location;
         issuance.set(
           res,
           new Promise<void>((resolve) => {
@@ -562,8 +616,9 @@ export function createAuraOAuthServer(options: AuraOAuthServerOptions): AuraOAut
             const backstop = setTimeout(abandon, 10_000);
             (backstop as { unref?: () => void }).unref?.();
             res.once('finish', () => {
-              // P2-2: the FINISHED response must be the same < 400 redirect and its Location must still carry the code.
-              const intact = res.statusCode === status && res.statusCode < 400 && String(res.getHeader('location') ?? '').includes(issuedCode);
+              // I2b-S12 (R-P2-1): the FINISHED response must be exactly the validated
+              // redirect -- same status, byte-identical Location.
+              const intact = res.statusCode === status && String(res.getHeader('location') ?? '') === validatedLocation;
               if (!intact) return abandon(); // replaced (e.g. Koa error handler): never committed
               // The request budget does not apply: the response is already out.
               outsideRequestBudget(() => held.commit()).then((outcome) => {
@@ -799,7 +854,7 @@ ${duration}${manage}
     const decision = await pre.limiter.check(rules);
     if (decision.allowed) return null;
     if (decision.limitedBy === 'unavailable') {
-      audit({ event: 'oauth.throttled', outcome: 'limiter_unavailable', limitedBy: 'unavailable' });
+      audit({ event: 'oauth.throttled', outcome: 'limiter_unavailable', limitedBy: 'unavailable', cause: decision.cause });
       return { status: 503, retryAfter: 1 };
     }
     audit({ event: 'oauth.throttled', outcome: 'preauth_throttled', limitedBy: decision.limitedBy });

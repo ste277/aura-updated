@@ -79,18 +79,22 @@ async function main() {
 
     // Every role, including RETAINED rotation keys, accepts each supported format.
     const strong = () => randomBytes(32).toString('base64url');
-    const base = () => ({ AURA_MCP_OAUTH_COOKIE_KEYS: strong(), AURA_MCP_OAUTH_PAIRWISE_SALT: strong(), AURA_MCP_AUDIT_KEY: strong() });
+    // I2b-S12: new configuration declares its format (base64url:/base64:/hex:); untagged values only as retained cookie keys.
+    const base = () => ({ AURA_MCP_OAUTH_COOKIE_KEYS: `base64url:${strong()}`, AURA_MCP_OAUTH_PAIRWISE_SALT: `base64url:${strong()}`, AURA_MCP_AUDIT_KEY: `base64url:${strong()}` });
     const jwksEnv = () => ({ AURA_MCP_OAUTH_JWKS: JSON.stringify(sharedKeys().jwks) });
     const hex16 = () => randomBytes(16).toString('hex');
     const roles: [string, (v: string) => Record<string, string>][] = [
       ['current cookie key', (v) => ({ AURA_MCP_OAUTH_COOKIE_KEYS: v })],
-      ['retained (older) cookie key', (v) => ({ AURA_MCP_OAUTH_COOKIE_KEYS: `${strong()},${v}` })],
+      ['retained (older) cookie key', (v) => ({ AURA_MCP_OAUTH_COOKIE_KEYS: `base64url:${strong()},${v}` })],
       ['pairwise salt', (v) => ({ AURA_MCP_OAUTH_PAIRWISE_SALT: v })],
       ['audit key', (v) => ({ AURA_MCP_AUDIT_KEY: v })],
     ];
     for (const [role, put] of roles) {
-      check(`SEC loader accepts a 16-byte hex ${role}`, !rejects(() => loadOAuthKeysFromEnv({ ...jwksEnv(), ...base(), ...put(hex16()) })));
-      check(`SEC loader accepts a 24-byte base64 ${role}`, !rejects(() => loadOAuthKeysFromEnv({ ...jwksEnv(), ...base(), ...put(randomBytes(24).toString('base64')) })));
+      check(`SEC loader accepts a 16-byte hex ${role} (declared hex:)`, !rejects(() => loadOAuthKeysFromEnv({ ...jwksEnv(), ...base(), ...put(`hex:${hex16()}`) })));
+      check(`SEC loader accepts a 24-byte base64 ${role} (declared base64:)`, !rejects(() => loadOAuthKeysFromEnv({ ...jwksEnv(), ...base(), ...put(`base64:${randomBytes(24).toString('base64')}`) })));
+      // I2b-S12: an UNTAGGED value is the legacy compatibility path -- retained cookie keys only.
+      const untaggedOk = !rejects(() => loadOAuthKeysFromEnv({ ...jwksEnv(), ...base(), ...put(hex16()) }));
+      check(`SEC untagged 16-byte hex as ${role}: ${role.startsWith('retained') ? 'accepted (legacy path)' : 'refused (format required)'}`, untaggedOk === role.startsWith('retained'));
     }
 
     const weak: [string, string][] = [

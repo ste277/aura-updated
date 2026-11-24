@@ -95,6 +95,22 @@ export function budgetedDeadlineMs(ms: number): number {
 }
 
 /**
+ * I2b-S12 (S11 review R-P3-1): the ABSOLUTE deadline instant of a store call:
+ * min(now + own deadline, the request budget's ORIGINAL instant). The budget
+ * instant is used as stored -- never rebuilt from a "remaining" sample and a
+ * later clock read, which could stretch the parent budget by the gap.
+ */
+export function budgetedDeadlineAt(ms: number, now = monotonicNow()): number {
+  const b = budgetStore.getStore();
+  return Math.min(now + ms, b ? b.deadlineAt : Infinity);
+}
+
+/** I2b-S12: the ONE expiry comparison used at every boundary -- expired at or after the instant. */
+export function expiredAt(at: number, now = monotonicNow()): boolean {
+  return now >= at;
+}
+
+/**
  * Settles with `work` or rejects with StoreUnavailableError('timeout') after
  * `ms`, whichever comes first. Any rejection of `work` is also converted to
  * StoreUnavailableError('error'), so driver errors never propagate (and never
@@ -289,11 +305,13 @@ function destroyClient(c: BoundedClient): void {
  */
 export function boundedStatement<R>(pool: BoundedPool, text: string, params: unknown[] | undefined, o: BoundedStatementOptions): Promise<QueryResultLike<R>> {
   const begin = beginText(o);
-  const deadlineMs = budgetedDeadlineMs(o.deadlineMs);
-  if (deadlineMs <= 0) return Promise.reject(new StoreUnavailableError('timeout'));
-  // I2b-S11 (P3-1): one ABSOLUTE monotonic deadline for every phase.
-  const deadlineAt = monotonicNow() + deadlineMs;
-  const expired = (at: number) => monotonicNow() >= at;
+  // I2b-S11/S12: one ABSOLUTE monotonic deadline for every phase, taken from
+  // the original request-budget instant (never reconstructed).
+  const startedAt = monotonicNow();
+  const deadlineAt = budgetedDeadlineAt(o.deadlineMs, startedAt);
+  if (expiredAt(deadlineAt, startedAt)) return Promise.reject(new StoreUnavailableError('timeout'));
+  const deadlineMs = deadlineAt - startedAt;
+  const expired = (at: number) => expiredAt(at);
   return new Promise((resolve, reject) => {
     let settled = false;
     let guard: ReturnType<typeof guardClient> | undefined;
@@ -396,9 +414,10 @@ export interface HeldTransaction<R> {
 export function heldStatement<R>(pool: BoundedPool, text: string, params: unknown[] | undefined, o: BoundedStatementOptions & { holdMs: number }): Promise<HeldTransaction<R>> {
   if (!Number.isInteger(o.holdMs) || o.holdMs < 1) return Promise.reject(new TypeError('holdMs must be a positive integer'));
   const begin = beginText(o);
-  const deadlineMs = budgetedDeadlineMs(o.deadlineMs);
-  if (deadlineMs <= 0) return Promise.reject(new StoreUnavailableError('timeout'));
-  const deadlineAt = monotonicNow() + deadlineMs;
+  const startedAt = monotonicNow();
+  const deadlineAt = budgetedDeadlineAt(o.deadlineMs, startedAt);
+  if (expiredAt(deadlineAt, startedAt)) return Promise.reject(new StoreUnavailableError('timeout'));
+  const deadlineMs = deadlineAt - startedAt;
   return new Promise((resolve, reject) => {
     let settled = false;
     let guard: ReturnType<typeof guardClient> | undefined;
@@ -417,7 +436,7 @@ export function heldStatement<R>(pool: BoundedPool, text: string, params: unknow
     (async () => {
       try {
         const c = await pool.connect();
-        if (settled || monotonicNow() >= deadlineAt) {
+        if (settled || expiredAt(deadlineAt)) {
           try {
             c.release();
           } catch {
@@ -443,7 +462,7 @@ export function heldStatement<R>(pool: BoundedPool, text: string, params: unknow
         const g = guard;
         await c.query(begin);
         const r = await c.query<R>(text, params);
-        if (settled || g.broken || monotonicNow() >= deadlineAt) {
+        if (settled || g.broken || expiredAt(deadlineAt)) {
           fail('timeout');
           return;
         }
@@ -464,7 +483,7 @@ export function heldStatement<R>(pool: BoundedPool, text: string, params: unknow
           commit(commitMs: number): Promise<HeldCommitOutcome> {
             if (decided || g.broken) return Promise.resolve('not_committed');
             // P3-1: a hold whose timer has not run yet but whose instant has passed is abandoned.
-            if (monotonicNow() >= holdAt) {
+            if (expiredAt(holdAt)) {
               abort();
               return Promise.resolve('not_committed');
             }
@@ -497,7 +516,7 @@ export function heldStatement<R>(pool: BoundedPool, text: string, params: unknow
                   }
                   g.releaseClean();
                   // Confirmed, but past its bound: report "unknown" (it landed) -- never a silent late success.
-                  answer(monotonicNow() > commitAt ? 'unknown' : 'committed');
+                  answer(expiredAt(commitAt) ? 'unknown' : 'committed');
                 },
                 () => {
                   g.discard();
