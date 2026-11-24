@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { spacing } from './theme';
-import { FieldLabel, TextInput, FieldError, SegmentedControl } from './ui';
+import { FieldLabel, TextInput, FieldError, DurationChip } from './ui';
 
 /**
  * Goals V2 Rhythm R5 -- the one user-facing Rhythm input mechanism (this
@@ -18,6 +18,14 @@ import { FieldLabel, TextInput, FieldError, SegmentedControl } from './ui';
 
 export type RhythmPickerValue = { kind: 'NONE' } | { kind: 'N_PER_WEEK'; targetPerWeek: number };
 type RhythmPreset = 'ONCE' | '2' | '3' | '5' | 'CUSTOM';
+
+const RHYTHM_PRESET_OPTIONS: ReadonlyArray<{ value: RhythmPreset; label: string }> = [
+  { value: 'ONCE', label: 'Once' },
+  { value: '2', label: '2× a week' },
+  { value: '3', label: '3× a week' },
+  { value: '5', label: '5× a week' },
+  { value: 'CUSTOM', label: 'Custom' },
+];
 
 export function presetForRhythmValue(value: RhythmPickerValue): RhythmPreset {
   if (value.kind === 'NONE') return 'ONCE';
@@ -81,17 +89,13 @@ export function RhythmPicker({
         How often would help?
       </FieldLabel>
       <div id={`${idPrefix}-rhythm`}>
-        <SegmentedControl<RhythmPreset>
-          options={[
-            { value: 'ONCE', label: 'Once' },
-            { value: '2', label: '2× a week' },
-            { value: '3', label: '3× a week' },
-            { value: '5', label: '5× a week' },
-            { value: 'CUSTOM', label: 'Custom' },
-          ]}
-          value={preset}
-          onChange={applyPreset}
-        />
+        {/* AURA-MR3: wrapping chips (not a nowrap segmented control) so all
+            five choices fit a 320px phone inside a card. */}
+        <div role="group" aria-label="Times per week" style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+          {RHYTHM_PRESET_OPTIONS.map((option) => (
+            <DurationChip key={option.value} label={option.label} selected={preset === option.value} onClick={() => applyPreset(option.value)} />
+          ))}
+        </div>
       </div>
       {preset === 'CUSTOM' && (
         <div style={{ marginTop: spacing.sm }}>

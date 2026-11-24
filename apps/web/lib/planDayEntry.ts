@@ -330,10 +330,16 @@ function formatDeadlineSummaryLabel(choice: PlanDayDeadlineChoice, horizon: Plan
  * flexibility/time, then duration, then Important only if true, then
  * Deadline only if set -- joined with " · ", never exposing a raw enum
  * name. */
+const RHYTHM_TIME_SUMMARY_LABELS: Record<NonNullable<PlanDayIntentRow['rhythmTimePreference']>, string> = { MORNING: 'Morning', AFTERNOON: 'Afternoon', EVENING: 'Evening', NIGHT: 'Night' };
+
 export function formatIntentRowSummary(row: PlanDayIntentRow, horizon: PlanningHorizon | null): string {
   const parts: string[] = [];
   parts.push(row.timeMode === 'FIXED' && row.fixedTime ? `Specific time ${formatFixedTimeLabel(row.fixedTime)}` : 'Flexible');
-  parts.push(row.durationMinutes === null ? 'Automatic' : `${row.durationMinutes} min`);
+  // AURA-MR3 -- a rhythm's preferred time/length (MR2 row defaults, sent with
+  // the preview when the row has no explicit choice) is shown, so the user
+  // can see their saved preference was carried forward.
+  if (row.timeMode === 'FLEXIBLE' && row.rhythmTimePreference) parts.push(RHYTHM_TIME_SUMMARY_LABELS[row.rhythmTimePreference]);
+  parts.push(row.durationMinutes !== null ? `${row.durationMinutes} min` : row.rhythmDurationMinutes !== undefined ? `${row.rhythmDurationMinutes} min` : 'Automatic');
   if (row.important) parts.push('Important');
   const deadlineLabel = formatDeadlineSummaryLabel(row.deadlineChoice, horizon);
   if (deadlineLabel) parts.push(deadlineLabel);
@@ -724,4 +730,34 @@ export function rekeyGoalDemandRowsForPlanningDate(rows: readonly PlanDayIntentR
     next.push(id === row.id ? row : { ...row, id });
   }
   return changed ? next : (rows as PlanDayIntentRow[]);
+}
+
+// ============================================================
+// AURA-MR3 -- explain a deferral caused by a rhythm's preferred time of day.
+// Plan My Day sends the rhythm's time-of-day as the engine's own
+// timePreference (MR2) and, unlike the weekly proposal, has no fallback; so
+// "Aura couldn't find a suitable time" alone hides the real reason when, say,
+// the morning has already passed. Presentation only: reads the preview's
+// deferred items, never re-evaluates scheduling.
+// ============================================================
+const RHYTHM_TIME_PHRASES: Record<NonNullable<PlanDayIntentRow['rhythmTimePreference']>, { plural: string; single: string }> = {
+  MORNING: { plural: 'mornings', single: 'morning' },
+  AFTERNOON: { plural: 'afternoons', single: 'afternoon' },
+  EVENING: { plural: 'evenings', single: 'evening' },
+  NIGHT: { plural: 'nights', single: 'night' },
+};
+
+export function describeRhythmTimeDeferrals(
+  rows: readonly PlanDayIntentRow[],
+  deferredItems: readonly { intentId: string; primaryReason: string }[],
+): string[] {
+  const notes: string[] = [];
+  for (const item of deferredItems) {
+    if (item.primaryReason !== 'NO_CANDIDATES' && item.primaryReason !== 'OUTSIDE_CONSTRUCTION_WINDOW' && item.primaryReason !== 'NO_FEASIBLE_WINDOW') continue;
+    const row = rows.find((r) => r.id === item.intentId);
+    if (!row || row.timeMode !== 'FLEXIBLE' || !row.rhythmTimePreference) continue;
+    const phrase = RHYTHM_TIME_PHRASES[row.rhythmTimePreference];
+    notes.push(`${row.title.trim()} is set to ${phrase.plural}, and no suitable ${phrase.single} time is left in the part of the day being planned. Plan it on another day, or change its preferred time in the goal.`);
+  }
+  return notes;
 }

@@ -16,7 +16,7 @@ import {
   FieldLabel,
   FieldError,
 } from '../../components/ui';
-import { colors, spacing, radius } from '../../components/theme';
+import { colors, spacing, radius, typography } from '../../components/theme';
 import { DayPlanPreviewController } from '../../components/DayPlanPreviewController';
 import { formatIsoClockTime } from '../../lib/dayPlanPreviewPresentation';
 import type { ConstructDayPreview } from '../../lib/dayConstructorOrchestrator';
@@ -42,6 +42,7 @@ import {
   canAddAnotherRow,
   buildRequestedIntentsForSubmission,
   buildGoalActivityLinksForAccept,
+  describeRhythmTimeDeferrals,
   presentPlanDayPreviewFailure,
   PLAN_DAY_DURATION_OPTIONS_MINUTES,
   NO_DEADLINE,
@@ -552,6 +553,9 @@ export function PlanDayClient({ timezone, planningDate, horizon, availabilityCon
               onPreviewReplaced={replacePreview}
               previewGenerationRef={previewGenerationRef}
             />
+            {describeRhythmTimeDeferrals(rows, preview.constructedDay.deferredItems).map((note) => (
+              <p key={note} style={{ ...typography.meta, color: colors.textSecondary, marginTop: spacing.sm }}>{note}</p>
+            ))}
             {shadowReview && timezone ? <ShadowReviewPanel review={shadowReview} timezone={timezone} /> : null}
           </>
         ) : (

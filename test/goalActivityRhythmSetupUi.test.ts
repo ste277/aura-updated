@@ -47,7 +47,9 @@ check('57. Custom rejects empty/fractional/zero/negative input (never silently f
 // every row, available regardless of derivedState.
 // ============================================================
 check('20. RhythmEditor is rendered unconditionally for every primary-list row (not gated on derivedState)', /<RhythmEditor activity=\{activity\} onSaved=\{onChanged\} \/>/.test(goalDetailSrc));
-check('20. the edit affordance PATCHes the one allowed Rhythm edit endpoint', /\/api\/goals\/\$\{activity\.goalId\}\/activities\/\$\{activity\.id\}\/rhythm/.test(goalDetailSrc) && /method: 'PATCH'/.test(goalDetailSrc));
+// AURA-MR3: the edit affordance now lives in components/RhythmSettingsEditor.tsx.
+const rhythmSettingsEditorSrc = stripComments(read('../apps/web/components/RhythmSettingsEditor.tsx'));
+check('20. the edit affordance PATCHes the one allowed Rhythm edit endpoint', /<RhythmSettingsEditor\b/.test(goalDetailSrc) && /\/api\/goals\/\$\{goalId\}\/activities\/\$\{goalActivityId\}\/rhythm/.test(rhythmSettingsEditorSrc) && /method: 'PATCH'/.test(rhythmSettingsEditorSrc));
 check('6. "Once" is never a persisted Rhythm kind in client code -- RhythmEditor/RhythmPicker only ever construct { kind: \'NONE\' } or { kind: \'N_PER_WEEK\', ... }, never { kind: \'ONCE\' }', !/kind:\s*'ONCE'/.test(goalDetailSrc) && !/kind:\s*'ONCE'/.test(rhythmPickerSrc));
 
 // ============================================================

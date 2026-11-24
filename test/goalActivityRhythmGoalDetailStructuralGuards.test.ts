@@ -64,11 +64,20 @@ const methodTokenPositions: number[] = [];
   while ((m = re.exec(goalDetailSrc)) !== null) methodTokenPositions.push(m.index);
 }
 const rhythmWriteCallSites = methodTokenPositions.filter((pos) => /rhythm/i.test(goalDetailSrc.slice(Math.max(0, pos - 200), pos + 200)));
+// AURA-MR3 re-baseline: the per-row rhythm edit moved from an inline
+// RhythmEditor fetch into the shared components/RhythmSettingsEditor.tsx
+// (frequency + MR1 preferences + pause/resume). The invariant is unchanged:
+// exactly ONE rhythm-edit write site (PATCH .../rhythm) plus the existing
+// Add-activity POST -- never a third rhythm write surface.
+const rhythmSettingsEditorSrc = stripComments(read('../apps/web/components/RhythmSettingsEditor.tsx'));
 check(
-  'GoalDetailClient.tsx issues Rhythm-authoring fetches ONLY through its two allowed R5 call sites (the existing Add-activity POST, extended with an optional rhythm field, and the new per-row edit PATCH .../rhythm endpoint) -- never a third',
-  rhythmWriteCallSites.length === 2 &&
+  'Rhythm-authoring fetches go ONLY through the two allowed call sites: Goal Detail\'s Add-activity POST (optional rhythm field) and RhythmSettingsEditor\'s single PATCH .../rhythm -- never a third',
+  rhythmWriteCallSites.length === 1 &&
     /body: JSON\.stringify\(\{ title: trimmed, rhythm \}\)/.test(goalDetailSrc) &&
-    /fetch\(`\/api\/goals\/\$\{activity\.goalId\}\/activities\/\$\{activity\.id\}\/rhythm`,\s*\{\s*method:\s*'PATCH'/.test(goalDetailSrc)
+    !/\/rhythm`/.test(goalDetailSrc) &&
+    (rhythmSettingsEditorSrc.match(/fetch\(/g) ?? []).length === 1 &&
+    /const endpoint = `\/api\/goals\/\$\{goalId\}\/activities\/\$\{goalActivityId\}\/rhythm`/.test(rhythmSettingsEditorSrc) &&
+    /fetch\(endpoint, \{ method: 'PATCH'/.test(rhythmSettingsEditorSrc)
 );
 check('GoalDetailClient.tsx\'s own fetch endpoints are still exactly the pre-R4 set (load/dismiss/add/archive/delete) -- no new endpoint was added', (goalDetailSrc.match(/fetch\(`\/api\/goals/g) ?? []).length === (stripComments(read('../apps/web/app/goals/[goalId]/GoalDetailClient.tsx')).match(/fetch\(`\/api\/goals/g) ?? []).length);
 

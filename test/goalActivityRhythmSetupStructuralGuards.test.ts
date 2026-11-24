@@ -34,6 +34,12 @@ const allSetupUiSrc = rhythmPickerSrc + goalDetailSrc + goalsListSrc;
 
 // ============================================================
 // 59. Anti-complexity guard -- this ticket's own explicit DO-NOT list.
+// AURA-MR3 deliberate re-baseline (as MR1's report required): a weekday
+// selector now exists, but ONLY in the post-setup edit surface
+// (components/RhythmSettingsEditor.tsx, behind progressive disclosure).
+// The SETUP surfaces checked here -- RhythmPicker, Goal Detail and Create
+// Goal -- must still contain none, so creating a rhythm stays "how often"
+// only. test/myRhythmPreferencesUi.test.ts asserts the editor side.
 // ============================================================
 check('59. no weekday picker (no Mon/Tue/Wed.../Sun day-of-week selector)', !/\bMon\b.*\bTue\b.*\bWed\b|weekday.*picker|pickDays|selectedDays/i.test(allSetupUiSrc));
 check('27/59. no "Which days?" question anywhere', !/which days/i.test(allSetupUiSrc));
