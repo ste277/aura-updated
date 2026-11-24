@@ -34,6 +34,21 @@ export interface RateLimitDecision {
   retryAfterSeconds: number;
   /** Which namespace rejected the request ("user", "client" or "capacity"), for audit only. */
   limitedBy?: string;
+  /**
+   * I2b-S11 (S10 review P2-3), diagnostics only, set when `limitedBy` is
+   * "unavailable" (the caller's answer is the same fail-closed 503 in every
+   * case):
+   *   - "deadline"        the decision deadline expired BEFORE any COMMIT was
+   *                       sent: expected load shedding, nothing was counted;
+   *   - "commit_unknown"  the deadline expired after COMMIT was sent, or the
+   *                       COMMIT was unconfirmed / acknowledged late: the
+   *                       increment MAY have landed (over-count, never
+   *                       over-admission);
+   *   - "checkout"        no connection could be checked out (pool / connect error);
+   *   - "driver"          a statement or the connection failed (SQL / driver error);
+   *   - "internal"        an invariant failed or no decision was reached.
+   */
+  cause?: 'deadline' | 'commit_unknown' | 'checkout' | 'driver' | 'internal';
 }
 
 export interface McpRateLimiter {

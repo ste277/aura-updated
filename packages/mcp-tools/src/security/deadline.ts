@@ -58,9 +58,24 @@ export function boundedMs(name: string, value: number | undefined, fallback: num
  */
 const budgetStore = new AsyncLocalStorage<{ deadlineAt: number }>();
 
+/**
+ * AURA-MCP-02-I2b-S11 (S10 review P3-1): every database deadline is an
+ * ABSOLUTE instant on a MONOTONIC clock (performance.now), checked
+ * explicitly at transaction boundaries -- not only by timer callbacks, which
+ * a stalled event loop can delay. Tests may substitute the clock.
+ */
+let clock: () => number = () => performance.now();
+export function monotonicNow(): number {
+  return clock();
+}
+/** Test hook: replace (or with null, restore) the monotonic clock. */
+export function setDeadlineClockForTests(fn: (() => number) | null): void {
+  clock = fn ?? (() => performance.now());
+}
+
 export function runWithRequestBudget<T>(ms: number, fn: () => Promise<T>): Promise<T> {
   if (!Number.isInteger(ms) || ms < 1) throw new TypeError('request budget must be a positive integer');
-  return budgetStore.run({ deadlineAt: Date.now() + ms }, fn);
+  return budgetStore.run({ deadlineAt: monotonicNow() + ms }, fn);
 }
 
 /** Runs `fn` outside any request budget (work that must not be cut short by the request's budget). */
@@ -71,7 +86,7 @@ export function outsideRequestBudget<T>(fn: () => T): T {
 /** Time left in the current request budget, ms (Infinity outside a budget; never negative). */
 export function requestBudgetRemainingMs(): number {
   const b = budgetStore.getStore();
-  return b ? Math.max(0, b.deadlineAt - Date.now()) : Infinity;
+  return b ? Math.max(0, b.deadlineAt - monotonicNow()) : Infinity;
 }
 
 /** A store-call deadline shortened to the current request budget. 0 = already spent. */
@@ -124,6 +139,65 @@ type QueryResultLike<R> = { rows: R[]; rowCount: number | null };
 export interface BoundedClient {
   query<R = Record<string, unknown>>(text: string, params?: unknown[]): Promise<QueryResultLike<R>>;
   release(err?: unknown): void;
+  /** node-pg clients are EventEmitters: a checked-out client emits 'error' when its connection dies. */
+  on?(event: 'error', listener: (err: unknown) => void): unknown;
+  off?(event: 'error', listener: (err: unknown) => void): unknown;
+}
+
+/**
+ * AURA-MCP-02-I2b-S11 (S10 review P2-1): node-pg removes the pool's
+ * idle-client 'error' listener when a client is checked out, so a server-side
+ * termination (idle-in-transaction timeout, administrator command, network
+ * loss) of a CHECKED-OUT client emits an 'error' event with no listener --
+ * an uncaught exception that ends the process. `guardClient` attaches ONE
+ * listener at checkout for the whole checkout-to-release lifecycle:
+ *   - `releaseClean()` removes exactly that listener, then returns the client
+ *     to the pool (which re-installs its own idle listener) -- no leak;
+ *   - `discard()` destroys the connection and deliberately LEAVES the
+ *     listener attached: a dying socket can still emit after release, and
+ *     the pool drops a client released with an error, so the listener goes
+ *     away with the discarded client object;
+ *   - the first 'error' marks the client broken and runs `onError` (once).
+ * Clients without `on` (test fakes) are handled the same way minus the
+ * listener.
+ */
+export function guardClient(c: BoundedClient, onError: (err: unknown) => void): { readonly broken: boolean; releaseClean(): void; discard(): void } {
+  let broken = false;
+  let done = false;
+  const listener = (err: unknown) => {
+    if (broken) return;
+    broken = true;
+    try {
+      onError(err);
+    } catch {
+      // never rethrow from an 'error' listener
+    }
+  };
+  c.on?.('error', listener);
+  return {
+    get broken() {
+      return broken;
+    },
+    releaseClean() {
+      if (done) return;
+      done = true;
+      if (broken) {
+        destroyClient(c);
+        return;
+      }
+      c.off?.('error', listener);
+      try {
+        c.release();
+      } catch {
+        // ignore
+      }
+    },
+    discard() {
+      if (done) return;
+      done = true;
+      destroyClient(c);
+    },
+  };
 }
 export interface BoundedPool {
   connect(): Promise<BoundedClient>;
@@ -217,72 +291,73 @@ export function boundedStatement<R>(pool: BoundedPool, text: string, params: unk
   const begin = beginText(o);
   const deadlineMs = budgetedDeadlineMs(o.deadlineMs);
   if (deadlineMs <= 0) return Promise.reject(new StoreUnavailableError('timeout'));
-  const startedAt = Date.now();
+  // I2b-S11 (P3-1): one ABSOLUTE monotonic deadline for every phase.
+  const deadlineAt = monotonicNow() + deadlineMs;
+  const expired = (at: number) => monotonicNow() >= at;
   return new Promise((resolve, reject) => {
     let settled = false;
-    let client: BoundedClient | undefined;
-    let released = false;
+    let guard: ReturnType<typeof guardClient> | undefined;
     let commitTimer: ReturnType<typeof setTimeout> | undefined;
     const fail = (reason: 'timeout' | 'error') => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
       if (commitTimer) clearTimeout(commitTimer);
+      guard?.discard(); // an uncertain connection is never reused
       reject(new StoreUnavailableError(reason));
     };
-    const destroy = (c: BoundedClient | undefined) => {
-      if (!c || released) return;
-      released = true;
-      destroyClient(c);
-    };
-    // One clock for every phase, COMMIT included (I2b-S10).
-    const timer = setTimeout(() => {
-      fail('timeout');
-      destroy(client);
-    }, deadlineMs);
+    // The timer only WAKES us; the explicit checks below decide.
+    const timer = setTimeout(() => fail('timeout'), deadlineMs);
     (async () => {
       try {
         const c = await pool.connect();
-        if (settled) {
-          // Never used: clean.
-          c.release();
+        if (settled || expired(deadlineAt)) {
+          // Late checkout: never used, so it is clean -- return it unused.
+          try {
+            c.release();
+          } catch {
+            // ignore
+          }
+          fail('timeout');
           return;
         }
-        client = c;
+        guard = guardClient(c, () => fail('error'));
         await c.query(begin);
         const r = await c.query<R>(text, params);
-        if (settled) {
-          // Failure already reported: never commit; destroying the
-          // connection rolls the transaction back.
-          destroy(c);
+        // Pre-COMMIT check: past the deadline (even if its timer has not
+        // run yet) the work is abandoned -- discarding the connection rolls
+        // the transaction back. COMMIT is never sent late.
+        if (settled || guard.broken || expired(deadlineAt)) {
+          fail('timeout');
           return;
         }
+        let commitAt = deadlineAt;
         if (o.commitDeadlineMs !== undefined) {
-          const left = deadlineMs - (Date.now() - startedAt);
-          commitTimer = setTimeout(() => {
-            fail('timeout');
-            destroy(c);
-          }, Math.max(0, Math.min(o.commitDeadlineMs, left)));
+          commitAt = Math.min(deadlineAt, monotonicNow() + o.commitDeadlineMs);
+          commitTimer = setTimeout(() => fail('timeout'), Math.max(0, commitAt - monotonicNow()));
         }
         const done = await c.query('COMMIT');
-        if (settled) {
-          destroy(c);
-          return;
-        }
+        if (settled) return;
         if (!commitConfirmed(done)) {
-          // Not confirmed (e.g. ROLLBACK tag): never a success.
-          destroy(c);
-          fail('error');
+          fail('error'); // e.g. ROLLBACK tag: never a success
           return;
         }
-        released = true;
-        c.release();
+        // A confirmed but LATE acknowledgement is reported as failure: the
+        // caller must treat the outcome as unknown (it did land).
+        if (expired(commitAt)) {
+          settled = true;
+          clearTimeout(timer);
+          if (commitTimer) clearTimeout(commitTimer);
+          guard.releaseClean(); // the transaction is finished; the connection is clean
+          reject(new StoreUnavailableError('timeout'));
+          return;
+        }
         settled = true;
         clearTimeout(timer);
         if (commitTimer) clearTimeout(commitTimer);
+        guard.releaseClean();
         resolve(r);
       } catch {
-        destroy(client);
         fail('error');
       }
     })();
@@ -323,46 +398,79 @@ export function heldStatement<R>(pool: BoundedPool, text: string, params: unknow
   const begin = beginText(o);
   const deadlineMs = budgetedDeadlineMs(o.deadlineMs);
   if (deadlineMs <= 0) return Promise.reject(new StoreUnavailableError('timeout'));
+  const deadlineAt = monotonicNow() + deadlineMs;
   return new Promise((resolve, reject) => {
     let settled = false;
-    let client: BoundedClient | undefined;
+    let guard: ReturnType<typeof guardClient> | undefined;
+    // After phase 1: COMMIT sent? (an error before it means the server rolled back)
+    let commitSent = false;
+    let decided = false;
+    let holdTimer: ReturnType<typeof setTimeout> | undefined;
     const fail = (reason: 'timeout' | 'error') => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      if (client) destroyClient(client);
+      guard?.discard();
       reject(new StoreUnavailableError(reason));
     };
     const timer = setTimeout(() => fail('timeout'), deadlineMs);
     (async () => {
       try {
         const c = await pool.connect();
-        if (settled) {
-          c.release();
+        if (settled || monotonicNow() >= deadlineAt) {
+          try {
+            c.release();
+          } catch {
+            // ignore
+          }
+          fail('timeout');
           return;
         }
-        client = c;
+        // P2-1: one listener for the whole hold. A connection that dies while
+        // held (idle-in-transaction timeout, terminated backend) is discarded;
+        // the server has rolled the uncommitted activation back.
+        guard = guardClient(c, () => {
+          if (!settled) {
+            fail('error');
+            return;
+          }
+          if (!commitSent) {
+            decided = true;
+            clearTimeout(holdTimer);
+          }
+          guard?.discard();
+        });
+        const g = guard;
         await c.query(begin);
         const r = await c.query<R>(text, params);
-        if (settled) return; // already failed: fail() destroyed the connection (rollback)
+        if (settled || g.broken || monotonicNow() >= deadlineAt) {
+          fail('timeout');
+          return;
+        }
         settled = true;
         clearTimeout(timer);
-        let decided = false;
-        const holdTimer = setTimeout(() => abort(), o.holdMs);
+        const holdAt = monotonicNow() + o.holdMs;
+        holdTimer = setTimeout(() => abort(), o.holdMs);
         (holdTimer as { unref?: () => void }).unref?.();
         function abort(): void {
           if (decided) return;
           decided = true;
           clearTimeout(holdTimer);
-          destroyClient(c);
+          g.discard();
         }
         resolve({
           result: r,
           abort,
           commit(commitMs: number): Promise<HeldCommitOutcome> {
-            if (decided) return Promise.resolve('not_committed');
+            if (decided || g.broken) return Promise.resolve('not_committed');
+            // P3-1: a hold whose timer has not run yet but whose instant has passed is abandoned.
+            if (monotonicNow() >= holdAt) {
+              abort();
+              return Promise.resolve('not_committed');
+            }
             decided = true;
             clearTimeout(holdTimer);
+            const commitAt = monotonicNow() + Math.max(1, commitMs);
             return new Promise<HeldCommitOutcome>((done) => {
               let answered = false;
               const answer = (v: HeldCommitOutcome) => {
@@ -372,29 +480,27 @@ export function heldStatement<R>(pool: BoundedPool, text: string, params: unknow
                 done(v);
               };
               const t = setTimeout(() => {
-                destroyClient(c);
+                g.discard();
                 answer('unknown');
               }, Math.max(1, commitMs));
+              commitSent = true;
               c.query('COMMIT').then(
                 (res) => {
                   if (answered) {
-                    destroyClient(c); // late answer: the connection is already discarded
+                    g.discard(); // late answer: the connection is already discarded
                     return;
                   }
-                  if (commitConfirmed(res)) {
-                    try {
-                      c.release();
-                    } catch {
-                      // ignore
-                    }
-                    answer('committed');
-                  } else {
-                    destroyClient(c);
+                  if (!commitConfirmed(res)) {
+                    g.discard();
                     answer('unknown');
+                    return;
                   }
+                  g.releaseClean();
+                  // Confirmed, but past its bound: report "unknown" (it landed) -- never a silent late success.
+                  answer(monotonicNow() > commitAt ? 'unknown' : 'committed');
                 },
                 () => {
-                  destroyClient(c);
+                  g.discard();
                   answer('unknown');
                 },
               );

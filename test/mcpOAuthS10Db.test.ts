@@ -91,9 +91,12 @@ function faultPool(real: Pool, f: Faults) {
       let inActivation = false;
       let frozen = false;
       let codeInsertOpen = false;
-      // A connection the server ends (e.g. idle_in_transaction timeout) errors asynchronously.
-      c.on('error', () => undefined);
       return {
+        // I2b-S11: forward listener management to the real client, so the
+        // APPLICATION's checkout guard handles connection errors (the S10
+        // fixture installed its own listener here, which masked P2-1).
+        on: c.on.bind(c),
+        off: c.off.bind(c),
         query: async (text: string, params?: unknown[]) => {
           if (st.down) throw new Error('injected: database unreachable');
           if (isActivation(text, params)) {
@@ -321,18 +324,27 @@ async function main() {
     {
       const name = 'A6 process frozen between activation and COMMIT';
       const r = await runCase(name, { freezeCommit: true }, { storeOpts: { activationHoldMs: 300, activationCommitMs: 300 } });
-      // The frozen connection is still open; the server ends it after
-      // idle_in_transaction_session_timeout = activationHoldMs + 1000 = 1300 ms.
-      await sleep(1800);
-      const lingering = await q(`SELECT count(*)::int AS n FROM pg_stat_activity WHERE application_name = 'aura-s10-A6-i0' AND state LIKE 'idle in transaction%'`);
+      // The redemption inside runCase ran DURING the hold (the frozen backend
+      // holds the row lock until idle_in_transaction_session_timeout =
+      // activationHoldMs + 1000 = 1300 ms): it may wait out lock_timeout (503)
+      // or see the pending row (400) -- both are refusals. I2b-S11 (P3-3):
+      // assert the refusal, then OBSERVE the rollback, then assert the
+      // deterministic outcome.
+      const idleInTx = async () => (await q(`SELECT count(*)::int AS n FROM pg_stat_activity WHERE application_name = 'aura-s10-A6-i0' AND state LIKE 'idle in transaction%'`))[0].n as number;
+      let rolledBack = false;
+      for (let i = 0; i < 160 && !rolledBack; i += 1) {
+        rolledBack = (await idleInTx()) === 0;
+        if (!rolledBack) await sleep(25);
+      }
       const state = await codeState();
       // A "restarted" instance: a brand-new store object, empty memory.
       const fresh = createPostgresAdapterStore({ db: mkPool('aura-s10-A6-fresh'), fieldKeys: keys.cookieKeys, cleanupEvery: 0 });
       const found = await new fresh.factory('AuthorizationCode').find(r.code as string);
-      Object.assign(r.row, { stateAfterServerTimeout: state, lingeringIdleInTx: lingering[0].n, freshStoreFinds: !!found });
-      check('A6 frozen before COMMIT: the response was handed off (303), the COMMIT never reached the server -> the code is PENDING and refused on the other instance', r.row.status === 303 && r.row.stateBeforeRedeem === 'pending' && r.row.redeemOtherInstance === 400 && r.row.token === false, r.row);
-      check('A6 the server-side idle_in_transaction timeout ended the frozen transaction (no lingering idle-in-transaction backend, row lock released)', lingering[0].n === 0 && state === 'pending', r.row);
-      check('A6 a restarted instance (fresh store, no memory) also refuses it', !found, r.row);
+      const consumed = await new fresh.factory('AuthorizationCode').consume(r.code as string).then(() => 'consumed', (e) => (e as Error).name);
+      Object.assign(r.row, { rollbackObserved: rolledBack, stateAfterRollback: state, freshStoreFinds: !!found, freshStoreConsume: consumed });
+      check('A6 frozen before COMMIT, DURING the hold: the response was handed off (303) and the redemption on the other instance is REFUSED (400 or a lock-wait 503), no token, code PENDING', r.row.status === 303 && r.row.redeemOtherInstance !== 200 && r.row.token === false && r.row.tokensInDb === 0 && r.row.stateBeforeRedeem === 'pending', r.row);
+      check('A6 the rollback is OBSERVED: the server ended the frozen idle-in-transaction backend (row lock released)', rolledBack && state === 'pending', r.row);
+      check('A6 AFTER the observed rollback: deterministic refusal -- a restarted instance neither finds nor consumes it', !found && consumed === 'ReplayDetectedError', r.row);
       for (const fc of r.f0.st.frozen) fc.release(new Error('test cleanup'));
     }
 
