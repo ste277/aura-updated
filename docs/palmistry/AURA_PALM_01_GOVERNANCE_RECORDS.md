@@ -2,7 +2,7 @@
 
 **Compiled 2026-11-24** by Claude (AI) for the Product Owner, in PR #385. This file transcribes earlier records. It is **not backdated**, and it creates no approval that was not given at the time.
 
-**Updated 2026-11-24:** the Product Owner's consolidated approval (D1–D7) was given in the chat session on 2026-11-24 and is transcribed verbatim in §6. Status: **CONTENT-ONLY MVP — OWNER APPROVED, PUBLICATION AUTHORIZATION PENDING.**
+**Updated 2026-11-24:** the Product Owner's consolidated approval (D1–D7) was given in the chat session on 2026-11-24 and is transcribed verbatim in §6. **Updated 2026-11-24 (later):** the Product Owner's D7 publication authorisation is transcribed verbatim in §7. Status: **CONTENT-ONLY MVP — PUBLICATION APPROVED** (merge of PR #385 authorised; Production deployment, database operations and promotion still need separate REL-05 authorisation).
 
 ## 1. Status summary
 
@@ -18,7 +18,7 @@
 | R8 | HR2 applicability to the content-only guide | **APPROVED 2026-11-24** (D4): content-only versus scanner split adopted | §4; §6 |
 | R8a | HR2 Stage 1, content-only guide | **ACCEPTED 2026-11-24** (D5), scoped exclusively to the content-only guide as a defence-in-depth build safeguard; no comprehensive detection guarantee | §4; §6 |
 | R8b | Build-boundary findings C6-S1, R2-N5, S1C-F4, content-only guide | **ACCEPTED 2026-11-24 as recorded limitations** (D6). **Not remediated.** Does not extend to the scanner workstream | §4; §6 |
-| R9 | Publication authorisation (public-release gate) | **NOT AUTHORIZED AT THIS STAGE** (D7). PR #385 must not be merged until the publication decision is given | §6 |
+| R9 | Publication authorisation (public-release gate) | **APPROVED 2026-11-24** (D7) for approved head `4d7e261`, content-only guide only, "subject to controlled release verification". Squash-merge of PR #385 authorised. Production deployment, database operations and promotion require **separate REL-05 authorisation**; the actual Production-compatible artifact must be verified before promotion | §7 |
 | R10 | `review-status.json` | **`APPROVED`**, Product Owner record (`role: PRODUCT_OWNER_EDITORIAL_AND_CULTURAL_REVIEW`, `independentScholarlyReview: false`, `contentCommit: f723942`, `date: 2026-11-24`), committed on PR #385 only. Not on `main` | `packages/palmistry/src/review-status.json` |
 
 **Changes to the G3 v1.1 publication sequence (PDF §12):**
@@ -26,7 +26,7 @@
 - Step 2 (scholarly sign-off): replaced by R3 + R4 (both approved 2026-11-24). The PDF §11 scholarly reviewer fields stay blank and unsigned.
 - Step 1 (governance records): this file; R5 and R6 transcriptions confirmed 2026-11-24.
 - Steps 4–5 (re-confirm corrections, record the approval in a reviewed change): the approval-record commit on PR #385.
-- Step 6 (separate publication authorisation): **not given** (R9).
+- Step 6 (separate publication authorisation): **given 2026-11-24** (R9, D7), subject to controlled release verification and REL-05 authorisation.
 
 ## 2. MVP product decisions 2.1–2.7 (GF-1)
 
@@ -123,7 +123,8 @@ For the **scanner workstream**, Stages 2–4, V1, A and the scanning R findings 
 ## 5. What is not recorded here
 
 - No independent scholarly or licensing **reviewer** sign-off. The v1.1 PDF §11 scholarly reviewer fields stay **blank and unsigned**; the Product Owner is not recorded as a scholarly reviewer.
-- No publication, staging or merge authorisation for PR #385.
+- No Production deployment, database operation or promotion authorisation (these need separate REL-05 authorisation).
+- No authorisation for palm scanning, camera or photo upload, MediaPipe or the hand model, personalised readings, prediction, real-image collection or scanner activation.
 - No GitHub comment, message or external distribution.
 
 ## 6. Product Owner consolidated approval, 2026-11-24 (verbatim)
@@ -202,4 +203,75 @@ Do not change Production environment variables, deployment settings or publicati
 Do not introduce another audit or remediation phase unless a material defect is discovered.
 Target status: CONTENT-ONLY MVP — OWNER APPROVED, PUBLICATION AUTHORIZATION PENDING.
 Stop after completing the approval-record commit and CI verification. Await my separate publication authorization.
+```
+
+## 7. Product Owner D7 publication authorisation, 2026-11-24 (verbatim)
+
+Given by the Product Owner in the Claude Code chat session on 2026-11-24, after CI passed on `4d7e261`. Transcribed exactly by Claude (AI), which adds no decision of its own.
+
+```text
+AURA-PALM-01-G3 — D7 Publication Authorization
+Decision: APPROVED
+PR: #385
+Approved head: `4d7e26159c048b1e727600fdab45321efde65768`
+I authorize publication of the content-only Aura Palmistry educational guide, subject to controlled release verification.
+All previously recorded D1–D6 decisions, risk acceptances and scope restrictions remain in force.
+1. Authorized merge
+
+* Update the PR title and description to reflect the completed Product Owner approval and publication authorization.
+* Record D7 in the existing governance records.
+* Verify compatibility with the latest main.
+* If the branch requires updating, confirm that the approved user-facing content remains unchanged.
+* Run the required CI checks on the final head.
+* Squash-merge PR #385 once all checks pass.
+* Confirm that the merge does not initiate an unauthorized Production deployment.
+
+2. Release scope
+Publication authorization covers only:
+
+* The educational Palmistry guide accessible through Explore.
+* Four traditional palm lines.
+* Five traditional palm marks.
+* Historical and cultural context.
+* Approved illustrations, disclosures and source attribution.
+
+This authorization does not extend to:
+
+* Palm scanning.
+* Camera access or photo uploads.
+* MediaPipe or hand-model functionality.
+* Personalized palm readings.
+* Predictive functionality.
+* Real-image collection.
+* Scanner activation or unresolved scanner governance requirements.
+
+3. Production release
+Include the approved Palmistry guide in the upcoming REL-05 consolidated release.
+Before Production promotion, verify the actual Production-compatible release artifact:
+
+* Confirm the exact source commit and deployment identity.
+* Confirm the approved guide is included.
+* Verify rendered content and illustrations against the approved revision.
+* Confirm disclosures and source attribution remain visible.
+* Confirm the pending-review notice is absent.
+* Confirm image-input, MediaPipe and reading-engine exclusion checks pass.
+* Confirm no Palmistry-related external requests.
+* Preserve all existing security and deployment safeguards.
+
+A Preview build alone must not be treated as proof that a different Production artifact is safe.
+Production deployment, database operations and promotion require separate REL-05 authorization.
+Preserve REL-04 as the current rollback target, subject to verification at release time.
+4. Completion report
+Report:
+
+* Final PR head and CI results.
+* Merge commit and PR closure.
+* Recorded D7 authorization.
+* Post-merge CI status.
+* Confirmation that Production remains unchanged.
+* Readiness for inclusion in REL-05.
+
+Keep Auto-fix and Auto-merge disabled.
+Do not introduce another audit, implementation phase or documentation package.
+Target status: CONTENT-ONLY MVP — PUBLICATION APPROVED, MERGED, READY FOR REL-05.
 ```
