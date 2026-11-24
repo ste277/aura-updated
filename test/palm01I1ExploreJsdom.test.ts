@@ -130,12 +130,13 @@ async function run() {
     check('S3. stand-in view renders nothing', h.container.innerHTML === '');
     await h.unmount();
   }
-  check('A13. gate: defaults read the real review status (pending -> hidden when NODE_ENV=production)', (() => {
+  // AURA-PALM-01-G3: real status is APPROVED (Product Owner, 2026-11-24); the pending -> hidden path stays covered by A10.
+  check('A13. gate: defaults read the real review status (approved -> visible when NODE_ENV=production)', (() => {
     const prev = process.env.NODE_ENV;
     (process.env as any).NODE_ENV = 'production';
     const result = isPalmistryAvailable();
     (process.env as any).NODE_ENV = prev;
-    return result === false;
+    return result === true;
   })());
 
   // ============================================================
@@ -151,7 +152,7 @@ async function run() {
     const disclosure = q('[data-testid="palmistry-disclosure"]');
     check('B2. general disclosure is visible on the guide itself (not a separate page)', Boolean(disclosure) && (disclosure!.textContent ?? '').includes(PALMISTRY_GENERAL_DISCLOSURE));
     check('B3. disclosure is exposed as an accessible note', disclosure?.getAttribute('role') === 'note');
-    check('B4. review-pending notice is shown (no fabricated approval)', Boolean(q('[data-testid="palmistry-review-notice"]')));
+    check('B4. review-pending notice follows the real approval record (APPROVED -> notice hidden)', !q('[data-testid="palmistry-review-notice"]'));
     check('B5. overview is shown before any selection', Boolean(q('[data-testid="palmistry-overview"]')));
     check('B6. longevity disclosure is not shown before ayurlekha is selected', !q('[data-testid="palmistry-longevity-disclosure"]'));
 

@@ -68,9 +68,10 @@ export const PALMISTRY_MARK_IDS = ['yava', 'matsya', 'shankha', 'chatra', 'vedi'
 export const PALMISTRY_ENTRY_IDS = [...PALMISTRY_LINE_IDS, ...PALMISTRY_MARK_IDS] as const;
 export type PalmistryEntryId = (typeof PALMISTRY_ENTRY_IDS)[number];
 
-/** Required disclosure (I1-B), verbatim from the ticket. */
+/** Required disclosure (I1-B), verbatim from the ticket, plus the second
+ * sentence from G3 v1.1 proposal W4 (applied in AURA-PALM-01-G3). */
 export const PALMISTRY_GENERAL_DISCLOSURE =
-  'Palmistry is a traditional interpretive practice, not a scientifically validated method of predicting personality, health, lifespan, or future events.';
+  'Palmistry is a traditional interpretive practice, not a scientifically validated method of predicting personality, health, lifespan, or future events. Please don\'t use it for decisions about health, money or relationships.';
 
 /** Required longevity disclosure (decision 2.2). */
 export const PALMISTRY_LONGEVITY_DISCLOSURE =
@@ -105,12 +106,12 @@ export const PALMISTRY_INTRO = {
  * whole Palmistry module tree with an empty stub, so no content ships).
  * Change it ONLY when a qualified human reviewer has signed off -- see
  * docs/palmistry/AURA_PALM_01_I1_CONTENT_REVIEW_PACKET.md. */
-const REVIEW_STATUS = reviewStatus as { status: string; approvedBy: null | { reviewer: string; date: string } };
+const REVIEW_STATUS = reviewStatus as { status: string; approvedBy: null | { reviewer: string; role: string; independentScholarlyReview: boolean; basis: string; contentCommit: string; date: string } };
 
 export const PALMISTRY_CONTENT_REVIEW = {
   status: (REVIEW_STATUS.status === 'APPROVED' ? 'APPROVED' : 'PENDING_HUMAN_REVIEW') as 'PENDING_HUMAN_REVIEW' | 'APPROVED',
   /** Shown in the UI until approved. */
-  notice: 'Preview content: awaiting review by a qualified scholar before public release.',
+  notice: 'Preview content: not yet approved for public release.',
   approvedBy: REVIEW_STATUS.approvedBy,
 };
 
@@ -157,7 +158,7 @@ export const PALMISTRY_ENTRIES: readonly PalmistryEntry[] = [
       { sourceId: 'hand-diagrams-18c', locator: 'figs. 1–3 (Zysk 2025, p. 246)' },
     ],
     contextNote:
-      'The compound name comes from the later diagrams, whose spellings vary. Which asterism the early text means is uncertain (possibly Dhaniṣṭhā). Historically "wealth" meant fortune in general, not a forecast of anyone\'s finances.',
+      'The compound name comes from the later diagrams, whose spellings vary. Which asterism the early text means is uncertain (possibly Dhaniṣṭhā). Here "wealth" is a traditional category, not a forecast of anyone\'s finances.',
     westernComparison: 'Western palmistry calls a crease in a similar place the "head line" and gives it a different meaning.',
     diagramPlacement: 'described-in-sources',
     diagramRegionId: 'palm-line-dhanamatrlekha',
@@ -180,7 +181,7 @@ export const PALMISTRY_ENTRIES: readonly PalmistryEntry[] = [
       { sourceId: 'samudrikatilaka', locator: '1.143 (Zysk 2025, p. 265)' },
     ],
     contextNote:
-      'The sources say little about how this line was read in detail. It was a traditional label, not a measure of intelligence, ancestry or character. The 12th-century Sāmudrikatilaka groups three lines as concerning family, wealth and longevity; whether its "family" line is this father line awaits expert review.',
+      'The sources say little about how this line was read in detail. It was a traditional label, not a measure of intelligence, ancestry or character. The 12th-century Sāmudrikatilaka groups three lines as concerning family, wealth and longevity; the cited passage does not say whether its "family" line is this father line.',
     westernComparison:
       'Western palmistry calls a crease curving round the thumb the "life line". In the Indian texts, the line linked with life is the longevity line at the top of the palm instead.',
     diagramPlacement: 'described-in-sources',
@@ -194,7 +195,7 @@ export const PALMISTRY_ENTRIES: readonly PalmistryEntry[] = [
     description:
       'A line rising from the wrist toward the fingers. Its course varies: the texts describe it ending at different fingers.',
     interpretation:
-      'Later treatises read this line by the finger it reaches. The Hastasañjīvana pairs each finger with a social role of its time: the forefinger with a king or minister, the middle finger with a general, the ring finger with a wealthy merchant or leader, and the little finger with renown. The Sāmudrikatilaka gives a similar scheme, including a king, army commander or preceptor for the middle finger.',
+      'Historical Sanskrit palmistry texts describe different interpretations of upward-running palm lines depending on their direction and termination. These interpretations often reflect the social hierarchies, occupations, authority and ideas of prosperity found in the societies in which the texts were composed.',
     tradition: 'Indian (12th- and 17th-century treatises)',
     attributionStatus: 'later-tradition-supported',
     attributionConfidence: 'High',
@@ -205,7 +206,7 @@ export const PALMISTRY_ENTRIES: readonly PalmistryEntry[] = [
       { sourceId: 'sardulakarnavadana', locator: 'vv. 1–2 (Zysk 2025, p. 243)' },
     ],
     contextNote:
-      'The drawing shows one possible course, ending at the middle finger. These readings describe the status categories of medieval society; the Sāmudrikatilaka (1.154) even varies them by social class. For Sāmudrikatilaka 1.155, the Sanskrit names the ring finger while the English translation says forefinger, an open question for expert review.',
+      'The drawing shows one possible course, ending at the middle finger. These readings describe the status categories of medieval society; the Sāmudrikatilaka (1.154) also varies them by social class (varṇa). For Sāmudrikatilaka 1.155, the Sanskrit names the ring finger while the English translation says forefinger; Aura does not choose between them.',
     westernComparison:
       'Western palmistry splits similar vertical lines into a "fate line" and a "sun line". The Indian treatises treat them as one upward line read by where it ends.',
     diagramPlacement: 'described-in-sources',
@@ -219,7 +220,7 @@ export const PALMISTRY_ENTRIES: readonly PalmistryEntry[] = [
     traditionalName: 'yava',
     description: 'A small mark shaped like a grain of barley, usually described on or at the base of the thumb.',
     interpretation:
-      'Historically, this mark was interpreted as a sign of prosperity. The Bṛhatsaṃhitā also links a barleycorn at the thumb\'s root with sons. An early Buddhist palmistry chapter (after the mid-9th century) uses its position on the thumb in omens about the time of birth.',
+      'Historically, this mark was interpreted as a sign of prosperity. The Bṛhatsaṃhitā also links a barleycorn at the thumb\'s root with having sons, reflecting the concerns of texts of that period. An early Buddhist palmistry chapter (after the mid-9th century) uses its position on the thumb in omens about the time of birth.',
     tradition: 'Indian (classical)',
     attributionStatus: 'classical-supported',
     attributionConfidence: 'High',
