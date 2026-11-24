@@ -1,4 +1,4 @@
-import { createPrivateKey, generateKeyPairSync, randomBytes } from 'crypto';
+import { constants, createPrivateKey, createPublicKey, generateKeyPairSync, randomBytes, sign, verify, type KeyObject } from 'crypto';
 
 /**
  * AURA-MCP-02-I2b -- signing and cookie key configuration for the Aura
@@ -26,6 +26,24 @@ import { createPrivateKey, generateKeyPairSync, randomBytes } from 'crypto';
  * a misconfigured deployment fails at startup instead of signing with a weak
  * or public key.
  *
+ * I2b-S8 (I2b-R-6) -- integrity and strength, independent of what the
+ * runtime's key import happens to check:
+ *   - `alg` is REQUIRED (RS256, PS256 or ES256) and must match `kty`;
+ *   - RSA: public exponent 65537; all CRT members present; n = p*q,
+ *     e*d = 1 mod lcm(p-1, q-1), dp = d mod (p-1), dq = d mod (q-1),
+ *     qi*q = 1 mod p (an inconsistent key can sign tokens that do not
+ *     verify against the published key -- a self-inflicted outage);
+ *   - EC: the public point is the one derived from `d`;
+ *   - every key must sign a probe that VERIFIES against a key built from
+ *     its PUBLIC members only (what /oauth/jwks publishes);
+ *   - secrets (cookie keys, pairwise salt, audit key): >= 32 characters AND
+ *     >= 128 bits of estimated entropy (character-frequency estimate, at
+ *     least 10 distinct characters, not a repeated block), so "aaaa..." or
+ *     a short repeated pattern is refused. This is a floor against obvious mistakes, not a
+ *     proof of randomness: generate secrets with a CSPRNG (e.g.
+ *     `openssl rand -base64 32`).
+ * Error messages name the variable and the kid only, never a value.
+ *
  * `ephemeralOAuthKeys()` is for local development and tests only: fresh
  * random keys per process.
  */
@@ -52,10 +70,38 @@ export function ephemeralOAuthKeys(): OAuthKeyMaterial {
   };
 }
 
+const MIN_SECRET_BITS = 128;
+const MIN_DISTINCT = 10;
+
+/** Character-frequency (Shannon) entropy estimate of a secret, in bits. */
+export function estimateSecretBits(value: string): number {
+  const counts = new Map<string, number>();
+  for (const ch of value) counts.set(ch, (counts.get(ch) ?? 0) + 1);
+  const n = [...value].length;
+  let perChar = 0;
+  for (const c of counts.values()) perChar -= (c / n) * Math.log2(c / n);
+  return perChar * n;
+}
+
+/** True when the value is a shorter block repeated (e.g. "0123456789" x 4): its entropy estimate overstates it. */
+function periodic(v: string): boolean {
+  for (let p = 1; p <= v.length / 2; p += 1) {
+    let same = true;
+    for (let i = p; i < v.length && same; i += 1) same = v[i] === v[i - p];
+    if (same) return true;
+  }
+  return false;
+}
+
+function strongEnough(v: string): boolean {
+  return v.length >= MIN_SECRET && new Set(v).size >= MIN_DISTINCT && !periodic(v) && estimateSecretBits(v) >= MIN_SECRET_BITS;
+}
+
 function secretList(name: string, value: string | undefined): string[] {
   const list = (value ?? '').split(',').map((s) => s.trim()).filter(Boolean);
   if (list.length === 0) throw new TypeError(`${name} is required`);
   for (const s of list) if (s.length < MIN_SECRET) throw new TypeError(`${name}: every key must be at least ${MIN_SECRET} characters`);
+  for (const s of list) if (!strongEnough(s)) throw new TypeError(`${name}: a key is too predictable (needs >= ${MIN_SECRET_BITS} bits of estimated entropy; use a CSPRNG)`);
   if (new Set(list).size !== list.length) throw new TypeError(`${name}: duplicate keys`);
   return list;
 }
@@ -63,7 +109,42 @@ function secretList(name: string, value: string | undefined): string[] {
 function secret(name: string, value: string | undefined): string {
   const v = (value ?? '').trim();
   if (v.length < MIN_SECRET) throw new TypeError(`${name} must be at least ${MIN_SECRET} characters`);
+  if (!strongEnough(v)) throw new TypeError(`${name} is too predictable (needs >= ${MIN_SECRET_BITS} bits of estimated entropy; use a CSPRNG)`);
   return v;
+}
+
+function b64uInt(v: unknown): bigint | null {
+  if (typeof v !== 'string' || !/^[A-Za-z0-9_-]+$/.test(v)) return null;
+  const hex = Buffer.from(v, 'base64url').toString('hex');
+  return hex ? BigInt(`0x${hex}`) : null;
+}
+const gcd = (a: bigint, b: bigint): bigint => {
+  while (b) [a, b] = [b, a % b];
+  return a;
+};
+
+/** I2b-S8: RSA private-key consistency (all members, not just what OpenSSL happens to use). */
+function rsaConsistent(jwk: Record<string, unknown>): boolean {
+  const [n, e, d, p, q, dp, dq, qi] = ['n', 'e', 'd', 'p', 'q', 'dp', 'dq', 'qi'].map((k) => b64uInt(jwk[k]));
+  if (!n || !e || !d || !p || !q || !dp || !dq || !qi) return false;
+  if (e !== 65537n) return false;
+  if (p * q !== n || p === q) return false;
+  const lambda = ((p - 1n) * (q - 1n)) / gcd(p - 1n, q - 1n);
+  return (e * d) % lambda === 1n && d % (p - 1n) === dp && d % (q - 1n) === dq && (qi * q) % p === 1n;
+}
+
+const PROBE = Buffer.from('aura-mcp-oauth-key-probe-v1');
+function signVerifies(alg: string, priv: KeyObject, pub: KeyObject): boolean {
+  try {
+    if (alg === 'ES256') return verify('sha256', PROBE, { key: pub, dsaEncoding: 'ieee-p1363' }, sign('sha256', PROBE, { key: priv, dsaEncoding: 'ieee-p1363' }));
+    if (alg === 'PS256') {
+      const o = { padding: constants.RSA_PKCS1_PSS_PADDING, saltLength: 32 };
+      return verify('sha256', PROBE, { key: pub, ...o }, sign('sha256', PROBE, { key: priv, ...o }));
+    }
+    return verify('sha256', PROBE, pub, sign('sha256', PROBE, priv));
+  } catch {
+    return false;
+  }
 }
 
 export function validateSigningJwks(raw: string | undefined): { keys: Record<string, unknown>[] } {
@@ -85,7 +166,8 @@ export function validateSigningJwks(raw: string | undefined): { keys: Record<str
     if (kids.has(kid)) throw new TypeError('AURA_MCP_OAUTH_JWKS kids must be unique');
     kids.add(kid);
     if (!ALLOWED_ALGS[kty]) throw new TypeError(`AURA_MCP_OAUTH_JWKS key ${kid}: kty must be RSA or EC`);
-    if (jwk.alg !== undefined && !ALLOWED_ALGS[kty].includes(String(jwk.alg))) throw new TypeError(`AURA_MCP_OAUTH_JWKS key ${kid}: alg not allowed`);
+    if (typeof jwk.alg !== 'string') throw new TypeError(`AURA_MCP_OAUTH_JWKS key ${kid}: alg is required (${ALLOWED_ALGS[kty].join(' or ')})`);
+    if (!ALLOWED_ALGS[kty].includes(jwk.alg)) throw new TypeError(`AURA_MCP_OAUTH_JWKS key ${kid}: alg not allowed`);
     if (jwk.use !== undefined && jwk.use !== 'sig') throw new TypeError(`AURA_MCP_OAUTH_JWKS key ${kid}: use must be "sig"`);
     if (typeof jwk.d !== 'string') throw new TypeError(`AURA_MCP_OAUTH_JWKS key ${kid}: must be a PRIVATE key`);
     let key;
@@ -97,6 +179,19 @@ export function validateSigningJwks(raw: string | undefined): { keys: Record<str
     const details = key.asymmetricKeyDetails ?? {};
     if (kty === 'RSA' && !((details.modulusLength ?? 0) >= 2048)) throw new TypeError(`AURA_MCP_OAUTH_JWKS key ${kid}: RSA keys must be >= 2048 bits`);
     if (kty === 'EC' && details.namedCurve !== 'prime256v1') throw new TypeError(`AURA_MCP_OAUTH_JWKS key ${kid}: EC keys must use P-256`);
+    // I2b-S8 (I2b-R-6): integrity, then a sign/verify probe against the PUBLIC members only.
+    if (kty === 'RSA' && !rsaConsistent(jwk)) throw new TypeError(`AURA_MCP_OAUTH_JWKS key ${kid}: inconsistent RSA private key (or exponent other than 65537)`);
+    let pub: KeyObject;
+    try {
+      pub = createPublicKey({ key: (kty === 'RSA' ? { kty, n: jwk.n, e: jwk.e } : { kty, crv: jwk.crv, x: jwk.x, y: jwk.y }) as never, format: 'jwk' });
+    } catch {
+      throw new TypeError(`AURA_MCP_OAUTH_JWKS key ${kid}: invalid public members`);
+    }
+    if (kty === 'EC') {
+      const derived = createPublicKey(key).export({ format: 'jwk' }) as Record<string, unknown>;
+      if (derived.x !== jwk.x || derived.y !== jwk.y) throw new TypeError(`AURA_MCP_OAUTH_JWKS key ${kid}: EC public point does not match the private key`);
+    }
+    if (!signVerifies(jwk.alg, key, pub)) throw new TypeError(`AURA_MCP_OAUTH_JWKS key ${kid}: signature probe does not verify against the published key`);
   }
   return { keys: keys.map((k) => ({ use: 'sig', ...(k as Record<string, unknown>) })) };
 }
