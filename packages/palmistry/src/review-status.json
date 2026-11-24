@@ -1,4 +1,11 @@
 {
-  "status": "PENDING_HUMAN_REVIEW",
-  "approvedBy": null
+  "status": "APPROVED",
+  "approvedBy": {
+    "reviewer": "Product Owner",
+    "role": "PRODUCT_OWNER_EDITORIAL_AND_CULTURAL_REVIEW",
+    "independentScholarlyReview": false,
+    "basis": "AURA-PALM-01-G3-SCHOLAR-WAIVER.md §5; AURA-PALM-01-G3-C-WAIVER.md §4",
+    "contentCommit": "f723942",
+    "date": "2026-11-24"
+  }
 }

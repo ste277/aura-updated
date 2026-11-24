@@ -325,6 +325,10 @@ export function createAuraOAuthServer(options: AuraOAuthServerOptions): AuraOAut
       token_endpoint_auth_method: 'none',
       grant_types: refreshAllowed(c.client_id) ? ['authorization_code', 'refresh_token'] : ['authorization_code'],
       response_types: ['code'],
+      // I2b-S11 (S10 review P2-2): codes are issued ONLY in a query redirect,
+      // whose hand-off is verified at 'finish' (status + Location). form_post
+      // and fragment are refused by the provider before any code exists.
+      response_modes: ['query'],
       ...(idTokens === 'pairwise' ? { subject_type: 'pairwise' } : {}),
     })),
     ...(idTokens === 'pairwise'
@@ -449,7 +453,9 @@ export function createAuraOAuthServer(options: AuraOAuthServerOptions): AuraOAut
    * Koa writes the response only after this outermost middleware returns.
    * For a code created by this request (any route but the token endpoint):
    *   1. It is deliverable only if the final response is < 400, actually
-   *      carries the code (Location or form_post body), headers are not yet
+   *      carries the code in its redirect Location (I2b-S11: the only
+   *      response mode offered is query; a body-carried code is never
+   *      deliverable), headers are not yet
    *      sent and the client is still connected. Otherwise the code is
    *      never sent and stays pending.
    *   2. Before the response is written, `beginIssuedActivation` runs the
@@ -505,7 +511,10 @@ export function createAuraOAuthServer(options: AuraOAuthServerOptions): AuraOAut
       const body = typeof ctx.body === 'string' ? ctx.body : '';
       const inLocation = location.includes(code);
       const carries = inLocation || body.includes(code);
-      const deliverable = ctx.status < 400 && carries && !connectionGone(ctx) && !ctx.res.headersSent;
+      // I2b-S11 (P2-2): only a code carried in the redirect Location is
+      // deliverable -- its final hand-off can be verified. A body-carried code
+      // (a response mode Aura does not offer) is never sent or activated.
+      const deliverable = ctx.status < 400 && inLocation && !connectionGone(ctx) && !ctx.res.headersSent;
       let activation: IssuedActivation | null = null;
       let ready = !adapterStore.beginIssuedActivation; // stores without pending codes write them active
       if (deliverable && adapterStore.beginIssuedActivation) {
@@ -553,7 +562,8 @@ export function createAuraOAuthServer(options: AuraOAuthServerOptions): AuraOAut
             const backstop = setTimeout(abandon, 10_000);
             (backstop as { unref?: () => void }).unref?.();
             res.once('finish', () => {
-              const intact = res.statusCode === status && res.statusCode < 400 && (!inLocation || String(res.getHeader('location') ?? '').includes(issuedCode));
+              // P2-2: the FINISHED response must be the same < 400 redirect and its Location must still carry the code.
+              const intact = res.statusCode === status && res.statusCode < 400 && String(res.getHeader('location') ?? '').includes(issuedCode);
               if (!intact) return abandon(); // replaced (e.g. Koa error handler): never committed
               // The request budget does not apply: the response is already out.
               outsideRequestBudget(() => held.commit()).then((outcome) => {
@@ -569,6 +579,8 @@ export function createAuraOAuthServer(options: AuraOAuthServerOptions): AuraOAut
       }
     }
     if (ctx.status >= 400) ctx.remove('Location');
+    // I2b-S11 (P2-2): discovery advertises only the response mode Aura issues codes in.
+    if (ctx.oidc?.route === 'discovery' && ctx.body && typeof ctx.body === 'object') (ctx.body as Record<string, unknown>).response_modes_supported = ['query'];
   });
 
   /**

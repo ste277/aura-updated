@@ -100,6 +100,12 @@ jobs:
       # transaction (commit / unknown / not_committed / abort / expiry). No DB.
       - name: Run I2b-S10 offline activation-readiness test
         run: npx ts-node test/mcpOAuthS10.test.ts
+      # I2b-S11 (S10 review): absolute monotonic deadlines under a fake clock
+      # (late checkout, pre-COMMIT expiry, late acknowledgement, hold expiry,
+      # limiter causes), the checkout error guard, canonical secret formats
+      # and the review's counterexamples. No DB.
+      - name: Run I2b-S11 offline remediation test
+        run: npx ts-node test/mcpOAuthS11.test.ts
       - name: Run panchang day service test
         run: npx ts-node test/panchangDay.test.ts
       - name: Run panchang month service test
@@ -1158,6 +1164,14 @@ jobs:
       # instances with separate stores and pools. Touches only the MCP tables.
       - name: Run I2b-S10 cross-instance code safety DB test
         run: npx ts-node test/mcpOAuthS10Db.test.ts
+      # I2b-S11 (S10 review): the APPLICATION pg pool survives terminated /
+      # idle-timed-out held activations, killed statements and limiter
+      # backends with no unhandled client error and no listener leak; issuance
+      # only in query mode (form_post / fragment refused, same-status
+      # replacement never committed, discovery advertises query only); the
+      # A6 freeze asserted deterministically. Touches only the MCP tables.
+      - name: Run I2b-S11 checked-out client and issuance DB test
+        run: npx ts-node test/mcpOAuthS11Db.test.ts
       - name: Verify every repository migration was recorded as applied
         run: |
           set -euo pipefail
