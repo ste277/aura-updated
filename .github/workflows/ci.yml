@@ -932,6 +932,10 @@ jobs:
         run: npx ts-node test/palmG5I1R2Lifecycle.test.ts
       - name: Run Palm upload production exclusion tests (G5-I1-R2)
         run: npx ts-node test/palmG5I1R2ProductionExclusion.test.ts
+      # PALM-03-I1: hand measurements, user-assisted feature representation and
+      # synthetic engine compatibility. Synthetic landmarks and traces only.
+      - name: Run Palm feature foundation tests (PALM-03-I1)
+        run: npx ts-node test/palm03I1FeatureFoundation.test.ts
       # G5-R4.4: the reader differential needs libarchive's bsdtar (the reader
       # behind HR2R1-F1/F2); G5-D7-A: real xz/bzip2/zstd/lz4/7z streams and the
       # 7-Zip extraction precondition. Without them those checks report NOT RUN.
