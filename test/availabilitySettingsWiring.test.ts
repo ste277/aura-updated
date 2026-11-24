@@ -158,8 +158,10 @@ function main() {
   // plus an Add action, never a call to the Reset/DELETE path (this
   // ticket's own section 22).
   {
-    const expandedZeroMatch = componentSource.match(/periods\.length === 0 \? \(\s*<div[^>]*>Not available<\/div>/);
-    check('76. the expanded zero-period state renders "Not available", never triggering Reset', !!expandedZeroMatch);
+    // Re-baselined by AURA-PREF-01: before anything is saved the same branch
+    // reads "Not set" instead (an empty day then means "whole day considered").
+    const expandedZeroMatch = componentSource.match(/periods\.length === 0 \? \(\s*<div[^>]*>\{notSetYet \? 'Not set' : 'Not available'\}<\/div>/);
+    check('76. the expanded zero-period state renders "Not available" ("Not set" before first save), never triggering Reset', !!expandedZeroMatch);
   }
 
   // 77. Add-period wording distinguishes a from-zero day ("+ Add

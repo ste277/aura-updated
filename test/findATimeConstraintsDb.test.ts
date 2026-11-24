@@ -101,7 +101,7 @@ async function main() {
     check('T1 route: FIND returns candidates', fa.status === 200 && fa.body.candidates.length > 0);
     check('T1 route: every candidate inside saved availability (06:00-22:00)', fa.body.candidates.every((c: any) => inside(c.start, c.end, at(D1, '06:00'), at(D1, '22:00'))));
     check('T6 route: no candidate overlaps Learn or Running', fa.body.candidates.every((c: any) => !overlaps(c.start, c.end, at(D1, '07:00'), at(D1, '08:00')) && !overlaps(c.start, c.end, at(D1, '18:00'), at(D1, '18:45'))));
-    check('T9 route: constraintsApplied reports CONFIGURED + 2 blocking plans', JSON.stringify(fa.body.constraintsApplied) === JSON.stringify({ availability: 'CONFIGURED', blockedPlanCount: 2 }));
+    check('T9 route: constraintsApplied reports CONFIGURED + 2 blocking plans (re-baselined by AURA-PREF-01: summary now also reports workHours)', JSON.stringify(fa.body.constraintsApplied) === JSON.stringify({ availability: 'CONFIGURED', blockedPlanCount: 2, workHours: 'UNCONFIGURED' }));
     check('route: no emptyReason on a non-empty result', fa.body.emptyReason === undefined);
     const faMorning = await call(timingSearchRoute, A.token, findBody({ timePreference: 'MORNING' }));
     check('T8 route: adjacent 06:30 (ends exactly when Learn starts) or 08:00 (starts as it ends) may be offered; nothing overlapping', faMorning.body.candidates.every((c: any) => !overlaps(c.start, c.end, at(D1, '07:00'), at(D1, '08:00'))) && faMorning.body.candidates.length > 0);
@@ -111,7 +111,7 @@ async function main() {
     // ============================================================
     await call(plansRoute, B.token, planBody('Existing', at(D1, '20:00'), at(D1, '21:00')));
     const fb = await call(timingSearchRoute, B.token, findBody({ timePreference: 'EVENING' }));
-    check('T3 route: UNCONFIGURED reported, existing plan still counted', JSON.stringify(fb.body.constraintsApplied) === JSON.stringify({ availability: 'UNCONFIGURED', blockedPlanCount: 1 }));
+    check('T3 route: UNCONFIGURED reported, existing plan still counted (re-baselined by AURA-PREF-01: summary now also reports workHours)', JSON.stringify(fb.body.constraintsApplied) === JSON.stringify({ availability: 'UNCONFIGURED', blockedPlanCount: 1, workHours: 'UNCONFIGURED' }));
     check('T3 route: no candidate overlaps the existing plan', fb.body.candidates.length > 0 && fb.body.candidates.every((c: any) => !overlaps(c.start, c.end, at(D1, '20:00'), at(D1, '21:00'))));
     const fbNight = await call(timingSearchRoute, B.token, findBody({ timePreference: 'NIGHT' }));
     check('T3 route: no new overnight restriction for unconfigured users (NIGHT still returns results)', fbNight.body.candidates.length > 0);

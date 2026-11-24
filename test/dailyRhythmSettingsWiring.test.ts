@@ -40,7 +40,7 @@ function main() {
   // Mounted in Settings, no new navigation section.
   // ============================================================
   check('1. YouView imports DailyRhythmSettings', youViewSource.includes("import { DailyRhythmSettings } from './DailyRhythmSettings';"));
-  check('1b. YouView renders <DailyRhythmSettings /> under a "Daily Rhythm" SectionHeader', /<SectionHeader label="Daily Rhythm" \/>\s*<DailyRhythmSettings \/>/.test(youViewSource));
+  check('1b. YouView renders <DailyRhythmSettings /> under a "Work hours" SectionHeader (re-baselined by AURA-PREF-01)', /<SectionHeader label="Work hours" \/>\s*<DailyRhythmSettings \/>/.test(youViewSource));
   check('1c. the Daily Rhythm section is mounted inline in the existing Settings page, not a new route/tab (no new app/ page file for it)', !fs.existsSync(path.join(__dirname, '..', 'apps/web/app/daily-rhythm')));
 
   // ============================================================

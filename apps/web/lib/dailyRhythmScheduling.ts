@@ -208,9 +208,24 @@ export interface DailyRhythmFilterContext {
  * search was never widened for an applicable one.
  */
 function isDailyRhythmApplicable(activityId: string | undefined, context: DailyRhythmFilterContext): boolean {
-  if (!isDailyRhythmConfigured(context.prefs)) return false;
-  if (!isConfiguredWorkday(context.targetDate, context.prefs.workDays)) return false;
-  return classifyActivityForDailyRhythm(activityId) === 'PERSONAL';
+  return dailyRhythmSteering(activityId, context) !== null;
+}
+
+/** AURA-PREF-01: which steering applies on this date, if any. PERSONAL
+ * activities prefer time OUTSIDE working hours (DR2, unchanged); WORK
+ * activities now prefer time INSIDE them (the mirror image -- before,
+ * configured work hours had no effect on work activities at all). Both
+ * soft. FLEXIBLE_BREAK and unknown activities are unaffected. */
+function dailyRhythmSteering(activityId: string | undefined, context: DailyRhythmFilterContext): 'PERSONAL' | 'WORK' | null {
+  if (!isDailyRhythmConfigured(context.prefs)) return null;
+  if (!isConfiguredWorkday(context.targetDate, context.prefs.workDays)) return null;
+  const behavior = classifyActivityForDailyRhythm(activityId);
+  return behavior === 'PERSONAL' || behavior === 'WORK' ? behavior : null;
+}
+
+/** True when [start, end) lies entirely within the work window. */
+export function isWithinWorkWindow(candidateStart: Date, candidateEnd: Date, workWindow: { start: Date; end: Date }): boolean {
+  return candidateStart.getTime() >= workWindow.start.getTime() && candidateEnd.getTime() <= workWindow.end.getTime();
 }
 
 /**
@@ -220,9 +235,9 @@ function isDailyRhythmApplicable(activityId: string | undefined, context: DailyR
  * preference:
  *
  *  - Not `isDailyRhythmApplicable` (unconfigured, non-workday, or the
- *    activity is WORK/FLEXIBLE_BREAK/unknown -- all already "eligible
- *    during working hours" by definition, nothing to deprioritize away
- *    from) -> returns `candidates` completely unchanged, by reference-
+ *    activity is FLEXIBLE_BREAK/unknown -- AURA-PREF-01: WORK activities
+ *    are now applicable and prefer time inside working hours, the mirror
+ *    image of the PERSONAL rule below) -> returns `candidates` completely unchanged, by reference-
  *    equal array identity where practical. This is the exact no-op DR2
  *    requires for "no work preferences", "non-workday", "flexible break
  *    during work", and "work activity during work".
@@ -254,8 +269,12 @@ export function applyDailyRhythmPreference(candidates: readonly TimingCandidate[
   // (both fields non-null) -- the non-null assertions below restate
   // that fact for the type checker, not a new runtime assumption.
   const workWindow = resolveWorkWindowInstants(context.targetDate, context.timezone, context.prefs.workStart!, context.prefs.workEnd!);
-  const outside = candidates.filter((candidate) => !overlapsWorkWindow(new Date(candidate.start), new Date(candidate.end), workWindow));
-  return outside.length > 0 ? outside : [...candidates];
+  // AURA-PREF-01: WORK activities keep only candidates fully inside the
+  // work window (same filter-then-fallback as PERSONAL's outside rule).
+  const preferred = dailyRhythmSteering(activityId, context) === 'WORK'
+    ? candidates.filter((candidate) => isWithinWorkWindow(new Date(candidate.start), new Date(candidate.end), workWindow))
+    : candidates.filter((candidate) => !overlapsWorkWindow(new Date(candidate.start), new Date(candidate.end), workWindow));
+  return preferred.length > 0 ? preferred : [...candidates];
 }
 
 // ============================================================

@@ -88,7 +88,7 @@ import {
   DAILY_RHYTHM_EXPANDED_SEARCH_LIMIT,
   type DailyRhythmPreferencesInput,
 } from './dailyRhythmScheduling';
-import { getDatePartsInTimezone } from './timezone';
+import { getDatePartsInTimezone, localDateTimeToUTC } from './timezone';
 
 /** The one new type the client needs: the real `TimingSearchResponse` the
  * engine returns, plus an OPTIONAL sibling map (never a change to the
@@ -103,7 +103,14 @@ import { getDatePartsInTimezone } from './timezone';
  * -- an unconfigured user's response is byte-identical to before this PR. */
 export type TimingSearchResponseWithDailyRhythm = TimingSearchResponse & { dailyRhythmNotes?: Record<string, string> };
 
-type FindATimeDailyRhythmFit = 'PREFERRED_OUTSIDE_WORK' | 'FALLBACK_INSIDE_WORK' | 'FLEXIBLE_BREAK_INSIDE_WORK';
+type FindATimeDailyRhythmFit =
+  | 'PREFERRED_OUTSIDE_WORK'
+  | 'FALLBACK_INSIDE_WORK'
+  | 'FLEXIBLE_BREAK_INSIDE_WORK'
+  // AURA-PREF-01: work activities now prefer the user's own working hours
+  // on configured workdays (the mirror image of the personal rule).
+  | 'WORK_INSIDE_WORK'
+  | 'WORK_FALLBACK_OUTSIDE_WORK';
 
 /** Per-candidate classification -- the one place this file touches
  * dailyRhythmScheduling.ts's lower-level primitives, each already
@@ -120,10 +127,14 @@ function classifyCandidate(candidate: Pick<TimingCandidate, 'start' | 'end'>, ac
   const dateStr = getDatePartsInTimezone(timezone, start).dateStr;
   if (!isConfiguredWorkday(dateStr, prefs.workDays)) return null;
   const behavior = classifyActivityForDailyRhythm(activityId);
-  if (behavior === null || behavior === 'WORK') return null;
+  if (behavior === null) return null;
 
   const workWindow = resolveWorkWindowInstants(dateStr, timezone, prefs.workStart, prefs.workEnd);
   const overlaps = overlapsWorkWindow(start, end, workWindow);
+  if (behavior === 'WORK') {
+    const inside = start.getTime() >= workWindow.start.getTime() && end.getTime() <= workWindow.end.getTime();
+    return inside ? 'WORK_INSIDE_WORK' : 'WORK_FALLBACK_OUTSIDE_WORK';
+  }
   if (behavior === 'PERSONAL') return overlaps ? 'FALLBACK_INSIDE_WORK' : 'PREFERRED_OUTSIDE_WORK';
   // FLEXIBLE_BREAK
   return overlaps ? 'FLEXIBLE_BREAK_INSIDE_WORK' : null;
@@ -139,30 +150,108 @@ function classifyCandidate(candidate: Pick<TimingCandidate, 'start' | 'end'>, ac
  * much wider." See this file's own module doc comment for why this gate
  * is deliberately NOT day-offset-aware.
  */
+/** Behaviours that get a work-hours preference in Find a Time (AURA-PREF-01:
+ * PERSONAL avoids working hours, WORK prefers them). FLEXIBLE_BREAK and
+ * unknown activities are unaffected. */
+function preferenceBehavior(activityId: string | undefined, prefs: DailyRhythmPreferencesInput): 'PERSONAL' | 'WORK' | null {
+  if (!isDailyRhythmConfigured(prefs)) return null;
+  const behavior = classifyActivityForDailyRhythm(activityId);
+  return behavior === 'PERSONAL' || behavior === 'WORK' ? behavior : null;
+}
+
 export function resolveFindATimeSearchLimit(mode: TimingSearchMode, activityId: string | undefined, prefs: DailyRhythmPreferencesInput): number | undefined {
   if (mode !== 'FIND') return undefined;
-  if (!isDailyRhythmConfigured(prefs)) return undefined;
-  if (classifyActivityForDailyRhythm(activityId) !== 'PERSONAL') return undefined;
+  if (preferenceBehavior(activityId, prefs) === null) return undefined;
   return DAILY_RHYTHM_EXPANDED_SEARCH_LIMIT;
 }
 
+/** How many local days ahead the preference intervals cover when the
+ * request doesn't say (comfortably beyond every planning horizon). */
+const PREFERENCE_SPAN_DAYS = 62;
+
+function addDaysToDateStr(dateStr: string, days: number): string {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d + days)).toISOString().slice(0, 10);
+}
+
 /**
- * FIND only. The exact same filter-with-fallback contract
- * applyDailyRhythmPreference (Day Constructor) already established --
- * "outside" candidates only, in their original relative order (this
- * file's own per-candidate classification never re-scores or reorders;
- * it only partitions, so whichever relative order runTimingSearch's own
- * ranking produced is preserved for whichever subset is returned) -- or
- * the ENTIRE original, unfiltered candidate list when no outside-work
- * candidate exists anywhere in the (possibly widened) search result.
- * Never called for CHECK/COMPARE -- an explicitly user-selected instant
- * is never filtered away, only annotated (buildDailyRhythmNotes below).
+ * AURA-PREF-01 -- the time a work-hours preference steers AWAY from, as
+ * `excludedIntervals` for one extra engine pass. On each configured workday:
+ * PERSONAL -> that day's working hours; WORK -> the rest of that day.
+ * Non-workdays contribute nothing (any time is fine there). Pure; no clock.
  */
+export function buildWorkHoursPreferenceExclusions(
+  behavior: 'PERSONAL' | 'WORK',
+  prefs: DailyRhythmPreferencesInput,
+  timezone: string,
+  fromDateStr: string,
+  toDateStr: string
+): { start: Date; end: Date }[] {
+  if (!isDailyRhythmConfigured(prefs)) return [];
+  const intervals: { start: Date; end: Date }[] = [];
+  for (let date = fromDateStr; date <= toDateStr; date = addDaysToDateStr(date, 1)) {
+    if (!isConfiguredWorkday(date, prefs.workDays)) continue;
+    const work = resolveWorkWindowInstants(date, timezone, prefs.workStart, prefs.workEnd);
+    if (behavior === 'PERSONAL') {
+      intervals.push(work);
+    } else {
+      intervals.push({ start: localDateTimeToUTC(date, '00:00', timezone), end: work.start });
+      intervals.push({ start: work.end, end: localDateTimeToUTC(addDaysToDateStr(date, 1), '00:00', timezone) });
+    }
+  }
+  return intervals;
+}
+
+function preferenceSpan(request: TimingSearchRequest, timezone: string): { from: string; to: string } {
+  const today = getDatePartsInTimezone(timezone, request.context.now).dateStr;
+  const requestedEnd = request.dateRange?.end ?? request.customEndDate;
+  const defaultEnd = addDaysToDateStr(today, PREFERENCE_SPAN_DAYS);
+  return { from: addDaysToDateStr(today, -1), to: requestedEnd && requestedEnd > defaultEnd ? requestedEnd : defaultEnd };
+}
+
+function engineRankKey(candidate: TimingCandidate): number {
+  // The engine's own ranking key (timingSearch.ts toRanked) -- used only to
+  // interleave the two passes back into the engine's order, never to re-score.
+  return candidate.auraFitScore ?? candidate.muhurtaScore * 5 + 55;
+}
+
+/**
+ * AURA-PREF-01 -- soft work-hours preference for FIND, applied BEFORE the
+ * engine's own per-day selection (the previous post-filter only ever saw each
+ * day's single best slot in a multi-day search, so a configured work day
+ * almost never moved a personal activity out of working hours).
+ *
+ * 1. Preferred pass: the same request with the steered-away time added to
+ *    `excludedIntervals`. Panchang still ranks everything that remains.
+ * 2. Full pass: the unchanged request.
+ * 3. Per local day: keep the preferred candidates; a day with NO preferred
+ *    candidate keeps its full-pass candidates instead (soft, never a hard
+ *    exclusion -- e.g. an explicit "afternoon" request on a workday, or a day
+ *    whose only usable time is inside working hours).
+ */
+function runFindWithWorkHoursPreference(request: TimingSearchRequest, timezone: string, prefs: DailyRhythmPreferencesInput, behavior: 'PERSONAL' | 'WORK'): TimingSearchResponse {
+  const span = preferenceSpan(request, timezone);
+  const exclusions = buildWorkHoursPreferenceExclusions(behavior, prefs, timezone, span.from, span.to);
+  const preferred = runTimingSearch({ ...request, excludedIntervals: [...(request.excludedIntervals ?? []), ...exclusions] });
+  const full = runTimingSearch(request);
+  const dayOf = (c: TimingCandidate) => getDatePartsInTimezone(timezone, new Date(c.start)).dateStr;
+  const preferredDays = new Set(preferred.candidates.map(dayOf));
+  const fallback = full.candidates.filter((c) => !preferredDays.has(dayOf(c)));
+  const merged = [...preferred.candidates, ...fallback].sort((a, b) => engineRankKey(b) - engineRankKey(a));
+  return { ...full, candidates: merged };
+}
+
+/** Kept for callers/tests that post-filter an existing candidate list. */
 export function applyDailyRhythmToFindCandidates(candidates: readonly TimingCandidate[], activityId: string | undefined, timezone: string, prefs: DailyRhythmPreferencesInput): TimingCandidate[] {
-  if (!isDailyRhythmConfigured(prefs)) return [...candidates];
-  if (classifyActivityForDailyRhythm(activityId) !== 'PERSONAL') return [...candidates];
-  const outside = candidates.filter((candidate) => classifyCandidate(candidate, activityId, timezone, prefs) === 'PREFERRED_OUTSIDE_WORK');
-  return outside.length > 0 ? outside : [...candidates];
+  const behavior = preferenceBehavior(activityId, prefs);
+  if (behavior === null) return [...candidates];
+  const preferredFit = behavior === 'PERSONAL' ? 'PREFERRED_OUTSIDE_WORK' : 'WORK_INSIDE_WORK';
+  const notSteered = (candidate: TimingCandidate) => {
+    const fit = classifyCandidate(candidate, activityId, timezone, prefs);
+    return fit === null || fit === preferredFit; // non-workday candidates count as preferred
+  };
+  const preferred = candidates.filter(notSteered);
+  return preferred.length > 0 ? preferred : [...candidates];
 }
 
 const FIND_TEXT = {
@@ -170,6 +259,8 @@ const FIND_TEXT = {
   fallback: 'No preferred outside-work option was found in the available results.',
   explicitOverlap: 'This time overlaps your usual working hours.',
   flexibleBreak: 'Short break that fits into your workday',
+  workInside: 'Fits your working hours.',
+  workFallback: 'Outside your usual working hours.',
 } as const;
 
 /**
@@ -193,6 +284,8 @@ export function buildDailyRhythmNotes(candidates: readonly TimingCandidate[], ac
     if (fit === 'PREFERRED_OUTSIDE_WORK') notes[candidate.start] = FIND_TEXT.preferred;
     else if (fit === 'FALLBACK_INSIDE_WORK') notes[candidate.start] = isExplicitSelection ? FIND_TEXT.explicitOverlap : FIND_TEXT.fallback;
     else if (fit === 'FLEXIBLE_BREAK_INSIDE_WORK') notes[candidate.start] = FIND_TEXT.flexibleBreak;
+    else if (fit === 'WORK_INSIDE_WORK') notes[candidate.start] = FIND_TEXT.workInside;
+    else if (fit === 'WORK_FALLBACK_OUTSIDE_WORK') notes[candidate.start] = FIND_TEXT.workFallback;
   }
   return notes;
 }
@@ -221,19 +314,17 @@ export function runTimingSearchWithDailyRhythm(request: TimingSearchRequest, tim
   const widenedLimit = resolveFindATimeSearchLimit(request.mode, request.activityId, prefs);
   const searchRequest = widenedLimit !== undefined ? { ...request, limit: widenedLimit } : request;
 
-  let result = runTimingSearch(searchRequest);
+  let result: TimingSearchResponse;
   let dailyRhythmNotes: Record<string, string>;
 
   if (searchRequest.mode === 'FIND') {
-    const preferred = applyDailyRhythmToFindCandidates(result.candidates, searchRequest.activityId, timezone, prefs);
-    const finalCandidates = preferred.slice(0, requestedLimit ?? DEFAULT_FIND_LIMIT);
+    const behavior = preferenceBehavior(searchRequest.activityId, prefs);
+    result = behavior === null ? runTimingSearch(searchRequest) : runFindWithWorkHoursPreference(searchRequest, timezone, prefs, behavior);
+    const finalCandidates = result.candidates.slice(0, requestedLimit ?? DEFAULT_FIND_LIMIT);
     result = { ...result, candidates: finalCandidates };
     dailyRhythmNotes = buildDailyRhythmNotes(finalCandidates, searchRequest.activityId, timezone, prefs, false);
   } else {
-    // CHECK/COMPARE -- every candidate here is an explicit user selection
-    // (the exact instant(s) requested), never filtered or reordered;
-    // only annotated, so "Use this time" always acts on precisely what
-    // was asked for.
+    result = runTimingSearch(searchRequest);
     dailyRhythmNotes = buildDailyRhythmNotes(result.candidates, searchRequest.activityId, timezone, prefs, true);
   }
 

@@ -8,7 +8,7 @@ import { buildTimingSearchRequest } from '../../../lib/timingSearchRequest';
 import { DailyAssistantContext } from '../../../../../packages/recommendation/src/dailyAssistant';
 import { recordProductEvent } from '../../../lib/productEvents';
 import { runTimingSearchWithDailyRhythm } from '../../../lib/timingSearchDailyRhythm';
-import type { DailyRhythmPreferencesInput } from '../../../lib/dailyRhythmScheduling';
+import { isDailyRhythmConfigured, type DailyRhythmPreferencesInput } from '../../../lib/dailyRhythmScheduling';
 import {
   buildFindATimeConstraints,
   loadFindATimeConstraintInputs,
@@ -115,7 +115,11 @@ export async function POST(req: NextRequest) {
   const searched = runTimingSearchWithDailyRhythm(validated.request, user.timezone, dailyRhythmPrefs);
   const emptyReason = constraints && !searched.unavailable ? resolveFindATimeEmptyReason(constraints, searched.candidates.length) : undefined;
   const result = constraints
-    ? { ...searched, constraintsApplied: summarizeFindATimeConstraints(constraints), ...(emptyReason ? { emptyReason } : {}) }
+    ? {
+        ...searched,
+        constraintsApplied: { ...summarizeFindATimeConstraints(constraints), workHours: isDailyRhythmConfigured(dailyRhythmPrefs) ? ('CONFIGURED' as const) : ('UNCONFIGURED' as const) },
+        ...(emptyReason ? { emptyReason } : {}),
+      }
     : searched;
 
   void recordProductEvent({

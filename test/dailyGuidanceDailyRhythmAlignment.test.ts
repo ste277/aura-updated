@@ -114,7 +114,12 @@ function main() {
   // (isDailyRhythmApplicable's own gate), confirmed by reference-content
   // equality against the original array, not merely non-empty.
   const filteredWork = applyDailyRhythmPreference(mixed, 'deep-work', contextFor(configuredUser, MONDAY));
-  check('3. work-appropriate activity (deep-work) during work hours -> unchanged, all candidates eligible, original order', JSON.stringify(filteredWork) === JSON.stringify(mixed));
+  // AURA-PREF-01: WORK activities now prefer the work window (mirror of the
+  // personal rule): only the inside-work candidate survives, and with no
+  // inside-work candidate the full set comes back (soft, never empty).
+  check('3. work activity (deep-work) on a workday -> only the inside-work candidate is kept (re-baselined by AURA-PREF-01: work activities now prefer working hours)', filteredWork.length === 1 && filteredWork[0].start === mixed[0].start);
+  const workOutsideOnly = applyDailyRhythmPreference(mixed.slice(1), 'deep-work', contextFor(configuredUser, MONDAY));
+  check('3b. work activity with no inside-work candidate -> full original set (never empty) (re-baselined by AURA-PREF-01: work activities now prefer working hours)', workOutsideOnly.length === 2);
 
   // Scenario 4 -- a short-break/flexible-break activity must never be
   // incorrectly excluded during work hours -- same no-op gate as WORK.
