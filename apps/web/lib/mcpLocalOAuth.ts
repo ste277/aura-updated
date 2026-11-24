@@ -13,7 +13,9 @@ import {
   type ClientAddressSource,
 } from '../../../packages/mcp-tools/src/security/clientAddress';
 import { MCP_PG_POOL_BOUNDS } from '../../../packages/mcp-tools/src/security/deadline';
+import { randomBytes } from 'crypto';
 import { createPostgresRateLimiter } from '../../../packages/mcp-tools/src/security/postgresRateLimit';
+import { createBucketHasher, deriveBucketKey, type BucketHasher } from '../../../packages/mcp-tools/src/security/preAuthRules';
 import { createFixedWindowRateLimiter, type McpRateLimiter } from '../../../packages/mcp-tools/src/security/rateLimit';
 import type { RemoteMcpConfig } from '../../../packages/mcp-tools/src/http/remoteMcpHandler';
 import { SESSION_COOKIE_NAME, verifySessionToken } from './auth';
@@ -75,6 +77,24 @@ export interface LocalState {
   audit: McpAuditSink;
   storeKind: 'memory' | 'postgres';
   addressSource: ClientAddressSource;
+  /** I2b-S8 (S3-6): keyed hash for limiter address buckets, shared by the AS and /api/mcp. */
+  hashBucket: BucketHasher;
+}
+
+/**
+ * I2b-S8 (S3-4): ONE parsed client-address source for both pre-auth paths.
+ * When AURA_MCP_CLIENT_ADDRESS_SOURCE is set, the authorization server and
+ * /api/mcp both use it (previously the AS always used the TCP peer, so
+ * behind an edge every client shared one bucket). When it is unset, local
+ * development keeps its defaults: the AS (a Node request from a directly
+ * connected client) uses the TCP peer, /api/mcp (an App Router request with
+ * no socket) uses "none" -- the shared bounded bucket.
+ */
+export function preAuthAddressSources(env: Record<string, string | undefined>): { authorizationServer: ClientAddressSource; mcp: ClientAddressSource } {
+  const configured = (env.AURA_MCP_CLIENT_ADDRESS_SOURCE ?? '').trim();
+  if (configured === '') return { authorizationServer: { kind: 'socket' }, mcp: { kind: 'none' } };
+  const source = parseClientAddressSource(configured);
+  return { authorizationServer: source, mcp: source };
 }
 
 /** I2b-S2: a pool with the shared bounds (security/deadline.ts MCP_PG_POOL_BOUNDS). */
@@ -132,6 +152,10 @@ export function getLocalMcpAuth(config: RemoteMcpConfig): LocalState {
   if (globalRef.__auraMcpLocalOAuth?.key === key) return globalRef.__auraMcpLocalOAuth;
 
   const keys = keyMaterial(env);
+  const sources = preAuthAddressSources(env);
+  // Configured keys: every instance derives the same bucket key. Ephemeral
+  // (local, one process): a per-process key is enough.
+  const hashBucket = createBucketHasher(keys.source === 'configured' ? deriveBucketKey(keys.auditKey) : randomBytes(32));
   const audit = createRedactingAuditSink({ knownTools: ['find_best_time'], userRefKey: keys.source === 'configured' ? keys.auditKey : undefined });
 
   let adapterStore: OAuthStore | undefined;
@@ -165,11 +189,9 @@ export function getLocalMcpAuth(config: RemoteMcpConfig): LocalState {
     adapterStore,
     keys,
     refreshTokens: { enabled: true },
-    // Local dev: clients connect directly, so the TCP peer is the address.
-    preAuth: { limiter: preAuthLimiter, addressSource: { kind: 'socket' } },
+    preAuth: { limiter: preAuthLimiter, addressSource: sources.authorizationServer, hashBucket },
   });
-  const addressSource = parseClientAddressSource(env.AURA_MCP_CLIENT_ADDRESS_SOURCE);
-  const state: LocalState = { key, server, rateLimiter, preAuthLimiter, audit, storeKind, addressSource };
+  const state: LocalState = { key, server, rateLimiter, preAuthLimiter, audit, storeKind, addressSource: sources.mcp, hashBucket };
   globalRef.__auraMcpLocalOAuth = state;
   return state;
 }
@@ -180,4 +202,9 @@ export const localMcpAudit = createRedactingAuditSink({ knownTools: ['find_best_
 export function localMcpClientAddress(state: LocalState, req: Request): { clientAddress: string | null; clientAddressProblem?: AddressUnresolvedReason } {
   const r = resolveClientAddressDetailed(fetchAddressRequest(req), state.addressSource);
   return r.kind === 'resolved' ? { clientAddress: r.address } : { clientAddress: null, clientAddressProblem: r.reason };
+}
+
+/** I2b-S8 (S3-6): the /api/mcp pre-auth dependencies that must match the AS. */
+export function localMcpPreAuthDeps(state: LocalState): { preAuthBucketHasher: BucketHasher } {
+  return { preAuthBucketHasher: state.hashBucket };
 }

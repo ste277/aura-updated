@@ -41,6 +41,15 @@ export interface OAuthStore {
    */
   activateIssued?(model: string, id: string): Promise<boolean>;
   revokeIssued?(model: string, id: string): Promise<void>;
+  /**
+   * I2b-S8 (S3-1 residual), optional: the server decided NOT to deliver this
+   * code but every `revokeIssued` attempt failed. The store refuses the code
+   * on this instance until it expires and keeps retrying the revocation in
+   * the background. Synchronous and never throws.
+   */
+  holdUnrevoked?(model: string, id: string): void;
+  /** I2b-S8: number of codes currently held by `holdUnrevoked` (monitoring/tests). */
+  pendingRevocations?(): number;
   /** Grants a user currently holds (connected assistants). */
   listUserGrants(userId: string): Promise<UserGrantSummary[]>;
   /** Revokes every grant (and its codes and tokens) a user holds for a client. Returns the number of grants revoked. */

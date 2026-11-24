@@ -6,7 +6,7 @@ import { MCP_SCOPE, type AccessTokenVerifier } from '../http/remoteMcpHandler';
 import { noopAuditSink, type McpAuditSink } from '../security/audit';
 import { nodeAddressRequest, resolveClientAddressDetailed, type ClientAddressSource } from '../security/clientAddress';
 import { isStoreUnavailableError } from '../security/deadline';
-import { buildPreAuthRules } from '../security/preAuthRules';
+import { buildPreAuthRules, type BucketHasher } from '../security/preAuthRules';
 import type { McpRateLimiter } from '../security/rateLimit';
 import { validateClientRegistry } from './clientPolicy';
 import { ephemeralOAuthKeys, type OAuthKeyMaterial } from './keys';
@@ -117,6 +117,8 @@ export interface PreAuthThrottle {
   globalShards?: number;
   /** Test hook: shard selection (default: crypto random). */
   pickShard?: (shards: number) => number;
+  /** I2b-S8 (S3-6): keyed hash for the address part of limiter keys (shared by every instance). */
+  hashBucket?: BucketHasher;
 }
 
 export interface AuraConnection {
@@ -470,6 +472,12 @@ export function createAuraOAuthServer(options: AuraOAuthServerOptions): AuraOAut
       }
     }
     audit({ event: 'oauth.error', outcome: 'store_unavailable', errorCode: 'CodeRevocationFailed' });
+    // I2b-S8 (S3-1 residual): refuse it on this instance and keep retrying.
+    try {
+      adapterStore.holdUnrevoked?.('AuthorizationCode', code);
+    } catch {
+      // never fails the response
+    }
   };
   const connectionGone = (ctx: ProviderCtx) => ctx.res.destroyed === true || ctx.req.socket?.destroyed === true;
 
@@ -521,6 +529,30 @@ export function createAuraOAuthServer(options: AuraOAuthServerOptions): AuraOAut
     }
     if (ctx.status >= 400) ctx.remove('Location');
   });
+
+  /**
+   * I2b-S8 (I2b-R-3): request-origin pinning. `oidc-provider` builds every
+   * absolute URL it emits (discovery endpoints, jwks_uri, the interaction
+   * resume redirect) from Koa's `ctx.href`, i.e. from the request's Host
+   * header -- client-controlled, and behind a TLS-terminating edge also on
+   * the wrong scheme. Before the provider (or the interaction pages) see a
+   * request, its origin is overwritten from the CONFIGURED issuer, and every
+   * forwarded-origin header is replaced, so no client-supplied Host,
+   * X-Forwarded-Host/-Proto/-Port, Forwarded or X-Forwarded-For value can
+   * influence the issuer, an endpoint URL, a redirect, the resource identity
+   * or cookie security. (The issuer and resource themselves already come
+   * only from configuration.) Pre-auth address resolution runs before this
+   * and reads only its configured source.
+   */
+  const issuerUrl = new URL(issuer);
+  provider.proxy = true;
+  const ORIGIN_HEADERS = ['host', 'x-forwarded-host', 'x-forwarded-proto', 'x-forwarded-port', 'x-forwarded-for', 'forwarded'];
+  function pinRequestOrigin(req: IncomingMessage): void {
+    for (const h of ORIGIN_HEADERS) delete req.headers[h];
+    req.headers.host = issuerUrl.host;
+    req.headers['x-forwarded-host'] = issuerUrl.host;
+    req.headers['x-forwarded-proto'] = issuerUrl.protocol.replace(/:$/, '');
+  }
 
   const providerCallback = provider.callback();
   const csrfWith = (key: Buffer, uid: string, userId: string) => createHmac('sha256', key).update(`${uid}\0${userId}`).digest('base64url');
@@ -597,7 +629,9 @@ export function createAuraOAuthServer(options: AuraOAuthServerOptions): AuraOAut
     let details: InteractionDetails;
     try {
       details = await provider.interactionDetails(req, res);
-    } catch {
+    } catch (err) {
+      // I2b-S8 (S3-3): an unavailable store is an outage (503), not an expired request.
+      if (isStoreUnavailableError(err)) throw err;
       return sendPage(res, 400, 'Request expired', '<h1>This request has expired</h1><p>Return to the assistant and start connecting again.</p>');
     }
     if (details.uid !== uid) return sendPage(res, 400, 'Request expired', '<h1>This connection request is no longer valid</h1><p>Return to your assistant and start connecting again.</p>');
@@ -705,6 +739,7 @@ ${duration}${manage}
       resolved.kind === 'resolved' ? resolved.address : null,
       { perAddress: pre.perAddress ?? 120, global: pre.global ?? 6000, globalShards: pre.globalShards },
       pre.pickShard,
+      pre.hashBucket,
     );
     const decision = await pre.limiter.check(rules);
     if (decision.allowed) return null;
@@ -732,6 +767,7 @@ ${duration}${manage}
           return;
         }
       }
+      pinRequestOrigin(req);
       if (path.startsWith(INTERACTION_PREFIX)) return await handleInteraction(req, res, path);
       // RFC 8414 discovery is served from the same document as OIDC discovery.
       const providerPath = path === '/.well-known/oauth-authorization-server' ? '/.well-known/openid-configuration' : path;

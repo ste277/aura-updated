@@ -1,5 +1,5 @@
-import { randomInt } from 'crypto';
-import { rateLimitAddressKey } from './clientAddress';
+import { createHmac, randomInt } from 'crypto';
+import { rateLimitAddressKey, UNRESOLVED_ADDRESS_KEY } from './clientAddress';
 import type { RateLimitRule } from './rateLimit';
 
 /**
@@ -61,18 +61,49 @@ export function validatePreAuthLimits(limits: PreAuthLimits): void {
   globalShardLimits(limits.global, limits.globalShards ?? defaultGlobalShards(limits.global));
 }
 
+/**
+ * I2b-S8 (S3-6): client addresses must not sit in clear in
+ * `McpRateLimitWindow.key`. A bucket hasher replaces the address part with a
+ * keyed HMAC (truncated to 128 bits), so the table holds no address. Every
+ * instance that shares the limiter must use the SAME key, or per-address
+ * limits would be counted per instance; the deployment derives it from the
+ * configured audit key (see `deriveBucketKey`). The shared `unresolved`
+ * bucket is not an address and stays readable.
+ */
+export type BucketHasher = (bucket: string) => string;
+
+export function createBucketHasher(key: Buffer | string): BucketHasher {
+  const k = typeof key === 'string' ? Buffer.from(key, 'utf8') : key;
+  if (k.length < 32) throw new TypeError('bucket hash key must be at least 32 bytes');
+  return (bucket) => (bucket === UNRESOLVED_ADDRESS_KEY ? bucket : `h:${createHmac('sha256', k).update(`aura-mcp-preauth-bucket-v1\0${bucket}`).digest('hex').slice(0, 32)}`);
+}
+
+/** Bucket key derived from a configured secret (label-separated, so it is independent of the secret's other uses). */
+export function deriveBucketKey(secret: string): Buffer {
+  return createHmac('sha256', secret).update('aura-mcp-preauth-bucket-key-v1').digest();
+}
+
 export function buildPreAuthRules(
   namespace: 'preauth-as' | 'preauth-mcp',
   clientAddress: string | null | undefined,
   limits: PreAuthLimits,
   pickShard: (shards: number) => number = (n) => randomInt(n),
+  hashBucket?: BucketHasher,
 ): RateLimitRule[] {
   validatePreAuthLimits(limits);
-  const shardLimits = globalShardLimits(limits.global, limits.globalShards ?? defaultGlobalShards(limits.global));
+  const shards = limits.globalShards ?? defaultGlobalShards(limits.global);
+  const shardLimits = globalShardLimits(limits.global, shards);
   const k = pickShard(shardLimits.length);
   if (!Number.isInteger(k) || k < 0 || k >= shardLimits.length) throw new TypeError('shard index out of range');
+  const bucket = rateLimitAddressKey(clientAddress);
   return [
-    { key: `${namespace}:global:${k}`, limit: shardLimits[k] },
-    { key: `${namespace}:addr:${rateLimitAddressKey(clientAddress)}`, limit: limits.perAddress },
+    // I2b-S8 (S3-7): the shard key names the ceiling and shard count it was
+    // sized for, so instances configured differently never share a row with
+    // different per-row limits (which could let one row exceed its share).
+    // While a change of G or N rolls out, the two configurations count in
+    // separate rows: the aggregate is bounded by G_old + G_new for as long
+    // as both serve traffic. Change limits with a full restart to keep G.
+    { key: `${namespace}:global:g${limits.global}n${shards}:${k}`, limit: shardLimits[k] },
+    { key: `${namespace}:addr:${hashBucket ? hashBucket(bucket) : bucket}`, limit: limits.perAddress },
   ];
 }

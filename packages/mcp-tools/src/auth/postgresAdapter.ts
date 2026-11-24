@@ -65,6 +65,13 @@ import { CONSUMABLE_MODELS, ReplayDetectedError, type OAuthStore, type UserGrant
  *     because an activation reported as failed may still have committed.
  *     The DELETE waits on the row lock of an in-flight activation, so it is
  *     ordered after a late COMMIT.
+ *   - I2b-S8 (S3-1 residual): when the authorization server could not
+ *     revoke a code (`holdUnrevoked`), this instance (a) refuses the code in
+ *     `find`/`consume` until it expires, and (b) keeps retrying the DELETE
+ *     in the background with backoff until it succeeds or the code's TTL
+ *     has passed. Other instances learn of it only once a retry lands; the
+ *     code never left the server, so redeeming it there needs the 256-bit
+ *     code value (see the S8 report).
  *
  * The adapter takes an injected `query` function (a `pg` Pool satisfies it),
  * so this package does not import a database driver.
@@ -91,6 +98,10 @@ export interface PostgresAdapterOptions {
   statementTimeoutMs?: number;
   /** I2b-S4: server-side `SET LOCAL lock_timeout` per statement, ms (default 1000). */
   lockTimeoutMs?: number;
+  /** I2b-S8: background revocation retry delays, ms (default 1s, 2s, 4s, 8s, 16s, 30s). Test hook. */
+  revocationRetryDelaysMs?: readonly number[];
+  /** I2b-S8: how long an unrevoked code is held locally, ms (default 65 s: code TTL 60 s + margin). */
+  unrevokedHoldMs?: number;
 }
 
 /**
@@ -193,6 +204,25 @@ export function createPostgresAdapterStore(options: PostgresAdapterOptions): OAu
       : { query: <R,>(text: string, params?: unknown[]) => withDeadline(options.db.query<R>(text, params), queryDeadlineMs) };
   let writes = 0;
 
+  /**
+   * I2b-S8 (S3-1 residual): storage keys of codes the server decided NOT to
+   * deliver but could not revoke, with the local hold deadline. Bounded: an
+   * entry lives at most `unrevokedHoldMs`, and the map is capped.
+   */
+  const unrevoked = new Map<string, number>();
+  const UNREVOKED_MAX = 10_000;
+  const retryDelays = options.revocationRetryDelaysMs ?? [1000, 2000, 4000, 8000, 16_000, 30_000];
+  const holdMs = boundedMs('unrevokedHoldMs', options.unrevokedHoldMs, 65_000, 1000, 600_000);
+  const isHeld = (model: string, key: string): boolean => {
+    if (!PENDING_ON_WRITE.has(model)) return false;
+    const until = unrevoked.get(key);
+    if (until === undefined) return false;
+    if (until > Date.now()) return true;
+    unrevoked.delete(key);
+    return false;
+  };
+  const deleteIssued = (model: string, key: string) => db.query(`DELETE FROM ${TABLE} WHERE "model" = $1 AND "id" = $2`, [model, key]);
+
   async function cleanupExpired(): Promise<number> {
     const r = await db.query(
       `DELETE FROM ${TABLE} WHERE ctid IN (SELECT ctid FROM ${TABLE} WHERE "expiresAt" IS NOT NULL AND "expiresAt" < now() LIMIT $1)`,
@@ -245,6 +275,8 @@ export function createPostgresAdapterStore(options: PostgresAdapterOptions): OAu
 
     private async findWhere(column: 'id' | 'uid' | 'userCode', value: string): Promise<{ id: string; row: { payload: AdapterPayload; consumedAt: Date | null } } | undefined> {
       const key = column === 'id' ? storageKey(value) : value;
+      // I2b-S8: a code this instance failed to revoke is refused locally.
+      if (column === 'id' && isHeld(this.name, key)) return undefined;
       const r = await db.query<{ payload: AdapterPayload; consumedAt: Date | null; id: string }>(
         `SELECT "payload", "consumedAt", "id" FROM ${TABLE}
          WHERE "model" = $1 AND "${column}" = $2 AND ("expiresAt" IS NULL OR "expiresAt" > now()) LIMIT 1`,
@@ -286,6 +318,7 @@ export function createPostgresAdapterStore(options: PostgresAdapterOptions): OAu
 
     async consume(id: string): Promise<void> {
       const key = storageKey(id);
+      if (isHeld(this.name, key)) throw new ReplayDetectedError();
       const r = await db.query<{ grantId: string | null }>(
         `UPDATE ${TABLE} SET "consumedAt" = now()
          WHERE "model" = $1 AND "id" = $2 AND "consumedAt" IS NULL AND ("expiresAt" IS NULL OR "expiresAt" > now())
@@ -343,7 +376,41 @@ export function createPostgresAdapterStore(options: PostgresAdapterOptions): OAu
     async revokeIssued(model: string, id: string): Promise<void> {
       if (!PENDING_ON_WRITE.has(model)) return;
       // Pending OR activated: an activation reported as failed may have committed (I2b-S6).
-      await db.query(`DELETE FROM ${TABLE} WHERE "model" = $1 AND "id" = $2`, [model, storageKey(id)]);
+      await deleteIssued(model, storageKey(id));
+    },
+    holdUnrevoked(model: string, id: string): void {
+      if (!PENDING_ON_WRITE.has(model)) return;
+      const key = storageKey(id);
+      if (unrevoked.size >= UNREVOKED_MAX) {
+        // Drop expired holds first; if still full, evict the oldest (it is the closest to its own expiry).
+        for (const [k, until] of unrevoked) if (until <= Date.now()) unrevoked.delete(k);
+        if (unrevoked.size >= UNREVOKED_MAX) unrevoked.delete(unrevoked.keys().next().value as string);
+      }
+      const until = Date.now() + holdMs;
+      unrevoked.set(key, until);
+      let i = 0;
+      const retry = () => {
+        if (Date.now() >= until) {
+          unrevoked.delete(key);
+          return;
+        }
+        deleteIssued(model, key).then(
+          () => unrevoked.delete(key),
+          () => {
+            i += 1;
+            if (i < retryDelays.length) schedule();
+          },
+        );
+      };
+      const schedule = () => {
+        const t = setTimeout(retry, retryDelays[i]);
+        (t as { unref?: () => void }).unref?.();
+      };
+      if (retryDelays.length > 0) schedule();
+    },
+    pendingRevocations(): number {
+      for (const [k, until] of unrevoked) if (until <= Date.now()) unrevoked.delete(k);
+      return unrevoked.size;
     },
     async size(model?: string): Promise<number> {
       const r = model
