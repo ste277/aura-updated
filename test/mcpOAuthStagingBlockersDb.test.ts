@@ -273,7 +273,7 @@ async function main() {
       check('429: over the per-address limit -> 429', JSON.stringify(s) === '[401,401,429]', s);
       const holder = await admin.connect();
       await holder.query('BEGIN');
-      await holder.query(`SELECT 1 FROM "McpRateLimitWindow" WHERE "key" = 'preauth-mcp:global:0' FOR UPDATE`);
+      await holder.query(`SELECT 1 FROM "McpRateLimitWindow" WHERE "key" = 'preauth-mcp:global:g6000n16:0' FOR UPDATE`);
       const r = await timed(handleRemoteMcpRequest(mcpReq(), deps('198.51.100.91')));
       await holder.query('ROLLBACK');
       holder.release();

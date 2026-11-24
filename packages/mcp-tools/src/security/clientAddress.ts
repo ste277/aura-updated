@@ -50,6 +50,8 @@ export type TrustedAddressHeader = (typeof TRUSTED_ADDRESS_HEADERS)[number];
 /** Shared pre-auth bucket for requests without a usable trusted address. */
 export const UNRESOLVED_ADDRESS_KEY = 'unresolved';
 const MAX_ADDRESS_LENGTH = 45;
+/** Raw header value bound checked before any parsing (address + up to 19 OWS characters). */
+const MAX_RAW_LENGTH = 64;
 
 export interface AddressRequestLike {
   /** Header lookup (Node IncomingHttpHeaders or a Fetch Headers wrapper). */
@@ -131,6 +133,10 @@ export function formatIpv6(h: readonly number[]): string {
 /** Strict parse to a canonical address; null for anything that is not exactly one IP address. */
 export function parseIp(value: string): ParsedIp | null {
   if (typeof value !== 'string') return null;
+  // I2b-S8 (S3-5): bound the input BEFORE any regex. The trim regex is
+  // quadratic on a long blank run (64,000 blanks blocked the event loop for
+  // 2.5 s); no valid address plus a little surrounding OWS is this long.
+  if (value.length > MAX_RAW_LENGTH) return null;
   // Optional surrounding blanks only (HTTP OWS); nothing else is stripped.
   const v = value.replace(/^[ \t]+|[ \t]+$/g, '').toLowerCase();
   if (v.length === 0 || v.length > MAX_ADDRESS_LENGTH) return null;

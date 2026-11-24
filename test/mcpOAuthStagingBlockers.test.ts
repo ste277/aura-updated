@@ -156,7 +156,7 @@ async function main() {
     check('I2b-1 shards: default 6000 -> 16 shards of 375; small ceilings stay one exact row', JSON.stringify(globalShardLimits(6000, defaultGlobalShards(6000))) === JSON.stringify(new Array(16).fill(375)) && defaultGlobalShards(12) === 1 && defaultGlobalShards(150) === 1);
     check('I2b-1 shards: invalid shard counts refused (0, > ceiling, > 64, non-integer)', [[10, 0], [10, 11], [10_000, 65], [10, 1.5]].every(([g, n]) => fails(() => globalShardLimits(g, n))));
     const rules = buildPreAuthRules('preauth-mcp', '2001:db8:1:2::77', { perAddress: 120, global: 6000 }, () => 5);
-    check('I2b-1 rules: one global shard + the /64 address bucket', JSON.stringify(rules) === JSON.stringify([{ key: 'preauth-mcp:global:5', limit: 375 }, { key: 'preauth-mcp:addr:v6:2001:db8:1:2::/64', limit: 120 }]), rules);
+    check('I2b-1 rules: one global shard + the /64 address bucket', JSON.stringify(rules) === JSON.stringify([{ key: 'preauth-mcp:global:g6000n16:5', limit: 375 }, { key: 'preauth-mcp:addr:v6:2001:db8:1:2::/64', limit: 120 }]), rules);
     const unresolved = buildPreAuthRules('preauth-as', null, { perAddress: 120, global: 6000 });
     check('I2b-1 rules: no address -> shared unresolved bucket with the per-address limit (never global-only)', unresolved.length === 2 && unresolved[1].key === 'preauth-as:addr:unresolved' && unresolved[1].limit === 120);
     const seen = new Map<string, number>();

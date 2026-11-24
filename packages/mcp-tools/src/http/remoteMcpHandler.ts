@@ -103,6 +103,8 @@ export interface RemoteMcpDeps {
   clientAddress?: string | null;
   /** Why `clientAddress` is null (from resolveClientAddressDetailed); audited as a code only. */
   clientAddressProblem?: AddressUnresolvedReason;
+  /** I2b-S8 (S3-6): keyed hash for the address part of limiter keys (shared by every instance). */
+  preAuthBucketHasher?: (bucket: string) => string;
   preAuthLimits?: PreAuthLimits;
   /** Test hook: global shard selection (default: crypto random). */
   pickShard?: (shards: number) => number;
@@ -257,7 +259,7 @@ export async function handleRemoteMcpRequest(req: Request, deps: RemoteMcpDeps):
     const address = deps.clientAddress ? parseIp(deps.clientAddress)?.address ?? null : null;
     const problem: AddressUnresolvedReason | undefined = address ? undefined : deps.clientAddress ? 'invalid' : deps.clientAddressProblem;
     if (problem && problem !== 'no_source') deps.audit?.({ event: 'mcp.address_unresolved', outcome: 'unresolved', errorCode: problem });
-    const rules: RateLimitRule[] = buildPreAuthRules('preauth-mcp', address, pre, deps.pickShard);
+    const rules: RateLimitRule[] = buildPreAuthRules('preauth-mcp', address, pre, deps.pickShard, deps.preAuthBucketHasher);
     const decision = await deps.preAuthRateLimiter.check(rules);
     if (!decision.allowed) {
       audit.limitedBy = decision.limitedBy;

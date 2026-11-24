@@ -1,5 +1,5 @@
 import type { PgQueryable } from '../auth/postgresAdapter';
-import { boundedMs, singleFlight } from './deadline';
+import { boundedMs, commitConfirmed, singleFlight, transactionTimeouts } from './deadline';
 import type { McpRateLimiter, RateLimitDecision, RateLimitRule } from './rateLimit';
 
 /**
@@ -72,6 +72,16 @@ export interface PostgresRateLimiterOptions {
   statementTimeoutMs?: number;
   /** Client-side bound for the whole decision, ms (default 1250, so a deny lands within 1.5 s even with timer jitter). On expiry: deny. */
   decisionDeadlineMs?: number;
+  /**
+   * I2b-S8 (S3-8): server-side `idle_in_transaction_session_timeout`, ms
+   * (default: lockTimeoutMs, i.e. 1000). A process frozen mid-decision
+   * (serverless freeze) would otherwise hold its shard row lock until TCP
+   * teardown; Postgres now ends that session and releases the lock, so a
+   * waiter's own lock_timeout normally outlasts the frozen holder. A live
+   * client never idles that long inside a decision: its deadline (1250 ms)
+   * has abandoned the transaction by then.
+   */
+  idleInTransactionTimeoutMs?: number;
 }
 
 export interface PostgresRateLimiter extends McpRateLimiter {
@@ -117,8 +127,9 @@ export function createPostgresRateLimiter(options: PostgresRateLimiterOptions): 
   const lockTimeoutMs = boundedMs('lockTimeoutMs', options.lockTimeoutMs, 1000, 10, 10_000);
   const statementTimeoutMs = boundedMs('statementTimeoutMs', options.statementTimeoutMs, 1000, 50, 30_000);
   const decisionDeadlineMs = boundedMs('decisionDeadlineMs', options.decisionDeadlineMs, 1250, 50, 30_000);
+  const idleInTransactionTimeoutMs = boundedMs('idleInTransactionTimeoutMs', options.idleInTransactionTimeoutMs, lockTimeoutMs, 100, 60_000);
   // Integers validated above, so interpolation is safe; SET cannot take bind parameters.
-  const BEGIN = `BEGIN; SET LOCAL lock_timeout = '${lockTimeoutMs}ms'; SET LOCAL statement_timeout = '${statementTimeoutMs}ms'`;
+  const BEGIN = transactionTimeouts({ statementTimeoutMs, lockTimeoutMs, idleInTransactionTimeoutMs });
   let admitted = 0;
 
   async function cleanupExpired(batch = 500): Promise<number> {
@@ -145,7 +156,9 @@ export function createPostgresRateLimiter(options: PostgresRateLimiterOptions): 
     const ok = r.rows[0]?.ok === true;
     if (ok) {
       if (r.rows.length !== keys.length || r.rows[0].bumped !== keys.length) throw new Error('rate-limit invariant violated');
-      await client.query('COMMIT');
+      // I2b-S8 (S5): admit only on a CONFIRMED commit (tag "COMMIT"); an
+      // unconfirmed outcome is a deny, which can only over-count.
+      if (!commitConfirmed(await client.query('COMMIT'))) throw new Error('commit not confirmed');
       return { allowed: true, retryAfterSeconds: 0 };
     }
     await client.query('ROLLBACK');

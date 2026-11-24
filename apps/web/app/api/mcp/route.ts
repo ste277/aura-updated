@@ -28,7 +28,7 @@ async function handle(req: Request): Promise<Response> {
   if (process.env.NODE_ENV !== 'production') {
     const gate = resolveRuntimeMcpAuthMode(config);
     if (config && gate.mode === 'local') {
-      const { getLocalMcpAuth, localMcpClientAddress } = await import('../../../lib/mcpLocalOAuth');
+      const { getLocalMcpAuth, localMcpClientAddress, localMcpPreAuthDeps } = await import('../../../lib/mcpLocalOAuth');
       const local = getLocalMcpAuth(config);
       return handleRemoteMcpRequest(req, {
         config,
@@ -41,6 +41,8 @@ async function handle(req: Request): Promise<Response> {
         // shared bounded "unresolved" bucket, never the global ceiling alone.
         preAuthRateLimiter: local.preAuthLimiter,
         ...localMcpClientAddress(local, req),
+        // I2b-S8 (S3-6): the same keyed address buckets as the AS.
+        ...localMcpPreAuthDeps(local),
         audit: local.audit,
       });
     }

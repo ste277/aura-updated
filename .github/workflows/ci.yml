@@ -85,6 +85,14 @@ jobs:
       # (I2b-R-2). No DB.
       - name: Run I2b-S2 staging-blocker offline test
         run: npx ts-node test/mcpOAuthStagingBlockers.test.ts
+      # I2b-S8: request-origin pinning (a forged Host / X-Forwarded-* never
+      # reaches discovery, endpoint URLs or redirects; I2b-R-3), signing-key
+      # integrity and secret strength (I2b-R-6), 503 for a store outage on
+      # the interaction page (S3-3), one address source (S3-4), bounded
+      # address parsing (S3-5), keyed address buckets (S3-6), versioned shard
+      # keys (S3-7), COMMIT confirmed by its tag and bounded (S5). No DB.
+      - name: Run I2b-S8 offline security test
+        run: npx ts-node test/mcpOAuthS8.test.ts
       - name: Run panchang day service test
         run: npx ts-node test/panchangDay.test.ts
       - name: Run panchang month service test
@@ -1107,6 +1115,13 @@ jobs:
       # are unaffected. Touches only the two MCP tables.
       - name: Run I2b-S6 authorization-code lifecycle DB test
         run: npx ts-node test/mcpOAuthCodeS6Db.test.ts
+      # I2b-S8: an undelivered code whose revocation failed is refused by
+      # that instance and deleted by a background retry (S3-1 residual); an
+      # unconfirmed or late COMMIT is never a success (S5); a frozen limiter
+      # transaction releases its shard lock (S3-8); limiter rows hold no
+      # client address and name G/N (S3-6, S3-7). Touches only the MCP tables.
+      - name: Run I2b-S8 security DB test
+        run: npx ts-node test/mcpOAuthS8Db.test.ts
       - name: Verify every repository migration was recorded as applied
         run: |
           set -euo pipefail

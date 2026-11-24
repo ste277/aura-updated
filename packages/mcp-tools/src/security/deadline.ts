@@ -99,6 +99,34 @@ export interface BoundedStatementOptions {
   statementTimeoutMs: number;
   /** Server-side `SET LOCAL lock_timeout`, ms. */
   lockTimeoutMs: number;
+  /**
+   * I2b-S8 (S5): client-side bound for the COMMIT round trip, ms (default:
+   * `deadlineMs`). When it expires the outcome is UNKNOWN: the answer is
+   * StoreUnavailableError and the connection is destroyed. Never a success.
+   */
+  commitDeadlineMs?: number;
+  /**
+   * I2b-S8 (S3-8): server-side `SET LOCAL idle_in_transaction_session_timeout`,
+   * ms (default: lockTimeoutMs). Only time BETWEEN round trips counts (a
+   * statement waiting on a lock is active, not idle). If this process freezes
+   * mid-transaction, Postgres ends the session and releases its locks.
+   */
+  idleInTransactionTimeoutMs?: number;
+}
+
+/** I2b-S8 (S3-8): transaction-local timeouts for a BEGIN message. Integers only (validated by callers). */
+export function transactionTimeouts(o: { statementTimeoutMs: number; lockTimeoutMs: number; idleInTransactionTimeoutMs: number }): string {
+  for (const v of [o.statementTimeoutMs, o.lockTimeoutMs, o.idleInTransactionTimeoutMs]) if (!Number.isInteger(v) || v < 1) throw new TypeError('timeouts must be positive integers');
+  return `BEGIN; SET LOCAL statement_timeout = '${o.statementTimeoutMs}ms'; SET LOCAL lock_timeout = '${o.lockTimeoutMs}ms'; SET LOCAL idle_in_transaction_session_timeout = '${o.idleInTransactionTimeoutMs}ms'`;
+}
+
+/**
+ * I2b-S8 (S5): a COMMIT is confirmed only by the server's command tag.
+ * Postgres answers COMMIT on an aborted transaction with the tag ROLLBACK
+ * and no error; anything but "COMMIT" is therefore an unconfirmed outcome.
+ */
+export function commitConfirmed(result: unknown): boolean {
+  return !!result && typeof result === 'object' && (result as { command?: unknown }).command === 'COMMIT';
 }
 
 /**
@@ -114,24 +142,37 @@ export interface BoundedStatementOptions {
  *     back an uncommitted transaction when its connection ends, so a
  *     statement that finishes after the deadline cannot become durable --
  *     even if the server-side timeouts are larger than the deadline;
- *   - once COMMIT has been sent, the deadline waits for its outcome (bounded
- *     by the pool's client-side query timeout). If that outcome is lost the
- *     answer is still StoreUnavailableError: the only case in which a write
- *     reported as failed may have landed is a lost COMMIT acknowledgement.
+ *   - once COMMIT has been sent, its round trip has its own bound
+ *     (`commitDeadlineMs`, I2b-S8 / S5; previously only the pool's query
+ *     timeout). A COMMIT that does not answer in time, errors, or answers
+ *     with any tag other than "COMMIT" (Postgres answers ROLLBACK on an
+ *     aborted transaction) is StoreUnavailableError, never a success: the
+ *     only case in which a write reported as failed may have landed is a
+ *     COMMIT that reached the server but whose answer did not come back;
+ *   - I2b-S8 (S3-8): the transaction also sets
+ *     `idle_in_transaction_session_timeout`, so a frozen process cannot
+ *     hold row locks until TCP teardown.
  * Every failure is StoreUnavailableError; a connection whose transaction
  * state is uncertain is destroyed, never returned to the pool.
  */
 export function boundedStatement<R>(pool: BoundedPool, text: string, params: unknown[] | undefined, o: BoundedStatementOptions): Promise<QueryResultLike<R>> {
-  const begin = `BEGIN; SET LOCAL statement_timeout = '${o.statementTimeoutMs}ms'; SET LOCAL lock_timeout = '${o.lockTimeoutMs}ms'`;
+  const begin = transactionTimeouts({
+    statementTimeoutMs: o.statementTimeoutMs,
+    lockTimeoutMs: o.lockTimeoutMs,
+    idleInTransactionTimeoutMs: o.idleInTransactionTimeoutMs ?? Math.max(100, o.lockTimeoutMs),
+  });
+  const commitDeadlineMs = o.commitDeadlineMs ?? o.deadlineMs;
   return new Promise((resolve, reject) => {
     let settled = false;
     let commitSent = false;
     let client: BoundedClient | undefined;
     let released = false;
+    let commitTimer: ReturnType<typeof setTimeout> | undefined;
     const fail = (reason: 'timeout' | 'error') => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      if (commitTimer) clearTimeout(commitTimer);
       reject(new StoreUnavailableError(reason));
     };
     const destroy = (c: BoundedClient | undefined) => {
@@ -166,14 +207,29 @@ export function boundedStatement<R>(pool: BoundedPool, text: string, params: unk
           return;
         }
         commitSent = true;
-        await c.query('COMMIT');
+        clearTimeout(timer);
+        // I2b-S8 (S5): the COMMIT round trip has its own bound. On expiry the
+        // outcome is unknown (it may land later): report failure, destroy.
+        commitTimer = setTimeout(() => {
+          fail('timeout');
+          destroy(c);
+        }, commitDeadlineMs);
+        const done = await c.query('COMMIT');
+        if (settled) {
+          destroy(c);
+          return;
+        }
+        if (!commitConfirmed(done)) {
+          // Not confirmed (e.g. ROLLBACK tag): never a success.
+          destroy(c);
+          fail('error');
+          return;
+        }
         released = true;
         c.release();
-        if (!settled) {
-          settled = true;
-          clearTimeout(timer);
-          resolve(r);
-        }
+        settled = true;
+        clearTimeout(commitTimer);
+        resolve(r);
       } catch {
         destroy(client);
         fail('error');
