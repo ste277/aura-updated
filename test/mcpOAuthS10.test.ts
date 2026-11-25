@@ -16,8 +16,8 @@
  *         abort, hold expiry, cancellation, phase-1 failure
  *   QO    query-only adapter fallback: nothing is written before commit()
  */
-import { randomBytes } from 'crypto';
-import { assessSecret, loadOAuthKeysFromEnv } from '../packages/mcp-tools/src/auth/keys';
+import { createHash, randomBytes } from 'crypto';
+import { assessConfiguredSecret, assessSecret, loadOAuthKeysFromEnv } from '../packages/mcp-tools/src/auth/keys';
 import { createPostgresAdapterStore } from '../packages/mcp-tools/src/auth/postgresAdapter';
 import { boundedStatement, heldStatement, requestBudgetRemainingMs, runWithRequestBudget, outsideRequestBudget, StoreUnavailableError, type BoundedPool } from '../packages/mcp-tools/src/security/deadline';
 import { check, sharedKeys, sleep, summary } from './mcpOAuthI2bHarness';
@@ -59,23 +59,70 @@ const failure = (p: Promise<unknown>) => p.then(() => null, (e) => e as unknown)
 async function main() {
   // ------------------------------------------------------------------ SEC
   {
-    const formats: [string, () => string][] = [
-      ['hex, 16 bytes (openssl rand -hex 16)', () => randomBytes(16).toString('hex')],
-      ['HEX upper case, 16 bytes', () => randomBytes(16).toString('hex').toUpperCase()],
-      ['hex, 20 bytes', () => randomBytes(20).toString('hex')],
-      ['hex, 32 bytes (openssl rand -hex 32)', () => randomBytes(32).toString('hex')],
-      ['base64, 24 bytes (openssl rand -base64 24)', () => randomBytes(24).toString('base64')],
-      ['base64, 32 bytes with padding (openssl rand -base64 32)', () => randomBytes(32).toString('base64')],
-      ['base64url, 24 bytes', () => randomBytes(24).toString('base64url')],
-      ['base64url, 32 bytes', () => randomBytes(32).toString('base64url')],
+    // AURA-MCP-CI-01: deterministic, policy-aware coverage. The former loop drew
+    // FRESH random samples and required every one to be accepted; an untagged
+    // 16-byte hex value with no a-f letter (P = (10/16)^32 ~= 2.9e-7; 20,000
+    // samples -> ~0.6% of runs) is refused BY POLICY (it is judged as legacy
+    // text, exactly as the S8 rule did). Samples are now derived from a fixed
+    // seed (the same 20,000 values on every run) and each is checked against
+    // the documented policy instead of "always accepted".
+    const s8Legacy = (v: string) => {
+      const n = [...v].length;
+      const counts = new Map<string, number>();
+      for (const ch of v) counts.set(ch, (counts.get(ch) ?? 0) + 1);
+      let h = 0;
+      for (const c of counts.values()) h -= (c / n) * Math.log2(c / n);
+      let per = false;
+      for (let p = 1; p <= v.length / 2 && !per; p += 1) {
+        let same = true;
+        for (let i = p; i < v.length && same; i += 1) same = v[i] === v[i - p];
+        per = same;
+      }
+      return v.length >= 32 && new Set(v).size >= 10 && !per && h * n >= 128;
+    };
+    const seeded = (tag: string, i: number, len: number) => {
+      let out = Buffer.alloc(0);
+      for (let b = 0; out.length < len; b += 1) out = Buffer.concat([out, createHash('sha256').update(`aura-ci01-s10:${tag}:${i}:${b}`).digest()]);
+      return out.subarray(0, len);
+    };
+    // Policy for an untagged hex value: hex credit needs >= 1 a-f letter; a
+    // digits-only value is judged by the legacy S8 rule.
+    const hexExpectation = (v: string) => (/[a-fA-F]/.test(v) ? true : s8Legacy(v));
+    const formats: [string, (i: number) => string, (v: string) => boolean][] = [
+      ['hex, 16 bytes (openssl rand -hex 16)', (i) => seeded('hex16', i, 16).toString('hex'), hexExpectation],
+      ['HEX upper case, 16 bytes', (i) => seeded('HEX16', i, 16).toString('hex').toUpperCase(), hexExpectation],
+      ['hex, 20 bytes', (i) => seeded('hex20', i, 20).toString('hex'), hexExpectation],
+      ['hex, 32 bytes (openssl rand -hex 32)', (i) => seeded('hex32', i, 32).toString('hex'), hexExpectation],
+      ['base64, 24 bytes (openssl rand -base64 24)', (i) => seeded('b64-24', i, 24).toString('base64'), () => true],
+      ['base64, 32 bytes with padding (openssl rand -base64 32)', (i) => seeded('b64-32', i, 32).toString('base64'), () => true],
+      ['base64url, 24 bytes', (i) => seeded('b64u-24', i, 24).toString('base64url'), () => true],
+      ['base64url, 32 bytes', (i) => seeded('b64u-32', i, 32).toString('base64url'), () => true],
     ];
     const N = 20_000;
-    for (const [label, gen] of formats) {
-      let refused = 0;
-      for (let i = 0; i < N; i += 1) if (!assessSecret(gen()).ok) refused += 1;
-      check(`SEC accepted: ${label} (${N} CSPRNG samples, 0 refused)`, refused === 0, refused);
+    for (const [label, gen, expect] of formats) {
+      let mismatches = 0;
+      let refusedByPolicy = 0;
+      for (let i = 0; i < N; i += 1) {
+        const v = gen(i);
+        const want = expect(v);
+        if (!want) refusedByPolicy += 1;
+        if (assessSecret(v).ok !== want) mismatches += 1;
+      }
+      check(`SEC policy-aware: ${label} (${N} fixed-seed samples; every verdict matches the documented policy; ${refusedByPolicy} refused by policy)`, mismatches === 0, { mismatches, refusedByPolicy });
     }
-    check('SEC strength is format-aware: hex 4 bits/char, base64 6 bits/char', assessSecret(randomBytes(16).toString('hex')).bits === 128 && assessSecret(randomBytes(24).toString('base64url')).bits === 192);
+    // Deterministic fixtures: the recorded digits-only value and the tagged path.
+    const digitsOnly = '64976964540383724985906370631171'; // recorded by a 4,000,000-sample probe
+    const dRes = assessSecret(digitsOnly);
+    check('SEC reproduction: the recorded digits-only 16-byte hex value is refused untagged (legacy text rule) -- the old "always accepted" assertion fails on it', !dRes.ok && dRes.format === 'text', dRes);
+    check('SEC the same digits-only value is ACCEPTED when explicitly tagged "hex:" (128 bits)', assessConfiguredSecret(`hex:${digitsOnly}`).ok && assessConfiguredSecret(`hex:${digitsOnly}`).bits === 128);
+    for (const v of ['7f3a9c0e5b2d8146ad3e9f7c0b1a5e28', '0B5E7D2A9C4F81E63A7D0C9B2E5F8146', '3c9e1f7a0b5d2e8c4a6f9d1b7e3c5a08d2f6b4e1']) {
+      check(`SEC representative untagged hex value accepted per policy: ${v.slice(0, 8)}... (${v.length} chars)`, assessSecret(v).ok && assessSecret(v).format === 'hex');
+    }
+    for (const [label, v] of [['32 x "a"', 'a'.repeat(32)], ['balanced counting hex', '0123456789abcdeffedcba9876543210'], ['low-variety mixed case', 'ghijGHIJhgjiHGJIijghIJGHjihgJIHG'], ['odd-length hex-lexical, 8 symbols (S11 overlap class)', 'acf0be1dab0fce1adb1fc0eadf1b0caedb1']] as [string, string][]) {
+      check(`SEC refused legacy value stays refused: ${label}`, !assessSecret(v).ok, assessSecret(v));
+    }
+    check('SEC mistagged hex under "base64:" stays refused (ambiguous_encoding)', assessConfiguredSecret(`base64:${'7f3a9c0e5b2d8146ad3e9f7c'}`).reason === 'ambiguous_encoding');
+    check('SEC strength is format-aware: hex 4 bits/char, base64 6 bits/char', assessSecret('7f3a9c0e5b2d8146ad3e9f7c0b1a5e28').bits === 128 && assessSecret(seeded('fmt', 0, 24).toString('base64url')).bits === 192);
 
     // Every role, including RETAINED rotation keys, accepts each supported format.
     const strong = () => randomBytes(32).toString('base64url');
