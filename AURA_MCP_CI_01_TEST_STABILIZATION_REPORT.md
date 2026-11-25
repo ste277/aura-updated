@@ -33,9 +33,12 @@ Shedding under load is legitimate here, so A has **no availability floor**.
 **C. Performance regression** (extended budget):
 - **Measurement:** the limiter flood is compared with a **control flood** of the same shape (3 × 5 connections, 2,000 units of 4 round trips, 16 hot advisory keys; no limiter code, no table), run immediately **before and after** it.
 - **Ratio:** limiterMs / max(control before, control after).
-- **Pass condition:** the **best of 3 paired trials** must be **≤ R_MAX = 8**, and every trial must **decide all 2,000** requests.
+- **Pass condition:** the **best of 3 paired trials** must be **≤ R_MAX = 5**, and every trial must **decide all 2,000** requests.
 - **Why best of 3:** persistent (genuine) degradation fails every trial; a transient environmental slowdown cannot.
-- **Why R_MAX = 8:** about 2× the worst healthy ratio seen anywhere (4.4 on CI), and far below the injected degradation (best ratio 44–66 locally).
+- **Why R_MAX = 5:**
+  - It is at least 2× the worst healthy **best-of-3** ratio observed (2.67 locally, 1.80 on CI), and above the worst healthy **single** trial anywhere (4.4).
+  - The injected degradation (+10 ms per statement) measured **11.2 on CI** (controls about 530 ms) and **44–66 locally**.
+  - R_MAX was first 8. CI run 45594423214 showed degradation at only 11.2 with 530 ms controls, which would be about 8 with the 746 ms controls seen in the same run. So it was **tightened** to 5, not loosened.
 - C's limiter floods use a long pool-checkout timeout, matching the controls. **Found and fixed during this work:** with the application's 2 s checkout timeout, a slow flood ended at about 2,050 ms in `checkout` failures, capping the ratio near 2,050 / control. On CI's slower controls that could have hidden real degradation.
 
 **ENV. Environment check:** a control flood slower than **5,000 ms** (4× the deadline) means the environment is unusably slow, and the run **fails**. It never passes vacuously.
@@ -52,18 +55,30 @@ Shedding under load is legitimate here, so A has **no availability floor**.
 
 ### Residual: reproduction and correction
 The deterministic scenario **"fast controls, then a healthy limiter flood under temporary contention"** applies +2 ms per statement only to the production flood, and +3 ms to one of the three C trials; the controls stay fast.
-- **Reproduced:** on the same runs, the CI-01 v1 gate would **fail**. The floor was 2,000 because the controls were fast, while completed was 1,474–1,650 across 6 runs.
+- **Reproduced, deterministically:** a replay of the v1 formula on fixed inputs (CI-recorded fast controls of 252 ms, giving a floor of 1,984, and a healthy flood that shed to 1,500 completed) **fails**. This is asserted.
+- **Live comparison, informational only:** v1 would also have failed every local run (floor 2,000, 1,474–1,650 completed). On CI run 45594423214 the controls were slow (511 ms, floor 978), so v1 would have passed that run.
+  - That is why the earlier live "v1 would fail" assertion was environment-dependent, and it **failed CI**. It was replaced by the replay. All real checks passed in that run.
 - **Corrected:** A passes, since the shedding is classified as `deadline`, the deadline is enforced and accounting is exact. B passes. C passes: the contended trial's ratio is 23–29, the other two 1.95–2.75.
 - **Distinguished from genuine degradation:** limiter-only +10 ms per statement in every limiter flood **fails C** (all trials 44–80). A stays safe for both scenarios, with exact accounting.
 
-### Results (local, `max_connections = 100`, 3 runs of the final head, 53/53 each)
+### Results
+**CI run 45594423214** (head `5aa35472`, before the two corrections above): 53/54, with only the environment-dependent replay assertion failing.
+
+| Scenario | A | C best (trial ratios) | Verdict |
+|---|---|---|---|
+| Healthy (controls 536–746 ms) | pass; flood 972–1,109 ms, 480 / 480 | 1.78 / 1.80 | pass |
+| Shared +2 ms | pass | 1.06 | pass |
+| Residual | pass | 1.79 (contended trial 3.61) | pass |
+| Degradation +10 ms | safe (227 / 227) | **11.24** (11.51 / 11.24 / 11.30) | **fail** (detected) |
+
+**Local** (`max_connections = 100`; earlier rows from 3 runs with R_MAX = 8, then 2 runs with the final R_MAX = 5, 54/54 each):
 
 | Scenario | A | C trial ratios (control ms, limiter ms) | C best | Verdict |
 |---|---|---|---|---|
-| Healthy #1 / #2 (6 samples) | pass; flood 163–336 ms, 480 / 480 | 1.85–3.34 (68–158 ms, 179–341 ms) | 1.85–2.34 | pass |
+| Healthy #1 / #2 (10 samples) | pass; flood 163–336 ms, 480 / 480 | 1.85–3.34 (68–158 ms, 179–341 ms) | 1.85–2.67 | pass |
 | Shared slowdown +2 ms | pass; flood about 1,266 ms (shedding), 480 / 480 | 1.19–1.29 (1,273–1,353, 1,534–1,738) | 1.19 | pass |
 | Residual (fast controls, contended healthy flood) | pass; deadline sheds classified, 480 / 480 | contended trial 23.6–28.3; others 1.95–2.75 | 1.95–2.28 | pass |
-| **Limiter-only degradation** (+10 ms) | pass (safe, exact) | 44.8–80.5 (81–145, 6,419–6,655) | **44.8–65.9** | **fail** (detected) |
+| **Limiter-only degradation** (+10 ms) | pass (safe, exact) | 44.8–84.5 (81–145, 6,419–6,655) | **44.8–65.9** | **fail** (detected) |
 | Unusably slow environment (control +12 ms) | — | control above 5,000 ms | — | **fail** |
 
 **Negative controls**, all failing A as required:
@@ -78,7 +93,7 @@ The deterministic scenario **"fast controls, then a healthy limiter flood under 
 B's exactness and per-shard accounting pass.
 
 ### Remaining limitations
-- **C is a timing comparison.** Its separation is large (healthy ≤ 3.34; degraded ≥ 44), and best-of-3 absorbs one transient. A contention burst covering all three trials while sparing both bracketing controls each time would be needed to fail a healthy limiter.
+- **C is a timing comparison.** On CI the separation is about 2× on each side of R_MAX = 5 (healthy best 1.80, degradation 11.2); locally it is much wider. Best-of-3 absorbs one transient. A contention burst covering all three trials while sparing both bracketing controls each time would be needed to fail a healthy limiter.
 - **A's deadline check uses 500 ms of scheduling slack** for event-loop lag with 2,000 pending promises. Observed maximum latencies were 1,252–1,268 ms.
 - **ENV and R_MAX are absolute constants.** They are justified from measured ranges, not fitted to one CI run.
 
@@ -110,6 +125,6 @@ B's exactness and per-shard accounting pass.
   - offline: transport, Local 119, SecurityRegression 34, I2b 116, StagingBlockers 52, S8 60, S10 135, S11 31, S12 84;
   - DB: Postgres 36, StorageProtection 42, StagingBlockersDb 53, StoreS4 13, CodeS6 14, S8Db 11, S10Db 21, S11Db 19, S12Db 15;
   - dbIdentityGuard.
-- **Repeats:** StagingBlockersDb 3/3 on the final head (and 5/5 on the earlier version of this design); S10 and S8 offline 3/3.
+- **Repeats:** StagingBlockersDb 5/5 on this design (3 runs with R_MAX = 8, 2 runs with the final R_MAX = 5 and the replay); S10 and S8 offline 3/3.
 - **No retries** were used to hide failures.
 - **Exact-head CI:** recorded in the PR description.
