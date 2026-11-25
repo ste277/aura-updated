@@ -11,6 +11,9 @@
  *    after the server processed them) or inject faults;
  *  - a fault-injecting localStorage is shared by every tab and delivers
  *    `storage` events for the account-transition key to the OTHER tabs;
+ *  - R4: a spec-conformant in-memory IndexedDB (fake-indexeddb) is shared by
+ *    every tab (the offline queue's store), with fault switches for open,
+ *    read and write failures (`idbFault`);
  *  - each TAB is a separate instance of the real client modules
  *    (lib/accountSession, activitySync, signOut, offlineHabitQueue).
  *
@@ -56,6 +59,47 @@ export class FaultyStorage {
 }
 export const storage = new FaultyStorage();
 (global as any).localStorage = storage;
+
+// ---------------------------------------------------------------- IndexedDB (R4: the offline queue store)
+const fidb = require('fake-indexeddb');
+// Installed explicitly on the Node global AND (jsdom suites) the window, so every module sees the same database.
+for (const target of [global as any, typeof window !== 'undefined' ? (window as any) : null]) {
+  if (!target) continue;
+  for (const n of ['indexedDB', 'IDBKeyRange', 'IDBDatabase', 'IDBTransaction', 'IDBObjectStore', 'IDBIndex', 'IDBRequest', 'IDBOpenDBRequest', 'IDBCursor', 'IDBCursorWithValue', 'IDBFactory', 'IDBVersionChangeEvent']) target[n] = fidb[n];
+}
+export const idbFault = { open: false, read: false, write: false };
+{
+  const factory = (global as any).indexedDB;
+  const realOpen = factory.open.bind(factory);
+  factory.open = (...a: unknown[]) => { if (idbFault.open) throw new Error('InvalidStateError: IndexedDB unavailable (synthetic)'); return realOpen(...a); };
+  for (const m of ['add', 'put', 'delete', 'clear']) {
+    const real = fidb.IDBObjectStore.prototype[m];
+    fidb.IDBObjectStore.prototype[m] = function (...a: unknown[]) { if (idbFault.write) throw new Error('QuotaExceededError (synthetic)'); return real.apply(this, a); };
+  }
+  for (const proto of [fidb.IDBObjectStore.prototype, fidb.IDBIndex.prototype]) {
+    for (const m of ['get', 'getAll']) {
+      const real = proto[m];
+      proto[m] = function (...a: unknown[]) { if (idbFault.read) throw new Error('UnknownError: read failed (synthetic)'); return real.apply(this, a); };
+    }
+  }
+}
+const idbReq = <T>(r: any) => new Promise<T>((res, rej) => { r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
+async function queueDb(): Promise<IDBDatabase> { return require(webPath('lib', 'offlineHabitQueue')).__openQueueDbForTests(); }
+/** Raw view of the queue database (independent of any tab's module state). */
+export async function queueDump(): Promise<{ records: any[]; claims: any[]; dispatches: any[]; tombstones: any[] }> {
+  const db = await queueDb();
+  const t = db.transaction(['records', 'claims', 'dispatches', 'tombstones'], 'readonly');
+  const all = (n: string) => idbReq<any[]>(t.objectStore(n).getAll());
+  const [records, claims, dispatches, tombstones] = await Promise.all([all('records'), all('claims'), all('dispatches'), all('tombstones')]);
+  return { records, claims, dispatches, tombstones };
+}
+/** Empties every queue store. */
+export async function clearQueueDb(): Promise<void> {
+  const db = await queueDb();
+  const t = db.transaction(['records', 'claims', 'dispatches', 'tombstones'], 'readwrite');
+  for (const n of ['records', 'claims', 'dispatches', 'tombstones']) t.objectStore(n).clear();
+  await new Promise<void>((res, rej) => { t.oncomplete = () => res(); t.onerror = () => rej(t.error); t.onabort = () => rej(t.error); });
+}
 
 // ---------------------------------------------------------------- server store + db stub
 export interface StoredUser { id: string; email: string; cityName: string; latitude: number; longitude: number; timezone: string; locationConfirmedAt: string; onboardingResolvedAt: string }
@@ -142,6 +186,8 @@ export const plansOf = (userId: string) => store.plans.filter((p) => p.userId ==
 const held = new Set<string>();
 export const locks = {
   enabled: true,
+  /** Test hook: runs inside navigator.locks.query() (an await point of the caller). */
+  onQuery: null as null | (() => unknown),
   request: async (name: string, opts: any, cb: (lock: unknown) => Promise<unknown>) => {
     if (held.has(name)) {
       if (opts?.ifAvailable) return cb(null);
@@ -153,7 +199,7 @@ export const locks = {
 };
 function installLocks() {
   const nav: any = (globalThis as any).navigator ?? {};
-  const query = async () => ({ held: [...held].map((name) => ({ name })) });
+  const query = async () => { if (locks.onQuery) await locks.onQuery(); return { held: [...held].map((name) => ({ name })) }; };
   Object.defineProperty(nav, 'locks', { configurable: true, get: () => (locks.enabled ? { request: locks.request, query } : undefined) });
   if (!(globalThis as any).navigator) Object.defineProperty(globalThis, 'navigator', { value: nav, configurable: true });
 }
@@ -322,13 +368,13 @@ export function registerCurrentModulesAsTab(id: string) {
   const acct = require(LIB[0]);
   tabs.push({ id, acct } as Tab);
 }
-/** Queue entry keys of an owner (per-entry layout). */
-export function queueKeys(owner: string) {
-  return [...storage.data.keys()].filter((k) => k.startsWith(`aura_q4:${owner}:`));
+/** recordIds queued for an owner (R4: IndexedDB records). */
+export async function queueKeys(owner: string): Promise<string[]> {
+  return (await queueDump()).records.filter((r) => r.ownerUserId === owner).map((r) => r.recordId);
 }
-/** clientRequestIds queued for an owner (R3 record keys: aura_q4:<owner>:<crid>:<recordId>). */
-export function queuedCrids(owner: string) {
-  return queueKeys(owner).map((k) => k.slice(`aura_q4:${owner}:`.length).split(':')[0]);
+/** clientRequestIds queued for an owner. */
+export async function queuedCrids(owner: string): Promise<string[]> {
+  return (await queueDump()).records.filter((r) => r.ownerUserId === owner).map((r) => r.clientRequestId);
 }
 
 // ---------------------------------------------------------------- misc

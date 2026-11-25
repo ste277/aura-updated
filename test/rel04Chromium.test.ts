@@ -35,7 +35,7 @@ addUser(B, 'bobsynth@example.invalid');
 const EMAIL: Record<string, string> = { 'alicesynth@example.invalid': A, 'bobsynth@example.invalid': B };
 
 // ---------------------------------------------------------------- bundle of the real client modules
-const MODULES = ['accountRoutePolicy', 'accountSession', 'offlineHabitQueue', 'habitLogSyncPolicy', 'activitySync', 'signOut', 'signInCode', 'accountBoundFetch'];
+const MODULES = ['serviceWorkerBridge', 'accountRoutePolicy', 'accountSession', 'offlineHabitQueue', 'habitLogSyncPolicy', 'activitySync', 'signOut', 'signInCode', 'accountBoundFetch'];
 const OLD = path.join(__dirname, 'fixtures', 'rel04-reviewed-head');
 function bundle(): string {
   const defs = MODULES.map((n) => {
@@ -58,6 +58,8 @@ var acct = __req('./accountSession');
 window.aura = { acct: acct, q: __req('./offlineHabitQueue'), sync: __req('./activitySync'), so: __req('./signOut'), si: __req('./signInCode'), bf: __req('./accountBoundFetch'), policy: __req('./accountRoutePolicy'), cls: __req('./habitLogSyncPolicy') };
 window.__nativeFetch = window.fetch.bind(window); // what an old bundle uses
 window.aura.bf.installAccountBoundFetch();
+__req('./serviceWorkerBridge').announceAccountBoundary();
+window.aura.swb = __req('./serviceWorkerBridge');
 window.oldEnqueue = (${oldEnqueue.trim().replace(/;$/, '')});
 window.oldReplay = (${oldReplay.trim().replace(/;$/, '')});
 window.auraReady = true;
@@ -86,9 +88,24 @@ function hold(p: string, phase: 'before' | 'after') {
 function takeGate(p: string, phase: 'before' | 'after') { const i = gates.findIndex((g) => g.path === p && g.phase === phase); return i >= 0 ? gates.splice(i, 1)[0] : null; }
 const serverLog: Array<{ path: string; method: string; status: number; expected: string | null }> = [];
 let BUNDLE = '';
+// R4 service-worker cases: what the "deployment" currently serves at /sw.js and at the app URL.
+const OLD_SW = fs.readFileSync(path.join(__dirname, 'fixtures', 'rel04-prod-head', 'sw.js.txt'), 'utf8'); // Production ac46fc3
+const NEW_SW = fs.readFileSync(path.join(WEB, 'public', 'sw.js'), 'utf8');
+const OLD_LOGOUT = fs.readFileSync(path.join(__dirname, 'fixtures', 'rel04-prod-head', 'page.handleLogout.txt'), 'utf8');
+const deploy = { sw: NEW_SW, appHtml: 'new' as 'old' | 'new' };
+// The pre-boundary page: registers the worker like Home does, and signs out with Production's own handleLogout body.
+const OLD_PAGE = `<!doctype html><html><body data-screen="signed-in"><script>
+navigator.serviceWorker.register('/sw.js');
+const setUser = (u) => { document.body.dataset.screen = u ? 'signed-in' : 'signed-out'; };
+const useCallback = (fn) => fn;
+${OLD_LOGOUT.replace('const handleLogout', 'window.handleLogout')}
+window.oldReady = true;
+</script></body></html>`;
 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url ?? '/', 'http://127.0.0.1');
+  if (url.pathname === '/sw.js') { res.writeHead(200, { 'content-type': 'text/javascript', 'cache-control': 'no-cache' }); res.end(deploy.sw); return; }
+  if (url.pathname === '/app') { res.writeHead(200, { 'content-type': 'text/html', 'cache-control': 'no-cache' }); res.end(deploy.appHtml === 'old' ? OLD_PAGE : '<!doctype html><html><body><script>navigator.serviceWorker.register("/sw.js");</script><script src="/bundle.js"></script></body></html>'); return; }
   if (url.pathname === '/') { res.writeHead(200, { 'content-type': 'text/html' }); res.end('<!doctype html><html><body><script src="/bundle.js"></script></body></html>'); return; }
   if (url.pathname === '/bundle.js') { res.writeHead(200, { 'content-type': 'text/javascript' }); res.end(BUNDLE); return; }
   const chunks: Buffer[] = [];
@@ -157,11 +174,11 @@ async function main() {
       const [t1, t2] = [await open(), await open()];
       for (const t of [t1, t2]) await t.evaluate(async () => { await (window as any).aura.acct.fetchVerifiedSession(); });
       const N = 40;
-      await Promise.all([t1, t2].map((t, i) => t.evaluate(({ i, N, A }: { i: number; N: number; A: string }) => {
+      await Promise.all([t1, t2].map((t, i) => t.evaluate(async ({ i, N, A }: { i: number; N: number; A: string }) => {
         const q = (window as any).aura.q;
-        for (let n = 0; n < N; n++) q.enqueueOwned({ activityTitle: `t${i}-${n}`, activeWindow: 'NEUTRAL', logTimestamp: '2026-11-25T06:00:00.000Z', clientRequestId: `crid-${i}-${n}`, tempId: 'x', ownerUserId: A });
+        await Promise.all(Array.from({ length: N }, (_, n) => q.enqueueOwned({ activityTitle: `t${i}-${n}`, activeWindow: 'NEUTRAL', logTimestamp: '2026-11-25T06:00:00.000Z', clientRequestId: `crid-${i}-${n}`, tempId: 'x', ownerUserId: A })));
       }, { i, N, A })));
-      const count = await t1.evaluate((A: string) => { const r = (window as any).aura.q.readOwnedQueue(A); return r.ok ? r.records.length : -1; }, A);
+      const count = await t1.evaluate(async (A: string) => { const r = await (window as any).aura.q.readOwnedQueue(A); return r.ok ? r.records.length : -1; }, A);
       check(`CH1 two real tabs enqueue ${N} entries each concurrently: all ${2 * N} kept`, count === 2 * N);
       await context.close();
     }
@@ -173,18 +190,18 @@ async function main() {
       await signIn('alicesynth@example.invalid');
       const [t1, t2] = [await open(), await open()];
       for (const t of [t1, t2]) await t.evaluate(async () => { await (window as any).aura.acct.fetchVerifiedSession(); });
-      await t1.evaluate((A: string) => {
+      await t1.evaluate(async (A: string) => {
         const q = (window as any).aura.q;
-        for (const n of [1, 2]) q.enqueueOwned({ activityTitle: `A ${n}`, activeWindow: 'NEUTRAL', logTimestamp: '2026-11-25T06:00:00.000Z', clientRequestId: `crid-r${n}`, tempId: 'x', ownerUserId: A, queuedAt: n });
+        for (const n of [1, 2]) await q.enqueueOwned({ activityTitle: `A ${n}`, activeWindow: 'NEUTRAL', logTimestamp: '2026-11-25T06:00:00.000Z', clientRequestId: `crid-r${n}`, tempId: 'x', ownerUserId: A });
       }, A);
       const g = hold('/api/habit-logs', 'before');
       const replay = t1.evaluate(async () => (window as any).aura.sync.replayOfflineQueue());
       await g.arrived;
-      const removed = await t2.evaluate((A: string) => {
+      const removed = await t2.evaluate(async (A: string) => {
         const q = (window as any).aura.q;
-        const r = q.readOwnedQueue(A);
+        const r = await q.readOwnedQueue(A);
         const rec = r.records.find((x: any) => x.item.clientRequestId === 'crid-r2');
-        return q.removeRecords([rec]).removed;
+        return (await q.discardRecords([rec.recordId], { tab: 'tab2' })).removed;
       }, A);
       g.release();
       await replay;
@@ -289,6 +306,166 @@ async function main() {
       const after = await t.evaluate(() => localStorage.getItem('offline_habit_queue'));
       check(`CH5 pre-REL-04 client replay in Chromium, ${expired ? 'EXPIRED' : 'valid'} session: entries kept byte for byte, nothing stored`, before !== null && after === before && store.logs.length === 0);
       await c.context.close();
+    }
+
+    // ------------------------------------------------------------ CH6 (R4) replay holds the claim in tab 1 -> tab 2's discard keeps it (real IndexedDB)
+    {
+      store.logs.length = 0;
+      const { context, open, signIn } = await newContext();
+      await signIn('alicesynth@example.invalid');
+      const [t1, t2] = [await open(), await open()];
+      for (const t of [t1, t2]) await t.evaluate(async () => { await (window as any).aura.acct.fetchVerifiedSession(); });
+      await t1.evaluate(async (A: string) => { await (window as any).aura.q.enqueueOwned({ activityTitle: 'in flight', activeWindow: 'NEUTRAL', logTimestamp: '2026-11-25T06:00:00.000Z', clientRequestId: 'crid-ch6', tempId: 'x', ownerUserId: A }); }, A);
+      const g = hold('/api/habit-logs', 'before');
+      const replay = t1.evaluate(async () => (window as any).aura.sync.replayOfflineQueue());
+      await g.arrived;
+      const d = await t2.evaluate(async (A: string) => {
+        const q = (window as any).aura.q;
+        const r = await q.readOwnedQueue(A);
+        return q.discardRecords(r.records.map((x: any) => x.recordId), { tab: 'tab2' });
+      }, A);
+      g.release();
+      await replay;
+      const left = await t2.evaluate(async (A: string) => { const r = await (window as any).aura.q.readOwnedQueue(A); return r.ok ? r.records.length : -1; }, A);
+      check('CH6 (R4, real Chromium IndexedDB, two pages) a discard while the other page is SENDING keeps the record (keptInFlight); the send settles it exactly once', d.keptInFlight === 1 && d.removed === 0 && store.logs.filter((l) => l.clientRequestId === 'crid-ch6').length === 1 && left === 0);
+      await context.close();
+    }
+
+    // ------------------------------------------------------------ CH7 (R4) no Web Locks: concurrent replays in two pages send each entry once
+    {
+      store.logs.length = 0;
+      const { context, open, signIn } = await newContext();
+      await context.addInitScript(() => { try { Object.defineProperty(navigator, 'locks', { value: undefined, configurable: true }); } catch { /* ignore */ } });
+      await signIn('alicesynth@example.invalid');
+      const [t1, t2] = [await open(), await open()];
+      const noLocks = await t1.evaluate(() => (navigator as any).locks === undefined);
+      for (const t of [t1, t2]) await t.evaluate(async () => { await (window as any).aura.acct.fetchVerifiedSession(); });
+      await t1.evaluate(async (A: string) => {
+        const q = (window as any).aura.q;
+        for (const n of [1, 2, 3, 4]) await q.enqueueOwned({ activityTitle: `nl ${n}`, activeWindow: 'NEUTRAL', logTimestamp: '2026-11-25T06:00:00.000Z', clientRequestId: `crid-nl${n}`, tempId: 'x', ownerUserId: A });
+      }, A);
+      const mark = serverLog.length;
+      await Promise.all([t1, t2].map((t) => t.evaluate(async () => (window as any).aura.sync.replayOfflineQueue())));
+      const posts = serverLog.slice(mark).filter((x) => x.path === '/api/habit-logs' && x.method === 'POST').length;
+      check(`CH7 (R4, real Chromium, Web Locks REMOVED) two pages replaying at once: each of 4 entries sent exactly once (${posts} sends)`, noLocks && posts === 4 && ['crid-nl1', 'crid-nl2', 'crid-nl3', 'crid-nl4'].every((c) => store.logs.filter((l) => l.clientRequestId === c).length === 1));
+      await context.close();
+    }
+
+    // ------------------------------------------------------------ CH8 (R4) migration racing settlement across pages: no resurrection
+    {
+      const { context, open, signIn } = await newContext();
+      await signIn('alicesynth@example.invalid');
+      const [t1, t2, t3] = [await open(), await open(), await open()];
+      const src = JSON.stringify([1, 2, 3].map((n) => ({ ...payload(`v2 ${n}`, `crid-mg${n}`), ownerUserId: A, tempId: 't' })));
+      await t1.evaluate(({ A, src }: { A: string; src: string }) => localStorage.setItem('offline_habit_queue_v2:' + A, src), { A, src });
+      const ids: string[] = await t1.evaluate(async (A: string) => { const r = await (window as any).aura.q.readOwnedQueue(A); return r.ok ? r.records.map((x: any) => x.recordId) : []; }, A);
+      // A stale context re-writes the source; t2 and t3 migrate while t1 settles all three, concurrently.
+      await t1.evaluate(({ A, src }: { A: string; src: string }) => localStorage.setItem('offline_habit_queue_v2:' + A, src), { A, src });
+      await Promise.all([
+        t2.evaluate(async (A: string) => (window as any).aura.q.readOwnedQueue(A), A),
+        t1.evaluate(async (ids: string[]) => (window as any).aura.q.settleRecords(ids), ids),
+        t3.evaluate(async (A: string) => (window as any).aura.q.readOwnedQueue(A), A),
+      ]);
+      const left = await t3.evaluate(async (A: string) => { const r = await (window as any).aura.q.readOwnedQueue(A); return r.ok ? r.records.length : -1; }, A);
+      check(`CH8 (R4, real Chromium) migration in two pages racing settlement in a third never recreates a settled entry (left: ${left})`, ids.length === 3 && left === 0);
+      await context.close();
+    }
+
+    // ------------------------------------------------------------ CH9 (R4) an OLD bundle keeps writing the legacy array during a new page's sign-out
+    {
+      store.logs.length = 0;
+      const { context, open, signIn } = await newContext();
+      await signIn('alicesynth@example.invalid');
+      const [oldTab, newTab] = [await open(), await open()];
+      await oldTab.evaluate(async (ps: any[]) => { for (const p of ps) await (window as any).oldEnqueue(localStorage, p, 't'); }, [payload('old 1', 'crid-old1'), payload('old 2', 'crid-old2')]);
+      await newTab.evaluate(async () => { await (window as any).aura.acct.fetchVerifiedSession(); });
+      const g = hold('/api/auth/logout', 'before');
+      const out = newTab.evaluate(async () => (window as any).aura.so.performSignOut({ fetch: (u: string, i: any) => fetch(u, i), confirm: () => true }));
+      await g.arrived;
+      await oldTab.evaluate(async (p: any) => (window as any).oldEnqueue(localStorage, p, 't'), payload('old 3 (during sign-out)', 'crid-old3'));
+      g.release();
+      const r = await out;
+      const arr = JSON.parse((await oldTab.evaluate(() => localStorage.getItem('offline_habit_queue'))) ?? '[]');
+      check(`CH9 (R4, real Chromium) sign-out never rewrites the shared legacy array: all 3 old-bundle entries survive, reported as kept (${r.legacyKept})`, r.outcome === 'signed-out' && arr.length === 3 && r.legacyKept === 3);
+      await context.close();
+    }
+
+    // ------------------------------------------------------------ CH10a (R4) A-2 reproduced WITHOUT the updated worker (residual for uncontrolled pages)
+    {
+      deploy.sw = OLD_SW; deploy.appHtml = 'old';
+      const { context, signIn, cookieUser } = await newContext();
+      const oldPage = await context.newPage();
+      await oldPage.goto(origin + '/app');
+      await oldPage.waitForFunction(async () => { const r = await navigator.serviceWorker.ready; return Boolean(r.active) && Boolean(navigator.serviceWorker.controller); }, null, { timeout: 15000 });
+      await signIn('alicesynth@example.invalid');
+      await oldPage.evaluate(async () => { await (window as any).handleLogout(); });
+      const screen = await oldPage.evaluate(() => document.body.dataset.screen);
+      check(`CH10a RESIDUAL (A-2, page still under the OLD Production worker): the old page shows "${screen}" while the session is still ${await cookieUser()}`, screen === 'signed-out' && (await cookieUser()) === A);
+      await context.close();
+    }
+
+    // ------------------------------------------------------------ CH10 (R4) old page + Production service worker, then the new worker is deployed
+    {
+      store.logs.length = 0;
+      deploy.sw = OLD_SW; deploy.appHtml = 'old';
+      const { context, signIn, cookieUser } = await newContext();
+      const oldPage = await context.newPage();
+      await oldPage.goto(origin + '/app');
+      await oldPage.waitForFunction(async () => { const r = await navigator.serviceWorker.ready; return Boolean(r.active) && Boolean(navigator.serviceWorker.controller); }, null, { timeout: 15000 });
+      await signIn('alicesynth@example.invalid');
+      // "Deploy": the new worker and the new bundle are served from now on; the old page stays open.
+      deploy.sw = NEW_SW; deploy.appHtml = 'new';
+      const changed = oldPage.evaluate(() => new Promise<boolean>((resolve) => { navigator.serviceWorker.addEventListener('controllerchange', () => resolve(true)); setTimeout(() => resolve(false), 15000); }));
+      const other = await context.newPage();
+      await other.goto(origin + '/app'); // any navigation in the origin makes the browser fetch the updated worker
+      const tookOver = await changed;
+      check('CH10 precondition (real Chromium): after a navigation elsewhere in the origin, the NEW worker takes control of the already-open OLD page', tookOver);
+      // The old page signs out with Production's own handleLogout (headerless).
+      const nav = oldPage.waitForURL(/aura_reloaded=upgrade/, { timeout: 15000 }).then(() => true, () => false);
+      await oldPage.evaluate(async () => { await (window as any).handleLogout(); }).catch(() => undefined);
+      const reloaded = await nav;
+      await oldPage.waitForFunction(() => (window as any).auraReady === true, null, { timeout: 15000 }).catch(() => undefined);
+      const logoutRefused = serverLog.filter((x) => x.path === '/api/auth/logout').some((x) => x.status === 503 && x.expected === null);
+      const session = await oldPage.evaluate(async () => { const r = await (window as any).aura.acct.fetchVerifiedSession(); return r.status === 'current' ? r.user.id : r.status; }).catch(() => 'no-new-bundle');
+      check('CH10 the old page\'s headerless sign-out is refused (503, cookie untouched) and the worker RELOADS that page into the current bundle (no lingering false "signed out" screen)', logoutRefused && reloaded && (await cookieUser()) === A);
+      check('CH10 the reloaded page runs the current bundle and shows the REAL session (still Alice), with the reload marker for its notice', session === A && (await oldPage.evaluate(() => (window as any).aura.swb.consumeReloadedNotice())) === true);
+      // A current-bundle page is never reloaded by the worker, even when the server refuses something.
+      const urlBefore = other.url();
+      await other.waitForFunction(() => (window as any).auraReady === true);
+      const st = await other.evaluate(async () => { await (window as any).aura.acct.fetchVerifiedSession(); return (await (window as any).__nativeFetch('/api/goals')).status; });
+      await other.waitForTimeout(800);
+      check(`CH10 a current-bundle page (announced to the worker) is NOT reloaded even when one of its requests is refused as out of date (${st})`, st === 503 && other.url() === urlBefore);
+      await context.close();
+    }
+
+    // ------------------------------------------------------------ CH11 (R4) cookie settlement through the worker: the CH4d race is serialized
+    {
+      deploy.sw = NEW_SW; deploy.appHtml = 'new';
+      const { context, open, signIn, cookieUser } = await newContext();
+      const boot = await context.newPage();
+      await boot.goto(origin + '/app');
+      await boot.waitForFunction(async () => { await navigator.serviceWorker.ready; return Boolean(navigator.serviceWorker.controller); }, null, { timeout: 15000 });
+      await signIn('alicesynth@example.invalid');
+      const y1 = await open();
+      const controlled = await y1.evaluate(() => Boolean(navigator.serviceWorker.controller));
+      await y1.evaluate(async () => { await (window as any).aura.acct.fetchVerifiedSession(); });
+      const gD = hold('/api/auth/logout', 'after');
+      const so2 = y1.evaluate(async () => (await (window as any).aura.so.performSignOut({ fetch: (i: any, n: any) => fetch(i, n), confirm: () => true })).outcome);
+      await gD.arrived;
+      // The same UNCOORDINATED sign-in as CH4d (a separate page, no auth lock), but from a page the worker controls.
+      const markSI = serverLog.length;
+      const uncoordinated = (async () => {
+        const p = await context.newPage(); await p.goto(origin + '/app');
+        await p.evaluate(async () => { await fetch('/api/auth/verify-code', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: 'bobsynth@example.invalid', code: '123456' }) }); });
+        await p.close();
+      })();
+      await new Promise((r) => setTimeout(r, 400));
+      const signInReachedServerEarly = serverLog.slice(markSI).some((x) => x.path === '/api/auth/verify-code');
+      gD.release();
+      const outcome = await so2; await uncoordinated;
+      const now = await cookieUser();
+      check(`CH11 (real Chromium, worker controlling both pages) the uncoordinated sign-in waits for the pending sign-out response, so it is NOT cleared by it (cookie now: ${now}; sign-out: ${outcome})`, controlled && !signInReachedServerEarly && now === B && outcome === 'signed-out');
+      await context.close();
     }
   } finally {
     await browser.close();

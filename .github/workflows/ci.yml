@@ -959,6 +959,20 @@ jobs:
         env:
           TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
         run: npx ts-node --project tsconfig.jsdom-tests.json test/rel04R2HeadReproduction.test.ts
+      # AURA-ANDROID-REL-04 R4 (assessment of b323d2a): IndexedDB queue integrity,
+      # account-bound server-rendered state and downloads, and b323d2a reproductions.
+      - name: Run REL-04 R4 queue integrity test
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/rel04R4QueueIntegrity.test.ts
+      - name: Run REL-04 R4 server-rendered account agreement and bound download test
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/rel04R4SsrAgreementJsdom.test.ts
+      - name: Run REL-04 R3-head (b323d2a) reproduction test
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/rel04R3HeadReproduction.test.ts
       # Pending replay reconciliation (was outside CI; structural assertion corrected in R3).
       - name: Run pending replay reconciliation test
         run: npx ts-node test/pendingReplayReconciliation.test.ts

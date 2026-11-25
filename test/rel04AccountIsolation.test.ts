@@ -11,7 +11,7 @@
  * DETERMINISTIC SIMULATIONS (held/failed requests, one process); they are not
  * a real multi-process browser race.
  */
-import { Device, addUser, check, finish, locks, logsOf, openTab, closeAllTabs, payload, queueKeys, queuedCrids, realPlansPost, resetStore, routes, storage, store, tick, WEB } from './rel04AccountIsolationHarness';
+import { Device, addUser, check, finish, locks, logsOf, openTab, closeAllTabs, payload, queueKeys, queuedCrids, clearQueueDb, idbFault, realPlansPost, resetStore, routes, storage, store, tick, WEB } from './rel04AccountIsolationHarness';
 import * as path from 'path';
 
 const { NextRequest } = require(require.resolve('next/server', { paths: [path.join(WEB, 'app', 'api', 'habit-logs')] }));
@@ -21,15 +21,17 @@ const A = 'synthetic-user-a';
 const B = 'synthetic-user-b';
 addUser(A, 'alicesynth@example.invalid');
 addUser(B, 'bobsynth@example.invalid');
-const qA = () => queueKeys(A).length;
-const qB = () => queueKeys(B).length;
+const qA = async () => (await queueKeys(A)).length;
+const qB = async () => (await queueKeys(B)).length;
 
-function fresh() {
+async function fresh() {
   resetStore();
   storage.clear();
   storage.fail = { get: false, set: false, remove: false };
+  idbFault.open = false; idbFault.read = false; idbFault.write = false;
   locks.enabled = true;
   closeAllTabs();
+  await clearQueueDb();
 }
 async function signedInTab(dev: Device, user: string, id = 'tab1') {
   dev.signIn(user);
@@ -57,7 +59,7 @@ function routeReq(method: string, url: string, cookieUser: string | null, header
 async function main() {
   // ================================================================ server boundary
   {
-    fresh();
+    await fresh();
     const before = store.dbCalls.length;
     const direct = await routes['POST /api/habit-logs'](routeReq('POST', '/api/habit-logs', B, { 'X-Aura-Expected-Account': A }, payload('x', 'c1')));
     check('SB1 habit-logs route: A expected + B session -> 409 account_mismatch, zero db calls', direct.status === 409 && (await direct.json()).code === 'account_mismatch' && store.dbCalls.length === before && store.logs.length === 0);
@@ -91,14 +93,14 @@ async function main() {
 
   // ================================================================ C1 A queues, signs out, B signs in
   {
-    fresh();
+    await fresh();
     const dev = new Device();
     const tab = await signedInTab(dev, A);
     await queueOffline(tab, dev, 'A walk', 'crid-a1');
     await queueOffline(tab, dev, 'A read', 'crid-a2');
     let asked = '';
     const out = await tab.so.performSignOut({ fetch: dev.fetch as any, confirm: (m) => { asked = m; return true; } });
-    check('C1 sign-out asked about the 2 pending logs, acknowledged, discarded exactly them', out.outcome === 'signed-out' && out.discardFailed === 0 && /2 activity logs/.test(asked) && qA() === 0 && dev.cookie === null);
+    check('C1 sign-out asked about the 2 pending logs, acknowledged, discarded exactly them', out.outcome === 'signed-out' && out.owned?.failed === 0 && out.owned?.removed === 2 && /2 activity logs/.test(asked) && (await qA()) === 0 && dev.cookie === null);
     dev.signIn(B);
     await tab.acct.fetchVerifiedSession(dev.fetch as any);
     const r = await tab.sync.replayOfflineQueue(dev.fetch as any);
@@ -107,7 +109,7 @@ async function main() {
 
   // ================================================================ C2 replay in progress when logout starts
   {
-    fresh();
+    await fresh();
     const dev = new Device();
     const tab = await signedInTab(dev, A);
     for (const n of [1, 2, 3]) await queueOffline(tab, dev, `A item ${n}`, `crid-r${n}`);
@@ -129,7 +131,7 @@ async function main() {
 
   // ================================================================ C3 unresolved direct writes before logout confirmation
   for (const phase of ['before', 'after'] as const) {
-    fresh();
+    await fresh();
     const dev = new Device();
     const tab = await signedInTab(dev, A);
     const gate = dev.hold('POST', '/api/habit-logs', phase);
@@ -140,33 +142,33 @@ async function main() {
     const w = await write;
     gate.release();
     const committed = logsOf(A).length;
-    check(`C3(${phase}) sign-out aborted the in-flight write; its outcome is unresolved, so it STAYS in A's queue`, w.kind === 'account-changed' && (w as any).keptForAccount === true && qA() === 1);
-    check(`C3(${phase}) the confirmation counts it, says it may already be saved, and Cancel keeps A signed in`, out.outcome === 'cancelled' && /1 activity log/.test(asked) && /may already have been saved/.test(asked) && dev.cookie !== null);
+    check(`C3(${phase}) sign-out aborted the in-flight write; its outcome is unresolved, so it STAYS in A's queue`, w.kind === 'account-changed' && (w as any).keptForAccount === true && (await qA()) === 1);
+    check(`C3(${phase}) the confirmation counts it, says it may already be saved, and Cancel keeps A signed in`, out.outcome === 'cancelled' && /1 activity log/.test(asked) && /already sent and may have been saved/.test(asked) && dev.cookie !== null);
     await tab.acct.fetchVerifiedSession(dev.fetch as any);
     await tab.sync.replayOfflineQueue(dev.fetch as any);
-    check(`C3(${phase}) replay with the original clientRequestId resolves it exactly once for A (server ${phase === 'after' ? 'had committed' : 'had not committed'})`, logsOf(A).filter((l) => l.clientRequestId === 'crid-if').length === 1 && qA() === 0 && committed === (phase === 'after' ? 1 : 0));
+    check(`C3(${phase}) replay with the original clientRequestId resolves it exactly once for A (server ${phase === 'after' ? 'had committed' : 'had not committed'})`, logsOf(A).filter((l) => l.clientRequestId === 'crid-if').length === 1 && (await qA()) === 0 && committed === (phase === 'after' ? 1 : 0));
   }
 
   // ================================================================ C4 A identity + B session (unrecognized cookie change)
   {
-    fresh();
+    await fresh();
     const dev = new Device();
     const tab = await signedInTab(dev, A);
     dev.signIn(B); // another tab signed in; this tab has not heard
     const r = await tab.sync.submitActivityLog(payload('tab thinks A', 'crid-s4'), 't', dev.fetch as any);
-    check('C4 refused by the server (409), kept for A, nothing stored for B', r.kind === 'account-changed' && (r as any).keptForAccount && qA() === 1 && qB() === 0 && store.logs.length === 0);
+    check('C4 refused by the server (409), kept for A, nothing stored for B', r.kind === 'account-changed' && (r as any).keptForAccount && (await qA()) === 1 && (await qB()) === 0 && store.logs.length === 0);
   }
 
   // ================================================================ C5 multi-tab queue interleavings (per-entry atomic storage)
   {
-    fresh();
+    await fresh();
     const dev = new Device();
     const tab1 = await signedInTab(dev, A, 'tab1');
     const tab2 = openTab('tab2');
     await tab2.acct.fetchVerifiedSession(dev.fetch as any);
     await queueOffline(tab1, dev, 'A one', 'crid-m1');
     await queueOffline(tab2, dev, 'A two', 'crid-m2');
-    check('C5a two tabs enqueue for A: both entries kept (no shared-array overwrite)', qA() === 2);
+    check('C5a two tabs enqueue for A: both entries kept (no shared-array overwrite)', (await qA()) === 2);
     const gate = dev.hold('POST', '/api/habit-logs', 'before');
     const rep1 = tab1.sync.replayOfflineQueue(dev.fetch as any);
     await gate.arrived;
@@ -175,23 +177,24 @@ async function main() {
     check('C5b a second tab\'s replay while one runs is excluded by the shared lock', rep2.stoppedBecause === 'busy');
     gate.release();
     const r1 = await rep1;
-    const left = queuedCrids(A);
+    const left = await queuedCrids(A);
     check('C5c tab1 settled and removed only the entries it read; tab2\'s new entry survived', r1.confirmed === 2 && JSON.stringify(left) === '["crid-m3"]');
     // Discard snapshot: an entry that appears AFTER confirmation survives the discard.
     let injected = false;
+    const db: IDBDatabase = await tab2.q.__openQueueDbForTests();
     const out = await tab1.so.performSignOut({
       fetch: dev.fetch as any,
       confirm: () => {
         // Simulates a tab that did not observe the transition (no Web Locks, missed marker) adding work after the question.
-        storage.setItem(`aura_q4:${A}:crid-late:rlate`, JSON.stringify({ ...payload('late', 'crid-late'), ownerUserId: A, tempId: 't', recordId: 'rlate', queuedAt: Date.now() }));
+        db.transaction(['records'], 'readwrite').objectStore('records').put({ recordId: 'rlate', ownerUserId: A, clientRequestId: 'crid-late', queuedAt: Date.now(), item: { ...payload('late', 'crid-late'), ownerUserId: A, tempId: 't', recordId: 'rlate' } });
         injected = true;
         return true;
       },
     });
-    check('C5d confirmed discard removes exactly the confirmed snapshot; work added afterwards is kept for A', out.outcome === 'signed-out' && injected && JSON.stringify(queuedCrids(A)) === '["crid-late"]');
+    check('C5d confirmed discard removes exactly the confirmed snapshot; work added afterwards is kept for A', out.outcome === 'signed-out' && injected && JSON.stringify(await queuedCrids(A)) === '["crid-late"]');
   }
   {
-    fresh();
+    await fresh();
     locks.enabled = false; // supported environment without Web Locks
     const dev = new Device();
     const tab1 = await signedInTab(dev, A, 'tab1');
@@ -199,30 +202,30 @@ async function main() {
     await tab2.acct.fetchVerifiedSession(dev.fetch as any);
     for (const n of [1, 2]) await queueOffline(tab1, dev, `A n${n}`, `crid-n${n}`);
     const [x, y] = await Promise.all([tab1.sync.replayOfflineQueue(dev.fetch as any), tab2.sync.replayOfflineQueue(dev.fetch as any)]);
-    check('C6 without Web Locks two tabs may replay concurrently; nothing is lost and nothing is duplicated (clientRequestId)', qA() === 0 && logsOf(A).length === 2 && x.stoppedBecause === null && y.stoppedBecause === null);
+    check('C6 without Web Locks two tabs may replay concurrently; nothing is lost and nothing is duplicated (clientRequestId)', (await qA()) === 0 && logsOf(A).length === 2 && x.stoppedBecause === null && y.stoppedBecause === null);
   }
 
   // ================================================================ C7 storage failures
   {
-    fresh();
+    await fresh();
     const dev = new Device();
     const tab = await signedInTab(dev, A);
-    storage.fail.set = true;
+    idbFault.write = true;
     dev.fault('POST', '/api/habit-logs', 'network-before');
     const r = await tab.sync.submitActivityLog(payload('cannot store', 'crid-f1'), 't', dev.fetch as any);
     check('C7a write fails AND storage write fails -> not-stored (reported, never claimed pending)', r.kind === 'not-stored');
-    storage.fail.set = false;
+    idbFault.write = false;
     await queueOffline(tab, dev, 'stored 1', 'crid-f2');
     await queueOffline(tab, dev, 'stored 2', 'crid-f3');
-    storage.fail.get = true;
+    idbFault.read = true;
     let asked = '';
     const c = await tab.so.performSignOut({ fetch: dev.fetch as any, confirm: (m) => { asked = m; return false; } });
     check('C7b unreadable storage: asked (cannot check) and Cancel keeps the session', c.outcome === 'cancelled' && /couldn't check this device/i.test(asked) && dev.cookie !== null);
-    storage.fail.get = false;
-    storage.fail.remove = true;
+    idbFault.read = false;
+    idbFault.write = true;
     const out = await signOut(tab, dev);
-    storage.fail.remove = false;
-    check('C7c removal failure after acknowledged logout: signed out AND reported truthfully (2 not removed)', out.outcome === 'signed-out' && out.discardFailed === 2 && qA() === 2);
+    idbFault.write = false;
+    check('C7c removal failure after acknowledged logout: signed out AND reported truthfully (2 not removed)', out.outcome === 'signed-out' && out.owned?.failed === 2 && (await qA()) === 2);
     dev.signIn(B);
     await tab.acct.fetchVerifiedSession(dev.fetch as any);
     await tab.sync.replayOfflineQueue(dev.fetch as any);
@@ -231,17 +234,17 @@ async function main() {
 
   // ================================================================ C8 bounded logout stages
   {
-    fresh();
+    await fresh();
     const dev = new Device();
     const tab = await signedInTab(dev, A);
     await queueOffline(tab, dev, 'A pending', 'crid-t1');
     dev.fault('POST', '/api/auth/logout', 'hang');
     const t0 = Date.now();
     const out = await signOut(tab, dev, { logoutTimeoutMs: 60, reconcileTimeoutMs: 60 });
-    check('C8a logout request that never settles: bounded; reconciled to the same account -> failed, A kept with its queue', out.outcome === 'failed' && tab.acct.getVerifiedAccount() === A && qA() === 1 && Date.now() - t0 < 2000);
+    check('C8a logout request that never settles: bounded; reconciled to the same account -> failed, A kept with its queue', out.outcome === 'failed' && tab.acct.getVerifiedAccount() === A && (await qA()) === 1 && Date.now() - t0 < 2000);
     dev.fault('POST', '/api/auth/logout', 'hang-body');
     const out2 = await signOut(tab, dev, { logoutTimeoutMs: 60, reconcileTimeoutMs: 60 });
-    check('C8b acknowledgement body that never finishes (server DID sign out): bounded, reconciled -> signed-out-unconfirmed, queue kept', out2.outcome === 'signed-out-unconfirmed' && qA() === 1);
+    check('C8b acknowledgement body that never finishes (server DID sign out): bounded, reconciled -> signed-out-unconfirmed, queue kept', out2.outcome === 'signed-out-unconfirmed' && (await qA()) === 1);
     dev.signIn(A);
     await tab.acct.fetchVerifiedSession(dev.fetch as any);
     dev.fault('POST', '/api/auth/logout', 'hang');
@@ -249,20 +252,20 @@ async function main() {
     const out3 = await signOut(tab, dev, { logoutTimeoutMs: 60, reconcileTimeoutMs: 60 });
     let refused = '';
     try { await tab.sync.submitActivityLog(payload('while unverified', 'crid-t2'), 't', dev.fetch as any); } catch (e: any) { refused = e?.reason; }
-    check('C8c logout AND reconciliation never settle: bounded -> unverified; bound writes refused; queue kept', out3.outcome === 'unverified' && tab.acct.getVerifiedAccount() === undefined && refused === 'unverified' && qA() === 1);
+    check('C8c logout AND reconciliation never settle: bounded -> unverified; bound writes refused; queue kept', out3.outcome === 'unverified' && tab.acct.getVerifiedAccount() === undefined && refused === 'unverified' && (await qA()) === 1);
     const back = await tab.acct.fetchVerifiedSession(dev.fetch as any);
     check('C8d recovery: a fresh session answer resumes A (the Retry path)', back.status === 'current' && tab.acct.getVerifiedAccount() === A);
   }
 
   // ================================================================ C9 HTTP failures are ambiguous
   {
-    fresh();
+    await fresh();
     const dev = new Device();
     const tab = await signedInTab(dev, A);
     await queueOffline(tab, dev, 'A pending', 'crid-h1');
     dev.fault('POST', '/api/auth/logout', 'process-then-500'); // server signed out; the client sees a 500
     const out = await signOut(tab, dev);
-    check('C9a 500 after the server changed the session is NOT treated as "still A": reconciled -> signed-out-unconfirmed', out.outcome === 'signed-out-unconfirmed' && tab.acct.getVerifiedAccount() === null && qA() === 1);
+    check('C9a 500 after the server changed the session is NOT treated as "still A": reconciled -> signed-out-unconfirmed', out.outcome === 'signed-out-unconfirmed' && tab.acct.getVerifiedAccount() === null && (await qA()) === 1);
     dev.signIn(A);
     await tab.acct.fetchVerifiedSession(dev.fetch as any);
     dev.fault('POST', '/api/auth/logout', 'json500');
@@ -272,13 +275,13 @@ async function main() {
     for (const mode of ['html200', 'redirect', 'json200-wrong', 'json-suffix-type'] as const) {
       dev.fault('POST', '/api/auth/logout', mode);
       const o = await signOut(tab, dev);
-      check(`C9c unexpected answer '${mode}' is never an acknowledgement; reconciled -> failed, A kept`, o.outcome === 'failed' && tab.acct.getVerifiedAccount() === A && qA() === 1);
+      check(`C9c unexpected answer '${mode}' is never an acknowledgement; reconciled -> failed, A kept`, o.outcome === 'failed' && tab.acct.getVerifiedAccount() === A && (await qA()) === 1);
     }
   }
 
   // ================================================================ C10 sign-in while logout is pending; concurrent logout across tabs
   for (const withLocks of [true, false]) {
-    fresh();
+    await fresh();
     locks.enabled = withLocks;
     const dev = new Device();
     dev.verifyAs['bobsynth@example.invalid'] = B;
@@ -301,14 +304,14 @@ async function main() {
 
   // ================================================================ C11 old logout cannot clear a newer sign-in (account-bound logout)
   {
-    fresh();
+    await fresh();
     const dev = new Device();
     const tab = await signedInTab(dev, A);
     await queueOffline(tab, dev, 'A pending', 'crid-o1');
     // An uncoordinated sign-in as B lands after the question but BEFORE A's
     // logout is sent, so the logout carries B's cookie.
     const o = await tab.so.performSignOut({ fetch: dev.fetch as any, confirm: () => { dev.signIn(B); return true; } });
-    check('C11 A\'s logout carrying B\'s session is refused by the server: B stays signed in; client switches to B; A\'s queue kept', o.outcome === 'account-changed' && dev.sessionUser() === B && tab.acct.getVerifiedAccount() === B && qA() === 1);
+    check('C11 A\'s logout carrying B\'s session is refused by the server: B stays signed in; client switches to B; A\'s queue kept', o.outcome === 'account-changed' && dev.sessionUser() === B && tab.acct.getVerifiedAccount() === B && (await qA()) === 1);
     // Documented limitation (report R2.6): a logout SENT with A's cookie is a
     // valid logout of A; if an uncoordinated sign-in's response lands before
     // that logout's response, the browser applies the logout's Set-Cookie
@@ -317,7 +320,7 @@ async function main() {
 
   // ================================================================ C12 session answer ordering
   {
-    fresh();
+    await fresh();
     const dev = new Device();
     dev.signIn(A);
     const tab = openTab('tab1');
@@ -331,7 +334,7 @@ async function main() {
     check('C12a concurrent same-epoch answers: the newer (B) wins; the late older (A) answer is never applied -- its caller gets the newer answer', second.status === 'current' && late.status === 'current' && (late as any).user.id === B && tab.acct.getVerifiedAccount() === B);
   }
   {
-    fresh();
+    await fresh();
     const dev = new Device();
     const tab = await signedInTab(dev, A);
     const gate = dev.hold('GET', '/api/auth/session', 'after');
@@ -345,7 +348,7 @@ async function main() {
     check('C12b the held "A" answer across a cross-tab invalidation is discarded; a fresh check finds B (A is not restored)', r.status === 'current' && (r as any).user.id === B && tab.acct.getVerifiedAccount() === B && dev.count('GET', '/api/auth/session') === sessionsBefore + 1);
   }
   {
-    fresh();
+    await fresh();
     const dev = new Device();
     const tab = await signedInTab(dev, A);
     await queueOffline(tab, dev, 'x', 'crid-c12');

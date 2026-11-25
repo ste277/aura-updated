@@ -56,6 +56,10 @@ class MemoryStorage {
   key(i: number): string | null { return Object.keys(this.store)[i] ?? null; }
 }
 (global as any).localStorage = new MemoryStorage();
+// AURA-ANDROID-REL-04 (R4): the queue is IndexedDB; entries written in the R3
+// localStorage format below are MIGRATED on read (which this file therefore
+// also exercises). A spec-conformant in-memory IndexedDB stands in for the browser's.
+{ const fidb = require('fake-indexeddb'); (global as any).indexedDB = fidb.indexedDB; (global as any).IDBKeyRange = fidb.IDBKeyRange; }
 
 import {
   readOfflineHabitQueue,
@@ -70,7 +74,15 @@ import { LoggedEntryItem } from '../apps/web/components/CalendarViewSection';
 const OWNER = 'synthetic-user-a';
 // AURA-ANDROID-REL-04 (R3): immutable records, one per key (aura_q4:<owner>:<clientRequestId>:<recordId>).
 const OWNED_KEY = 'aura_q4:' + OWNER + ':corrupt-entry:r0';
+async function clearIdb() {
+  const db: IDBDatabase = await require('../apps/web/lib/offlineHabitQueue').__openQueueDbForTests();
+  const t = db.transaction(['records', 'claims', 'dispatches', 'tombstones'], 'readwrite');
+  for (const n of ['records', 'claims', 'dispatches', 'tombstones']) t.objectStore(n).clear();
+  await new Promise<void>((res) => { t.oncomplete = () => res(); });
+}
+let pendingClear: Promise<void> = Promise.resolve();
 function setQueue(items: unknown[]) {
+  pendingClear = clearIdb();
   const ls = (global as any).localStorage;
   for (const k of Object.keys((ls as any).store ?? {})) if (k.startsWith('aura_q')) ls.removeItem(k);
   items.forEach((i, n) => {
@@ -106,9 +118,11 @@ function confirmedEntry(id: string, clientRequestId: string, title = 'Deep Work'
 // (1. pending survives reload, 2. multiple entries, 5. stable identity).
 // ============================================================
 
-(global as any).localStorage.clear();
+async function readQ() { await pendingClear; return readOfflineHabitQueue(OWNER); }
+(async () => {
+(global as any).localStorage.clear(); pendingClear = clearIdb();
 setQueue([queuedA]);
-const read1 = readOfflineHabitQueue(OWNER);
+const read1 = (await readQ());
 check('readOfflineHabitQueue reads back the one queued entry', read1.length === 1);
 const reconstructed1 = read1.map(toPendingLoggedEntry);
 check('the reconstructed entry has syncStatus === \'pending\' (4. no accidental promotion -- always literal, never derived)', reconstructed1[0]?.syncStatus === 'pending');
@@ -120,9 +134,9 @@ check('the reconstructed entry preserves activityTitle/loggedAt/notes/source/sig
   reconstructed1[0]?.activitySignificance === 'HIGH'
 ));
 
-(global as any).localStorage.clear();
+(global as any).localStorage.clear(); pendingClear = clearIdb();
 setQueue([queuedA, queuedB]);
-const reconstructedMulti = readOfflineHabitQueue(OWNER).map(toPendingLoggedEntry);
+const reconstructedMulti = (await readQ()).map(toPendingLoggedEntry);
 check('two queued entries both reconstruct independently', reconstructedMulti.length === 2 && reconstructedMulti.every((e) => e.syncStatus === 'pending'));
 check('each keeps its own distinct id (clientRequestId)', reconstructedMulti[0]?.id !== reconstructedMulti[1]?.id);
 
@@ -136,9 +150,9 @@ check('clientRequestId is carried onto the reconstructed entry itself (never a f
 // once it's gone from the queue (inherent to reading live, not cached).
 // ============================================================
 
-(global as any).localStorage.clear();
+(global as any).localStorage.clear(); pendingClear = clearIdb();
 setQueue([queuedB]); // queuedA removed, as if replay had confirmed/rejected + removed it
-const afterRemoval = readOfflineHabitQueue(OWNER);
+const afterRemoval = (await readQ());
 check('an item removed from the queue is no longer read back', !afterRemoval.some((item) => item.clientRequestId === queuedA.clientRequestId));
 check('the remaining still-queued item is still read back', afterRemoval.some((item) => item.clientRequestId === queuedB.clientRequestId));
 
@@ -148,22 +162,22 @@ check('the remaining still-queued item is still read back', afterRemoval.some((i
 // malformed sibling destroy otherwise-valid entries.
 // ============================================================
 
-(global as any).localStorage.clear();
-check('no queue key at all -> empty array, no throw', (() => { try { return readOfflineHabitQueue(OWNER).length === 0; } catch { return false; } })());
+(global as any).localStorage.clear(); pendingClear = clearIdb();
+check('no queue key at all -> empty array, no throw', (await readQ().then((r) => r.length === 0, () => false)));
 
 setQueue([]); (global as any).localStorage.setItem(OWNED_KEY, 'not valid json{{{');
-check('corrupt JSON -> empty array, no throw', (() => { try { return readOfflineHabitQueue(OWNER).length === 0; } catch { return false; } })());
+check('corrupt JSON -> empty array, no throw', (await readQ().then((r) => r.length === 0, () => false)));
 
 setQueue([]); (global as any).localStorage.setItem(OWNED_KEY, JSON.stringify({ not: 'an array' }));
-check('a non-array value -> empty array, no throw', (() => { try { return readOfflineHabitQueue(OWNER).length === 0; } catch { return false; } })());
+check('a non-array value -> empty array, no throw', (await readQ().then((r) => r.length === 0, () => false)));
 
 setQueue([queuedA, { activityTitle: 'Missing required fields' }]);
-const mixedRead = readOfflineHabitQueue(OWNER);
+const mixedRead = (await readQ());
 check('a malformed sibling is dropped while a valid sibling in the SAME queue still reconstructs (one bad item does not destroy the rest)', mixedRead.length === 1 && mixedRead[0]?.clientRequestId === queuedA.clientRequestId);
 
 setQueue([{ ...queuedA, logSource: 'NOT_A_REAL_SOURCE' }]);
-check('an invalid logSource degrades to the safe MANUAL default rather than propagating garbage', readOfflineHabitQueue(OWNER).map(toPendingLoggedEntry)[0]?.logSource === 'MANUAL');
-(global as any).localStorage.clear();
+check('an invalid logSource degrades to the safe MANUAL default rather than propagating garbage', (await readQ()).map(toPendingLoggedEntry)[0]?.logSource === 'MANUAL');
+(global as any).localStorage.clear(); pendingClear = clearIdb();
 
 // ============================================================
 // mergeConfirmedLogEntries -- the loadUserDataAndLogs merge, called
@@ -316,11 +330,11 @@ check(
   'page.tsx imports the extracted helpers from the new lib module',
   /import \{ readOfflineHabitQueue, toPendingLoggedEntry, mergeConfirmedLogEntries, selectQueueItemsToReconstruct \} from '\.\.\/lib\/offlineHabitQueue';/.test(pageSource)
 );
-check('loadUserDataAndLogs calls mergeConfirmedLogEntries (no re-implemented inline merge logic)', /return mergeConfirmedLogEntries\(confirmedEntries, prev, queuedClientRequestIds\);/.test(pageSource));
+check('loadUserDataAndLogs calls mergeConfirmedLogEntries (no re-implemented inline merge logic)', /setLogEntries\(\(prev\) => mergeConfirmedLogEntries\(confirmedEntries, prev, queuedClientRequestIds\)\);/.test(pageSource));
 check('the confirmed fetch propagates clientRequestId from the server row onto each entry', /clientRequestId: l\.clientRequestId \?\? undefined,/.test(pageSource));
 check('the reload-reconstruction effect calls selectQueueItemsToReconstruct (no re-implemented inline selection logic)', /const reconstructed = selectQueueItemsToReconstruct\(queued, prev\)\.map\(toPendingLoggedEntry\);/.test(pageSource));
 check('an empty queue is a no-op in the reconstruction (no unnecessary setLogEntries call)', /if \(queued\.length > 0\) \{/.test(pageSource));
-check('AURA-ANDROID-REL-04: reconstruction reads only the verified account\'s queue', /const queued = readOfflineHabitQueue\(check\.user\.id\);/.test(pageSource));
+check('AURA-ANDROID-REL-04: reconstruction reads only the verified account\'s queue (R4: awaited IndexedDB read, dropped if the account changed meanwhile)', /const queued = await readOfflineHabitQueue\(check\.user\.id\);\s*if \(accountIdRef\.current !== check\.user\.id\) return;/.test(pageSource));
 
 check('handleLogActivity is unchanged: still returns Promise<\'confirmed\' | \'pending\'>', /Promise<'confirmed' \| 'pending'>/.test(pageSource));
 check(
@@ -352,3 +366,4 @@ if (!allPassed) {
 } else {
   console.log('\nALL PENDING ACTIVITY RELOAD VISIBILITY CHECKS PASSED');
 }
+})().catch((e) => { console.error(e); process.exit(1); });

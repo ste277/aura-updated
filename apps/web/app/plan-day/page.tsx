@@ -7,6 +7,7 @@ import { resolvePlanDayServerProps, resolveGoalActivityHandoff, resolveCaptureHa
 import { createRealGoalDemandCandidatesDeps } from '../../lib/goalDemandCandidates';
 import { parseHorizonSearchParam } from '../../lib/planningHorizon';
 import { PlanDayClient } from './PlanDayClient';
+import { resolveServerAccount } from '../../lib/serverAccount';
 
 /**
  * Day Constructor V1 -- PR F2. The user-reachable "Plan my day" entry
@@ -50,6 +51,7 @@ export default async function PlanDayPage({
   searchParams: { horizon?: string | string[]; fromGoal?: string | string[]; activities?: string | string[]; captures?: string | string[] };
 }) {
   const horizon = parseHorizonSearchParam(searchParams.horizon);
+  const serverAccount = await resolveServerAccount();
   const bootstrap = await resolvePlanDayServerProps({
     getSessionToken: () => cookies().get(SESSION_COOKIE_NAME)?.value,
     verifySession: (token) => verifySessionToken(token),
@@ -120,9 +122,10 @@ export default async function PlanDayPage({
   // inclusion). On LOAD_FAILED nothing is marked: legacy manual rows.
   const handoffGoalActivities = markCanonicalGoalDemandHandoff(goalActivities, automaticGoalDemand.status === 'OK' ? automaticGoalDemand.manualCanonicalGoalActivityIds : []);
 
-  // AURA-ANDROID-REL-04 (R3): server-rendered from the cookie's account -> reload on account change.
+  // AURA-ANDROID-REL-04 (R3/R4): every prop below was resolved for `serverAccount`; the client
+  // shows PlanDayClient (and enables its actions) only once its own verification agrees.
   return (
-    <AccountScoped onChange="reload">
+    <AccountScoped onChange="reload" serverAccount={serverAccount}>
     <PlanDayClient
       timezone={bootstrap?.timezone ?? null}
       planningDate={bootstrap?.planningDate ?? null}

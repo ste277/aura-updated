@@ -178,6 +178,8 @@ export function subscribeAccount(listener: () => void): () => void {
 }
 
 export function getAccountEpoch(): number { return state.epoch; }
+/** This browsing context's id (claims on queued work are held per context). */
+export function getTabId(): string { return tabId; }
 export function getVerifiedAccount(): VerifiedAccount { return state.account; }
 
 function foreignMarkerActive(now = Date.now()): boolean {

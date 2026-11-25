@@ -4,6 +4,7 @@ import { useEffect, useState, useMemo } from 'react';
 import { CITY_OPTIONS } from '../lib/cities';
 import type { CityOption } from '../lib/cities';
 import { SouthIndianChart } from './SouthIndianChart';
+import { downloadBound, downloadResultMessage } from '../lib/boundDownload';
 
 interface GrahaPlacement {
   graha: string;
@@ -196,13 +197,14 @@ export function BirthChartSection() {
         </span>
         {hasProfile && (
           <div style={{ display: 'flex', gap: 12 }}>
-            <a
-              href="/api/calendar/feed"
-              download
-              style={{ fontSize: 11, color: 'var(--as-abhijit, #4ade80)', textDecoration: 'none' }}
+            {/* AURA-ANDROID-REL-04 IR-01 (R4): bound to the account tapped under (lib/boundDownload.ts). */}
+            <button
+              type="button"
+              onClick={async () => { const r = await downloadBound('/api/calendar/feed', 'auraschedule.ics'); const m = downloadResultMessage(r); if (m) window.alert(m); }}
+              style={{ fontSize: 11, color: 'var(--as-abhijit, #4ade80)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
             >
               📅 Export iCal
-            </a>
+            </button>
             <button
               type="button"
               onClick={handleToggleForm}

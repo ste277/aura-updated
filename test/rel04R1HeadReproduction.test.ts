@@ -14,7 +14,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as vm from 'vm';
 import { execFileSync } from 'child_process';
-import { Device, WEB, addUser, check, closeAllTabs, finish, logsOf, openTab, payload, resetStore, routes, storage, store } from './rel04AccountIsolationHarness';
+import { Device, WEB, addUser, check, clearQueueDb, closeAllTabs, finish, logsOf, openTab, payload, resetStore, routes, storage, store } from './rel04AccountIsolationHarness';
 
 const R1 = 'd09449b655d21c213f8bbb29cf90f5bdc71c208e';
 const FIX = path.join(__dirname, 'fixtures', 'rel04-r1-head');
@@ -116,8 +116,7 @@ async function main() {
     check('D1 CORRECTED new client: legacy entries are not replayed or assigned automatically (quarantined)', r.attempted === 0 && store.logs.length === 0 && storage.data.has('offline_habit_queue'));
     check('D1 CORRECTED (R3): there is no way to assign unowned legacy entries to an account (no adopt API)', !('adoptLegacyQueue' in tab.q));
     const snap = tab.q.readLegacySnapshot();
-    const discard = snap.ok ? tab.q.discardLegacySnapshot(snap) : null;
-    check('D1 CORRECTED (R3): only an explicit discard of the confirmed snapshot removes them; nothing is stored for any account', !!discard && discard.removed === 2 && !discard.failed && !storage.data.has('offline_habit_queue') && store.logs.length === 0);
+    check('D1 CORRECTED (R4): they are counted, kept unchanged (never rewritten while older writers may be active), and nothing is stored for any account', snap.ok && snap.count === 2 && storage.data.has('offline_habit_queue') && !('discardLegacySnapshot' in tab.q) && store.logs.length === 0);
   }
 
   // ================= D2 ordinary plan creation without account binding
@@ -166,16 +165,14 @@ async function main() {
     interleave(r1Queue, A, (k) => k === 'offline_habit_queue_v2:' + A);
     const r1Items = JSON.parse(storage.data.get('offline_habit_queue_v2:' + A) ?? '[]').map((i: any) => i.clientRequestId);
     check(`D4 R1 HEAD: interleaved enqueues lose an entry (kept: ${JSON.stringify(r1Items)})`, r1Items.length === 1);
-    // Corrected: an enqueue never reads before writing; force the same interleaving at its write.
+    // Corrected (R4): each enqueue is ONE IndexedDB transaction; two contexts enqueueing at once are serialized.
     fresh();
-    let injected = false;
-    const realSet = storage.setItem.bind(storage);
-    (storage as any).setItem = (k: string, v: string) => {
-      if (!injected && k.startsWith(`aura_q4:${A}:`)) { injected = true; currentQueue.enqueueOwned({ ...payload('context 2', 'crid-ctx2'), tempId: 't2', ownerUserId: A }); }
-      return realSet(k, v);
-    };
-    try { currentQueue.enqueueOwned({ ...payload('context 1', 'crid-ctx1'), tempId: 't1', ownerUserId: A }); } finally { (storage as any).setItem = realSet; }
-    check('D4 CORRECTED: immutable per-record keys -- both interleaved enqueues kept', currentQueue.readOfflineHabitQueue(A).length === 2);
+    await clearQueueDb();
+    await Promise.all([
+      currentQueue.enqueueOwned({ ...payload('context 1', 'crid-ctx1'), tempId: 't1', ownerUserId: A }),
+      currentQueue.enqueueOwned({ ...payload('context 2', 'crid-ctx2'), tempId: 't2', ownerUserId: A }),
+    ]);
+    check('D4 CORRECTED (R4): concurrent enqueues are atomic transactions -- both kept', (await currentQueue.readOfflineHabitQueue(A)).length === 2);
   }
 
   // ================= D5 concurrent same-epoch session answers

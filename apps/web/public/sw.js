@@ -17,12 +17,81 @@ self.addEventListener('activate', (event) => {
   );
 });
 
+// AURA-ANDROID-REL-04 (R4) -- compatibility bridge for pages loaded BEFORE the
+// account boundary (old bundles cannot be changed; this worker controls them
+// once the browser has fetched this version, which it does on the next
+// navigation anywhere in the origin; skipWaiting + clients.claim above then
+// apply it to already-open pages).
+//  1. Refresh path (activation blockers A-1/A-2): an /api request WITHOUT the
+//     X-Aura-Expected-Account header that the server refuses with 503
+//     client_upgrade_required came from an out-of-date page. That page is
+//     reloaded (once) into the current bundle, with ?aura_reloaded=upgrade so
+//     the new page can say what happened. This includes an old page's sign-out
+//     (refused so it cannot clear a replacement session): instead of leaving a
+//     false "signed out" screen, the page reloads and shows the real session.
+//     Pages of the current bundle announce themselves and are never reloaded.
+//  2. Cookie settlement (A-3): sign-in and sign-out requests from EVERY page
+//     this worker controls (old or new bundle, with or without Web Locks) are
+//     sent one at a time; the next starts only after the previous response
+//     (and its Set-Cookie) has arrived, so a stale sign-out response can no
+//     longer land after a newer sign-in and clear it. Bounded wait.
+// Pages this worker does not control (service workers unavailable or
+// disabled, a hard reload, before the update) are NOT covered; see the
+// readiness report.
+const ACCOUNT_HEADER = 'x-aura-expected-account';
+const AUTH_COOKIE_ROUTES = ['/api/auth/logout', '/api/auth/verify-code'];
+const AUTH_SETTLE_TIMEOUT_MS = 15000;
+const RELOAD_GUARD_MS = 30000;
+const boundaryClients = new Set();
+const reloadedClients = new Map();
+let authChain = Promise.resolve();
+
+self.addEventListener('message', (event) => {
+  const data = event.data || {};
+  if (data.type === 'AURA_ACCOUNT_BOUNDARY' && event.source && event.source.id) boundaryClients.add(event.source.id);
+});
+
+function settleAuthSerially(request) {
+  const run = authChain.then(() => fetch(request));
+  const settled = run.then(() => undefined, () => undefined);
+  authChain = Promise.race([settled, new Promise((resolve) => setTimeout(resolve, AUTH_SETTLE_TIMEOUT_MS))]);
+  return run;
+}
+
+async function reloadOutdatedClient(clientId) {
+  if (!clientId || boundaryClients.has(clientId)) return;
+  const now = Date.now();
+  if (now - (reloadedClients.get(clientId) || 0) < RELOAD_GUARD_MS) return;
+  reloadedClients.set(clientId, now);
+  const client = await self.clients.get(clientId);
+  if (!client || client.type !== 'window' || typeof client.navigate !== 'function') return;
+  const target = new URL(client.url);
+  if (target.origin !== self.location.origin || target.searchParams.get('aura_reloaded') === 'upgrade') return;
+  target.searchParams.set('aura_reloaded', 'upgrade');
+  try { await client.navigate(target.toString()); } catch (err) { /* not controlled / navigation refused */ }
+}
+
 self.addEventListener('fetch', (event) => {
   // Network first fallback to cache strategy for API calls
   if (event.request.url.includes('/api/')) {
-    event.respondWith(
-      fetch(event.request).catch(() => caches.match(event.request))
+    const url = new URL(event.request.url);
+    const sameOrigin = url.origin === self.location.origin;
+    const unbound = sameOrigin && !event.request.headers.has(ACCOUNT_HEADER);
+    const authCookie = sameOrigin && event.request.method === 'POST' && AUTH_COOKIE_ROUTES.includes(url.pathname);
+    const responded = (authCookie ? settleAuthSerially(event.request) : fetch(event.request)).then(
+      (res) => {
+        if (unbound && res.status === 503 && event.clientId) {
+          // Still within respondWith's pending promise, so extending the event's lifetime is allowed.
+          event.waitUntil(res.clone().json().then((body) => {
+            if (body && body.code === 'client_upgrade_required') return reloadOutdatedClient(event.clientId);
+            return undefined;
+          }).catch(() => undefined));
+        }
+        return res;
+      },
+      () => caches.match(event.request)
     );
+    event.respondWith(responded);
     return;
   }
 

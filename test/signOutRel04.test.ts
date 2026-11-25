@@ -64,10 +64,10 @@ async function signOutWith(answer: Answer, sessionAfter: string | null) {
   const switched = await signOutWith({ status: 200, throws: true }, 'user-b');
   check('lost answer, session now B -> account-changed to B', switched.out === 'account-changed' && acct.getVerifiedAccount() === 'user-b');
 
-  check('wording: 1 owned', /1 activity log that has not synced yet/.test(so.describePendingWork({ owned: 1, legacy: 0 })) && /remove it/.test(so.describePendingWork({ owned: 1, legacy: 0 })));
-  check('wording: owned + legacy named separately', /2 activity logs that have not synced yet and 1 older unsynced log/.test(so.describePendingWork({ owned: 2, legacy: 1 })));
-  check('wording: unreadable storage asks instead of assuming none', /couldn't check this device/i.test(so.describePendingWork({ owned: null, legacy: 0 })));
-  check('wording: nothing pending -> no question', so.describePendingWork({ owned: 0, legacy: 0 }) === null);
+  check('wording: 1 owned', /1 activity log that has not synced yet/.test(so.describePendingWork({ owned: 1 })) && /remove it/.test(so.describePendingWork({ owned: 1 })));
+  check('wording (R4): the question is about OWNED entries only; already-sent ones are named as possibly saved', /2 activity logs that have not synced yet \(1 of them was already sent and may have been saved/.test(so.describePendingWork({ owned: 2, ownedSent: 1 })) && !/older|earlier version/.test(so.describePendingWork({ owned: 2, ownedSent: 1 })));
+  check('wording: unreadable storage asks instead of assuming none', /couldn't check this device/i.test(so.describePendingWork({ owned: null })));
+  check('wording: nothing pending -> no question', so.describePendingWork({ owned: 0 }) === null);
 
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);

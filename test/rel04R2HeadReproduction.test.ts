@@ -14,7 +14,7 @@ import { React, flush } from './jsdomReactHarness';
 import * as fs from 'fs';
 import * as path from 'path';
 import { execFileSync } from 'child_process';
-import { Device, WEB, addUser, check, closeAllTabs, finish, locks, logsOf, openTab, payload, queuedCrids, resetStore, routes, storage, store } from './rel04AccountIsolationHarness';
+import { Device, WEB, addUser, check, clearQueueDb, closeAllTabs, finish, idbFault, locks, logsOf, openTab, payload, queuedCrids, resetStore, routes, storage, store } from './rel04AccountIsolationHarness';
 
 void React;
 const R2 = '091e3ce90b62440bc0dc6fb25dc5666385d0ca65';
@@ -84,7 +84,7 @@ function req(method: string, url: string, cookieUser: string | null, headers: Re
   return new NextRequest(`http://localhost${url}`, { method, headers: h });
 }
 const passes = (res: Response) => res.headers.get('x-middleware-next') === '1';
-function fresh() { resetStore(); storage.clear(); storage.fail = { get: false, set: false, remove: false }; locks.enabled = true; closeAllTabs(); }
+function fresh() { resetStore(); storage.clear(); storage.fail = { get: false, set: false, remove: false }; idbFault.open = false; idbFault.read = false; idbFault.write = false; locks.enabled = true; closeAllTabs(); }
 const habitRoute = routes['POST /api/habit-logs'];
 
 async function main() {
@@ -104,7 +104,7 @@ async function main() {
     routes['POST /api/habit-logs'] = async () => Response.json({ error: 'bad gateway' }, { status: 502 });
     const o2 = await tab.sync.submitActivityLog(payload('A', 'crid-e1'), 't', dev.fetch as any);
     routes['POST /api/habit-logs'] = habitRoute;
-    check('E1 CORRECTED: kept as queued', o2.kind === 'queued' && queuedCrids(A).includes('crid-e1'));
+    check('E1 CORRECTED: kept as queued', o2.kind === 'queued' && (await queuedCrids(A)).includes('crid-e1'));
   }
 
   // ---------------------------------------------------------------- E2 per-entry read exception
@@ -117,13 +117,13 @@ async function main() {
     const r = r2.q.readOwnedQueue(A);
     (storage as any).getItem = realGet;
     check(`E2 R2 HEAD: a per-entry read exception looks like a successful EMPTY queue (ok=${r.ok}, items=${r.ok ? r.items.length : '-'})`, r.ok === true && r.items.length === 0);
-    fresh();
+    fresh(); await clearQueueDb();
     const tab = openTab('tab1');
-    storage.data.set(`aura_q4:${A}:crid-e2:r1`, JSON.stringify({ ...payload('A', 'crid-e2'), ownerUserId: A, tempId: 't', recordId: 'r1' }));
-    (storage as any).getItem = (k: string) => { if (k.startsWith('aura_q4:')) throw new Error('read denied'); return realGet(k); };
-    const r3 = tab.q.readOwnedQueue(A);
-    (storage as any).getItem = realGet;
-    check('E2 CORRECTED: unreadable (ok:false)', r3.ok === false);
+    await tab.q.enqueueOwned({ ...payload('A', 'crid-e2'), ownerUserId: A, tempId: 't' });
+    idbFault.read = true;
+    const r3 = await tab.q.readOwnedQueue(A);
+    idbFault.read = false;
+    check('E2 CORRECTED (R4 IndexedDB): unreadable (ok:false)', r3.ok === false);
   }
 
   // ---------------------------------------------------------------- E3 identity overwrite
@@ -134,11 +134,11 @@ async function main() {
     r2.q.enqueueOwned({ ...payload('DIFFERENT', 'crid-e3'), ownerUserId: A, tempId: 't' });
     const items = r2.q.readOfflineHabitQueue(A);
     check(`E3 R2 HEAD: a different payload OVERWRITES the identity (now "${items[0]?.activityTitle}")`, items.length === 1 && items[0].activityTitle === 'DIFFERENT');
-    fresh();
+    fresh(); await clearQueueDb();
     const tab = openTab('tab1');
-    tab.q.enqueueOwned({ ...payload('original', 'crid-e3'), ownerUserId: A, tempId: 't' });
-    const c = tab.q.enqueueOwned({ ...payload('DIFFERENT', 'crid-e3'), ownerUserId: A, tempId: 't' });
-    check('E3 CORRECTED: refused (conflict); the original is kept', c.status === 'conflict' && tab.q.readOfflineHabitQueue(A)[0]?.activityTitle === 'original');
+    await tab.q.enqueueOwned({ ...payload('original', 'crid-e3'), ownerUserId: A, tempId: 't' });
+    const c = await tab.q.enqueueOwned({ ...payload('DIFFERENT', 'crid-e3'), ownerUserId: A, tempId: 't' });
+    check('E3 CORRECTED: refused (conflict); the original is kept', c.status === 'conflict' && (await tab.q.readOfflineHabitQueue(A))[0]?.activityTitle === 'original');
   }
 
   // ---------------------------------------------------------------- E4 migration resurrection
@@ -153,13 +153,13 @@ async function main() {
     storage.data.set(v2Key, src); // a concurrent context re-writes / still holds the source
     const again = r2.q.readOfflineHabitQueue(A);
     check('E4 R2 HEAD: a concurrent migration RECREATES the settled entry', again.length === 1);
-    fresh();
+    fresh(); await clearQueueDb();
     const tab = openTab('tab1');
     storage.data.set(v2Key, src);
-    const first = tab.q.readOwnedQueue(A);
-    if (first.ok) tab.q.removeRecords(first.records);
+    const first = await tab.q.readOwnedQueue(A);
+    if (first.ok) await tab.q.settleRecords(first.records.map((r) => r.recordId));
     storage.data.set(v2Key, src);
-    check('E4 CORRECTED: tombstoned, not recreated', tab.q.readOfflineHabitQueue(A).length === 0);
+    check('E4 CORRECTED: tombstoned, not recreated', (await tab.q.readOfflineHabitQueue(A)).length === 0);
   }
 
   // ---------------------------------------------------------------- E5 unreadable snapshot reported as clean

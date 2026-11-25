@@ -11,17 +11,22 @@
  *  3. Wait (bounded) until no bound operation is in flight. Unresolved
  *     activity writes are already in their account's queue (outbox), so the
  *     count in step 4 includes them. Still busy -> nothing was sent: 'busy'.
- *  4. SNAPSHOT this account's queue keys plus the quarantined legacy entries.
- *     Unreadable storage counts as "unknown". If anything (or unknown), ask;
- *     Cancel -> 'cancelled', account unchanged (nothing reached the server).
+ *  4. SNAPSHOT this account's queued records (IndexedDB). Unreadable storage
+ *     counts as "unknown". If anything (or unknown), ask; Cancel ->
+ *     'cancelled', account unchanged (nothing reached the server). Legacy
+ *     (unowned, pre-update) entries are NOT part of the discard (R4): they
+ *     are counted and reported separately, and kept.
  *  5. POST /api/auth/logout bound to the account (X-Aura-Expected-Account),
  *     redirect:'error', no-store, within LOGOUT_TIMEOUT_MS including the body.
  *     Acknowledged ONLY by: status 200, not redirected, media type exactly
  *     application/json, body exactly an object with `loggedOut === true`.
- *       acknowledged -> discard EXACTLY the confirmed snapshot (never entries
- *                       added later), verify each removal, end signed out.
- *                       Removal that failed is reported ('signed-out' with
- *                       discardFailed > 0), never claimed as removed.
+ *       acknowledged -> discard EXACTLY the confirmed records in one
+ *                       transaction (never entries added later; never one a
+ *                       context is sending at that moment -- kept and
+ *                       reported); records already sent are removed but
+ *                       reported as possibly saved (a local discard never
+ *                       undoes what the server accepted). Every count is
+ *                       what the transaction observed.
  *       anything else (network error, timeout, any HTTP status, malformed or
  *       unexpected answer) is AMBIGUOUS -- a 4xx/5xx from an intermediary is
  *       not proof the session is unchanged -- and is reconciled with a fresh,
@@ -39,13 +44,14 @@ import {
   EXPECTED_ACCOUNT_HEADER,
   beginTransition,
   boundedExchange,
+  getTabId,
   getVerifiedAccount,
   isJsonMediaType,
   readSessionAnswer,
   settleActivityOperations,
   withAuthLock,
 } from './accountSession';
-import { discardLegacySnapshot, readLegacySnapshot, readOwnedQueue, removeRecords } from './offlineHabitQueue';
+import { discardRecords, readLegacySnapshot, readOwnedQueue } from './offlineHabitQueue';
 
 export type SignOutOutcome =
   | 'signed-out'
@@ -58,12 +64,22 @@ export type SignOutOutcome =
 
 export interface SignOutResult {
   outcome: SignOutOutcome;
-  /** Confirmed-discard entries that could not be removed from this device (still queued for the signed-out account). */
-  discardFailed: number;
-  /** The owned queue could not be read, so nothing could be confirmed or discarded: whatever is stored stays for that account. */
-  discardUnknown?: boolean;
-  /** Legacy (unowned) entries added by an old tab after the confirmation: kept, not discarded. */
-  legacyKeptAddedLater?: number;
+  /** OWNED entries of the signed-out account (only set for 'signed-out'). */
+  owned?: OwnedDiscardReport;
+  /** LEGACY (unowned, pre-update) entries: never removed by sign-out; count kept on this device (null = unreadable). */
+  legacyKept?: number | null;
+}
+
+export interface OwnedDiscardReport {
+  /** The owned queue could not be read: nothing was confirmed or removed; whatever is stored stays for that account. */
+  unknown: boolean;
+  removed: number;
+  /** Of `removed`: had already been sent, so the server may have saved them. */
+  removedPossiblySaved: number;
+  /** Being sent by another window at that moment: kept for that account. */
+  keptInFlight: number;
+  /** Could not be removed (storage failure): still stored for that account. */
+  failed: number;
 }
 
 export interface SignOutDeps {
@@ -79,33 +95,64 @@ export const RECONCILE_TIMEOUT_MS = 10_000;
 export const SIGN_OUT_FAILED_MESSAGE = "Couldn't sign out. Check your connection and try again.";
 export const SIGN_OUT_BUSY_MESSAGE = 'Something is still being saved, or another window is signing in or out. Try again in a moment.';
 export const SIGN_OUT_UNVERIFIED_MESSAGE = "Aura couldn't confirm whether you're signed out. Your unsynced activity is kept. Check your connection and tap Retry.";
-export function discardOutcomeMessage(r: SignOutResult): string | null {
-  if (r.outcome !== 'signed-out') return null;
-  if (r.discardUnknown) return "You're signed out, but Aura couldn't read this device's unsynced activity, so nothing was removed. Anything stored stays on this device and will only sync if you sign in to the same account again.";
-  if (r.discardFailed > 0) return discardFailedMessage(r.discardFailed);
-  if (r.legacyKeptAddedLater && r.legacyKeptAddedLater > 0) return `You're signed out. ${r.legacyKeptAddedLater === 1 ? '1 older unsynced log was' : `${r.legacyKeptAddedLater} older unsynced logs were`} added after you confirmed, so ${r.legacyKeptAddedLater === 1 ? 'it was' : 'they were'} kept.`;
-  return null;
+export const SIGN_OUT_UNCONFIRMED_MESSAGE = "You're signed out on this device. Aura couldn't get the server's confirmation, so this account's unsynced activity was kept on this device; it will only sync if you sign in to the same account again.";
+export const SIGN_OUT_ACCOUNT_CHANGED_MESSAGE = "A different account is now signed in on this device (from another window). Aura is showing that account; nothing was removed.";
+
+/**
+ * R4 -- the ONE user-facing statement of what sign-out did, for every outcome
+ * (null only for 'cancelled', and for a clean 'signed-out' with nothing to report).
+ */
+export function signOutOutcomeMessage(r: SignOutResult): string | null {
+  switch (r.outcome) {
+    case 'signed-out': return discardOutcomeMessage(r);
+    case 'signed-out-unconfirmed': return SIGN_OUT_UNCONFIRMED_MESSAGE;
+    case 'account-changed': return SIGN_OUT_ACCOUNT_CHANGED_MESSAGE;
+    case 'failed': return SIGN_OUT_FAILED_MESSAGE;
+    case 'busy': return SIGN_OUT_BUSY_MESSAGE;
+    case 'unverified': return SIGN_OUT_UNVERIFIED_MESSAGE;
+    case 'cancelled': return null;
+  }
 }
 
-export function discardFailedMessage(n: number): string {
-  return `You're signed out, but ${n === 1 ? '1 unsynced activity log' : `${n} unsynced activity logs`} couldn't be removed from this device. ${n === 1 ? 'It' : 'They'} will only sync if you sign in to the same account again.`;
+const plural = (n: number, one: string, many: string) => (n === 1 ? one : many.replace('#', String(n)));
+
+/**
+ * What happened to this device's unsynced activity, OWNED and LEGACY entries
+ * reported separately, from the counts actually observed. null = nothing to say.
+ */
+export function discardOutcomeMessage(r: SignOutResult): string | null {
+  if (r.outcome !== 'signed-out') return null;
+  const parts: string[] = [];
+  const o = r.owned;
+  if (o) {
+    if (o.unknown) parts.push("Aura couldn't read this account's unsynced activity on this device, so none of it was removed. Anything stored stays on this device and will only sync if you sign in to the same account again.");
+    else {
+      if (o.removedPossiblySaved > 0) parts.push(`${plural(o.removed, '1 unsynced activity log was', '# unsynced activity logs were')} removed from this device; ${plural(o.removedPossiblySaved, '1 had', '# had')} already been sent and may have been saved to your account (removing ${o.removedPossiblySaved === 1 ? 'it' : 'them'} here doesn't undo that).`);
+      if (o.keptInFlight > 0) parts.push(`${plural(o.keptInFlight, '1 activity log was', '# activity logs were')} still being sent from another window, so ${o.keptInFlight === 1 ? 'it was' : 'they were'} kept on this device for that account.`);
+      if (o.failed > 0) parts.push(`${plural(o.failed, "1 unsynced activity log couldn't", "# unsynced activity logs couldn't")} be removed from this device. ${o.failed === 1 ? 'It' : 'They'} will only sync if you sign in to the same account again.`);
+    }
+  }
+  if (r.legacyKept === null) parts.push("Aura couldn't check this device for activity logs from an earlier version; any there were left in place.");
+  else if (r.legacyKept && r.legacyKept > 0) parts.push(`${plural(r.legacyKept, '1 activity log', '# activity logs')} from an earlier version of Aura (not linked to any account) ${r.legacyKept === 1 ? 'was' : 'were'} left on this device.`);
+  return parts.length ? `You're signed out. ${parts.join(' ')}` : null;
 }
 
 export interface PendingWork {
   owned: number | null; // null = unreadable
-  legacy: number | null;
+  /** Of `owned`: already sent at least once (may have been saved). */
+  ownedSent?: number;
 }
 
+/** The confirmation question for OWNED entries (legacy entries are not removed by sign-out, so not asked about). */
 export function describePendingWork(p: PendingWork): string | null {
-  const parts: string[] = [];
-  if (p.owned === null || p.legacy === null) {
+  if (p.owned === null) {
     return "Aura couldn't check this device for activity logs that haven't synced yet. If there are any, signing out will remove them. Sign out anyway?";
   }
-  if (p.owned > 0) parts.push(p.owned === 1 ? '1 activity log that has not synced yet' : `${p.owned} activity logs that have not synced yet`);
-  if (p.legacy > 0) parts.push(p.legacy === 1 ? '1 older unsynced log saved before an update, which cannot be synced safely' : `${p.legacy} older unsynced logs saved before an update, which cannot be synced safely`);
-  if (parts.length === 0) return null;
-  const total = p.owned + p.legacy;
-  return `You have ${parts.join(' and ')} (some may already have been saved). Signing out will remove ${total === 1 ? 'it' : 'them'} from this device. Sign out anyway?`;
+  if (p.owned === 0) return null;
+  const sent = p.ownedSent ?? 0;
+  const what = p.owned === 1 ? '1 activity log that has not synced yet' : `${p.owned} activity logs that have not synced yet`;
+  const note = sent > 0 ? ` (${sent === p.owned ? (p.owned === 1 ? 'it was' : 'they were') : `${sent} of them ${sent === 1 ? 'was' : 'were'}`} already sent and may have been saved; removing ${sent === 1 ? 'it' : 'them'} here won't undo that)` : '';
+  return `You have ${what}${note}. Signing out will remove ${p.owned === 1 ? 'it' : 'them'} from this device. Sign out anyway?`;
 }
 
 type Ack = 'acknowledged' | 'ambiguous';
@@ -150,13 +197,13 @@ export function performSignOut(deps: SignOutDeps): Promise<SignOutResult> {
   if (inFlight) return inFlight;
   inFlight = (async () => {
     const r = await withAuthLock(() => run(deps));
-    return r ?? { outcome: 'busy' as const, discardFailed: 0 };
+    return r ?? { outcome: 'busy' as const };
   })().finally(() => { inFlight = null; });
   return inFlight;
 }
 
 async function run(deps: SignOutDeps): Promise<SignOutResult> {
-  const done = (outcome: SignOutOutcome, discardFailed = 0): SignOutResult => ({ outcome, discardFailed });
+  const done = (outcome: SignOutOutcome): SignOutResult => ({ outcome });
   const owner = getVerifiedAccount();
   if (typeof owner !== 'string') return done(owner === undefined ? 'unverified' : 'failed');
   const transition = beginTransition('signing-out');
@@ -165,10 +212,11 @@ async function run(deps: SignOutDeps): Promise<SignOutResult> {
   const idle = await settleActivityOperations(deps.settleTimeoutMs ?? 8000);
   if (!idle) { transition.end('resumed'); return done('busy'); }
 
-  // The exact snapshot the question is about (owned records + legacy array).
-  const snapshot = readOwnedQueue(owner);
-  const legacySnap = readLegacySnapshot();
-  const pending: PendingWork = { owned: snapshot.ok ? snapshot.records.length + snapshot.corruptKeys.length : null, legacy: legacySnap.ok ? legacySnap.count : null };
+  // The exact snapshot the question is about (owned records only).
+  const snapshot = await readOwnedQueue(owner);
+  const pending: PendingWork = snapshot.ok
+    ? { owned: snapshot.records.length + snapshot.corruptIds.length, ownedSent: snapshot.records.filter((r) => r.dispatched).length }
+    : { owned: null };
   const question = describePendingWork(pending);
   if (question && !deps.confirm(question)) { transition.end('resumed'); return done('cancelled'); }
 
@@ -176,16 +224,14 @@ async function run(deps: SignOutDeps): Promise<SignOutResult> {
   if (ack === 'acknowledged') {
     // Only now, after the confirmation and the server's acknowledgement, and
     // only EXACTLY the confirmed records (never anything added later).
-    let failed = 0;
-    let legacyKeptAddedLater = 0;
-    if (snapshot.ok) failed += removeRecords([...snapshot.records, ...snapshot.corruptKeys.map((key) => ({ key }))]).failed;
-    if (question && legacySnap.ok && legacySnap.count > 0) {
-      const lr = discardLegacySnapshot(legacySnap);
-      if (lr.failed) failed += legacySnap.count;
-      legacyKeptAddedLater = lr.keptAddedLater;
+    let owned: OwnedDiscardReport = { unknown: true, removed: 0, removedPossiblySaved: 0, keptInFlight: 0, failed: 0 };
+    if (snapshot.ok) {
+      const d = await discardRecords([...snapshot.records.map((r) => r.recordId), ...snapshot.corruptIds], { tab: getTabId() });
+      owned = { unknown: false, removed: d.removed, removedPossiblySaved: d.removedPossiblySaved, keptInFlight: d.keptInFlight, failed: d.failed };
     }
+    const legacy = readLegacySnapshot();
     transition.end('signed-out');
-    return { outcome: 'signed-out', discardFailed: failed, discardUnknown: !snapshot.ok, legacyKeptAddedLater };
+    return { outcome: 'signed-out', owned, legacyKept: legacy.ok ? legacy.count : null };
   }
 
   const r = await reconcile(deps.fetch, owner, deps.reconcileTimeoutMs ?? RECONCILE_TIMEOUT_MS);

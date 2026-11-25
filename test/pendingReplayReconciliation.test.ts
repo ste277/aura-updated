@@ -247,13 +247,13 @@ check(
 );
 
 check(
-  'replay still classifies each item via classifyHabitLogSyncOutcome, keeps retry-worthy items, and removes exactly the settled records of that identity (AURA-ANDROID-REL-04 R3: immutable per-record keys, removed per identity after settlement -- never a batched rewrite)',
+  'replay still classifies each item via classifyHabitLogSyncOutcome, keeps retry-worthy items (claim released), and settles exactly the records of that identity (AURA-ANDROID-REL-04 R4: one IndexedDB settlement transaction per identity -- never a batched rewrite)',
   (() => {
     const src = fs.readFileSync('apps/web/lib/activitySync.ts', 'utf8');
     const classify = src.indexOf('const outcome = classifyHabitLogSyncOutcome(status);');
-    const keepRetry = src.indexOf("if (outcome === 'retry') continue;", classify);
-    const removeSettled = src.indexOf('const r = removeRecords(group);', keepRetry);
-    return classify > 0 && keepRetry > classify && removeSettled > keepRetry && !/removeOwnedEntries|setItem\(/.test(src);
+    const keepRetry = src.indexOf("if (outcome === 'retry') { await releaseClaim(head.recordId, tab); continue; }", classify);
+    const removeSettled = src.indexOf('const r = await settleRecords(group.map((g) => g.recordId));', keepRetry);
+    return classify > 0 && keepRetry > classify && removeSettled > keepRetry && !/removeOwnedEntries|setItem\(|localStorage/.test(src);
   })()
 );
 

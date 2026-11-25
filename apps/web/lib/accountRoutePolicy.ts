@@ -34,8 +34,11 @@ export const ROUTE_RULES: Rule[] = [
   { match: exact('/api/mcp'), cls: 'exempt', reason: 'MCP protocol endpoint: its own bearer/OAuth authentication; disabled (404) in production. Status preserved.' },
   { match: prefix('/api/location/'), cls: 'exempt', reason: 'Geocoding search/reverse: requires a session but returns only public place data, never account data.' },
   { match: (p) => /^\/api\/aura-moments\/[^/]+\/response$/.test(p), cls: 'exempt', reason: 'Public Moment recipient link (bearer-link token flow); recipients need no account.' },
-  { match: (p, m) => (m === 'GET' || m === 'HEAD') && p === '/api/calendar/feed', cls: 'exempt', reason: 'Opened by link navigation / calendar apps (cannot carry a header); the response is a download for the current cookie holder, never rendered into an account-scoped screen.' },
-  { match: (p, m) => (m === 'GET' || m === 'HEAD') && p === '/api/users/export', cls: 'exempt', reason: 'Data-export download by link navigation (cannot carry a header); same as calendar feed.' },
+  // R4: the calendar FEED keeps its link/subscription contract (no header possible), so a stated account is
+  // enforced but absence is allowed. The in-app download states the account (lib/boundDownload.ts).
+  // /api/users/export is no longer listed: it is account-scoped (in-app download only, bound).
+  { match: (p, m) => (m === 'GET' || m === 'HEAD') && p === '/api/calendar/feed', cls: 'optional', reason: 'Calendar subscription/link contract: opened by calendar apps or a copied link that cannot carry a header (absence allowed); the in-app download states the account and is enforced.' },
+  { match: (p, m) => m === 'POST' && p === '/api/reminders/seen', cls: 'optional', reason: 'Also sent by the service worker on a notification click (no page, no verified account to state); the route verifies the reminder belongs to the session user before writing. A stated account is enforced.' },
   { match: exact('/api/product-events'), cls: 'optional', reason: 'Telemetry posted by guest and signed-in pages; a stated account is enforced, absence allowed.' },
 ];
 

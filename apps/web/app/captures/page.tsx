@@ -1,8 +1,6 @@
 import type { Metadata } from 'next';
 import { AccountScoped } from '../../components/AccountScoped';
-import { cookies } from 'next/headers';
-import { verifySessionToken, SESSION_COOKIE_NAME } from '../../lib/auth';
-import { getUserById } from '../../lib/db';
+import { resolveServerAccount } from '../../lib/serverAccount';
 import { CapturesClient } from './CapturesClient';
 
 /**
@@ -17,17 +15,9 @@ export const metadata: Metadata = {
   description: 'Capture something you want to do. Aura will help find the time.',
 };
 
-async function resolveAuthenticated(): Promise<boolean> {
-  const token = cookies().get(SESSION_COOKIE_NAME)?.value;
-  if (!token) return false;
-  const session = verifySessionToken(token);
-  if (!session) return false;
-  const user = await getUserById(session.userId);
-  return user !== null;
-}
-
 export default async function CapturesPage() {
-  const authenticated = await resolveAuthenticated();
-  // AURA-ANDROID-REL-04 (R3): server-rendered from the cookie's account -> reload on account change.
-  return <AccountScoped onChange="reload"><CapturesClient authenticated={authenticated} /></AccountScoped>;
+  const serverAccount = await resolveServerAccount();
+  const authenticated = serverAccount !== null;
+  // AURA-ANDROID-REL-04 (R3/R4): rendered for `serverAccount`; shown only once the client's verification agrees.
+  return <AccountScoped onChange="reload" serverAccount={serverAccount}><CapturesClient authenticated={authenticated} /></AccountScoped>;
 }

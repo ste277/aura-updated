@@ -60,14 +60,14 @@ async function main() {
     return { p, methods, session, classes: methods.map((m) => policy.classifyApiRoute(p, m)) };
   });
   const exemptSessionRoutes = inventory.filter((r) => r.session && r.classes.some((c: string) => c === 'exempt'));
-  const allowedExemptSession = ['/api/auth/', '/api/location/', '/api/calendar/feed', '/api/users/export'];
+  const allowedExemptSession = ['/api/auth/', '/api/location/'];
   check(`B1 inventory: ${inventory.length} API route files, each classified`, inventory.length >= 80 && inventory.every((r) => r.classes.length === r.methods.length));
   check('B1 every session-authenticated route is account-scoped, except the justified, listed exemptions', exemptSessionRoutes.every((r) => allowedExemptSession.some((a) => r.p.startsWith(a))));
   check('B1 Connected Apps management (/api/mcp/connections) is account-scoped; the MCP protocol endpoint stays exempt', policy.classifyApiRoute('/api/mcp/connections', 'GET') === 'account' && policy.classifyApiRoute('/api/mcp', 'POST') === 'exempt');
   check('B1 Goals, Captures, plans, habit logs, people, users settings are account-scoped', ['/api/goals', '/api/goals/x', '/api/captures', '/api/plans', '/api/habit-logs', '/api/people', '/api/users/location'].every((p) => policy.classifyApiRoute(p, 'POST') === 'account' && policy.classifyApiRoute(p, 'GET') === 'account'));
   check('B1 every exemption carries a written reason', policy.ROUTE_RULES.every((r: any) => typeof r.reason === 'string' && r.reason.length > 20));
   const exportPost = policy.classifyApiRoute('/api/users/export', 'POST');
-  check('B1 navigation-download exemptions are GET-only', exportPost === 'account' && policy.classifyApiRoute('/api/calendar/feed', 'POST') === 'account');
+  check('B1 (R4) data export is account-scoped for every method; calendar feed GET is optional (subscription contract), POST account', exportPost === 'account' && policy.classifyApiRoute('/api/users/export', 'GET') === 'account' && policy.classifyApiRoute('/api/calendar/feed', 'GET') === 'optional' && policy.classifyApiRoute('/api/calendar/feed', 'POST') === 'account');
 
   // ---------------------------------------------------------------- B2 middleware policy
   const req = (method: string, url: string, cookieUser: string | null, headers: Record<string, string> = {}) => {
@@ -80,7 +80,9 @@ async function main() {
   check('B2 "signed out" statement while a session exists -> 409 account_mismatch', (await mw.middleware(req('GET', '/api/captures', A, { 'X-Aura-Expected-Account': policy.SIGNED_OUT_ACCOUNT }))).status === 409);
   check('B2 stated account matches -> passes to the route', passes(await mw.middleware(req('GET', '/api/goals', A, { 'X-Aura-Expected-Account': A }))));
   check('B2 no cookie -> passes (the route answers 401)', passes(await mw.middleware(req('GET', '/api/goals', null))));
-  check('B2 exempt routes pass headerless (auth, guest, location, calendar feed / export downloads)', [req('POST', '/api/auth/verify-code', A), req('POST', '/api/guest/timing-search', A), req('GET', '/api/location/search', A), req('GET', '/api/calendar/feed', A), req('GET', '/api/users/export', A)].every(() => true) && (await Promise.all([mw.middleware(req('POST', '/api/auth/verify-code', A)), mw.middleware(req('POST', '/api/guest/timing-search', A)), mw.middleware(req('GET', '/api/location/search', A)), mw.middleware(req('GET', '/api/calendar/feed', A)), mw.middleware(req('GET', '/api/users/export', A))])).every(passes));
+  check('B2 exempt routes pass headerless (auth, guest, location); calendar feed headerless passes (subscription contract)', (await Promise.all([mw.middleware(req('POST', '/api/auth/verify-code', A)), mw.middleware(req('POST', '/api/guest/timing-search', A)), mw.middleware(req('GET', '/api/location/search', A)), mw.middleware(req('GET', '/api/calendar/feed', A))])).every(passes));
+  check('B2 (R4) headerless export download with a session -> 503; mismatched export -> 409; matching -> passes', (await mw.middleware(req('GET', '/api/users/export', A))).status === 503 && (await mw.middleware(req('GET', '/api/users/export', A, { 'X-Aura-Expected-Account': B }))).status === 409 && passes(await mw.middleware(req('GET', '/api/users/export', A, { 'X-Aura-Expected-Account': A }))));
+  check('B2 (R4) calendar download stating another account -> 409', (await mw.middleware(req('GET', '/api/calendar/feed', A, { 'X-Aura-Expected-Account': B }))).status === 409);
   check('B2 telemetry (optional): headerless passes, a mismatched statement is refused', passes(await mw.middleware(req('POST', '/api/product-events', A))) && (await mw.middleware(req('POST', '/api/product-events', A, { 'X-Aura-Expected-Account': B }))).status === 409);
 
   // ---------------------------------------------------------------- B3 unknown account: verify before forwarding; never forward on failure
@@ -110,13 +112,14 @@ async function main() {
   dev.signIn(A);
   acct.__resetAccountSessionForTests('tab');
   for (const [name, el, reloadMode] of [
-    ['Goals', React.createElement(AccountScoped, { onChange: 'reload' }, React.createElement(GoalsListClient, { authenticated: true })), true],
-    ['Captures', React.createElement(AccountScoped, { onChange: 'reload' }, React.createElement(CapturesClient, { authenticated: true })), true],
+    ['Goals', React.createElement(AccountScoped, { onChange: 'reload', serverAccount: A }, React.createElement(GoalsListClient, { authenticated: true })), true],
+    ['Captures', React.createElement(AccountScoped, { onChange: 'reload', serverAccount: A }, React.createElement(CapturesClient, { authenticated: true })), true],
     ['Connected Apps', React.createElement(AccountScoped, null, React.createElement(ConnectedAppsClient)), false],
   ] as const) {
     dev.signIn(A);
     acct.__resetAccountSessionForTests('tab');
     reloads = 0;
+    try { window.sessionStorage.clear(); } catch { /* R4 reload guard */ }
     const mark = dev.calls.length;
     const h = await mount(el as any);
     await settle(14);

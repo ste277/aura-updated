@@ -13,19 +13,26 @@
  *   changed mid-flight) stays queued for its account and is later replayed
  *   with the SAME clientRequestId, which the server de-duplicates. Aborting a
  *   request is never treated as proof that the server did not commit it.
+ * - R4: the queue is IndexedDB (lib/offlineHabitQueue.ts). A record is sent
+ *   only under a CLAIM taken atomically with the check that it still exists
+ *   and that no other context is sending it (the direct write claims its own
+ *   record when storing it). The claim is the replay/discard handoff: a
+ *   discard never removes a record a context is sending, and a replay never
+ *   sends a record that was settled or discarded. No await separates the
+ *   final account/transition check from the send. Settlement removes exactly
+ *   the settled records in one transaction; an unresolved send releases its
+ *   claim and the record stays queued.
  * - Replay is one flight per tab and account (plus a Web Lock across tabs
- *   where available), skips entries this tab is still sending, stops as soon
- *   as the binding stops being current, and removes only the entries it
- *   settled (one atomic removeItem each).
+ *   where available, an optimisation only: correctness comes from the claims).
  */
-import { AccountUnavailableError, captureAccountBinding, getVerifiedAccount, isTransitionActive, isTransitionActiveNow, lockManager, reportUpgradeRequired, runActivityOperation, type AccountBinding, type AccountLease } from './accountSession';
+import { AccountUnavailableError, captureAccountBinding, getTabId, getVerifiedAccount, isTransitionActive, isTransitionActiveNow, lockManager, reportUpgradeRequired, runActivityOperation, type AccountBinding, type AccountLease } from './accountSession';
 import { classifyHabitLogSyncOutcome } from './habitLogSyncPolicy';
-import { enqueueOwned, readOwnedQueue, removeRecords, type QueuedHabitLog } from './offlineHabitQueue';
+import { claimForDispatch, enqueueOwned, readOwnedQueue, releaseClaim, settleRecords, type QueuedHabitLog } from './offlineHabitQueue';
 
 export type HabitLogPayload = Omit<QueuedHabitLog, 'tempId'>;
 
 export const UPGRADE_REQUIRED_CODE = 'client_upgrade_required';
-export const UPGRADE_MESSAGE = 'Aura was updated. Reload the app to continue; nothing you logged is lost.';
+export const UPGRADE_MESSAGE = 'Aura was updated. Reload the app to continue; this activity is kept on this device and will sync after you reload.';
 
 export type ActivityWriteResult =
   | { kind: 'confirmed'; serverLog: Record<string, unknown> }
@@ -42,7 +49,6 @@ export type ActivityWriteResult =
 
 /** Statuses meaning "this session can't write this entry now" -- keep it for its account. */
 const ACCOUNT_HOLD = new Set([401, 403, 409, 428]);
-const sendingHere = new Set<string>();
 
 function post(lease: AccountLease, fetchImpl: typeof fetch, payload: HabitLogPayload) {
   return fetchImpl('/api/habit-logs', {
@@ -73,27 +79,33 @@ async function isUpgradeRefusal(res: Response): Promise<boolean> {
  */
 export async function submitActivityLog(payload: HabitLogPayload, tempId: string, fetchImpl: typeof fetch = (i, n) => fetch(i, n), binding?: AccountBinding): Promise<ActivityWriteResult> {
   return runActivityOperation(async (lease) => {
-    const crid = payload.clientRequestId;
-    const stored = enqueueOwned({ ...payload, tempId, ownerUserId: lease.account });
+    const tab = getTabId();
+    const stored = await enqueueOwned({ ...payload, tempId, ownerUserId: lease.account }, { claimFor: tab });
     if (stored.status === 'conflict') return { kind: 'not-stored' }; // never send a second payload under one identity
-    const outbox = stored.status === 'stored' ? stored.key : null;
-    const settle = () => { if (outbox) removeRecords([{ key: outbox }]); };
-    sendingHere.add(crid);
+    // The identical entry is already queued and another context is sending it: never send it twice at once.
+    if (stored.status === 'stored' && !stored.claimed) return lease.isCurrent() ? { kind: 'queued' } : { kind: 'account-changed', keptForAccount: true };
+    const outbox = stored.status === 'stored' ? stored.recordId : null;
+    const settle = async () => { if (outbox) await settleRecords([outbox]); };
+    const release = async () => { if (outbox) await releaseClaim(outbox, tab); };
+    // Final checks with no await before the send.
+    if (!lease.isCurrent() || isTransitionActive()) {
+      await release();
+      return outbox ? { kind: 'account-changed', keptForAccount: true } : { kind: 'not-stored' };
+    }
     let res: Response;
     try {
       res = await post(lease, fetchImpl, payload);
     } catch {
-      sendingHere.delete(crid);
+      await release();
       if (!outbox) return { kind: 'not-stored' };
       return lease.isCurrent() ? { kind: 'queued' } : { kind: 'account-changed', keptForAccount: true };
     }
-    sendingHere.delete(crid);
-    if (await isUpgradeRefusal(res)) { reportUpgradeRequired(); return outbox ? { kind: 'upgrade-required' } : { kind: 'not-stored' }; }
-    if (ACCOUNT_HOLD.has(res.status)) return { kind: 'account-changed', keptForAccount: Boolean(outbox) };
-    if (res.status >= 500) return outbox ? { kind: 'queued' } : { kind: 'not-stored' };
-    if (!res.ok) { settle(); return { kind: 'rejected', status: res.status }; }
+    if (await isUpgradeRefusal(res)) { await release(); reportUpgradeRequired(); return outbox ? { kind: 'upgrade-required' } : { kind: 'not-stored' }; }
+    if (ACCOUNT_HOLD.has(res.status)) { await release(); return { kind: 'account-changed', keptForAccount: Boolean(outbox) }; }
+    if (res.status >= 500) { await release(); return outbox ? { kind: 'queued' } : { kind: 'not-stored' }; }
+    if (!res.ok) { await settle(); return { kind: 'rejected', status: res.status }; }
     const serverLog = await res.json().catch(() => ({}));
-    settle();
+    await settle();
     if (!lease.isCurrent()) return { kind: 'account-changed', keptForAccount: false };
     return { kind: 'confirmed', serverLog };
   }, binding);
@@ -132,29 +144,28 @@ export function replayOfflineQueue(fetchImpl: typeof fetch = (i, n) => fetch(i, 
   return p;
 }
 
-function stillQueued(key: string, raw: string): boolean {
-  try {
-    return typeof localStorage !== 'undefined' && localStorage.getItem(key) === raw;
-  } catch {
-    return false;
-  }
-}
-
 async function replayLocked(fetchImpl: typeof fetch, binding: AccountBinding): Promise<ReplayResult> {
   return runActivityOperation(async (lease) => {
+    const tab = getTabId();
     const result = EMPTY(null);
-    const read = readOwnedQueue(lease.account);
+    const read = await readOwnedQueue(lease.account);
     if (!read.ok) return { ...result, stoppedBecause: 'unreadable' as const };
     result.conflicts = read.conflicts.length;
     for (const group of read.groups) {
       const head = group[0];
       if (!lease.isCurrent()) { result.stoppedBecause = 'account-changed'; break; }
-      if (sendingHere.has(head.item.clientRequestId)) continue; // its direct write is still deciding it
-      // Never send from a stale snapshot: the exact record must still be queued
-      // (not settled or discarded meanwhile) and no auth transition may be running
-      // anywhere (held Web Lock or marker).
-      if (!stillQueued(head.key, head.raw)) continue;
+      if (head.inFlight) continue; // another context (or this one) is sending it
       if (await isTransitionActiveNow()) { result.stoppedBecause = 'transition'; break; }
+      // The handoff: atomically confirm it is still queued and not being sent, and claim it.
+      const claim = await claimForDispatch(head.recordId, tab);
+      if (claim === 'failed') { result.stoppedBecause = 'unreadable'; break; }
+      if (claim !== 'claimed') continue; // settled/discarded meanwhile, or another context is sending it
+      // Final checks with no await before the send.
+      if (!lease.isCurrent() || isTransitionActive()) {
+        await releaseClaim(head.recordId, tab);
+        result.stoppedBecause = lease.isCurrent() ? 'transition' : 'account-changed';
+        break;
+      }
       const { tempId: _t, ownerUserId: _o, queuedAt: _q, recordId: _r, ...payload } = head.item;
       result.attempted++;
       let status: number | 'network-error';
@@ -165,13 +176,13 @@ async function replayLocked(fetchImpl: typeof fetch, binding: AccountBinding): P
       } catch {
         status = 'network-error';
       }
-      if (res && (await isUpgradeRefusal(res))) { reportUpgradeRequired(); result.stoppedBecause = 'upgrade-required'; break; }
-      if (typeof status === 'number' && ACCOUNT_HOLD.has(status)) { result.stoppedBecause = 'account-hold'; break; }
+      if (res && (await isUpgradeRefusal(res))) { await releaseClaim(head.recordId, tab); reportUpgradeRequired(); result.stoppedBecause = 'upgrade-required'; break; }
+      if (typeof status === 'number' && ACCOUNT_HOLD.has(status)) { await releaseClaim(head.recordId, tab); result.stoppedBecause = 'account-hold'; break; }
       const outcome = classifyHabitLogSyncOutcome(status);
-      if (outcome === 'retry') continue; // no response or 5xx: ambiguous, keep
+      if (outcome === 'retry') { await releaseClaim(head.recordId, tab); continue; } // no response or 5xx: ambiguous, keep
       if (outcome === 'confirmed') result.confirmed++;
-      // Settled: remove exactly the records of this identity that were snapshotted.
-      const r = removeRecords(group);
+      // Settled: remove exactly the records of this identity that were read.
+      const r = await settleRecords(group.map((g) => g.recordId));
       result.removed += r.removed;
       result.removeFailed += r.failed;
     }
@@ -182,5 +193,4 @@ async function replayLocked(fetchImpl: typeof fetch, binding: AccountBinding): P
 /** Test-only. */
 export function __resetActivitySyncForTests() {
   replaysInFlight.clear();
-  sendingHere.clear();
 }

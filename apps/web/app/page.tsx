@@ -28,7 +28,7 @@ import { shouldRefreshMyDayForDateChange } from '../lib/myDayRefreshPolicy';
 import { readOfflineHabitQueue, toPendingLoggedEntry, mergeConfirmedLogEntries, selectQueueItemsToReconstruct } from '../lib/offlineHabitQueue';
 import { fetchVerifiedSession, subscribeAccount, getAccountEpoch, getVerifiedAccount, AccountUnavailableError, startForegroundReverification, captureAccountBinding } from '../lib/accountSession';
 import { installAccountBoundFetch } from '../lib/accountBoundFetch';
-import { readLegacySnapshot, discardLegacySnapshot } from '../lib/offlineHabitQueue';
+import { readLegacySnapshot } from '../lib/offlineHabitQueue';
 import { UPGRADE_MESSAGE } from '../lib/activitySync';
 import { submitActivityLog, replayOfflineQueue } from '../lib/activitySync';
 import { refreshAfterHomeCompletion } from '../lib/homeRefresh';
@@ -64,7 +64,7 @@ import { formatDisplayName } from '../lib/displayName';
 import { trackEvent } from '../lib/trackEvent';
 import { generateClientRequestId } from '../lib/clientId';
 import { useAndroidBackButton } from '../lib/useAndroidBackButton';
-import { performSignOut, SIGN_OUT_FAILED_MESSAGE, SIGN_OUT_BUSY_MESSAGE, SIGN_OUT_UNVERIFIED_MESSAGE, discardOutcomeMessage } from '../lib/signOut';
+import { performSignOut, signOutOutcomeMessage } from '../lib/signOut';
 import {
   loadNotificationPrefs,
   saveNotificationPrefs,
@@ -421,9 +421,12 @@ function DashboardPageInner() {
     // still correctly clearing a permanently-rejected (4xx) entry's
     // stale row once it's no longer in the queue (PR #86's own
     // invariant) -- see that function's own doc comment.
-    setLogEntries((prev) => {
-      const queuedClientRequestIds = new Set(readOfflineHabitQueue(accountIdRef.current).map((item) => item.clientRequestId));
-      return mergeConfirmedLogEntries(confirmedEntries, prev, queuedClientRequestIds);
+    // R4: the queue read is asynchronous (IndexedDB); the merge itself is unchanged.
+    const owner = accountIdRef.current;
+    void readOfflineHabitQueue(owner).then((queued) => {
+      if (accountIdRef.current !== owner) return; // the account changed meanwhile: this page is being replaced
+      const queuedClientRequestIds = new Set(queued.map((item) => item.clientRequestId));
+      setLogEntries((prev) => mergeConfirmedLogEntries(confirmedEntries, prev, queuedClientRequestIds));
     });
   }, []);
 
@@ -457,7 +460,8 @@ function DashboardPageInner() {
 
       // Pending Activity Reload Visibility V1, now account-scoped: only the
       // verified account's own queued entries are reconstructed.
-      const queued = readOfflineHabitQueue(check.user.id);
+      const queued = await readOfflineHabitQueue(check.user.id);
+      if (accountIdRef.current !== check.user.id) return;
       if (queued.length > 0) {
         setLogEntries((prev) => {
           const reconstructed = selectQueueItemsToReconstruct(queued, prev).map(toPendingLoggedEntry);
@@ -1586,13 +1590,9 @@ function DashboardPageInner() {
       fetch: (url, init) => fetch(url, init),
       confirm: (message) => window.confirm(message),
     });
-    if (result.outcome === 'failed') window.alert(SIGN_OUT_FAILED_MESSAGE);
-    else if (result.outcome === 'busy') window.alert(SIGN_OUT_BUSY_MESSAGE);
-    else if (result.outcome === 'unverified') window.alert(SIGN_OUT_UNVERIFIED_MESSAGE);
-    else {
-      const note = discardOutcomeMessage(result);
-      if (note) window.alert(note);
-    }
+    // R4: every outcome states whether sign-out completed (lib/signOut.ts signOutOutcomeMessage).
+    const note = signOutOutcomeMessage(result);
+    if (note) window.alert(note);
   }, []);
 
   // My Day Timing Location Change Refresh V1 -- LocationPicker only ever
@@ -1882,32 +1882,15 @@ function DashboardPageInner() {
       }}
     >
       {legacyCount > 0 && (
-        // AURA-ANDROID-REL-04 (R3) -- pre-update offline logs have NO recorded
+        // AURA-ANDROID-REL-04 (R3/R4) -- pre-update offline logs have NO recorded
         // account. They stay quarantined: never synced, never assigned to any
-        // account (no "add to this account"), and their contents are never
-        // shown. The only action is an explicit discard of exactly the entries
-        // counted here.
+        // account, and their contents are never shown. R4: no removal action --
+        // the shared legacy array may still be written by an older Aura tab, so
+        // destructive cleanup is deferred (lib/offlineHabitQueue.ts).
         <div role="status" style={{ width: '100%', maxWidth: 560, marginBottom: 12, padding: 12, borderRadius: 10, border: '1px solid var(--as-border)', background: 'var(--as-surface)', fontSize: 13 }}>
           <p style={{ margin: '0 0 8px' }}>
-            This device holds {legacyCount === 1 ? '1 activity log' : `${legacyCount} activity logs`} from an earlier version of Aura that {legacyCount === 1 ? "isn't" : "aren't"} linked to any account, so {legacyCount === 1 ? 'it' : 'they'} can&apos;t be synced. {legacyCount === 1 ? 'It stays' : 'They stay'} on this device until removed.
+            This device holds {legacyCount === 1 ? '1 activity log' : `${legacyCount} activity logs`} from an earlier version of Aura that {legacyCount === 1 ? "isn't" : "aren't"} linked to any account, so {legacyCount === 1 ? 'it' : 'they'} can&apos;t be synced. {legacyCount === 1 ? 'It stays' : 'They stay'} on this device and {legacyCount === 1 ? 'is' : 'are'} never shown or sent.
           </p>
-          <button
-            type="button"
-            onClick={() => {
-              const snap = readLegacySnapshot();
-              if (!snap.ok) { window.alert("Couldn't read this device's storage. Nothing was removed."); return; }
-              if (snap.count === 0) { setLegacyCount(0); return; }
-              if (!window.confirm(`Remove ${snap.count === 1 ? 'this unsynced log' : `these ${snap.count} unsynced logs`} from this device? This can't be undone.`)) return;
-              const r = discardLegacySnapshot(snap);
-              if (r.failed) window.alert("Couldn't remove them from this device's storage. Nothing was removed.");
-              else if (r.keptAddedLater > 0) window.alert(`Removed ${r.removed}. ${r.keptAddedLater === 1 ? '1 log was' : `${r.keptAddedLater} logs were`} added after you confirmed and ${r.keptAddedLater === 1 ? 'was' : 'were'} kept.`);
-              const after = readLegacySnapshot();
-              setLegacyCount(after.ok ? after.count : legacyCount);
-            }}
-            style={{ padding: '6px 12px', borderRadius: 8, border: '1px solid var(--as-border)', background: 'transparent', color: 'var(--as-text-muted)' }}
-          >
-            Remove from this device
-          </button>
         </div>
       )}
       {/* Real-Time Solar Phase Shift Toast Banner */}
