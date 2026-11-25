@@ -1,35 +1,47 @@
 /**
- * AURA-ANDROID-REL-04 IR-01 -- every activity-log write goes through here:
- * the direct POST /api/habit-logs from Home and its offline queue replay.
+ * AURA-ANDROID-REL-04 IR-01 (R2) -- every activity-log write goes through here:
+ * Home's direct POST /api/habit-logs and the offline queue replay.
  *
- * - A write needs a verified account and no auth transition
- *   (lib/accountSession.ts runActivityOperation).
- * - Every request carries X-Aura-Expected-Account = that account; the server
- *   rejects it (409) if the session belongs to someone else, before anything
- *   is written (lib/expectedAccount.ts). So a request that was already on the
- *   wire when the account changed can never be stored under the next account.
- * - A network failure queues the entry for its OWN account only, and only if
- *   that account is still current; after a transition nothing is queued and
- *   the caller is told.
- * - Replay is single-flight per tab and per account (plus a Web Lock across
- *   tabs where available), stops as soon as the account changes, and only
- *   ever removes the ids it settled.
+ * - Bound to the account the user acted under (AccountBinding captured at
+ *   the action); refused if that account is no longer current or an auth
+ *   transition is running (lib/accountSession.ts).
+ * - Every request states that account (X-Aura-Expected-Account); the server
+ *   refuses it (409) under any other session, before anything is written.
+ * - OUTBOX: a direct write is stored in its account's queue BEFORE it is
+ *   sent, under its own clientRequestId. A definitive server answer removes
+ *   it; anything unresolved (no response, aborted by a transition, account
+ *   changed mid-flight) stays queued for its account and is later replayed
+ *   with the SAME clientRequestId, which the server de-duplicates. Aborting a
+ *   request is never treated as proof that the server did not commit it.
+ * - Replay is one flight per tab and account (plus a Web Lock across tabs
+ *   where available), skips entries this tab is still sending, stops as soon
+ *   as the binding stops being current, and removes only the entries it
+ *   settled (one atomic removeItem each).
  */
-import { AccountUnavailableError, getVerifiedAccount, isTransitionActive, runActivityOperation, type AccountLease } from './accountSession';
+import { AccountUnavailableError, captureAccountBinding, getVerifiedAccount, isTransitionActive, lockManager, runActivityOperation, type AccountBinding, type AccountLease } from './accountSession';
 import { classifyHabitLogSyncOutcome } from './habitLogSyncPolicy';
 import { enqueueOwned, readOwnedQueue, removeOwnedEntries, type OwnedQueuedHabitLog, type QueuedHabitLog } from './offlineHabitQueue';
 
 export type HabitLogPayload = Omit<QueuedHabitLog, 'tempId'>;
 
+export const UPGRADE_REQUIRED_CODE = 'client_upgrade_required';
+export const UPGRADE_MESSAGE = 'Aura was updated. Reload the app to continue; nothing you logged is lost.';
+
 export type ActivityWriteResult =
   | { kind: 'confirmed'; serverLog: Record<string, unknown> }
+  /** No definitive answer; kept in the account's queue for replay. */
   | { kind: 'queued' }
+  /** Definitive refusal; nothing kept. */
   | { kind: 'rejected'; status: number }
-  | { kind: 'account-changed' }
-  | { kind: 'not-stored' };
+  /** The bound account stopped being current mid-flight; the entry stays queued for that account. */
+  | { kind: 'account-changed'; keptForAccount: boolean }
+  /** Unresolved and could not be stored on this device. */
+  | { kind: 'not-stored' }
+  | { kind: 'upgrade-required' };
 
-/** Statuses that say "this session can't write this entry right now"; never a reason to drop it. */
+/** Statuses meaning "this session can't write this entry now" -- keep it for its account. */
 const ACCOUNT_HOLD = new Set([401, 403, 409, 428]);
+const sendingHere = new Set<string>();
 
 function post(lease: AccountLease, fetchImpl: typeof fetch, payload: HabitLogPayload) {
   return fetchImpl('/api/habit-logs', {
@@ -41,118 +53,122 @@ function post(lease: AccountLease, fetchImpl: typeof fetch, payload: HabitLogPay
   });
 }
 
+async function isUpgradeRefusal(res: Response): Promise<boolean> {
+  if (res.status !== 503) return false;
+  try {
+    const body = await res.clone().json();
+    return body?.code === UPGRADE_REQUIRED_CODE;
+  } catch {
+    return false;
+  }
+}
+
 /**
- * One direct activity write. Throws AccountUnavailableError when there is no
- * verified account or a transition is running (nothing is sent or queued).
+ * One direct activity write for `binding` (capture it when the user acts).
+ * Throws AccountUnavailableError when the binding is not current (nothing is
+ * sent or stored).
  */
-export async function submitActivityLog(payload: HabitLogPayload, tempId: string, fetchImpl: typeof fetch = fetch): Promise<ActivityWriteResult> {
+export async function submitActivityLog(payload: HabitLogPayload, tempId: string, fetchImpl: typeof fetch = (i, n) => fetch(i, n), binding?: AccountBinding): Promise<ActivityWriteResult> {
   return runActivityOperation(async (lease) => {
+    const crid = payload.clientRequestId;
+    const outboxed = enqueueOwned({ ...payload, tempId, ownerUserId: lease.account });
+    sendingHere.add(crid);
     let res: Response;
     try {
       res = await post(lease, fetchImpl, payload);
     } catch {
-      // No response: the outcome is ambiguous. Queue it for THIS account,
-      // but only while this account is still current.
-      if (!lease.isCurrent()) return { kind: 'account-changed' };
-      const stored = enqueueOwned({ ...payload, tempId, ownerUserId: lease.account });
-      return stored ? { kind: 'queued' } : { kind: 'not-stored' };
+      sendingHere.delete(crid);
+      if (!outboxed) return { kind: 'not-stored' };
+      return lease.isCurrent() ? { kind: 'queued' } : { kind: 'account-changed', keptForAccount: true };
     }
-    if (!lease.isCurrent()) {
-      // The response belongs to an account that is no longer shown (the
-      // server only accepted it if the session was still this account), so
-      // it must not touch the next account's screen or queue.
-      return { kind: 'account-changed' };
+    sendingHere.delete(crid);
+    if (await isUpgradeRefusal(res)) return { kind: 'upgrade-required' };
+    if (ACCOUNT_HOLD.has(res.status) || res.status >= 500) {
+      // 409/401/...: this session can't take A's entry now; 5xx: transient.
+      // Both keep the entry for its account (replay later, same id).
+      if (res.status >= 500) {
+        // Preserve the established UX: a server error is shown, not silently queued.
+        if (outboxed) removeOwnedEntries(lease.account, [crid]);
+        return { kind: 'rejected', status: res.status };
+      }
+      return { kind: 'account-changed', keptForAccount: outboxed };
     }
-    if (!res.ok) return { kind: 'rejected', status: res.status };
+    if (!res.ok) {
+      if (outboxed) removeOwnedEntries(lease.account, [crid]);
+      return { kind: 'rejected', status: res.status };
+    }
     const serverLog = await res.json().catch(() => ({}));
-    if (!lease.isCurrent()) return { kind: 'account-changed' };
+    if (outboxed) removeOwnedEntries(lease.account, [crid]);
+    if (!lease.isCurrent()) return { kind: 'account-changed', keptForAccount: false };
     return { kind: 'confirmed', serverLog };
-  });
+  }, binding);
 }
 
 export interface ReplayResult {
   attempted: number;
   confirmed: number;
   removed: number;
-  stoppedBecause: null | 'account-changed' | 'account-hold' | 'unreadable' | 'busy' | 'unavailable';
+  removeFailed: number;
+  stoppedBecause: null | 'account-changed' | 'account-hold' | 'unreadable' | 'busy' | 'unavailable' | 'upgrade-required';
 }
+const EMPTY = (stoppedBecause: ReplayResult['stoppedBecause']): ReplayResult => ({ attempted: 0, confirmed: 0, removed: 0, removeFailed: 0, stoppedBecause });
 
 const replaysInFlight = new Map<string, Promise<ReplayResult>>();
 
-type LockManagerLike = { request: (name: string, opts: { ifAvailable: boolean }, cb: (lock: unknown) => Promise<ReplayResult>) => Promise<ReplayResult> };
-
-function lockManager(): LockManagerLike | null {
-  try {
-    const nav = (globalThis as { navigator?: { locks?: LockManagerLike } }).navigator;
-    return nav?.locks && typeof nav.locks.request === 'function' ? nav.locks : null;
-  } catch {
-    return null;
-  }
-}
-
 /** Replays the verified account's queue. Never throws. */
-export function replayOfflineQueue(fetchImpl: typeof fetch = fetch): Promise<ReplayResult> {
+export function replayOfflineQueue(fetchImpl: typeof fetch = (i, n) => fetch(i, n)): Promise<ReplayResult> {
   const account = getVerifiedAccount();
-  if (!account || isTransitionActive()) {
-    return Promise.resolve({ attempted: 0, confirmed: 0, removed: 0, stoppedBecause: 'unavailable' });
-  }
+  if (!account || isTransitionActive()) return Promise.resolve(EMPTY('unavailable'));
   const existing = replaysInFlight.get(account);
   if (existing) return existing;
+  let binding: AccountBinding;
+  try { binding = captureAccountBinding(); } catch { return Promise.resolve(EMPTY('unavailable')); }
   const run = async (): Promise<ReplayResult> => {
     const locks = lockManager();
-    if (!locks) return replayLocked(fetchImpl);
-    return locks.request(`aura-habit-replay:${account}`, { ifAvailable: true }, async (lock) =>
-      lock ? replayLocked(fetchImpl) : { attempted: 0, confirmed: 0, removed: 0, stoppedBecause: 'busy' as const }
-    );
+    if (!locks) return replayLocked(fetchImpl, binding);
+    return locks.request(`aura-habit-replay:${account}`, { ifAvailable: true }, async (lock) => (lock ? replayLocked(fetchImpl, binding) : EMPTY('busy')));
   };
   const p = run()
-    .catch((err) =>
-      err instanceof AccountUnavailableError
-        ? ({ attempted: 0, confirmed: 0, removed: 0, stoppedBecause: 'unavailable' } as ReplayResult)
-        : ({ attempted: 0, confirmed: 0, removed: 0, stoppedBecause: 'account-changed' } as ReplayResult)
-    )
+    .catch((err) => (err instanceof AccountUnavailableError ? EMPTY('unavailable') : EMPTY('account-changed')))
     .finally(() => replaysInFlight.delete(account));
   replaysInFlight.set(account, p);
   return p;
 }
 
-async function replayLocked(fetchImpl: typeof fetch): Promise<ReplayResult> {
+async function replayLocked(fetchImpl: typeof fetch, binding: AccountBinding): Promise<ReplayResult> {
   return runActivityOperation(async (lease) => {
-    const result: ReplayResult = { attempted: 0, confirmed: 0, removed: 0, stoppedBecause: null };
+    const result = EMPTY(null);
     const read = readOwnedQueue(lease.account);
-    if (!read.ok) return { ...result, stoppedBecause: 'unreadable' };
-    const settled: string[] = [];
-    try {
-      for (const item of read.items as OwnedQueuedHabitLog[]) {
-        if (!lease.isCurrent()) { result.stoppedBecause = 'account-changed'; break; }
-        const { tempId: _tempId, ownerUserId: _owner, ...payload } = item;
-        result.attempted++;
-        let status: number | 'network-error';
-        try {
-          const res = await post(lease, fetchImpl, payload);
-          status = res.status;
-        } catch {
-          status = 'network-error';
-        }
-        if (typeof status === 'number' && ACCOUNT_HOLD.has(status)) {
-          // Keep the entry for its owner and stop: this session can't write it.
-          result.stoppedBecause = 'account-hold';
-          break;
-        }
-        const outcome = classifyHabitLogSyncOutcome(status);
-        if (outcome === 'confirmed') { settled.push(item.clientRequestId); result.confirmed++; }
-        else if (outcome === 'permanent-failure') settled.push(item.clientRequestId);
-        // 'retry' stays queued.
+    if (!read.ok) return { ...result, stoppedBecause: 'unreadable' as const };
+    for (const item of read.items as OwnedQueuedHabitLog[]) {
+      if (!lease.isCurrent()) { result.stoppedBecause = 'account-changed'; break; }
+      if (sendingHere.has(item.clientRequestId)) continue; // its direct write is still deciding it
+      const { tempId: _t, ownerUserId: _o, queuedAt: _q, ...payload } = item;
+      result.attempted++;
+      let status: number | 'network-error';
+      let res: Response | null = null;
+      try {
+        res = await post(lease, fetchImpl, payload);
+        status = res.status;
+      } catch {
+        status = 'network-error';
       }
-    } finally {
-      // Remove only what was settled; anything enqueued meanwhile survives.
-      if (settled.length > 0 && removeOwnedEntries(lease.account, settled)) result.removed = settled.length;
+      if (res && (await isUpgradeRefusal(res))) { result.stoppedBecause = 'upgrade-required'; break; }
+      if (typeof status === 'number' && ACCOUNT_HOLD.has(status)) { result.stoppedBecause = 'account-hold'; break; }
+      const outcome = classifyHabitLogSyncOutcome(status);
+      if (outcome === 'retry') continue;
+      if (outcome === 'confirmed') result.confirmed++;
+      // Settled (confirmed or definitively rejected): remove exactly this entry.
+      const r = removeOwnedEntries(lease.account, [item.clientRequestId]);
+      result.removed += r.removed;
+      result.removeFailed += r.failed;
     }
     return result;
-  });
+  }, binding);
 }
 
 /** Test-only. */
 export function __resetActivitySyncForTests() {
   replaysInFlight.clear();
+  sendingHere.clear();
 }

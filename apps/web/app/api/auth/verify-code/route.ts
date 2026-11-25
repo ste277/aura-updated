@@ -79,7 +79,11 @@ export async function POST(req: NextRequest) {
     }
 
     const sessionToken = createSessionToken(user.id, user.email);
-    const response = NextResponse.json({ ok: true });
+    // AURA-ANDROID-REL-04 IR-01 (R2) -- the account this code signed in, so
+    // the client can correlate a pending action (the /find save) with THIS
+    // verification instead of whatever session happens to be ambient later.
+    const response = NextResponse.json({ ok: true, userId: user.id });
+    response.headers.set('Cache-Control', 'no-store');
     response.cookies.set(SESSION_COOKIE_NAME, sessionToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',

@@ -26,7 +26,10 @@ import type { DailyReflection } from '../lib/dailyReflection';
 import type { TomorrowPreview } from '../lib/tomorrowPreview';
 import { shouldRefreshMyDayForDateChange } from '../lib/myDayRefreshPolicy';
 import { readOfflineHabitQueue, toPendingLoggedEntry, mergeConfirmedLogEntries, selectQueueItemsToReconstruct } from '../lib/offlineHabitQueue';
-import { fetchVerifiedSession, subscribeAccount, getAccountEpoch, AccountUnavailableError, startForegroundReverification } from '../lib/accountSession';
+import { fetchVerifiedSession, subscribeAccount, getAccountEpoch, getVerifiedAccount, AccountUnavailableError, startForegroundReverification, captureAccountBinding } from '../lib/accountSession';
+import { installAccountBoundFetch } from '../lib/accountBoundFetch';
+import { readLegacyQueue, adoptLegacyQueue, clearLegacyQueue } from '../lib/offlineHabitQueue';
+import { UPGRADE_MESSAGE } from '../lib/activitySync';
 import { submitActivityLog, replayOfflineQueue } from '../lib/activitySync';
 import { refreshAfterHomeCompletion } from '../lib/homeRefresh';
 import { selectTodaysPendingActivities } from '../lib/myDayPendingOverlay';
@@ -61,7 +64,7 @@ import { formatDisplayName } from '../lib/displayName';
 import { trackEvent } from '../lib/trackEvent';
 import { generateClientRequestId } from '../lib/clientId';
 import { useAndroidBackButton } from '../lib/useAndroidBackButton';
-import { performSignOut, SIGN_OUT_FAILED_MESSAGE, SIGN_OUT_BUSY_MESSAGE } from '../lib/signOut';
+import { performSignOut, SIGN_OUT_FAILED_MESSAGE, SIGN_OUT_BUSY_MESSAGE, SIGN_OUT_UNVERIFIED_MESSAGE, discardFailedMessage } from '../lib/signOut';
 import {
   loadNotificationPrefs,
   saveNotificationPrefs,
@@ -132,6 +135,11 @@ function isFrictionWindow(windowName: string): boolean {
 // account-scoped state, ref and in-component cache starts empty for the next
 // account, and late responses for the previous one land on an unmounted
 // instance (ignored by React) instead of the new screen.
+// AURA-ANDROID-REL-04 (R2) -- every same-origin account-scoped API request
+// from this bundle states the verified account and obeys auth transitions
+// (lib/accountBoundFetch.ts). Installed at module load, before any effect.
+if (typeof window !== 'undefined') installAccountBoundFetch();
+
 export default function DashboardPage() {
   const epoch = React.useSyncExternalStore(subscribeAccount, getAccountEpoch, () => 0);
   useEffect(() => startForegroundReverification(), []);
@@ -140,6 +148,13 @@ export default function DashboardPage() {
 
 function DashboardPageInner() {
   const [user, setUser] = useState<SessionUser | null | undefined>(undefined);
+  // AURA-ANDROID-REL-04 IR-03 (R2) -- the session could not be verified
+  // (offline, server unreachable, ambiguous sign-out). Bound work is refused
+  // until a fresh answer arrives; pending activity is kept.
+  const [sessionUnverified, setSessionUnverified] = useState(false);
+  // Quarantined pre-update activity logs (no owner): shown with an explicit
+  // choice, never assigned automatically.
+  const [legacyCount, setLegacyCount] = useState(0);
   // AURA-ANDROID-REL-04 IR-01 -- the verified account this dashboard instance
   // belongs to (set from the session answer; the instance is remounted when
   // the account changes).
@@ -420,7 +435,12 @@ function DashboardPageInner() {
       // account change is 'stale' and never applied.
       const check = await fetchVerifiedSession();
       if (check.status === 'stale') return;
-      if (check.status === 'error') throw new Error('session check failed');
+      if (check.status === 'error') {
+        // I6: unknown account -- never shown as "signed out", never trusted as A.
+        setSessionUnverified(true);
+        return;
+      }
+      setSessionUnverified(false);
       const sessionData = check.payload as any;
 
       if (check.status === 'signed-out' || !sessionData?.user) {
@@ -432,6 +452,8 @@ function DashboardPageInner() {
 
       accountIdRef.current = check.user.id;
       setUser(sessionData.user);
+      const legacy = readLegacyQueue();
+      setLegacyCount(legacy ? legacy.length : 0);
 
       // Pending Activity Reload Visibility V1, now account-scoped: only the
       // verified account's own queued entries are reconstructed.
@@ -471,7 +493,8 @@ function DashboardPageInner() {
         setPlannedActivities(await plansRes.json());
       }
     } catch {
-      setUser(null);
+      // A dashboard read failed: keep the verified account (the session
+      // answer above decided it); just leave the data empty.
       setPlannedActivities([]);
     }
   }, [applyConfirmedLogs]);
@@ -1406,6 +1429,10 @@ function DashboardPageInner() {
       // FULL_ACTIVITY_CATALOG regardless of what this client sends.
       activityId?: string
     ): Promise<'confirmed' | 'pending'> => {
+      // AURA-ANDROID-REL-04 IR-01 (R2) -- bound to the account the user acted
+      // under, captured now (throws, with a message, during a transition or
+      // without a verified account).
+      const binding = captureAccountBinding();
       const targetDate = customTimestamp ? new Date(customTimestamp) : new Date();
       const calculatedMinute = targetDate.getHours() * 60 + targetDate.getMinutes();
       const tempId = `temp-${Date.now()}`;
@@ -1423,6 +1450,9 @@ function DashboardPageInner() {
 
       const optimisticEntry: LoggedEntryItem = {
         id: tempId,
+        // Same identity as its outbox entry, so a reload-reconstruction never
+        // shows it twice while it is being sent.
+        clientRequestId,
         activityTitle,
         activeWindow: activeWindowForLog,
         loggedAt: targetDate,
@@ -1469,7 +1499,7 @@ function DashboardPageInner() {
       // failure queues the entry for THIS account only while it is current.
       let outcome: Awaited<ReturnType<typeof submitActivityLog>>;
       try {
-        outcome = await submitActivityLog(payload, tempId);
+        outcome = await submitActivityLog(payload, tempId, undefined, binding);
       } catch (err) {
         setLogEntries((prev) => prev.filter((item) => item.id !== tempId));
         if (err instanceof AccountUnavailableError) throw err;
@@ -1492,6 +1522,8 @@ function DashboardPageInner() {
         setLogEntries((prev) => prev.filter((item) => item.id !== tempId));
         if (outcome.kind === 'rejected') throw new Error(`Unable to log this activity (server responded ${outcome.status}).`);
         if (outcome.kind === 'not-stored') throw new Error("You're offline and this device couldn't keep the activity. Try again when you're back online.");
+        if (outcome.kind === 'upgrade-required') throw new Error(UPGRADE_MESSAGE);
+        // account-changed: kept (if stored) in the ORIGINAL account's queue.
         throw new AccountUnavailableError('stale');
       }
 
@@ -1550,12 +1582,14 @@ function DashboardPageInner() {
   const handleLogout = useCallback(async () => {
     // Signed-out, unconfirmed and account-changed outcomes change the account
     // epoch, which remounts this dashboard for the next state.
-    const outcome = await performSignOut({
+    const result = await performSignOut({
       fetch: (url, init) => fetch(url, init),
       confirm: (message) => window.confirm(message),
     });
-    if (outcome === 'failed') window.alert(SIGN_OUT_FAILED_MESSAGE);
-    else if (outcome === 'busy') window.alert(SIGN_OUT_BUSY_MESSAGE);
+    if (result.outcome === 'failed') window.alert(SIGN_OUT_FAILED_MESSAGE);
+    else if (result.outcome === 'busy') window.alert(SIGN_OUT_BUSY_MESSAGE);
+    else if (result.outcome === 'unverified') window.alert(SIGN_OUT_UNVERIFIED_MESSAGE);
+    else if (result.outcome === 'signed-out' && result.discardFailed > 0) window.alert(discardFailedMessage(result.discardFailed));
   }, []);
 
   // My Day Timing Location Change Refresh V1 -- LocationPicker only ever
@@ -1777,6 +1811,20 @@ function DashboardPageInner() {
     setTodayReflection({ outputLevel, followedGuidance });
   }, []);
 
+  if (sessionUnverified && user !== null) {
+    // I6 recovery path: never shown as signed out, never as the old account.
+    return (
+      <main style={{ minHeight: '100vh', background: 'var(--as-bg, #020617)', color: 'var(--as-text)', display: 'flex', flexDirection: 'column', gap: 12, alignItems: 'center', justifyContent: 'center', padding: 24, textAlign: 'center' }}>
+        <p role="alert" style={{ maxWidth: 360 }}>
+          Aura couldn&apos;t confirm which account is signed in. Anything you logged on this device is kept.
+        </p>
+        <button type="button" onClick={() => { setSessionUnverified(false); setUser(undefined); loadUserDataAndLogs(); }} style={{ padding: '10px 18px', borderRadius: 8, border: '1px solid var(--as-border)', background: 'var(--as-surface)', color: 'var(--as-text)' }}>
+          Retry
+        </button>
+      </main>
+    );
+  }
+
   if (user === undefined) {
     return (
       <main style={{ minHeight: '100vh', background: 'var(--as-bg, #020617)', color: 'var(--as-text-muted)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -1830,6 +1878,43 @@ function DashboardPageInner() {
         boxSizing: 'border-box',
       }}
     >
+      {legacyCount > 0 && (
+        // AURA-ANDROID-REL-04 (R2) -- pre-update offline logs have no recorded
+        // account. They are never synced or assigned automatically: the user
+        // decides, explicitly, for THIS signed-in account, or discards them.
+        <div role="status" style={{ width: '100%', maxWidth: 560, marginBottom: 12, padding: 12, borderRadius: 10, border: '1px solid var(--as-border)', background: 'var(--as-surface)', fontSize: 13 }}>
+          <p style={{ margin: '0 0 8px' }}>
+            {legacyCount === 1 ? '1 activity log' : `${legacyCount} activity logs`} from an earlier version of Aura {legacyCount === 1 ? 'is' : 'are'} saved on this device but {legacyCount === 1 ? "isn't" : "aren't"} linked to any account, so {legacyCount === 1 ? 'it' : 'they'} won&apos;t sync automatically.
+          </p>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              onClick={() => {
+                if (!user || getVerifiedAccount() !== user.id) return;
+                if (!window.confirm(`Add ${legacyCount === 1 ? 'this log' : `these ${legacyCount} logs`} to ${user.email}? Only do this if you logged ${legacyCount === 1 ? 'it' : 'them'} yourself.`)) return;
+                const r = adoptLegacyQueue(user.id);
+                if (!r.ok) window.alert("Couldn't move them on this device. Nothing was changed on the server.");
+                setLegacyCount(readLegacyQueue()?.length ?? 0);
+                loadUserDataAndLogs();
+              }}
+              style={{ padding: '6px 12px', borderRadius: 8, border: '1px solid var(--as-border)', background: 'transparent', color: 'var(--as-text)' }}
+            >
+              Add to {formatDisplayName(user.email)}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                if (!window.confirm(`Remove ${legacyCount === 1 ? 'this unsynced log' : `these ${legacyCount} unsynced logs`} from this device? This can't be undone.`)) return;
+                if (!clearLegacyQueue()) window.alert("Couldn't remove them from this device's storage.");
+                setLegacyCount(readLegacyQueue()?.length ?? 0);
+              }}
+              style={{ padding: '6px 12px', borderRadius: 8, border: '1px solid var(--as-border)', background: 'transparent', color: 'var(--as-text-muted)' }}
+            >
+              Discard
+            </button>
+          </div>
+        </div>
+      )}
       {/* Real-Time Solar Phase Shift Toast Banner */}
       <WindowShiftToast activeWindowName={activeType} />
 

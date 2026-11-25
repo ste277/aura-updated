@@ -57,6 +57,7 @@ import {
 // Plan's own eligibility derivation and its own fetch/skip transport stay
 // fully independent of Home's, unchanged from the original HPG4-2 PR).
 import { summarizeSkipAllOutcome, collectSkipAllOutcomes } from '../lib/homeMissedRecovery';
+import { boundFetch, captureAccountBinding, type AccountBinding } from '../lib/accountBoundFetch';
 
 export type { PlanEventLocation };
 export { RESULT_LABEL_TEXT, findCandidateKey, planPayloadFromCandidate };
@@ -368,11 +369,14 @@ function getHorizonHelper(horizon: PlanningHorizon, timezone?: string): string {
  */
 
 export async function saveUpcomingPlanFromCandidate(candidate: TimingCandidate, durationMinutes: number, options: SaveUpcomingPlanOptions = {}): Promise<UpcomingPlan> {
-  const { sharedWithName, guestConversionToken, clientRequestId, eventLocation, activityId, overlapPolicy, expectedAccountId } = options;
+  // AURA-ANDROID-REL-04 IR-01 (R2) -- bound before any await: the account
+  // the user acted under (or, if the caller didn't capture one, now).
+  const binding = options.binding ?? captureAccountBinding();
+  const { sharedWithName, guestConversionToken, clientRequestId, eventLocation, activityId, overlapPolicy } = options;
   const plan = planPayloadFromCandidate(candidate, durationMinutes, sharedWithName, eventLocation);
-  const res = await fetch('/api/plans', {
+  const res = await boundFetch(binding, '/api/plans', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...(expectedAccountId ? { 'X-Aura-Expected-Account': expectedAccountId } : {}) },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       title: plan.title,
       activityType: plan.title,
@@ -402,7 +406,7 @@ export async function saveUpcomingPlanFromCandidate(candidate: TimingCandidate, 
     // failure. Every other non-2xx keeps the exact previous behaviour.
     if (res.status === 409) {
       const body = await res.json().catch(() => null);
-      if (isPlanOverlapResponse(body)) throw new PlanOverlapSaveError(parsePlanOverlapConflict(body), plan);
+      if (isPlanOverlapResponse(body)) throw new PlanOverlapSaveError(parsePlanOverlapConflict(body), plan, binding);
     }
     throw new Error('Unable to save plan.');
   }
@@ -414,7 +418,7 @@ export async function saveUpcomingPlanFromCandidate(candidate: TimingCandidate, 
  * and the exact refused plan payload, so the caller can show both sides and
  * offer an explicit override of the SAME payload. */
 export class PlanOverlapSaveError extends Error {
-  constructor(public readonly conflict: PlanOverlapConflictView | null, public readonly proposed: UpcomingPlan) {
+  constructor(public readonly conflict: PlanOverlapConflictView | null, public readonly proposed: UpcomingPlan, public readonly binding?: AccountBinding) {
     super('That time overlaps another plan.');
     this.name = 'PlanOverlapSaveError';
   }
@@ -981,6 +985,8 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
   };
 
   const handleSavePlan = async (plan: UpcomingPlan, activityId?: string | null, options?: PlanSaveOptions): Promise<UpcomingPlan> => {
+    // AURA-ANDROID-REL-04 IR-01 (R2) -- the account the user acted under, captured at the action.
+    const binding = captureAccountBinding();
     const replacedPlanId = reschedulingPlanId;
     if (replacedPlanId) {
       try {
@@ -1010,7 +1016,7 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
       }
     }
     try {
-      const res = await fetch('/api/plans', {
+      const res = await boundFetch(binding, '/api/plans', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

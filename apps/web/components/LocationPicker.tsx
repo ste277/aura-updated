@@ -293,13 +293,21 @@ export function LocationPicker({ currentCity, currentLatitude, currentLongitude,
 
   // ---- Smart Location Selection: search ----
   const [searchQuery, setSearchQuery] = useState('');
-  const [searchLoading, setSearchLoading] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [searchResults, setSearchResults] = useState<GeocodeResultDto[]>([]);
-  // AURA-ANDROID-REL-04 IR-06 -- the query the current results/error belong
-  // to. Anything for another query is hidden on the very render the query
-  // changes, before any effect or response.
-  const [searchFor, setSearchFor] = useState('');
+  // AURA-ANDROID-REL-04 IR-06 (R2) -- every input change starts a new INPUT
+  // GENERATION, in the same render as the new text. Results, error and the
+  // loading flag are stamped with the generation they belong to and shown
+  // only while it is current, so returning to an earlier query text (A -> B
+  // -> A) never brings back A's retired rows: only a response for the new
+  // generation can display (or be selected).
+  const [inputGen, setInputGen] = useState(0);
+  const [searchFor, setSearchFor] = useState(-1);
+  const [searchLoadingGen, setSearchLoadingGen] = useState(-1);
+  const changeSearchQuery = (value: string) => {
+    setSearchQuery(value);
+    setInputGen((g) => g + 1);
+  };
   const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // AURA-ANDROID-REL-04 -- id of the newest search request; an older, slower
   // response must never replace newer results (REL-03 "search race").
@@ -348,18 +356,18 @@ export function LocationPicker({ currentCity, currentLatitude, currentLongitude,
     // debounce, aborts the request and retires the id, so an obsolete
     // request can never change results, error or loading state.
     const seq = ++searchSeqRef.current;
+    const gen = inputGen;
     const controller = new AbortController();
     const isLatest = () => searchSeqRef.current === seq && !controller.signal.aborted;
-    setSearchLoading(false);
     if (query.length < 2) {
       setSearchResults([]);
       setSearchError(null);
-      setSearchFor(query);
+      setSearchFor(gen);
       return () => { controller.abort(); };
     }
     searchDebounceRef.current = setTimeout(async () => {
       if (!isLatest()) return;
-      setSearchLoading(true);
+      setSearchLoadingGen(gen);
       setSearchError(null);
       try {
         const res = await fetch(`/api/location/search?q=${encodeURIComponent(query)}`, { signal: controller.signal });
@@ -372,14 +380,14 @@ export function LocationPicker({ currentCity, currentLatitude, currentLongitude,
           setSearchResults([]);
           setSearchError(typeof data.error === 'string' ? data.error : 'Search is temporarily unavailable.');
         }
-        setSearchFor(query);
+        setSearchFor(gen);
       } catch {
         if (!isLatest()) return;
         setSearchResults([]);
         setSearchError("Couldn't search right now. Please try again.");
-        setSearchFor(query);
+        setSearchFor(gen);
       } finally {
-        if (isLatest()) setSearchLoading(false);
+        if (isLatest()) setSearchLoadingGen(-1);
       }
     }, 400);
     return () => {
@@ -387,9 +395,11 @@ export function LocationPicker({ currentCity, currentLatitude, currentLongitude,
       controller.abort();
       if (searchSeqRef.current === seq) searchSeqRef.current++;
     };
-  }, [searchQuery]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [inputGen]);
 
-  const searchIsCurrent = searchFor === searchQuery.trim();
+  const searchIsCurrent = searchFor === inputGen;
+  const searchLoading = searchLoadingGen === inputGen;
   const visibleSearchResults = searchIsCurrent ? searchResults : [];
   const visibleSearchError = searchIsCurrent ? searchError : null;
 
@@ -574,7 +584,7 @@ export function LocationPicker({ currentCity, currentLatitude, currentLongitude,
         setCustomCities((prev) => [confirmed, ...prev.filter((c) => c.cityName !== confirmed.cityName)]);
         onChanged(confirmed);
         setPending(null);
-        setSearchQuery('');
+        changeSearchQuery('');
         setSearchResults([]);
       } else {
         const data = await res.json().catch(() => ({}));
@@ -1199,7 +1209,7 @@ export function LocationPicker({ currentCity, currentLatitude, currentLongitude,
           type="text"
           placeholder="e.g. Kollam, Kerala"
           value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
+          onChange={(e) => changeSearchQuery(e.target.value)}
           style={inputStyle(false)}
           autoComplete="off"
         />

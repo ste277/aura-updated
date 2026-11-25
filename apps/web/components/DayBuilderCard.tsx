@@ -12,6 +12,7 @@ import { presentProposedPlanOverlap, type PlanOverlapConflictView } from '../lib
 import { trackEvent } from '../lib/trackEvent';
 import { colors, spacing, radius, typography } from './theme';
 import { PrimaryButton, SecondaryButton, TextButton, StatusBadge } from './ui';
+import { captureAccountBinding, type AccountBinding } from '../lib/accountBoundFetch';
 
 /**
  * Intentional Day Builder V1 -- Daily Story's proactive suggestion cards
@@ -196,11 +197,15 @@ export function DayBuilderCard({
     trackEvent('DAY_BUILDER_SLOT_SELECTED', { metadata: { activityId: suggestion.activityId, candidateRank: index, dayPhase, hasPerson: suggestion.candidate.kind === 'SHARED' } });
   };
 
-  const performAdd = async (suggestion: IntentionalDaySuggestion, candidate: TimingCandidate, durationMinutes: number, options: { clientRequestId: string; activityId: string }, overlapPolicy: 'ALLOW' | 'REJECT_ACTIVE_OVERLAP') => {
+  const performAdd = async (suggestion: IntentionalDaySuggestion, candidate: TimingCandidate, durationMinutes: number, rawOptions: { clientRequestId: string; activityId: string; binding?: AccountBinding }, overlapPolicy: 'ALLOW' | 'REJECT_ACTIVE_OVERLAP') => {
     if (addingRef.current) return;
     addingRef.current = true;
     setState(suggestion.id, { addStatus: 'SAVING', error: undefined });
+    // AURA-ANDROID-REL-04 IR-01 (R2) -- bound at the first Add; an explicit
+    // override re-sends the stored options, so it keeps the SAME account.
+    let options: { clientRequestId: string; activityId: string; binding?: AccountBinding } = rawOptions;
     try {
+      options = { ...rawOptions, binding: rawOptions.binding ?? captureAccountBinding() };
       const plan = await saveUpcomingPlanFromCandidate(candidate, durationMinutes, { ...options, overlapPolicy });
       trackEvent('DAY_BUILDER_SUGGESTION_ADDED', { metadata: { intentionCategory: suggestion.groupId, activityId: suggestion.activityId, dayPhase } });
       setDbOverlap(null);

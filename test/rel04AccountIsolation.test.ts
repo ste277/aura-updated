@@ -1,31 +1,36 @@
 /**
- * AURA-ANDROID-REL-04 IR-01 / IR-03 -- integrated account-isolation and
- * sign-out transition scenarios (synthetic accounts A and B).
+ * AURA-ANDROID-REL-04 IR-01 / IR-03 (R2) -- integrated account-isolation and
+ * account-transition scenarios (synthetic accounts A and B).
  *
- *   npx ts-node test/rel04AccountIsolation.test.ts
+ *   TS_NODE_COMPILER_OPTIONS='{"jsx":"react-jsx"}' npx ts-node --project tsconfig.jsdom-tests.json test/rel04AccountIsolation.test.ts
  *
- * Client side: the real lib/accountSession, activitySync, signOut and
- * offlineHabitQueue modules (one instance per tab). Server side: the real
- * route handlers (logout, session, habit-logs, plans) over an in-memory db
- * stub. Requests are held / failed under test control. See the harness.
+ * Client: the real lib/accountSession, activitySync, offlineHabitQueue,
+ * signOut, signInCode and accountBoundFetch modules, one instance per tab.
+ * Server: the real middleware.ts and the real logout, session, habit-logs and
+ * plans route handlers over an in-memory db stub. Interleavings are
+ * DETERMINISTIC SIMULATIONS (held/failed requests, one process); they are not
+ * a real multi-process browser race.
  */
-import { Device, addUser, check, finish, logsOf, openTab, closeAllTabs, payload, resetStore, routes, storage, store, tick } from './rel04AccountIsolationHarness';
+import { Device, addUser, check, finish, locks, logsOf, openTab, closeAllTabs, payload, queueKeys, realPlansPost, resetStore, routes, storage, store, tick, WEB } from './rel04AccountIsolationHarness';
+import * as path from 'path';
+
+const { NextRequest } = require(require.resolve('next/server', { paths: [path.join(WEB, 'app', 'api', 'habit-logs')] }));
+const auth = require(path.join(WEB, 'lib', 'auth'));
 
 const A = 'synthetic-user-a';
 const B = 'synthetic-user-b';
 addUser(A, 'alicesynth@example.invalid');
 addUser(B, 'bobsynth@example.invalid');
-const KEY_A = 'offline_habit_queue_v2:' + A;
-const KEY_B = 'offline_habit_queue_v2:' + B;
-const queueLen = (key: string) => { const raw = storage.data.get(key); return raw ? JSON.parse(raw).length : 0; };
+const qA = () => queueKeys(A).length;
+const qB = () => queueKeys(B).length;
 
 function fresh() {
   resetStore();
   storage.clear();
   storage.fail = { get: false, set: false, remove: false };
+  locks.enabled = true;
   closeAllTabs();
 }
-
 async function signedInTab(dev: Device, user: string, id = 'tab1') {
   dev.signIn(user);
   const tab = openTab(id);
@@ -40,55 +45,67 @@ async function queueOffline(tab: ReturnType<typeof openTab>, dev: Device, title:
   if (r.kind !== 'queued') throw new Error(`setup: expected queued, got ${r.kind}`);
 }
 const yes = () => true;
+const signOut = (tab: ReturnType<typeof openTab>, dev: Device, extra: Record<string, unknown> = {}) =>
+  tab.so.performSignOut({ fetch: dev.fetch as any, confirm: yes, ...extra } as any);
+function routeReq(method: string, url: string, cookieUser: string | null, headers: Record<string, string> = {}, body?: unknown) {
+  const h = new Headers(headers);
+  if (cookieUser) h.set('cookie', `as_session=${auth.createSessionToken(cookieUser, store.users.get(cookieUser)!.email)}`);
+  if (body !== undefined) h.set('content-type', 'application/json');
+  return new NextRequest(`http://localhost${url}`, { method, headers: h, body: body === undefined ? undefined : JSON.stringify(body) });
+}
 
 async function main() {
-  // ------------------------------------------------------------------ server write boundary
+  // ================================================================ server boundary
   {
     fresh();
+    const before = store.dbCalls.length;
+    const direct = await routes['POST /api/habit-logs'](routeReq('POST', '/api/habit-logs', B, { 'X-Aura-Expected-Account': A }, payload('x', 'c1')));
+    check('SB1 habit-logs route: A expected + B session -> 409 account_mismatch, zero db calls', direct.status === 409 && (await direct.json()).code === 'account_mismatch' && store.dbCalls.length === before && store.logs.length === 0);
+
+    const unbound = await routes['POST /api/habit-logs'](routeReq('POST', '/api/habit-logs', A, {}, payload('x', 'c2')));
+    const ub = await unbound.json();
+    check('SB2 habit-logs route: unbound (old client), signed in -> 503 client_upgrade_required, no-store, nothing written', unbound.status === 503 && ub.code === 'client_upgrade_required' && unbound.headers.get('cache-control') === 'no-store' && store.logs.length === 0 && store.dbCalls.length === before);
+    const unboundExpired = await routes['POST /api/habit-logs'](routeReq('POST', '/api/habit-logs', null, {}, payload('x', 'c3')));
+    check('SB3 habit-logs route: unbound + expired session -> the same 503 (decided before authentication, never 401)', unboundExpired.status === 503 && (await unboundExpired.json()).code === 'client_upgrade_required');
+    const noSession = await routes['POST /api/habit-logs'](routeReq('POST', '/api/habit-logs', null, { 'X-Aura-Expected-Account': A }, payload('x', 'c4')));
+    check('SB4 the header never authorizes: bound request without a session -> 401', noSession.status === 401 && store.logs.length === 0);
+
+    const pMismatch = await realPlansPost(routeReq('POST', '/api/plans', B, { 'X-Aura-Expected-Account': A }, { title: 'x' }));
+    const pUnbound = await realPlansPost(routeReq('POST', '/api/plans', A, {}, { title: 'x' }));
+    const pUnboundExpired = await realPlansPost(routeReq('POST', '/api/plans', null, {}, { title: 'x' }));
+    check('SB5 plans route (real handler): mismatch -> 409; unbound -> 503 upgrade (signed in and expired); zero db calls', pMismatch.status === 409 && pUnbound.status === 503 && pUnboundExpired.status === 503 && store.dbCalls.length === before);
+
+    const lo = await routes['POST /api/auth/logout'](routeReq('POST', '/api/auth/logout', B, { 'X-Aura-Expected-Account': A }));
+    check('SB6 logout bound to A while the session is B -> 409, cookie untouched (no Set-Cookie)', lo.status === 409 && !lo.headers.get('set-cookie'));
+    const loOld = await routes['POST /api/auth/logout'](routeReq('POST', '/api/auth/logout', A));
+    check('SB7 logout without header (old client) still signs out', loOld.status === 200 && /Max-Age=0/i.test(loOld.headers.get('set-cookie') ?? ''));
+
     const dev = new Device();
     dev.signIn(B);
-    const before = store.dbCalls.length;
-    const res = await dev.fetch('/api/habit-logs', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Aura-Expected-Account': A }, body: JSON.stringify(payload('A-expected', 'crid-x1')) });
-    const body = await res.json();
-    check('SB1 request with A expected + B session -> 409 account_mismatch', res.status === 409 && body.code === 'account_mismatch');
-    check('SB1 nothing persisted and no db call made (rejected before any read/write)', store.logs.length === 0 && store.dbCalls.length === before);
-
-    const noHeader = await dev.fetch('/api/habit-logs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload('no-header', 'crid-x2')) });
-    check('SB2 activity write without the expected-account header -> 428, nothing persisted', noHeader.status === 428 && store.logs.length === 0);
-
-    const ok = await dev.fetch('/api/habit-logs', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Aura-Expected-Account': B }, body: JSON.stringify(payload('B own', 'crid-x3')) });
-    check('SB3 matching expected account -> 200 and persisted for B only', ok.status === 200 && logsOf(B).length === 1 && logsOf(A).length === 0);
-
-    dev.cookie = null;
-    const anon = await dev.fetch('/api/habit-logs', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Aura-Expected-Account': B }, body: JSON.stringify(payload('anon', 'crid-x4')) });
-    check('SB4 the header never authorizes: no session + header -> 401', anon.status === 401 && logsOf(B).length === 1);
-
-    dev.signIn(B);
-    const callsBefore = store.dbCalls.length;
-    const plan = await dev.fetch('/api/plans', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Aura-Expected-Account': A }, body: JSON.stringify({ title: 'x' }) });
-    check('SB5 POST /api/plans with A expected + B session -> 409 before any db call (real route)', plan.status === 409 && store.dbCalls.length === callsBefore);
+    const read = await dev.fetch('/api/habit-logs', { headers: { 'X-Aura-Expected-Account': A } });
+    check('SB8 middleware: account-sensitive READ stating A with B\'s cookie -> 409 (no B data returned)', read.status === 409 && (await read.json()).code === 'account_mismatch');
+    dev.cookie = 'forged.signature';
+    const forged = await dev.fetch('/api/habit-logs', { method: 'POST', headers: { 'X-Aura-Expected-Account': A, 'Content-Type': 'application/json' }, body: JSON.stringify(payload('x', 'c5')) });
+    check('SB9 middleware passes an invalid session through; the route answers 401', forged.status === 401);
   }
 
-  // ------------------------------------------------------------------ S1: A queues, signs out, B signs in
+  // ================================================================ C1 A queues, signs out, B signs in
   {
     fresh();
     const dev = new Device();
     const tab = await signedInTab(dev, A);
     await queueOffline(tab, dev, 'A walk', 'crid-a1');
     await queueOffline(tab, dev, 'A read', 'crid-a2');
-    check('S1 A queued 2 entries under A\'s own key (none in the legacy key)', queueLen(KEY_A) === 2 && !storage.data.has('offline_habit_queue'));
     let asked = '';
     const out = await tab.so.performSignOut({ fetch: dev.fetch as any, confirm: (m) => { asked = m; return true; } });
-    check('S1 sign-out asked about exactly the 2 pending logs and was acknowledged', out === 'signed-out' && /2 activity logs/.test(asked));
-    check('S1 A\'s queue discarded after confirmation + acknowledged logout', queueLen(KEY_A) === 0 && dev.cookie === null);
+    check('C1 sign-out asked about the 2 pending logs, acknowledged, discarded exactly them', out.outcome === 'signed-out' && out.discardFailed === 0 && /2 activity logs/.test(asked) && qA() === 0 && dev.cookie === null);
     dev.signIn(B);
-    const s = await tab.acct.fetchVerifiedSession(dev.fetch as any);
+    await tab.acct.fetchVerifiedSession(dev.fetch as any);
     const r = await tab.sync.replayOfflineQueue(dev.fetch as any);
-    check('S1 B verified; B\'s replay sends nothing', s.status === 'current' && r.attempted === 0 && dev.count('POST', '/api/habit-logs', (c) => c.processed) === 0);
-    check('S1 nothing of A\'s was ever stored under B', logsOf(B).length === 0);
+    check('C1 B replays nothing; nothing of A stored under B', r.attempted === 0 && logsOf(B).length === 0);
   }
 
-  // ------------------------------------------------------------------ S2: replay in progress when logout starts
+  // ================================================================ C2 replay in progress when logout starts
   {
     fresh();
     const dev = new Device();
@@ -100,160 +117,92 @@ async function main() {
     let asked = '';
     const out = tab.so.performSignOut({ fetch: dev.fetch as any, confirm: (m) => { asked = m; return true; } });
     const rr = await replay;
-    check('S2 the running replay is aborted when sign-out starts (item 1 never processed)', rr.stoppedBecause === 'account-changed' && dev.count('POST', '/api/habit-logs', (c) => c.processed) === 0);
-    check('S2 sign-out waited for the replay, then counted all 3 still-pending logs', (await out) === 'signed-out' && /3 activity logs/.test(asked));
+    check('C2 the running replay is aborted by the transition', rr.stoppedBecause === 'account-changed');
+    check('C2 sign-out waited, then counted all 3 still-pending logs', (await out).outcome === 'signed-out' && /3 activity logs/.test(asked));
     dev.signIn(B);
     await tab.acct.fetchVerifiedSession(dev.fetch as any);
     gate.release();
     await tab.sync.replayOfflineQueue(dev.fetch as any);
     await tick();
-    check('S2 no A entry ever reached the server under B', logsOf(B).length === 0 && dev.calls.every((c) => !(c.key === 'POST /api/habit-logs' && c.sessionUser === B)));
+    check('C2 nothing reached the server under B', logsOf(B).length === 0 && dev.calls.every((c) => !(c.key === 'POST /api/habit-logs' && c.sessionUser === B && c.processed)));
   }
 
-  // S2b: replay request already on the wire with A's cookie, B signs in before it lands
-  {
+  // ================================================================ C3 unresolved direct writes before logout confirmation
+  for (const phase of ['before', 'after'] as const) {
     fresh();
     const dev = new Device();
     const tab = await signedInTab(dev, A);
-    await queueOffline(tab, dev, 'A item', 'crid-w1');
-    await queueOffline(tab, dev, 'A item 2', 'crid-w2');
-    const gate = dev.hold('POST', '/api/habit-logs', 'after'); // processed under A, response delayed
-    const replay = tab.sync.replayOfflineQueue(dev.fetch as any);
+    const gate = dev.hold('POST', '/api/habit-logs', phase);
+    const write = tab.sync.submitActivityLog(payload('in flight', 'crid-if'), 't', dev.fetch as any);
     await gate.arrived;
-    // Another tab switches the device to B meanwhile.
-    dev.signIn(B);
-    const tab2 = openTab('tab2');
-    await tab2.acct.fetchVerifiedSession(dev.fetch as any);
-    await tick();
-    gate.release();
-    const rr = await replay;
-    check('S2b the in-flight item was stored for A (its cookie at send), never for B', logsOf(A).length === 1 && logsOf(B).length === 0);
-    check('S2b the replay stopped at the account change; item 2 was never sent under B', rr.attempted === 1 && dev.count('POST', '/api/habit-logs', (c) => c.sessionUser === B) === 0);
-    check('S2b A\'s entries stay in A\'s queue only (the aborted item 1 is kept: its answer was lost)', queueLen(KEY_A) >= 1 && queueLen(KEY_B) === 0);
-    dev.signIn(A);
-    await tab.acct.fetchVerifiedSession(dev.fetch as any);
-    await tab.sync.replayOfflineQueue(dev.fetch as any);
-    check('S2b when A returns, replay completes without duplicating item 1 (server idempotency by clientRequestId)', logsOf(A).filter((l) => l.clientRequestId === 'crid-w1').length === 1 && logsOf(A).length === 2 && queueLen(KEY_A) === 0);
-  }
-
-  // ------------------------------------------------------------------ S3: direct activity request after logout
-  {
-    fresh();
-    const dev = new Device();
-    const tab = await signedInTab(dev, A);
-    await tab.so.performSignOut({ fetch: dev.fetch as any, confirm: yes });
-    let refused = false;
-    try { await tab.sync.submitActivityLog(payload('after logout', 'crid-d1'), 't', dev.fetch as any); } catch (e: any) { refused = e?.name === 'AccountUnavailableError'; }
-    check('S3 a direct activity write after logout is refused client-side, nothing sent or queued', refused && dev.count('POST', '/api/habit-logs') === 0 && queueLen(KEY_A) === 0);
-    const raw = await dev.fetch('/api/habit-logs', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Aura-Expected-Account': A }, body: JSON.stringify(payload('raw', 'crid-d2')) });
-    check('S3 the same request sent anyway is rejected by the server (401), nothing stored', raw.status === 401 && store.logs.length === 0);
-  }
-
-  // ------------------------------------------------------------------ S4: A's identity, B's session (stale tab)
-  {
-    fresh();
-    const dev = new Device();
-    const tab1 = await signedInTab(dev, A, 'tab1');
-    const gate = dev.hold('POST', '/api/habit-logs', 'before');
-    // tab1 starts a direct write; before it is sent... model: B signs in elsewhere, then the request goes out with B's cookie.
-    dev.signIn(B); // cookie now B; tab1 has not heard yet (no storage event)
-    const write = tab1.sync.submitActivityLog(payload('tab1 thinks A', 'crid-s4'), 't', dev.fetch as any);
-    await gate.arrived;
-    gate.release();
-    const r = await write;
-    check('S4 request carrying A + B\'s session is rejected (409) and reported as rejected', r.kind === 'rejected' && (r as any).status === 409);
-    check('S4 nothing persisted for B or A; not queued', store.logs.length === 0 && queueLen(KEY_A) === 0 && queueLen(KEY_B) === 0);
-  }
-
-  // ------------------------------------------------------------------ S5: concurrent replay and enqueue
-  {
-    fresh();
-    const dev = new Device();
-    const tab = await signedInTab(dev, A);
-    await queueOffline(tab, dev, 'A one', 'crid-c1');
-    await queueOffline(tab, dev, 'A two', 'crid-c2');
-    const gate = dev.hold('POST', '/api/habit-logs', 'before');
-    const r1 = tab.sync.replayOfflineQueue(dev.fetch as any);
-    const r2 = tab.sync.replayOfflineQueue(dev.fetch as any);
-    check('S5 a second replay while one runs is the same single flight', r1 === r2);
-    await gate.arrived;
-    await queueOffline(tab, dev, 'A three (new)', 'crid-c3');
-    gate.release();
-    const res = await r1;
-    const left = JSON.parse(storage.data.get(KEY_A) ?? '[]').map((i: any) => i.clientRequestId);
-    check('S5 replay confirmed the 2 it read and removed only those', res.confirmed === 2 && res.removed === 2);
-    check('S5 the entry enqueued during replay survived (no snapshot overwrite)', JSON.stringify(left) === '["crid-c3"]');
-    check('S5 each replayed entry reached the server exactly once', logsOf(A).filter((l) => l.clientRequestId === 'crid-c1').length === 1 && logsOf(A).filter((l) => l.clientRequestId === 'crid-c2').length === 1);
-  }
-
-  // ------------------------------------------------------------------ S6: legacy unowned entries
-  {
-    fresh();
-    storage.data.set('offline_habit_queue', JSON.stringify([{ activityTitle: 'legacy 1', clientRequestId: 'crid-l1', logTimestamp: '2026-11-01T00:00:00.000Z' }, { activityTitle: 'legacy 2', clientRequestId: 'crid-l2', logTimestamp: '2026-11-01T00:00:00.000Z' }]));
-    const dev = new Device();
-    const tab = await signedInTab(dev, A);
-    const r = await tab.sync.replayOfflineQueue(dev.fetch as any);
-    check('S6 legacy unowned entries are quarantined: never replayed for the verified account', r.attempted === 0 && dev.count('POST', '/api/habit-logs') === 0);
-    check('S6 they are not shown as the current account\'s pending work', tab.q.readOfflineHabitQueue(A).length === 0);
     let asked = '';
-    const cancelled = await tab.so.performSignOut({ fetch: dev.fetch as any, confirm: (m) => { asked = m; return false; } });
-    check('S6 sign-out names them explicitly; Cancel keeps them and keeps A signed in', cancelled === 'cancelled' && /2 older unsynced logs/.test(asked) && storage.data.has('offline_habit_queue') && dev.cookie !== null);
-    const out = await tab.so.performSignOut({ fetch: dev.fetch as any, confirm: yes });
-    check('S6 explicit confirmed discard removes them only after the acknowledged logout', out === 'signed-out' && !storage.data.has('offline_habit_queue'));
+    const out = await tab.so.performSignOut({ fetch: dev.fetch as any, confirm: (m) => { asked = m; return false; } });
+    const w = await write;
+    gate.release();
+    const committed = logsOf(A).length;
+    check(`C3(${phase}) sign-out aborted the in-flight write; its outcome is unresolved, so it STAYS in A's queue`, w.kind === 'account-changed' && (w as any).keptForAccount === true && qA() === 1);
+    check(`C3(${phase}) the confirmation counts it, says it may already be saved, and Cancel keeps A signed in`, out.outcome === 'cancelled' && /1 activity log/.test(asked) && /may already have been saved/.test(asked) && dev.cookie !== null);
+    await tab.acct.fetchVerifiedSession(dev.fetch as any);
+    await tab.sync.replayOfflineQueue(dev.fetch as any);
+    check(`C3(${phase}) replay with the original clientRequestId resolves it exactly once for A (server ${phase === 'after' ? 'had committed' : 'had not committed'})`, logsOf(A).filter((l) => l.clientRequestId === 'crid-if').length === 1 && qA() === 0 && committed === (phase === 'after' ? 1 : 0));
   }
 
-  // ------------------------------------------------------------------ S7: account switch / session expiry without logout
+  // ================================================================ C4 A identity + B session (unrecognized cookie change)
   {
     fresh();
     const dev = new Device();
     const tab = await signedInTab(dev, A);
-    await queueOffline(tab, dev, 'A pending', 'crid-e1');
-    const epochA = tab.acct.getAccountEpoch();
-    dev.cookie = null; // session expired / cleared, no ordinary logout
-    const s1 = await tab.acct.fetchVerifiedSession(dev.fetch as any);
-    check('S7 session expiry is detected as signed-out and moves to a new epoch', s1.status === 'signed-out' && tab.acct.getAccountEpoch() > epochA && tab.acct.getVerifiedAccount() === null);
-    check('S7 A\'s pending entry is kept for A (expiry is not a confirmed sign-out)', queueLen(KEY_A) === 1);
-    dev.signIn(B);
-    await tab.acct.fetchVerifiedSession(dev.fetch as any);
-    const r = await tab.sync.replayOfflineQueue(dev.fetch as any);
-    check('S7 B replays nothing of A\'s; A\'s entry never reaches the server under B', r.attempted === 0 && logsOf(B).length === 0 && queueLen(KEY_A) === 1);
-    dev.signIn(A);
-    await tab.acct.fetchVerifiedSession(dev.fetch as any);
-    const rA = await tab.sync.replayOfflineQueue(dev.fetch as any);
-    check('S7 when A is verified again, A\'s entry replays for A', rA.confirmed === 1 && logsOf(A).length === 1 && queueLen(KEY_A) === 0);
+    dev.signIn(B); // another tab signed in; this tab has not heard
+    const r = await tab.sync.submitActivityLog(payload('tab thinks A', 'crid-s4'), 't', dev.fetch as any);
+    check('C4 refused by the server (409), kept for A, nothing stored for B', r.kind === 'account-changed' && (r as any).keptForAccount && qA() === 1 && qB() === 0 && store.logs.length === 0);
   }
 
-  // ------------------------------------------------------------------ S8: multiple tabs
+  // ================================================================ C5 multi-tab queue interleavings (per-entry atomic storage)
   {
     fresh();
     const dev = new Device();
     const tab1 = await signedInTab(dev, A, 'tab1');
     const tab2 = openTab('tab2');
-    tab2.acct.subscribeAccount(() => {});
     await tab2.acct.fetchVerifiedSession(dev.fetch as any);
-    const gate = dev.hold('POST', '/api/auth/logout', 'before');
-    const out = tab2.so.performSignOut({ fetch: dev.fetch as any, confirm: yes });
+    await queueOffline(tab1, dev, 'A one', 'crid-m1');
+    await queueOffline(tab2, dev, 'A two', 'crid-m2');
+    check('C5a two tabs enqueue for A: both entries kept (no shared-array overwrite)', qA() === 2);
+    const gate = dev.hold('POST', '/api/habit-logs', 'before');
+    const rep1 = tab1.sync.replayOfflineQueue(dev.fetch as any);
     await gate.arrived;
-    await tick();
-    let refused = '';
-    try { await tab1.sync.submitActivityLog(payload('tab1 during tab2 sign-out', 'crid-m1'), 't', dev.fetch as any); } catch (e: any) { refused = e?.reason; }
-    check('S8 while tab2 signs out, tab1 refuses new activity writes (cross-tab marker)', refused === 'transition' && dev.count('POST', '/api/habit-logs') === 0);
+    await queueOffline(tab2, dev, 'A three (during tab1 replay)', 'crid-m3');
+    const rep2 = await tab2.sync.replayOfflineQueue(dev.fetch as any);
+    check('C5b a second tab\'s replay while one runs is excluded by the shared lock', rep2.stoppedBecause === 'busy');
     gate.release();
-    await out;
-    await tick();
-    check('S8 tab2\'s completed sign-out moves tab1 to a new epoch with no verified account', tab1.acct.getVerifiedAccount() === undefined);
-    let refused2 = '';
-    try { await tab1.sync.submitActivityLog(payload('tab1 after', 'crid-m2'), 't', dev.fetch as any); } catch (e: any) { refused2 = e?.reason; }
-    check('S8 tab1 does nothing authenticated until it re-verifies', refused2 === 'unverified');
-    // tab2 signs in as B; tab1 learns through the storage event.
-    dev.signIn(B);
+    const r1 = await rep1;
+    const left = queueKeys(A).map((k) => k.split(':').pop());
+    check('C5c tab1 settled and removed only the entries it read; tab2\'s new entry survived', r1.confirmed === 2 && JSON.stringify(left) === '["crid-m3"]');
+    // Discard snapshot: an entry that appears AFTER confirmation survives the discard.
+    let injected = false;
+    const out = await tab1.so.performSignOut({
+      fetch: dev.fetch as any,
+      confirm: () => {
+        // Simulates a tab that did not observe the transition (no Web Locks, missed marker) adding work after the question.
+        storage.setItem(`aura_q3:${A}:crid-late`, JSON.stringify({ ...payload('late', 'crid-late'), ownerUserId: A, tempId: 't', queuedAt: Date.now() }));
+        injected = true;
+        return true;
+      },
+    });
+    check('C5d confirmed discard removes exactly the confirmed snapshot; work added afterwards is kept for A', out.outcome === 'signed-out' && injected && JSON.stringify(queueKeys(A).map((k) => k.split(':').pop())) === '["crid-late"]');
+  }
+  {
+    fresh();
+    locks.enabled = false; // supported environment without Web Locks
+    const dev = new Device();
+    const tab1 = await signedInTab(dev, A, 'tab1');
+    const tab2 = openTab('tab2');
     await tab2.acct.fetchVerifiedSession(dev.fetch as any);
-    await tick();
-    const s = await tab1.acct.fetchVerifiedSession(dev.fetch as any);
-    check('S8 tab1 re-verifies as B (never A)', s.status === 'current' && tab1.acct.getVerifiedAccount() === B);
+    for (const n of [1, 2]) await queueOffline(tab1, dev, `A n${n}`, `crid-n${n}`);
+    const [x, y] = await Promise.all([tab1.sync.replayOfflineQueue(dev.fetch as any), tab2.sync.replayOfflineQueue(dev.fetch as any)]);
+    check('C6 without Web Locks two tabs may replay concurrently; nothing is lost and nothing is duplicated (clientRequestId)', qA() === 0 && logsOf(A).length === 2 && x.stoppedBecause === null && y.stoppedBecause === null);
   }
 
-  // ------------------------------------------------------------------ S9: storage failures
+  // ================================================================ C7 storage failures
   {
     fresh();
     const dev = new Device();
@@ -261,116 +210,157 @@ async function main() {
     storage.fail.set = true;
     dev.fault('POST', '/api/habit-logs', 'network-before');
     const r = await tab.sync.submitActivityLog(payload('cannot store', 'crid-f1'), 't', dev.fetch as any);
-    check('S9 enqueue write failure -> not-stored (caller tells the user; nothing claimed pending)', r.kind === 'not-stored');
+    check('C7a write fails AND storage write fails -> not-stored (reported, never claimed pending)', r.kind === 'not-stored');
     storage.fail.set = false;
-    await queueOffline(tab, dev, 'stored', 'crid-f2');
+    await queueOffline(tab, dev, 'stored 1', 'crid-f2');
+    await queueOffline(tab, dev, 'stored 2', 'crid-f3');
     storage.fail.get = true;
     let asked = '';
-    const cancel = await tab.so.performSignOut({ fetch: dev.fetch as any, confirm: (m) => { asked = m; return false; } });
-    check('S9 unreadable storage: sign-out asks (cannot check) and Cancel keeps the session', cancel === 'cancelled' && /couldn't check this device/i.test(asked) && dev.cookie !== null);
-    const rr = await tab.sync.replayOfflineQueue(dev.fetch as any);
-    check('S9 unreadable storage: replay sends nothing', rr.stoppedBecause === 'unreadable' && dev.count('POST', '/api/habit-logs', (c) => c.processed) === 0);
+    const c = await tab.so.performSignOut({ fetch: dev.fetch as any, confirm: (m) => { asked = m; return false; } });
+    check('C7b unreadable storage: asked (cannot check) and Cancel keeps the session', c.outcome === 'cancelled' && /couldn't check this device/i.test(asked) && dev.cookie !== null);
     storage.fail.get = false;
     storage.fail.remove = true;
-    const out = await tab.so.performSignOut({ fetch: dev.fetch as any, confirm: yes });
+    const out = await signOut(tab, dev);
     storage.fail.remove = false;
-    check('S9 removal failure after acknowledged logout: still signed out', out === 'signed-out' && dev.cookie === null);
+    check('C7c removal failure after acknowledged logout: signed out AND reported truthfully (2 not removed)', out.outcome === 'signed-out' && out.discardFailed === 2 && qA() === 2);
     dev.signIn(B);
     await tab.acct.fetchVerifiedSession(dev.fetch as any);
     await tab.sync.replayOfflineQueue(dev.fetch as any);
-    check('S9 the undeletable A entry stays partitioned: never sent under B', logsOf(B).length === 0 && dev.count('POST', '/api/habit-logs', (c) => c.sessionUser === B) === 0);
+    check('C7d the entries that could not be removed stay A\'s: never sent under B', logsOf(B).length === 0 && dev.count('POST', '/api/habit-logs', (x) => x.sessionUser === B) === 0);
   }
 
-  // ------------------------------------------------------------------ S10/S11/S12: logout failures, unexpected answers, lost ack, retry
-  for (const [label, mode, expect] of [
-    ['S10 offline (no response)', 'network-before', 'failed'],
-    ['S10 HTTP 500', 'json500', 'failed'],
-    ['S11 unexpected 200 HTML (captive portal)', 'html200', 'failed'],
-    ['S11 unexpected redirect', 'redirect', 'failed'],
-    ['S11 malformed acknowledgement (200 JSON without loggedOut)', 'json200-wrong', 'failed'],
-  ] as const) {
-    fresh();
-    const dev = new Device();
-    const tab = await signedInTab(dev, A);
-    await queueOffline(tab, dev, 'A pending', 'crid-x');
-    dev.fault('POST', '/api/auth/logout', mode);
-    const out = await tab.so.performSignOut({ fetch: dev.fetch as any, confirm: yes });
-    check(`${label}: outcome '${expect}', still A, A's queue kept`, out === expect && tab.acct.getVerifiedAccount() === A && queueLen(KEY_A) === 1 && dev.cookie !== null);
-    const retry = await tab.so.performSignOut({ fetch: dev.fetch as any, confirm: yes });
-    check(`${label}: retry signs out and discards A's queue`, retry === 'signed-out' && queueLen(KEY_A) === 0 && dev.cookie === null);
-  }
+  // ================================================================ C8 bounded logout stages
   {
     fresh();
     const dev = new Device();
     const tab = await signedInTab(dev, A);
-    await queueOffline(tab, dev, 'A pending', 'crid-lost');
-    dev.fault('POST', '/api/auth/logout', 'network-after'); // server cleared the cookie, answer lost
-    const out = await tab.so.performSignOut({ fetch: dev.fetch as any, confirm: yes });
-    check('S12 lost acknowledgement is reconciled: signed out, but unconfirmed', out === 'signed-out-unconfirmed' && tab.acct.getVerifiedAccount() === null);
-    check('S12 unacknowledged logout keeps A\'s queue for A (not discarded)', queueLen(KEY_A) === 1);
-    dev.signIn(B);
+    await queueOffline(tab, dev, 'A pending', 'crid-t1');
+    dev.fault('POST', '/api/auth/logout', 'hang');
+    const t0 = Date.now();
+    const out = await signOut(tab, dev, { logoutTimeoutMs: 60, reconcileTimeoutMs: 60 });
+    check('C8a logout request that never settles: bounded; reconciled to the same account -> failed, A kept with its queue', out.outcome === 'failed' && tab.acct.getVerifiedAccount() === A && qA() === 1 && Date.now() - t0 < 2000);
+    dev.fault('POST', '/api/auth/logout', 'hang-body');
+    const out2 = await signOut(tab, dev, { logoutTimeoutMs: 60, reconcileTimeoutMs: 60 });
+    check('C8b acknowledgement body that never finishes (server DID sign out): bounded, reconciled -> signed-out-unconfirmed, queue kept', out2.outcome === 'signed-out-unconfirmed' && qA() === 1);
+    dev.signIn(A);
     await tab.acct.fetchVerifiedSession(dev.fetch as any);
-    await tab.sync.replayOfflineQueue(dev.fetch as any);
-    check('S12 B never receives A\'s kept entry', logsOf(B).length === 0);
+    dev.fault('POST', '/api/auth/logout', 'hang');
+    dev.fault('GET', '/api/auth/session', 'hang');
+    const out3 = await signOut(tab, dev, { logoutTimeoutMs: 60, reconcileTimeoutMs: 60 });
+    let refused = '';
+    try { await tab.sync.submitActivityLog(payload('while unverified', 'crid-t2'), 't', dev.fetch as any); } catch (e: any) { refused = e?.reason; }
+    check('C8c logout AND reconciliation never settle: bounded -> unverified; bound writes refused; queue kept', out3.outcome === 'unverified' && tab.acct.getVerifiedAccount() === undefined && refused === 'unverified' && qA() === 1);
+    const back = await tab.acct.fetchVerifiedSession(dev.fetch as any);
+    check('C8d recovery: a fresh session answer resumes A (the Retry path)', back.status === 'current' && tab.acct.getVerifiedAccount() === A);
   }
+
+  // ================================================================ C9 HTTP failures are ambiguous
   {
     fresh();
     const dev = new Device();
     const tab = await signedInTab(dev, A);
-    let asks = 0;
-    await queueOffline(tab, dev, 'A pending', 'crid-cc');
+    await queueOffline(tab, dev, 'A pending', 'crid-h1');
+    dev.fault('POST', '/api/auth/logout', 'process-then-500'); // server signed out; the client sees a 500
+    const out = await signOut(tab, dev);
+    check('C9a 500 after the server changed the session is NOT treated as "still A": reconciled -> signed-out-unconfirmed', out.outcome === 'signed-out-unconfirmed' && tab.acct.getVerifiedAccount() === null && qA() === 1);
+    dev.signIn(A);
+    await tab.acct.fetchVerifiedSession(dev.fetch as any);
+    dev.fault('POST', '/api/auth/logout', 'json500');
+    const sessionCallsBefore = dev.count('GET', '/api/auth/session');
+    const out2 = await signOut(tab, dev);
+    check('C9b 500 with the session unchanged: A resumes only after a fresh session answer', out2.outcome === 'failed' && dev.count('GET', '/api/auth/session') === sessionCallsBefore + 1 && tab.acct.getVerifiedAccount() === A);
+    for (const mode of ['html200', 'redirect', 'json200-wrong', 'json-suffix-type'] as const) {
+      dev.fault('POST', '/api/auth/logout', mode);
+      const o = await signOut(tab, dev);
+      check(`C9c unexpected answer '${mode}' is never an acknowledgement; reconciled -> failed, A kept`, o.outcome === 'failed' && tab.acct.getVerifiedAccount() === A && qA() === 1);
+    }
+  }
+
+  // ================================================================ C10 sign-in while logout is pending; concurrent logout across tabs
+  for (const withLocks of [true, false]) {
+    fresh();
+    locks.enabled = withLocks;
+    const dev = new Device();
+    dev.verifyAs['bobsynth@example.invalid'] = B;
+    const tab1 = await signedInTab(dev, A, 'tab1');
+    const tab2 = openTab('tab2');
+    await tab2.acct.fetchVerifiedSession(dev.fetch as any);
     const gate = dev.hold('POST', '/api/auth/logout', 'before');
-    const p1 = tab.so.performSignOut({ fetch: dev.fetch as any, confirm: () => { asks++; return true; } });
-    const p2 = tab.so.performSignOut({ fetch: dev.fetch as any, confirm: () => { asks++; return true; } });
+    const out = signOut(tab1, dev);
     await gate.arrived;
+    await tick();
+    const si = await tab2.si.verifySignInCode({ email: 'bobsynth@example.invalid', code: '123456' }, dev.fetch as any);
+    const second = await tab2.so.performSignOut({ fetch: dev.fetch as any, confirm: yes });
+    check(`C10 (${withLocks ? 'Web Locks' : 'marker fallback'}) sign-in in another tab while logout is pending is refused (BUSY), no verify-code sent`, si.kind === 'BUSY' && dev.count('POST', '/api/auth/verify-code') === 0);
+    check(`C10 (${withLocks ? 'Web Locks' : 'marker fallback'}) a concurrent logout in another tab is refused (busy): one logout request`, second.outcome === 'busy' && dev.count('POST', '/api/auth/logout') === 1);
     gate.release();
-    const [o1, o2] = await Promise.all([p1, p2]);
-    check('S13 concurrent sign-out attempts share one transition: one question, one logout request', p1 === p2 && o1 === 'signed-out' && o2 === 'signed-out' && asks === 1 && dev.count('POST', '/api/auth/logout') === 1);
+    await out;
+    const si2 = await tab2.si.verifySignInCode({ email: 'bobsynth@example.invalid', code: '123456' }, dev.fetch as any);
+    check(`C10 (${withLocks ? 'Web Locks' : 'marker fallback'}) after the logout completes, B signs in and is confirmed; the old logout cannot clear it`, si2.kind === 'VERIFIED' && (si2 as any).userId === B && dev.sessionUser() === B);
   }
 
-  // ------------------------------------------------------------------ S14: late session response
+  // ================================================================ C11 old logout cannot clear a newer sign-in (account-bound logout)
   {
     fresh();
     const dev = new Device();
     const tab = await signedInTab(dev, A);
-    const gate = dev.hold('GET', '/api/auth/session', 'after'); // answered "A", delivered late
-    const late = tab.acct.fetchVerifiedSession(dev.fetch as any);
-    await gate.arrived;
-    await tab.so.performSignOut({ fetch: dev.fetch as any, confirm: yes });
-    gate.release();
-    const r = await late;
-    check('S14 a session answer from before the sign-out is stale and does not restore A', r.status === 'stale' && tab.acct.getVerifiedAccount() === null);
+    await queueOffline(tab, dev, 'A pending', 'crid-o1');
+    // An uncoordinated sign-in as B lands after the question but BEFORE A's
+    // logout is sent, so the logout carries B's cookie.
+    const o = await tab.so.performSignOut({ fetch: dev.fetch as any, confirm: () => { dev.signIn(B); return true; } });
+    check('C11 A\'s logout carrying B\'s session is refused by the server: B stays signed in; client switches to B; A\'s queue kept', o.outcome === 'account-changed' && dev.sessionUser() === B && tab.acct.getVerifiedAccount() === B && qA() === 1);
+    // Documented limitation (report R2.6): a logout SENT with A's cookie is a
+    // valid logout of A; if an uncoordinated sign-in's response lands before
+    // that logout's response, the browser applies the logout's Set-Cookie
+    // last. Coordinated flows prevent this with the auth lock (C10).
   }
 
-  // ------------------------------------------------------------------ S15: in-flight direct write when sign-out starts
+  // ================================================================ C12 session answer ordering
+  {
+    fresh();
+    const dev = new Device();
+    dev.signIn(A);
+    const tab = openTab('tab1');
+    const gate = dev.hold('GET', '/api/auth/session', 'after'); // answers "A", delivered late
+    const first = tab.acct.fetchVerifiedSession(dev.fetch as any);
+    await gate.arrived;
+    dev.signIn(B);
+    const second = await tab.acct.fetchVerifiedSession(dev.fetch as any);
+    gate.release();
+    const late = await first;
+    check('C12a concurrent same-epoch answers: the newer (B) wins; the late older (A) answer is never applied -- its caller gets the newer answer', second.status === 'current' && late.status === 'current' && (late as any).user.id === B && tab.acct.getVerifiedAccount() === B);
+  }
   {
     fresh();
     const dev = new Device();
     const tab = await signedInTab(dev, A);
-    const gate = dev.hold('POST', '/api/habit-logs', 'before');
-    const write = tab.sync.submitActivityLog(payload('in flight', 'crid-if'), 't', dev.fetch as any);
+    const gate = dev.hold('GET', '/api/auth/session', 'after');
+    const held = tab.acct.fetchVerifiedSession(dev.fetch as any);
     await gate.arrived;
-    let asked: string | null = null;
-    const out = await tab.so.performSignOut({ fetch: dev.fetch as any, confirm: (m) => { asked = m; return true; } });
-    const w = await write;
-    check('S15 sign-out aborts the in-flight write and waits for it to settle', w.kind === 'account-changed' && out === 'signed-out');
-    check('S15 the aborted write was neither stored nor queued (and the user was not asked about phantom work)', store.logs.length === 0 && queueLen(KEY_A) === 0 && asked === null);
+    dev.signIn(B); // another tab signed in as B ...
+    tab.acct.__deliverStorageEventForTests({ key: 'aura_account_announce_v2', newValue: JSON.stringify({ account: B, tab: 'other', at: Date.now() }) });
+    const sessionsBefore = dev.count('GET', '/api/auth/session');
     gate.release();
+    const r = await held;
+    check('C12b the held "A" answer across a cross-tab invalidation is discarded; a fresh check finds B (A is not restored)', r.status === 'current' && (r as any).user.id === B && tab.acct.getVerifiedAccount() === B && dev.count('GET', '/api/auth/session') === sessionsBefore + 1);
   }
-
-  // ------------------------------------------------------------------ S16: busy write blocks sign-out (ambiguous -> no sign-out)
   {
     fresh();
     const dev = new Device();
     const tab = await signedInTab(dev, A);
-    let release!: () => void;
-    const stuck = tab.acct.runActivityOperation(() => new Promise<void>((r) => { release = r; }));
-    const out = await tab.so.performSignOut({ fetch: dev.fetch as any, confirm: yes, settleTimeoutMs: 50 });
-    check('S16 an activity operation that will not settle -> busy; still signed in, nothing sent', out === 'busy' && dev.cookie !== null && dev.count('POST', '/api/auth/logout') === 0 && tab.acct.getVerifiedAccount() === A);
-    release(); await stuck;
+    await queueOffline(tab, dev, 'x', 'crid-c12');
+    const gate = dev.hold('GET', '/api/auth/session', 'after');
+    const held = tab.acct.fetchVerifiedSession(dev.fetch as any);
+    await gate.arrived;
+    const out = await tab.so.performSignOut({ fetch: dev.fetch as any, confirm: () => false }); // cancelled transition
+    const sessionsBefore = dev.count('GET', '/api/auth/session');
+    gate.release();
+    const r = await held;
+    void sessionsBefore;
+    const heldRec = dev.calls.filter((c) => c.key === 'GET /api/auth/session')[1];
+    check('C12c a session read in flight when a transition starts is aborted (never applied); the caller gets stale or a FRESH re-check; account unchanged after Cancel', out.outcome === 'cancelled' && heldRec?.status === 'aborted' && (r.status === 'stale' || (r.status === 'current' && (r as any).user.id === A)) && tab.acct.getVerifiedAccount() === A);
   }
 
-  void routes;
   finish();
 }
 

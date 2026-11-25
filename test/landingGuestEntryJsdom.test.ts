@@ -16,7 +16,7 @@ function check(label: string, condition: boolean) {
   console.log(`${condition ? 'OK  ' : 'FAIL'} ${label}`);
   if (!condition) allPassed = false;
 }
-const res = (status: number, body: unknown) => ({ ok: status >= 200 && status < 300, status, json: async () => body });
+const res = (status: number, body: unknown) => ({ ok: status >= 200 && status < 300, status, headers: new Headers({ 'content-type': 'application/json' }), json: async () => body });
 const { LoginScreen } = require('../apps/web/components/LoginScreen');
 
 (async () => {
@@ -56,8 +56,13 @@ const { LoginScreen } = require('../apps/web/components/LoginScreen');
   await typeInto(h.container.querySelector('input[placeholder="123456"]') as HTMLInputElement, '123456');
   await click([...h.container.querySelectorAll('button')].find((b) => b.textContent === 'Sign in')!);
   check('2. verify-code is sent for the same address', JSON.stringify(f.calls[1]?.body) === JSON.stringify({ email: 'f3-user@e2e.aura.local', code: '123456' }));
-  f.resolve(1, res(200, { ok: true }));
+  // AURA-ANDROID-REL-04 (R2): verify-code names the account it signed in, and
+  // the client confirms it with a fresh session answer before continuing.
+  f.resolve(1, res(200, { ok: true, userId: 'u-f3' }));
   await flush();
+  check('2. the sign-in is confirmed with a fresh session read', f.calls[2]?.url === '/api/auth/session');
+  f.resolve(2, res(200, { user: { id: 'u-f3', email: 'f3-user@e2e.aura.local' } }));
+  await flush(); await flush();
   check('2. a correct code signs in', loggedIn === 1);
 
   // Change email returns to the landing step, intro and guest link included.
@@ -78,7 +83,8 @@ const { LoginScreen } = require('../apps/web/components/LoginScreen');
   const strip = (s: string) => s.replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
   const login = strip(fs.readFileSync(path.join(__dirname, '..', 'apps/web/components/LoginScreen.tsx'), 'utf8'));
   check('4/5. no separate guest experience: the link targets the existing /find route only', (login.match(/href="\/find"/g) ?? []).length === 1 && fs.existsSync(path.join(__dirname, '..', 'apps/web/app/find/page.tsx')));
-  check('no registration gate / allowlist / auth-logic change introduced', !/allowlist|invite|waitlist|isAllowed/i.test(login) && /\/api\/auth\/verify-code/.test(login));
+  const signInLib = strip(fs.readFileSync(path.join(__dirname, '..', 'apps/web/lib/signInCode.ts'), 'utf8'));
+  check('no registration gate / allowlist / auth-logic change introduced (verify-code now called via lib/signInCode.ts, AURA-ANDROID-REL-04 R2)', !/allowlist|invite|waitlist|isAllowed/i.test(login + signInLib) && /verifySignInCode/.test(login) && /\/api\/auth\/verify-code/.test(signInLib));
 
   console.log(`\n${count} checks`);
   if (!allPassed) { console.log('SOME CHECKS FAILED'); process.exit(1); }

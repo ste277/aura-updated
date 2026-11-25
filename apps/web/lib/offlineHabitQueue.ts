@@ -44,36 +44,46 @@ function isQueuedHabitLog(value: unknown): value is QueuedHabitLog {
 }
 
 /**
- * AURA-ANDROID-REL-04 IR-01 -- the queue is partitioned by VERIFIED account.
- * Each account's entries live under their own key and carry ownerUserId, so
- * replay for account B can never read account A's entries, a sign-out
- * discards only the signed-out account's entries, and an account switch or
- * session expiry leaves the previous account's entries untouched (they replay
- * only when that account is verified again).
+ * AURA-ANDROID-REL-04 IR-01 (R2) -- the queue is partitioned by VERIFIED
+ * account and stored ONE ENTRY PER KEY:
+ *
+ *     aura_q3:<ownerUserId>:<clientRequestId>  ->  JSON entry (with ownerUserId)
+ *
+ * so every mutation is a single, atomic storage operation:
+ *   enqueue  = setItem(one key)         settle/remove = removeItem(one key)
+ *   snapshot = the set of keys present  discard       = removeItem of exactly
+ *                                                       the snapshot's keys
+ * No read-modify-write of a shared array exists, so concurrent tabs (with or
+ * without Web Locks) cannot lose an appended entry, resurrect a settled one,
+ * or delete work added after a discard was confirmed. Web Locks are used
+ * only to keep two tabs from replaying the same account at once; without
+ * them a duplicate replay is harmless (the server de-duplicates by
+ * clientRequestId).
  *
  * The pre-REL-04 key (`offline_habit_queue`) holds entries with NO owner.
- * Their owner is never inferred: they are QUARANTINED (never replayed, never
- * shown as the current account's pending work) and removed only through an
- * explicit, confirmed discard (lib/signOut.ts).
- *
- * Every mutation is a synchronous read-modify-write of the latest stored
- * value (localStorage is synchronous within a tab), and replay removes only
- * the ids it settled -- it never writes back a snapshot -- so a concurrent
- * enqueue or a concurrent replay can't be overwritten, and a late completion
- * can't restore a cleared queue.
+ * Their owner is never inferred: they stay QUARANTINED until the user
+ * explicitly discards them or explicitly adds them to the signed-in account.
+ * The interim array format of the unreleased R1 head
+ * (`offline_habit_queue_v2:<owner>`) is migrated entry by entry.
  */
 export const LEGACY_QUEUE_KEY = 'offline_habit_queue';
-export const QUEUE_KEY_PREFIX = 'offline_habit_queue_v2:';
+export const QUEUE_V2_PREFIX = 'offline_habit_queue_v2:';
+export const QUEUE_PREFIX = 'aura_q3:';
 
 export interface OwnedQueuedHabitLog extends QueuedHabitLog {
   ownerUserId: string;
+  /** When it was queued (ordering only). */
+  queuedAt?: number;
 }
 
-export function queueKeyFor(ownerUserId: string): string {
-  return QUEUE_KEY_PREFIX + ownerUserId;
+export function queueKeyFor(ownerUserId: string, clientRequestId: string): string {
+  return `${QUEUE_PREFIX}${ownerUserId}:${clientRequestId}`;
+}
+function ownerPrefix(ownerUserId: string) {
+  return `${QUEUE_PREFIX}${ownerUserId}:`;
 }
 
-export type QueueRead = { ok: true; items: OwnedQueuedHabitLog[] } | { ok: false };
+export type QueueRead = { ok: true; items: OwnedQueuedHabitLog[]; keys: string[] } | { ok: false };
 
 function storageOrNull(): Storage | null {
   try {
@@ -84,25 +94,50 @@ function storageOrNull(): Storage | null {
 }
 
 /**
- * The owner's entries. `ok:false` when storage is unavailable, throws, or
- * holds something that isn't a queue -- callers must not treat that as
- * "nothing pending". Entries whose ownerUserId differs are ignored.
+ * The owner's entries (and their keys = the snapshot). `ok:false` when storage
+ * is unavailable or throws -- callers must not treat that as "nothing pending".
+ * A malformed entry, or one whose ownerUserId differs, is ignored (not removed).
  */
 export function readOwnedQueue(ownerUserId: string): QueueRead {
   const s = storageOrNull();
   if (!s) return { ok: false };
   try {
-    const raw = s.getItem(queueKeyFor(ownerUserId));
-    if (!raw) return { ok: true, items: [] };
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return { ok: false };
-    return {
-      ok: true,
-      items: parsed.filter((v): v is OwnedQueuedHabitLog => isQueuedHabitLog(v) && (v as { ownerUserId?: unknown }).ownerUserId === ownerUserId),
-    };
+    migrateV2(s, ownerUserId);
+    const prefix = ownerPrefix(ownerUserId);
+    const keys: string[] = [];
+    for (let i = 0; i < s.length; i++) {
+      const k = s.key(i);
+      if (k && k.startsWith(prefix)) keys.push(k);
+    }
+    const found: Array<{ it: OwnedQueuedHabitLog; k: string }> = [];
+    for (const k of keys) {
+      let v: unknown;
+      try { v = JSON.parse(s.getItem(k) ?? 'null'); } catch { continue; }
+      if (isQueuedHabitLog(v) && (v as { ownerUserId?: unknown }).ownerUserId === ownerUserId && k === queueKeyFor(ownerUserId, (v as QueuedHabitLog).clientRequestId)) {
+        found.push({ it: v as OwnedQueuedHabitLog, k });
+      }
+    }
+    found.sort((a, b) => (a.it.queuedAt ?? 0) - (b.it.queuedAt ?? 0) || a.it.logTimestamp.localeCompare(b.it.logTimestamp));
+    return { ok: true, items: found.map((o) => o.it), keys: found.map((o) => o.k) };
   } catch {
     return { ok: false };
   }
+}
+
+/** One-time move of the unreleased R1 array format into per-entry keys (idempotent by clientRequestId). */
+function migrateV2(s: Storage, ownerUserId: string) {
+  const raw = s.getItem(QUEUE_V2_PREFIX + ownerUserId);
+  if (!raw) return;
+  let parsed: unknown;
+  try { parsed = JSON.parse(raw); } catch { return; }
+  if (!Array.isArray(parsed)) return;
+  for (const v of parsed) {
+    if (isQueuedHabitLog(v) && (v as { ownerUserId?: unknown }).ownerUserId === ownerUserId) {
+      const key = queueKeyFor(ownerUserId, (v as QueuedHabitLog).clientRequestId);
+      if (s.getItem(key) === null) s.setItem(key, JSON.stringify(v));
+    }
+  }
+  s.removeItem(QUEUE_V2_PREFIX + ownerUserId);
 }
 
 /** Presentation read: the owner's entries, or [] if unreadable. */
@@ -112,78 +147,91 @@ export function readOfflineHabitQueue(ownerUserId: string | null | undefined): O
   return r.ok ? r.items : [];
 }
 
-function writeOwned(s: Storage, ownerUserId: string, items: OwnedQueuedHabitLog[]) {
-  if (items.length === 0) s.removeItem(queueKeyFor(ownerUserId));
-  else s.setItem(queueKeyFor(ownerUserId), JSON.stringify(items));
-}
-
-/** Appends one entry for its owner. false = not stored (storage unavailable/full/corrupt). */
+/** Stores one entry for its owner (one atomic setItem). false = not stored. */
 export function enqueueOwned(item: OwnedQueuedHabitLog): boolean {
   const s = storageOrNull();
-  if (!s || !item.ownerUserId) return false;
-  const current = readOwnedQueue(item.ownerUserId);
-  if (!current.ok) return false;
+  if (!s || !item.ownerUserId || !item.clientRequestId) return false;
   try {
-    const items = current.items.filter((i) => i.clientRequestId !== item.clientRequestId);
-    items.push(item);
-    writeOwned(s, item.ownerUserId, items);
+    s.setItem(queueKeyFor(item.ownerUserId, item.clientRequestId), JSON.stringify({ queuedAt: Date.now(), ...item }));
     return true;
   } catch {
     return false;
   }
 }
 
-/** Removes exactly these clientRequestIds from the owner's latest stored queue. */
-export function removeOwnedEntries(ownerUserId: string, clientRequestIds: Iterable<string>): boolean {
+export interface RemovalResult { removed: number; failed: number }
+
+/** Removes exactly these entries (one atomic removeItem each). Reports failures truthfully. */
+export function removeOwnedEntries(ownerUserId: string, clientRequestIds: Iterable<string>): RemovalResult {
+  return removeKeys([...clientRequestIds].map((id) => queueKeyFor(ownerUserId, id)));
+}
+
+/** Removes exactly these keys (a discard snapshot); never touches keys added later. */
+export function removeKeys(keys: Iterable<string>): RemovalResult {
   const s = storageOrNull();
-  if (!s) return false;
-  const ids = new Set(clientRequestIds);
-  if (ids.size === 0) return true;
-  const current = readOwnedQueue(ownerUserId);
-  if (!current.ok) return false;
-  try {
-    writeOwned(s, ownerUserId, current.items.filter((i) => !ids.has(i.clientRequestId)));
-    return true;
-  } catch {
-    return false;
+  const result: RemovalResult = { removed: 0, failed: 0 };
+  for (const k of keys) {
+    try {
+      if (!s) throw new Error('no storage');
+      s.removeItem(k);
+      if (s.getItem(k) !== null) throw new Error('still present');
+      result.removed++;
+    } catch {
+      result.failed++;
+    }
   }
+  return result;
 }
 
-/** Discards the owner's whole queue (confirmed sign-out only). */
-export function clearOwnedQueue(ownerUserId: string): boolean {
-  const s = storageOrNull();
-  if (!s) return false;
-  try {
-    s.removeItem(queueKeyFor(ownerUserId));
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/** Number of quarantined legacy (unowned) entries; null if unreadable. */
-export function legacyQueueCount(): number | null {
+/** Quarantined legacy (unowned) entries; null if unreadable. */
+export function readLegacyQueue(): unknown[] | null {
   const s = storageOrNull();
   if (!s) return null;
   try {
     const raw = s.getItem(LEGACY_QUEUE_KEY);
-    if (!raw) return 0;
+    if (!raw) return [];
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed.length : null;
+    return Array.isArray(parsed) ? parsed : null;
   } catch {
     return null;
   }
 }
 
+/** Number of quarantined legacy (unowned) entries; null if unreadable. */
+export function legacyQueueCount(): number | null {
+  const l = readLegacyQueue();
+  return l === null ? null : l.length;
+}
+
+/** Explicit discard of the quarantined legacy entries (a user decision). */
 export function clearLegacyQueue(): boolean {
   const s = storageOrNull();
   if (!s) return false;
   try {
     s.removeItem(LEGACY_QUEUE_KEY);
-    return true;
+    return s.getItem(LEGACY_QUEUE_KEY) === null;
   } catch {
     return false;
   }
+}
+
+/**
+ * EXPLICIT user decision only ("these are mine -- add them to this account"):
+ * copies each valid legacy entry into the account's queue (its original
+ * clientRequestId kept, so a copy the server already has is de-duplicated),
+ * then removes the legacy key. Never called automatically.
+ */
+export function adoptLegacyQueue(ownerUserId: string): { adopted: number; skipped: number; ok: boolean } {
+  const legacy = readLegacyQueue();
+  if (legacy === null) return { adopted: 0, skipped: 0, ok: false };
+  let adopted = 0, skipped = 0;
+  for (const v of legacy) {
+    if (isQueuedHabitLog(v)) {
+      if (enqueueOwned({ ...(v as QueuedHabitLog), ownerUserId })) adopted++;
+      else return { adopted, skipped, ok: false };
+    } else skipped++;
+  }
+  return { adopted, skipped, ok: clearLegacyQueue() };
 }
 
 /**

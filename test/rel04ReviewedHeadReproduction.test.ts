@@ -64,9 +64,13 @@ const reviewedReplay = compileBlock(['localStorage', 'fetch', 'classifyHabitLogS
 const reviewedEnqueue = compileBlock(['localStorage', 'payload', 'tempId'], fx('page.enqueue.txt'));
 
 const currentRoutePost = routes['POST /api/habit-logs'];
+let reviewedServer = false;
 function useReviewedServer(on: boolean) {
+  reviewedServer = on;
   routes['POST /api/habit-logs'] = on ? (req) => reviewedRoute.POST(req) : currentRoutePost;
 }
+/** A device for the selected server: the reviewed head had no middleware. */
+function makeDevice() { const d = new Device(); d.useMiddleware = !reviewedServer; return d; }
 function fresh() { resetStore(); storage.clear(); closeAllTabs(); }
 
 async function main() {
@@ -74,7 +78,7 @@ async function main() {
   {
     // Reviewed head
     fresh(); useReviewedServer(true);
-    const dev = new Device();
+    const dev = makeDevice();
     dev.signIn(A);
     await reviewedEnqueue(storage, payload('A private walk', 'crid-r1a'), 't1');
     await reviewedEnqueue(storage, payload('A private journal', 'crid-r1b'), 't2');
@@ -85,7 +89,7 @@ async function main() {
 
     // Corrected head
     fresh(); useReviewedServer(false);
-    const dev2 = new Device();
+    const dev2 = makeDevice();
     dev2.signIn(A);
     const tab = openTab('tab1');
     await tab.acct.fetchVerifiedSession(dev2.fetch as any);
@@ -100,15 +104,15 @@ async function main() {
     // Even the reviewed-head replay running under B's session cannot leak against the corrected server.
     await reviewedEnqueue(storage, payload('A queued by an old bundle', 'crid-r1-old'), 't-old');
     await reviewedReplay(storage, dev2.fetch, classifyHabitLogSyncOutcome, () => {}, () => {});
-    const refused = dev2.calls.filter((c) => c.key === 'POST /api/habit-logs' && c.status === 428 && c.sessionUser === B).length;
-    check('R1 CORRECTED SERVER: an out-of-date client replaying under B is refused (no expected account -> 428), nothing stored under B', refused === 1 && logsOf(B).length === 0);
+    const refused = dev2.calls.filter((c) => c.key === 'POST /api/habit-logs' && c.status === 503 && c.sessionUser === B).length;
+    check('R1 CORRECTED SERVER: an out-of-date client replaying under B is refused (unbound -> 503 upgrade, entry kept), nothing stored under B', refused === 1 && logsOf(B).length === 0 && storage.data.has('offline_habit_queue'));
   }
 
   // ======================= R2: replay in progress when logout starts, then B signs in
   {
     // Reviewed head
     fresh(); useReviewedServer(true);
-    const dev = new Device();
+    const dev = makeDevice();
     dev.signIn(A);
     for (const n of [1, 2, 3]) await reviewedEnqueue(storage, payload(`A item ${n}`, `crid-r2-${n}`), `t${n}`);
     const gate = dev.hold('POST', '/api/habit-logs', 'before');
@@ -123,7 +127,7 @@ async function main() {
 
     // Corrected head
     fresh(); useReviewedServer(false);
-    const dev2 = new Device();
+    const dev2 = makeDevice();
     dev2.signIn(A);
     const tab = openTab('tab1');
     await tab.acct.fetchVerifiedSession(dev2.fetch as any);
@@ -137,18 +141,18 @@ async function main() {
     gate2.release();
     await replay2;
     await tab.sync.replayOfflineQueue(dev2.fetch as any);
-    check('R2 CORRECTED HEAD: replay aborted by the sign-out; nothing stored under B', out2 === 'signed-out' && logsOf(B).length === 0 && logsOf(A).length === 0);
+    check('R2 CORRECTED HEAD: replay aborted by the sign-out; nothing stored under B', out2.outcome === 'signed-out' && logsOf(B).length === 0 && logsOf(A).length === 0);
   }
 
   // ======================= R3: stale tab request with B's session
   {
     fresh(); useReviewedServer(true);
-    const dev = new Device();
+    const dev = makeDevice();
     dev.signIn(B);
     const res = await dev.fetch('/api/habit-logs', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Aura-Expected-Account': A }, body: JSON.stringify(payload('meant for A', 'crid-r3')) });
     check('R3 REVIEWED SERVER: a write meant for A is accepted under B\'s session', res.status === 200 && logsOf(B).length === 1);
     fresh(); useReviewedServer(false);
-    const dev2 = new Device();
+    const dev2 = makeDevice();
     dev2.signIn(B);
     const res2 = await dev2.fetch('/api/habit-logs', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Aura-Expected-Account': A }, body: JSON.stringify(payload('meant for A', 'crid-r3')) });
     check('R3 CORRECTED SERVER: the same write is refused (409) and nothing is stored', res2.status === 409 && logsOf(B).length === 0);

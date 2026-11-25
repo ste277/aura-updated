@@ -117,10 +117,12 @@ public class MainActivity extends BridgeActivity {
      * AURA-ANDROID-REL-04 (fresh-process session state; IR-04): ask the WebView to persist
      * its cookie store whenever the app leaves the foreground. Chromium writes cookie
      * changes to disk lazily (batched), so a sign-in or sign-out followed quickly by the
-     * process being killed could leave the previous cookie on disk. This is BEST-EFFORT
-     * persistence, not a durability guarantee: flush() is asynchronous on some WebView
-     * versions, a kill during or before onPause (or a delayed logout response that lands
-     * after it) is not covered, and nothing here confirms the write. Session safety does
+     * process being killed could leave the previous cookie on disk. CookieManager.flush()
+     * blocks while it writes the cookies the WebView holds AT THAT MOMENT (it may perform
+     * I/O on this thread); it is still BEST-EFFORT, not a durability guarantee: a kill
+     * before or during onPause, or a Set-Cookie (e.g. a delayed logout response) that
+     * arrives after this flush, is not covered, and nothing here confirms the write
+     * reached storage. Session safety does
      * not depend on it: the server-side account boundary and the sign-out transition do
      * (lib/accountSession.ts, lib/expectedAccount.ts). Device acceptance D-S2 checks the
      * real behaviour. flush() only writes; it changes no cookie.

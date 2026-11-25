@@ -16,6 +16,7 @@ import { RELATIONSHIP_ICON, RELATIONSHIP_LABEL, SavedPersonRow } from './PeopleV
 import { trackEvent } from '../lib/trackEvent';
 import * as theme from './theme';
 import { SegmentedControl } from './ui';
+import { captureAccountBinding } from '../lib/accountBoundFetch';
 
 /** Event Location Search V1: the user's persistent everyday Timing
  * Location -- passed down as a full location object (not just a timezone
@@ -417,6 +418,8 @@ export function MuhurthamFinderView({ timingLocation, locationConfirmed, onBack,
     const key = windowKey(dateKey, window);
     setSavingWindowKey(key);
     try {
+      // AURA-ANDROID-REL-04 IR-01 (R2) -- bound at the tap.
+      const binding = captureAccountBinding();
       // Event Location Plan Persistence V1: the snapshot that produced the
       // CURRENTLY DISPLAYED result set -- resultEventLocation, never the
       // live picker (brief section 5) -- trimmed to {cityName, timezone}
@@ -428,7 +431,7 @@ export function MuhurthamFinderView({ timingLocation, locationConfirmed, onBack,
       // own `activityId` state is already a genuine SUPPORTED_MUHURTHAM_ACTIVITY_IDS
       // value (a subset of the same FULL_ACTIVITY_CATALOG namespace), never
       // re-derived here.
-      await saveUpcomingPlanFromCandidate(window, durationMinutes, { sharedWithName, eventLocation, activityId });
+      await saveUpcomingPlanFromCandidate(window, durationMinutes, { sharedWithName, eventLocation, activityId, binding });
       setSavedWindowKeys((prev) => new Set(prev).add(key));
       onPlanLogged?.();
     } catch {

@@ -21,6 +21,7 @@ delete process.env.AUTH_SECRET;
 
 const auth = require('../apps/web/lib/auth');
 const logoutRoute = require('../apps/web/app/api/auth/logout/route');
+const { NextRequest } = require(require.resolve('next/server', { paths: [require('path').join(__dirname, '..', 'apps', 'web', 'app', 'api', 'auth')] }));
 
 let passed = 0, failed = 0;
 function check(label: string, ok: boolean) { ok ? passed++ : failed++; console.log(`${ok ? 'OK  ' : 'FAIL'} ${label}`); }
@@ -29,7 +30,7 @@ function check(label: string, ok: boolean) { ok ? passed++ : failed++; console.l
   const token: string = auth.createSessionToken('synthetic-user-rv1', 'rv1@example.invalid');
   check('synthetic token verifies before logout', auth.verifySessionToken(token)?.userId === 'synthetic-user-rv1');
 
-  const res = await logoutRoute.POST();
+  const res = await logoutRoute.POST(new NextRequest('http://localhost/api/auth/logout', { method: 'POST', headers: { cookie: `as_session=${token}`, 'X-Aura-Expected-Account': 'synthetic-user-rv1' } }));
   const setCookie = res.headers.get('set-cookie') ?? '';
   check('logout responds 200 { loggedOut: true }', res.status === 200 && (await res.json()).loggedOut === true);
   check('logout Set-Cookie empties as_session with Max-Age=0 on path /', /^as_session=;/.test(setCookie) && /Max-Age=0/i.test(setCookie) && /Path=\//i.test(setCookie));

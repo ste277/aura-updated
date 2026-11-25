@@ -1,0 +1,179 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { createHabitLog, getHabitLogByClientRequestId, getUserById, listHabitLogsForInsights, INSIGHTS_HISTORY_DAYS } from '../../../lib/db';
+import { getSessionFromRequest } from '../../../lib/session';
+import { checkExpectedAccount } from '../../../lib/expectedAccount';
+import { parseJsonObject } from '../../../lib/request';
+import { resolveHistoricalActiveWindow } from '../../../lib/historicalActivityWindow';
+import { SolarNoEventError } from '../../../../../packages/astronomy/src/errors';
+import { getMinuteOfDayInTimezone } from '../../../lib/timezone';
+import { getActivityProfileById } from '../../../../../packages/recommendation/src/personalizedTasks';
+
+function parseLogSource(value: unknown): 'AURA_PLANNED' | 'AURA_DO_NOW' | 'MANUAL' | 'OVERRIDE_CAUTION' {
+  if (value === 'AURA_PLANNED' || value === 'AURA_DO_NOW' || value === 'MANUAL' || value === 'OVERRIDE_CAUTION') return value;
+  return 'MANUAL';
+}
+
+function parseActivitySignificance(value: unknown): 'LOW' | 'MEDIUM' | 'HIGH' {
+  if (value === 'LOW' || value === 'MEDIUM' || value === 'HIGH') return value;
+  return 'MEDIUM';
+}
+
+export async function POST(req: NextRequest) {
+  const session = getSessionFromRequest(req);
+  if (!session) {
+    return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 });
+  }
+
+  // AURA-ANDROID-REL-04 IR-01 -- the write must be for the account this
+  // session authenticates; checked before any read or write.
+  const accountMismatch = checkExpectedAccount(req, session.userId, { required: true });
+  if (accountMismatch) return accountMismatch;
+
+  const user = await getUserById(session.userId);
+  if (!user) return NextResponse.json({ error: 'User not found.' }, { status: 404 });
+
+  const body = await parseJsonObject(req);
+  if (!body) return NextResponse.json({ error: 'A valid JSON request body is required.' }, { status: 400 });
+
+  const { activityTitle, activityId, logTimestamp, notes, durationMinutes, logSource, activitySignificance, clientRequestId } = body;
+  const cleanTitle = typeof activityTitle === 'string' ? activityTitle.trim() : '';
+
+  if (!cleanTitle) {
+    return NextResponse.json({ error: 'Missing required fields.' }, { status: 400 });
+  }
+
+  // Good Right Now / Log Activity Failure State Correctness V1 -- an
+  // OPTIONAL client-generated id (most callers still omit it). Absent ->
+  // ordinary non-idempotent insert, unchanged from before. Present and
+  // already recorded -> this is a retry of a request whose response never
+  // reached the client (e.g. the original offline-queue POST actually
+  // committed, but the client never saw the 200) -- return the SAME row
+  // instead of creating a duplicate. Never trusted to look up another
+  // user's row: scoped to session.userId, same as every other lookup here.
+  const cleanClientRequestId = typeof clientRequestId === 'string' && clientRequestId.trim() ? clientRequestId.trim() : null;
+  if (cleanClientRequestId) {
+    const existing = await getHabitLogByClientRequestId(session.userId, cleanClientRequestId);
+    if (existing) return NextResponse.json(existing);
+  }
+
+  // Prospective Canonical Activity Identity V1 -- activityId is UNTRUSTED
+  // client input, optional. Absent/null/empty -> persist NULL (the
+  // legitimate, expected value for manual/free-text logs -- never treated
+  // as an error). Present -> must resolve to a REAL, current
+  // FULL_ACTIVITY_CATALOG entry via an exact-id lookup (no alias/title/
+  // fuzzy matching); an unknown id is rejected outright rather than
+  // silently dropped to NULL or persisted unvalidated -- a client sending
+  // a bogus id is a request error, not a "we just didn't recognize it"
+  // case. activityTitle is NEVER required to match the resolved
+  // activity's own catalog title (a card's user-visible title can
+  // legitimately differ from the catalog's title, e.g. "Distraction-free
+  // planning block" for activityId "deep-work") -- activityTitle remains
+  // exactly what was submitted, the historical record of what the user
+  // actually saw/logged.
+  let validatedActivityId: string | null = null;
+  if (typeof activityId === 'string' && activityId.trim()) {
+    const activity = getActivityProfileById(activityId.trim());
+    if (!activity) {
+      return NextResponse.json({ error: 'Unknown activity.' }, { status: 400 });
+    }
+    validatedActivityId = activity.id;
+  }
+
+  // Parse custom timestamp if provided, fallback to current time
+  const customDate = typeof logTimestamp === 'string' ? new Date(logTimestamp) : new Date();
+  if (Number.isNaN(customDate.getTime())) {
+    return NextResponse.json({ error: 'logTimestamp must be a valid date.' }, { status: 400 });
+  }
+
+  // Insights Correctness + Historical Integrity V1 -- activeWindow is now
+  // ALWAYS computed server-side from this log's own timestamp and the
+  // owner's Timing Location, never accepted from the client. Previously a
+  // client-supplied `activeWindow` was trusted as-is; a backdated entry
+  // (PastActivityModal.tsx) either fell back to today's live window
+  // (activeType, via the wired onConfirmLog path) or a hardcoded 'NEUTRAL'
+  // (the unused direct-fetch fallback path) -- both wrong for a genuinely
+  // past instant. This single server-side computation fixes both, and
+  // removes any possibility of client/server skew for live entries too.
+  // Uses ONLY the owner's Timing Location (never Birth Location, Event
+  // Location, or SavedPerson/SHARED context) -- an ordinary owner activity
+  // log.
+  // PA-3C-C1B-01: a legitimate solar no-event condition (polar day/night)
+  // must not lose this otherwise-valid activity log. Only SolarNoEventError
+  // is caught here -- SolarInputValidationError/SolarComputationError are
+  // real bugs/bad data and must keep propagating uncaught, never silently
+  // become 'UNAVAILABLE' (that would hide a genuine defect as if it were
+  // an expected astronomical fact).
+  let activeWindow: string;
+  try {
+    activeWindow = resolveHistoricalActiveWindow(customDate, user.latitude, user.longitude, user.timezone);
+  } catch (err) {
+    if (err instanceof SolarNoEventError) {
+      activeWindow = 'UNAVAILABLE';
+    } else {
+      throw err;
+    }
+  }
+
+  // Insights Timezone Consistency V1 -- logMinuteOfDay is now ALSO ALWAYS
+  // computed server-side, from the exact SAME logTimestamp + owner Timing
+  // Location used for activeWindow above, mirroring PR #75's
+  // server-authoritative pattern. Previously the client computed this
+  // value itself (page.tsx: browser-local `targetDate.getHours()*60+
+  // getMinutes()`) and the server trusted it as-is -- an inconsistent
+  // provenance (correct for logPlannedActivity's own server-side path via
+  // getMinuteOfDayInTimezone, but browser-local here) the prior audit
+  // flagged. A client-submitted `logMinuteOfDay`, if present in the
+  // request body, is no longer read or required at all.
+  const logMinuteOfDay = getMinuteOfDayInTimezone(user.timezone, customDate);
+
+  const entry = await createHabitLog({
+    userId: session.userId,
+    activityTitle: cleanTitle,
+    activityId: validatedActivityId,
+    activeWindow,
+    logMinuteOfDay,
+    logTimestamp: customDate,
+    // Good Right Now Action Semantics V1: the floor used to be 5, silently
+    // bumping any near-zero submission up -- that made it impossible to
+    // ever log a genuinely INSTANT activity (a hydration check) without
+    // manufacturing a fake few minutes of "effort" (brief section 1/4).
+    // 0 is now a legitimate, real value: instantaneous activities log
+    // exactly 0, not a placeholder. Insights/streak calculations were
+    // audited (brief section 1/13) and already treat durationMinutes as
+    // real elapsed effort ONLY where a nullish-coalescing default (?? 30)
+    // is applied -- 0 passes through those unchanged (nullish coalescing
+    // only substitutes for null/undefined, never 0), so this is a
+    // backward-compatible floor change, not a new code path.
+    durationMinutes: Math.min(180, Math.max(0, Number(durationMinutes ?? 30))),
+    notes: notes ? String(notes).trim() : undefined,
+    logSource: parseLogSource(logSource),
+    activitySignificance: parseActivitySignificance(activitySignificance),
+    clientRequestId: cleanClientRequestId,
+  });
+
+  return NextResponse.json(entry);
+}
+
+export async function GET(req: NextRequest) {
+  const session = getSessionFromRequest(req);
+  if (!session) {
+    return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 });
+  }
+
+  // Insights Correctness + Historical Integrity V1 -- this is the ONLY
+  // caller of this route (apps/web/app/page.tsx's client fetch, which
+  // feeds InsightsView.tsx's own client-side analytics -- This Month, the
+  // 7-day trend, the 30-day heatmap, the active logging streak -- as well
+  // as loggedActivitiesToday/Timeline/HomeDashboard, which only ever
+  // filter this same list down to a narrower window and are unaffected by
+  // receiving more history). Switched from the row-count-capped
+  // listHabitLogs() (LIMIT 50, deliberately left unmodified -- see its own
+  // doc comment; apps/web/lib/myDayOrchestrator.ts calls that function
+  // directly, not this route, and is unaffected by this change) to the
+  // date-range listHabitLogsForInsights(), so a moderately active logger's
+  // period-based Insights are no longer silently truncated.
+  const sinceDate = new Date(Date.now() - INSIGHTS_HISTORY_DAYS * 24 * 60 * 60 * 1000);
+  const entries = await listHabitLogsForInsights(session.userId, sinceDate);
+
+  return NextResponse.json(entries);
+}

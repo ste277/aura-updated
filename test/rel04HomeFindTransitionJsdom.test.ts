@@ -24,6 +24,9 @@ const dev = new Device();
 dev.extra['/api/plans'] = () => [];
 dev.extra['/api/habits'] = () => [];
 (global as any).fetch = dev.fetch;
+(window as any).fetch = dev.fetch; // the page installs the account-bound wrapper around window.fetch
+(global as any).requestAnimationFrame = (f: any) => setTimeout(f, 0);
+(global as any).cancelAnimationFrame = (id: any) => clearTimeout(id);
 (window as any).confirm = () => true;
 (window as any).alert = () => {};
 
@@ -59,7 +62,7 @@ async function main() {
   const remountA = await mount(React.createElement(Page)); // a second A dashboard whose first load is held
   await lateSession.arrived;
   let out = '';
-  await act(async () => { out = await performSignOut({ fetch: dev.fetch, confirm: () => true }); });
+  await act(async () => { out = (await performSignOut({ fetch: dev.fetch, confirm: () => true })).outcome; });
   await settle();
   check('H2 sign-out acknowledged; Home leaves account A (no A name or data on screen)', out === 'signed-out' && !hasA(textOf(c)));
 
@@ -94,7 +97,7 @@ async function main() {
   check('H6 A again: Home shows A', /Alicesynth/.test(textOf(c)));
   dev.signIn(B); // another tab signed in as B ...
   await act(async () => {
-    acct.__deliverStorageEventForTests({ key: 'aura_account_transition_v1', newValue: JSON.stringify({ kind: 'account-verified', account: B, tab: 'other-tab', at: Date.now() }) });
+    acct.__deliverStorageEventForTests({ key: 'aura_account_announce_v2', newValue: JSON.stringify({ account: B, tab: 'other-tab', at: Date.now() }) });
   });
   await settle();
   check('H6 ... and announced it: this tab drops A and re-verifies as B', /Bobsynth/.test(textOf(c)) && !hasA(textOf(c)));
@@ -107,7 +110,7 @@ async function main() {
   check('F1 /find verifies the session through the shared boundary (account A)', acct.getVerifiedAccount() === A);
 
   let outFind = '';
-  await act(async () => { outFind = await performSignOut({ fetch: dev.fetch, confirm: () => true }); });
+  await act(async () => { outFind = (await performSignOut({ fetch: dev.fetch, confirm: () => true })).outcome; });
   await settle();
   const fc = find.container as HTMLElement;
   const chip = [...fc.querySelectorAll('button')].find((b) => /Workout/.test(b.textContent ?? ''));
@@ -118,11 +121,11 @@ async function main() {
   // F3: a /find save during another tab's sign-out is refused client-side, and a stale save is refused by the server.
   dev.signIn(A);
   await act(async () => { await acct.fetchVerifiedSession(); });
-  storage.setItem('aura_account_transition_v1', JSON.stringify({ kind: 'signing-out', tab: 'other-tab', at: Date.now() }));
+  storage.setItem('aura_auth_transition_v2', JSON.stringify({ kind: 'signing-out', tx: 'other-tx', tab: 'other-tab', at: Date.now() }));
   let refused = '';
   try { await acct.runActivityOperation(async () => 'saved'); } catch (e: any) { refused = e?.reason; }
   check('F3 during another tab\'s sign-out, /find-style saves are refused (shared runActivityOperation)', refused === 'transition');
-  storage.removeItem('aura_account_transition_v1');
+  storage.removeItem('aura_auth_transition_v2');
   await find.unmount();
 
   finish();

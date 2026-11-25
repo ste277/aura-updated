@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { FULL_ACTIVITY_CATALOG } from '../../../../packages/recommendation/src/personalizedTasks';
 import { getActivityDefinition } from '../../../../packages/recommendation/src/activityDefinitions';
 import { formatMuhurtaReason } from '../../../../packages/muhurta/src/muhurtaReasonFormat';
@@ -9,8 +9,9 @@ import type { PlanningHorizon } from '../../../../packages/recommendation/src/da
 import { RESULT_LABEL_TEXT, saveUpcomingPlanFromCandidate } from '../../components/PlanWithAuraView';
 import { CITY_OPTIONS } from '../../lib/cities';
 import { trackEvent } from '../../lib/trackEvent';
-import { fetchVerifiedSession, subscribeAccount, getAccountEpoch, runActivityOperation, startForegroundReverification } from '../../lib/accountSession';
-import { requestSignInCode } from '../../lib/signInCode';
+import { fetchVerifiedSession, subscribeAccount, getAccountEpoch, startForegroundReverification } from '../../lib/accountSession';
+import { captureAccountBinding, installAccountBoundFetch, StaleAccountCompletionError, type AccountBinding } from '../../lib/accountBoundFetch';
+import { requestSignInCode, verifySignInCode } from '../../lib/signInCode';
 import { SignInCodeActions } from '../../components/SignInCodeActions';
 import { colors, spacing, radius, typography } from '../../components/theme';
 import { PrimaryButton, SecondaryButton, TextButton, ActivityChip, DurationChip, StatusBadge, EmptyState, TextInput, SelectInput, FieldLabel, type StatusTone } from '../../components/ui';
@@ -101,11 +102,21 @@ function formatCandidateWhen(startIso: string, endIso: string, timezone: string)
   return `${dayLabel} · ${timeFmt(start)}–${timeFmt(end)}`;
 }
 
+// AURA-ANDROID-REL-04 (R2) -- same account-bound fetch as Home.
+if (typeof window !== 'undefined') installAccountBoundFetch();
+
 export function GuestFindClient({ initialSource, initialRestoreToken }: { initialSource: 'AURA_MOMENT' | 'DIRECT'; initialRestoreToken: string | null }) {
   useAndroidBackToHome();
   const [phase, setPhase] = useState<Phase>('CHECKING_SESSION');
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [error, setError] = useState('');
+  // AURA-ANDROID-REL-04 IR-01 (R2) -- the account-sensitive flow (candidate,
+  // guest token, sign-in step, save) belongs to one account. `flowGenRef`
+  // retires it when the account changes; `ownSignInRef` marks this page's own
+  // sign-in, so the account change it causes doesn't reset the flow it is
+  // completing.
+  const flowGenRef = useRef(0);
+  const ownSignInRef = useRef(false);
 
   const [activityQuery, setActivityQuery] = useState('');
   const [activityId, setActivityId] = useState<string | null>(null);
@@ -189,17 +200,26 @@ export function GuestFindClient({ initialSource, initialRestoreToken }: { initia
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // AURA-ANDROID-REL-04 IR-03 -- an account change in this or another tab
-  // (sign-out, sign-in, switch, expiry) re-verifies the session, so /find
-  // never keeps acting for the previous account.
+  // AURA-ANDROID-REL-04 IR-01 / IR-03 (R2) -- an account change made
+  // elsewhere (sign-out, another sign-in, switch, expiry, another tab)
+  // re-verifies the session and RESETS the account-sensitive flow: no pending
+  // candidate, guest token, code step or save result carries over to the next
+  // account. This page's own sign-in is excluded (ownSignInRef).
   useEffect(() => {
     let active = true;
     let seenEpoch = getAccountEpoch();
     const unsubscribe = subscribeAccount(() => {
-      // Only an actual account change (new epoch) needs a re-check.
       const epoch = getAccountEpoch();
       if (epoch === seenEpoch) return;
       seenEpoch = epoch;
+      if (ownSignInRef.current) return;
+      flowGenRef.current++;
+      setPhase((p) => (p === 'SAVING' || p === 'SAVED' || p === 'SAVE_ERROR' || p === 'SIGNUP' ? 'ACTIVITY' : p));
+      setGuestStateToken(null);
+      setSignupStep('EMAIL');
+      setSentTo(null);
+      setCode('');
+      setError('');
       fetchVerifiedSession().then((check) => {
         if (!active || check.status === 'stale') return;
         setIsAuthenticated(check.status === 'current');
@@ -326,15 +346,24 @@ export function GuestFindClient({ initialSource, initialRestoreToken }: { initia
     if (!selectedCandidate || !activityId) return;
 
     if (isAuthenticated) {
-      await performSave();
+      // Bound to the account the user is acting under, at this tap.
+      let binding: AccountBinding;
+      try {
+        binding = captureAccountBinding();
+      } catch {
+        setPhase('SAVE_ERROR');
+        return;
+      }
+      await performSave(binding);
       return;
     }
 
     setPhase('SIGNUP');
   };
 
-  const performSave = async () => {
+  const performSave = async (binding: AccountBinding) => {
     if (!selectedCandidate || !activityId) return;
+    const flowGen = flowGenRef.current;
     setPhase('SAVING');
     try {
       // Recipient Conversion V1 Hardening (brief section 10) -- the same
@@ -343,18 +372,22 @@ export function GuestFindClient({ initialSource, initialRestoreToken }: { initia
       // verification, or a re-visited magic link all resolve to the SAME
       // token, so POST /api/plans returns the already-created Plan instead
       // of creating a second one.
-      // AURA-ANDROID-REL-04 IR-01 -- saved only for the verified account,
-      // never during a sign-out; the server refuses it under any other session.
-      await runActivityOperation((lease) =>
-        saveUpcomingPlanFromCandidate(selectedCandidate, durationMinutes, {
-          guestConversionToken: guestStateToken ?? undefined,
-          expectedAccountId: lease.account,
-        })
-      );
+      // AURA-ANDROID-REL-04 IR-01 (R2) -- saved only for `binding` (the
+      // account the user acted under / the code verified): refused once that
+      // account is no longer current; the lease's abort reaches the actual
+      // request; the server refuses it under any other session.
+      await saveUpcomingPlanFromCandidate(selectedCandidate, durationMinutes, {
+        guestConversionToken: guestStateToken ?? undefined,
+        binding,
+      });
+      // A completion for a retired flow (the account changed meanwhile) must
+      // not show its success here.
+      if (flowGen !== flowGenRef.current) return;
       trackEvent('GUEST_RESULT_SAVED', { metadata: { activityId, source: initialSource } });
       trackEvent('ONBOARDING_HANDOFF_VIEWED', { metadata: { activityId, source: initialSource } });
       setPhase('SAVED');
-    } catch {
+    } catch (err) {
+      if (flowGen !== flowGenRef.current || err instanceof StaleAccountCompletionError) return;
       setPhase('SAVE_ERROR');
     }
   };
@@ -429,30 +462,38 @@ export function GuestFindClient({ initialSource, initialRestoreToken }: { initia
     if (!sentTo) return;
     setSignupBusy(true);
     setError('');
+    const flowGen = flowGenRef.current;
+    ownSignInRef.current = true;
     try {
-      const res = await fetch('/api/auth/verify-code', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: sentTo, code }),
-      });
-      if (!res.ok) {
-        const data = await res.json().catch(() => null);
-        setError(data?.error ?? 'That code did not work. Try again.');
+      // AURA-ANDROID-REL-04 IR-01 / IR-03 (R2) -- coordinated sign-in that
+      // names the account THIS code signed in and confirms it with a fresh
+      // session answer (lib/signInCode.ts). A competing sign-in elsewhere
+      // makes it UNCONFIRMED instead of rebinding the pending save.
+      const result = await verifySignInCode({ email: sentTo, code });
+      if (flowGen !== flowGenRef.current) return;
+      if (result.kind !== 'VERIFIED') {
+        setError(result.message);
         return;
       }
-      trackEvent('GUEST_SIGNUP_COMPLETED', { metadata: { source: initialSource } });
-      // AURA-ANDROID-REL-04 IR-01 -- learn WHICH account the code signed in
-      // (verified by the server) before saving anything for it.
-      const check = await fetchVerifiedSession();
-      if (check.status !== 'current') {
+      let binding: AccountBinding;
+      try {
+        binding = captureAccountBinding();
+      } catch {
         setError("Signed in, but Aura couldn't confirm your account. Try again.");
         return;
       }
+      if (binding.account !== result.userId) {
+        setError('Another sign-in happened on this device. Nothing was saved. Try again.');
+        return;
+      }
+      trackEvent('GUEST_SIGNUP_COMPLETED', { metadata: { source: initialSource } });
       setIsAuthenticated(true);
-      await performSave();
+      ownSignInRef.current = false;
+      await performSave(binding);
     } catch {
       setError("Couldn't reach the server. Check your connection and try again.");
     } finally {
+      ownSignInRef.current = false;
       setSignupBusy(false);
     }
   };

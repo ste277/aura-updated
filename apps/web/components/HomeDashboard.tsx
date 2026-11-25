@@ -51,6 +51,7 @@ import { formatGoalActivityCompletion } from '../lib/goalActivityExecution';
 import { DailyBriefingCard } from './DailyBriefingCard';
 import { GoalRhythmSuggestionsCard } from './GoalRhythmSuggestionsCard';
 import { excludeGoalRhythmSuggestionsDuplicatingActivities, type HomeGoalRhythmSuggestion, type HomePausedGoalRhythm } from '../lib/homeGoalRhythmSuggestions';
+import { captureAccountBinding } from '../lib/accountBoundFetch';
 
 /** Matches page.tsx's own FALLBACK_TZ -- defensive only, page.tsx always supplies a real value today. */
 const FALLBACK_HOME_TZ = 'Asia/Kolkata';
@@ -1418,6 +1419,9 @@ export function HomeDashboard({
     setOpportunityError('');
     setHomeOverlap(null);
     try {
+      // AURA-ANDROID-REL-04 IR-01 (R2) -- the account the user acted under,
+      // captured at the tap, before the CHECK request.
+      const binding = captureAccountBinding();
       const durationMinutes = item.metadata.durationMinutes ?? 45;
       const response = await onTimingSearch({ mode: 'CHECK', activityId: item.metadata.activityId, durationMinutes, candidateStart: item.start });
       const candidate: TimingCandidate | undefined = response.requestedCandidate ?? response.candidates[0];
@@ -1429,7 +1433,10 @@ export function HomeDashboard({
       // a contract violation surfaces as a clean failure instead of a
       // silently-wrong save.
       if (candidate.start !== item.start) throw new Error('CHECK returned a different instant than the opportunity displayed');
-      const options = { activityId: item.metadata.activityId, clientRequestId: `home-opportunity:${item.id}` };
+      // AURA-ANDROID-REL-04 IR-01 (R2) -- the binding captured at the tap
+      // (above) travels in `options`, so the explicit overlap override re-sends
+      // for the SAME account.
+      const options = { activityId: item.metadata.activityId, clientRequestId: `home-opportunity:${item.id}`, binding };
       try {
         // AURA-HPG5-V2-I3 (I3-B) -- a Home opportunity is a recommended time
         // computed earlier: opt in to REJECT_ACTIVE_OVERLAP so a slot that

@@ -52,6 +52,8 @@ class MemoryStorage {
   clear(): void {
     this.store = {};
   }
+  get length(): number { return Object.keys(this.store).length; }
+  key(i: number): string | null { return Object.keys(this.store)[i] ?? null; }
 }
 (global as any).localStorage = new MemoryStorage();
 
@@ -66,9 +68,16 @@ import { LoggedEntryItem } from '../apps/web/components/CalendarViewSection';
 
 // AURA-ANDROID-REL-04 IR-01: the queue is per verified account; entries carry ownerUserId.
 const OWNER = 'synthetic-user-a';
-const OWNED_KEY = 'offline_habit_queue_v2:' + OWNER;
+// AURA-ANDROID-REL-04 (R2): one storage key per entry (aura_q3:<owner>:<clientRequestId>).
+const OWNED_KEY = 'aura_q3:' + OWNER + ':corrupt-entry';
 function setQueue(items: unknown[]) {
-  (global as any).localStorage.setItem(OWNED_KEY, JSON.stringify(items.map((i) => (i && typeof i === 'object' ? { ownerUserId: OWNER, ...(i as object) } : i))));
+  const ls = (global as any).localStorage;
+  for (const k of Object.keys((ls as any).store ?? {})) if (k.startsWith('aura_q3:')) ls.removeItem(k);
+  items.forEach((i, n) => {
+    const it = i && typeof i === 'object' ? { ownerUserId: OWNER, queuedAt: n, ...(i as object) } : i;
+    const crid = (it as { clientRequestId?: string })?.clientRequestId ?? `malformed-${n}`;
+    ls.setItem('aura_q3:' + OWNER + ':' + crid, JSON.stringify(it));
+  });
 }
 
 const queuedA: QueuedHabitLog = {
@@ -318,12 +327,12 @@ check(
   'the only change to handleLogActivity itself is stamping the already-generated clientRequestId onto the pending-marked entry',
   /prev\.map\(\(item\) => \(item\.id === tempId \? \{ \.\.\.item, syncStatus: 'pending', clientRequestId \} : item\)\)\);/.test(pageSource)
 );
-check('handleLogActivity\'s optimistic-entry literal (before the request) and offline-queue push are untouched', /const optimisticEntry: LoggedEntryItem = \{\s*id: tempId,\s*activityTitle,\s*activeWindow: activeWindowForLog,\s*loggedAt: targetDate,\s*logMinuteOfDay: calculatedMinute,\s*durationMinutes,\s*notes: notes \? String\(notes\)\.trim\(\) : null,\s*logSource: finalLogSource,\s*activitySignificance: inferredSignificance,\s*\};/.test(pageSource));
+check('handleLogActivity\'s optimistic-entry literal is unchanged apart from carrying its outbox clientRequestId (AURA-ANDROID-REL-04 R2)', /const optimisticEntry: LoggedEntryItem = \{\s*id: tempId,[\s\S]{0,200}?clientRequestId,\s*activityTitle,\s*activeWindow: activeWindowForLog,\s*loggedAt: targetDate,\s*logMinuteOfDay: calculatedMinute,\s*durationMinutes,\s*notes: notes \? String\(notes\)\.trim\(\) : null,\s*logSource: finalLogSource,\s*activitySignificance: inferredSignificance,\s*\};/.test(pageSource));
 check('page.tsx still generates clientRequestId once per log attempt via generateClientRequestId() (PR #86 idempotency untouched; AURA-MOBILE-01-M2-B/AND-01: not crypto.randomUUID() directly, which throws outside a secure context)', /const clientRequestId = generateClientRequestId\(\);/.test(pageSource));
 // AURA-ANDROID-REL-04 IR-01: replay moved to lib/activitySync.ts (account-bound); same classification.
 const activitySyncSource = fs.readFileSync('apps/web/lib/activitySync.ts', 'utf8');
 check('offline-queue replay still classifies via classifyHabitLogSyncOutcome (now in lib/activitySync.ts)', /classifyHabitLogSyncOutcome/.test(activitySyncSource) && /replayOfflineQueue\(\)/.test(pageSource));
-check('the replay queue-removal/retention logic still classifies confirmed/retry/permanent-failure', /const outcome = classifyHabitLogSyncOutcome\(status\);/.test(activitySyncSource) && /outcome === 'permanent-failure'/.test(activitySyncSource));
+check('the replay queue-removal/retention logic still classifies confirmed/retry/permanent-failure', /const outcome = classifyHabitLogSyncOutcome\(status\);/.test(activitySyncSource) && /outcome === 'retry'/.test(activitySyncSource) && /outcome === 'confirmed'/.test(activitySyncSource));
 check('Plan logging (handlePlanLogged) remains separate and untouched in page.tsx', /const handlePlanLogged = useCallback\(async \(\) => \{/.test(pageSource));
 check('Timing Location save orchestration (handleLocationChanged) remains untouched in page.tsx', /const handleLocationChanged = useCallback\(async \(city: \{/.test(pageSource));
 check('LocationPicker.tsx was not touched by this change (no reference to offlineHabitQueue there)', !fs.existsSync('apps/web/components/LocationPicker.tsx') || !/offlineHabitQueue/.test(fs.readFileSync('apps/web/components/LocationPicker.tsx', 'utf8')));

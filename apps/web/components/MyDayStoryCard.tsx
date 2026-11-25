@@ -16,6 +16,7 @@ import { RELATIONSHIP_ICON, SavedPersonRow } from './PeopleView';
 import { trackEvent } from '../lib/trackEvent';
 import { colors, spacing, radius, typography } from './theme';
 import { PrimaryButton, SecondaryButton, TextButton, ActivityChip, StatusBadge, type StatusTone } from './ui';
+import { captureAccountBinding } from '../lib/accountBoundFetch';
 
 /**
  * My Day V1 -- the Daily Story narrative card + inline intention-discovery
@@ -286,7 +287,10 @@ export function MyDayStoryCard({
     setPhase('CREATING');
     setError('');
     try {
-      await saveUpcomingPlanFromCandidate(target, selectedDurationMinutes, { overlapPolicy });
+      // AURA-ANDROID-REL-04 IR-01 (R2) -- bound at the tap (the first save and
+      // an explicit "Save anyway" are each their own user action).
+      const binding = captureAccountBinding();
+      await saveUpcomingPlanFromCandidate(target, selectedDurationMinutes, { overlapPolicy, binding });
       // Product Journey / E2E Hardening V1 (brief section 26) -- the
       // My Day intention flow's own doc comment already claimed this
       // reuses PLAN_RESULT_SELECTED "via the existing reused APIs", but

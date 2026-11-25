@@ -33,8 +33,8 @@ async function signOutWith(answer: Answer, sessionAfter: string | null) {
   storage.clear();
   acct.setVerifiedAccount('user-a');
   const { f, calls } = fakeFetch(answer, sessionAfter);
-  const out = await so.performSignOut({ fetch: f, confirm: () => true, settleTimeoutMs: 10 });
-  return { out, calls };
+  const res = await so.performSignOut({ fetch: f, confirm: () => true, settleTimeoutMs: 10 });
+  return { out: res.outcome, calls };
 }
 
 (async () => {
@@ -47,12 +47,18 @@ async function signOutWith(answer: Answer, sessionAfter: string | null) {
     ['200 text/html', { status: 200, type: 'text/html', body: '<html></html>' }],
     ['200 marked redirected', { status: 200, body: { loggedOut: true }, redirected: true }],
     ['200 malformed JSON', { status: 200, body: '{not json' }],
+    ['200 JSON body under a non-JSON media type containing "application/json"', { status: 200, type: 'text/plain; profile=application/json', body: { loggedOut: true } }],
+    ['200 application/json-seq', { status: 200, type: 'application/json-seq', body: { loggedOut: true } }],
+    ['200 array body', { status: 200, body: [{ loggedOut: true }] }],
   ] as Array<[string, Answer]>) {
     const r = await signOutWith(ans, 'user-a');
     check(`${label}: not accepted; reconciled (session still A) -> failed, A kept`, r.out === 'failed' && acct.getVerifiedAccount() === 'user-a' && r.calls.some((c) => c.startsWith('GET /api/auth/session')));
   }
   const http = await signOutWith({ status: 503, body: { error: 'x' } }, 'user-a');
-  check('HTTP 503 -> failed without reconciliation needed', http.out === 'failed' && acct.getVerifiedAccount() === 'user-a');
+  check('HTTP 503 is ambiguous: reconciled with a fresh session answer before A resumes', http.out === 'failed' && acct.getVerifiedAccount() === 'user-a' && http.calls.some((c) => c.startsWith('GET /api/auth/session')));
+  const http2 = await signOutWith({ status: 503, body: { error: 'x' } }, null);
+  check('HTTP 503 after the session actually ended -> signed-out-unconfirmed (never restored as A)', http2.out === 'signed-out-unconfirmed' && acct.getVerifiedAccount() === null);
+  check('strict media type helper', acct.isJsonMediaType('application/json; charset=utf-8') && acct.isJsonMediaType('Application/JSON') && !acct.isJsonMediaType('text/plain; x=application/json') && !acct.isJsonMediaType('application/json-seq') && !acct.isJsonMediaType(null));
   const lost = await signOutWith({ status: 200, throws: true }, null);
   check('lost answer, session gone -> signed-out-unconfirmed', lost.out === 'signed-out-unconfirmed' && acct.getVerifiedAccount() === null);
   const switched = await signOutWith({ status: 200, throws: true }, 'user-b');

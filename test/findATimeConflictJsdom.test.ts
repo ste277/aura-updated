@@ -14,6 +14,9 @@ import { runTimingSearch, type TimingSearchRequest } from '../packages/recommend
 import { resolveTzOffsetMinutes, localDateTimeToUTC, getDatePartsInTimezone, addDaysToDateStr } from '../apps/web/lib/timezone';
 
 const { PlanWithAuraView } = require('../apps/web/components/PlanWithAuraView');
+// AURA-ANDROID-REL-04 (R2): in the app these components render only after Home verified the
+// account; account-bound saves (captured at the user's action) need that verified account.
+require('../apps/web/lib/accountSession').setVerifiedAccount('synthetic-test-user', { broadcast: false });
 
 let allPassed = true;
 let count = 0;

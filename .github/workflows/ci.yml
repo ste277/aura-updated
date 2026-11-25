@@ -926,6 +926,20 @@ jobs:
         env:
           TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
         run: npx ts-node --project tsconfig.jsdom-tests.json test/rel04ReviewedHeadReproduction.test.ts
+      # R2 -- plan creation and existing mutations through the real callers
+      # (shared helper, overlap override, fetch wrapper) and the real mounted /find
+      # sign-in-and-save flow, incl. competing sign-in and late completion.
+      - name: Run REL-04 bound writes and /find flow test (IR-01/IR-03 R2)
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/rel04BoundWritesJsdom.test.ts
+      # R2 -- the delta review's findings reproduce with the R1 head's code
+      # (d09449b, vendored verbatim) and are prevented by the corrected head,
+      # including the pre-REL-04 client against both routes (mixed-version).
+      - name: Run REL-04 R1-head reproduction and mixed-version test (R2)
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/rel04R1HeadReproduction.test.ts
       # S5-A RV-1 in-process: logout clears the cookie; a copied token stays valid
       # until exp (documents the accepted residual of revocation Option B).
       - name: Run REL-04 RV-1 token replay test

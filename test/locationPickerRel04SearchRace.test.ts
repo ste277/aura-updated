@@ -173,6 +173,46 @@ async function run() {
     await h.unmount();
   }
 
+  // R9 (IR-06 R2) -- A -> B -> A: returning to an earlier query text never
+  // brings back its retired rows, neither during the new debounce nor while
+  // the new request is in flight.
+  {
+    pending.length = 0;
+    const h = await mount(picker()); const c = h.container;
+    const input = c.querySelector('#location-picker-search') as HTMLInputElement;
+    await typeAndDebounce(c, 'Kol');
+    await settle(() => byQ('Kol').resolve(['Kollam']));
+    check('R9 precondition: Kollam shown for "Kol"', resultButtons(c, /^Kollam/).length === 1);
+    await typeInto(input, 'Kot');
+    await typeInto(input, 'Kol'); // back to the same text before any response
+    check('R9 during the new debounce the retired Kollam row is NOT shown (not selectable)', resultButtons(c, /^Kollam/).length === 0);
+    await wait(450); await flush();
+    const live = pending.filter((p) => p.q === 'Kol').slice(-1)[0];
+    check('R9 a fresh request is in flight for the repeated query; the retired row is still not shown', !!live && live !== byQ('Kol') && resultButtons(c, /^Kollam/).length === 0);
+    check('R9 loading shows only for the live request', /Searching/.test(text(c)));
+    await settle(() => live.resolve(['Kollam Junction']));
+    check('R9 only the live generation\'s result becomes selectable', resultButtons(c, /^Kollam Junction/).length === 1 && resultButtons(c, /^Kollam$/).length === 0);
+    await h.unmount();
+  }
+
+  // R10 (IR-06 R2) -- rapid edits; an obsolete failure never shows; loading
+  // and error stay consistent with the live generation.
+  {
+    pending.length = 0;
+    const h = await mount(picker()); const c = h.container;
+    const input = c.querySelector('#location-picker-search') as HTMLInputElement;
+    await typeAndDebounce(c, 'Pu');
+    for (const v of ['Pun', 'Pune', 'Pun', 'Pune']) await typeInto(input, v);
+    await wait(450); await flush();
+    const live = pending.slice(-1)[0];
+    check('R10 rapid edits coalesce into one live request (debounce preserved)', pending.length === 2 && live.q === 'Pune');
+    await settle(() => byQ('Pu').reject());
+    check('R10 the obsolete request\'s failure shows no error and does not stop the live spinner', !/Couldn't search right now/.test(text(c)) && /Searching/.test(text(c)));
+    await settle(() => live.reject());
+    check('R10 the live request\'s failure shows its error and stops loading', /Couldn't search right now/.test(text(c)) && !/Searching/.test(text(c)));
+    await h.unmount();
+  }
+
   console.log(`\n${passed} passed, ${failed} failed`);
   if (failed > 0) process.exit(1);
 }

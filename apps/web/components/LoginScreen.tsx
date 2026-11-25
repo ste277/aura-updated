@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { SignInCodeActions } from './SignInCodeActions';
-import { requestSignInCode, SIGN_IN_OFFLINE_MESSAGE } from '../lib/signInCode';
+import { requestSignInCode, verifySignInCode, SIGN_IN_OFFLINE_MESSAGE } from '../lib/signInCode';
 
 export function LoginScreen({ onLoggedInCheck }: { onLoggedInCheck: () => void }) {
   const [email, setEmail] = useState('');
@@ -61,15 +61,10 @@ export function LoginScreen({ onLoggedInCheck }: { onLoggedInCheck: () => void }
     setError(null);
 
     try {
-      const res = await fetch('/api/auth/verify-code', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: sentTo, code }),
-      });
-
-      if (!res.ok) {
-        const data = await res.json().catch(() => null);
-        setError(data?.error ?? `That code did not work (${res.status}). Try again.`);
+      // AURA-ANDROID-REL-04 (R2) -- coordinated, account-confirmed sign-in.
+      const result = await verifySignInCode({ email: sentTo, code });
+      if (result.kind !== 'VERIFIED') {
+        setError(result.message);
         return;
       }
 

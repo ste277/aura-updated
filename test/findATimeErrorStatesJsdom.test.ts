@@ -17,6 +17,9 @@ import * as path from 'path';
 
 const { FIND_TIME_TIMEOUT_MS, FIND_TIME_ERROR_COPY, classifyFindTimeError, assertFindTimeCandidates, FindTimeError } = require('../apps/web/lib/findTimeErrors');
 const { PlanWithAuraView } = require('../apps/web/components/PlanWithAuraView');
+// AURA-ANDROID-REL-04 (R2): in the app these components render only after Home verified the
+// account; account-bound saves (captured at the user's action) need that verified account.
+require('../apps/web/lib/accountSession').setVerifiedAccount('synthetic-test-user', { broadcast: false });
 
 let allPassed = true;
 let count = 0;
@@ -197,7 +200,8 @@ const OLD_MISLEADING = 'Aura could not find a time for this request';
   check('S1. the misleading catch-all message is removed from Find a Time', !view.includes(OLD_MISLEADING));
   check('S2. CHECK / COMPARE paths untouched (no timeout/classification added there)', (view.match(/withFindTimeTimeout\(/g) ?? []).length === 2);
   check('11. guest /find still calls the unauthenticated guest endpoint and keeps its own SEARCH_ERROR / NO_RESULT states', /'\/api\/guest\/timing-search'/.test(guest) && /setPhase\('SEARCH_ERROR'\)/.test(guest) && /setPhase\('NO_RESULT'\)/.test(guest));
-  check('12. guest save still goes through email sign-in (Continue with email -> verify-code)', /Continue with email/.test(guest) && /\/api\/auth\/verify-code/.test(guest));
+  const signInLib = strip(fs.readFileSync(path.join(__dirname, '..', 'apps/web/lib/signInCode.ts'), 'utf8'));
+  check('12. guest save still goes through email sign-in (Continue with email -> verify-code, now via lib/signInCode.ts verifySignInCode, AURA-ANDROID-REL-04 R2)', /Continue with email/.test(guest) && /verifySignInCode\(/.test(guest) && /\/api\/auth\/verify-code/.test(signInLib));
 
   console.log(`\n${count} checks`);
   if (!allPassed) { console.log('SOME CHECKS FAILED'); process.exit(1); }
