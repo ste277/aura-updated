@@ -144,10 +144,10 @@ async function main() {
     check('D1 an unanswered send stays queued, its claim released, its dispatch recorded', r.kind === 'queued' && dump.records.length === 1 && dump.claims.length === 0 && dump.dispatches.length === 1);
     let asked = '';
     const out = await t1.so.performSignOut({ fetch: dev.fetch as any, confirm: (m) => { asked = m; return true; } });
-    check('D1 the sign-out question says it was already sent and may have been saved, and that removing it will not undo that', /already sent and may have been saved/.test(asked) && /won't undo/.test(asked));
-    check('D1 the discard reports it as removed-but-possibly-saved (never as undone)', out.outcome === 'signed-out' && out.owned?.removed === 1 && out.owned?.removedPossiblySaved === 1 && logsOf(A).length === 1);
+    check('D1 (R5) the sign-out question says it may already have been sent and that removing it will not undo that', /may already have been sent/.test(asked) && /won't undo/.test(asked));
+    check('D1 the discard reports it as removed-but-possibly-saved (never as undone)', out.outcome === 'signed-out' && out.owned?.removed === 1 && out.owned?.removedPossiblySent === 1 && logsOf(A).length === 1);
     const msg = t1.so.discardOutcomeMessage(out) ?? '';
-    check('D1 the message states it may have been saved to the account and that removing it here does not undo that', /may have been saved to your account/.test(msg) && /doesn't undo that/.test(msg));
+    check('D1 (R5) the message states the removed count, that it may already have been sent and saved, and that removing it here does not undo that', /1 unsynced activity log was removed/.test(msg) && /may already have been sent, so it may be saved to your account/.test(msg) && /doesn't undo that/.test(msg));
   }
 
   // ---------------------------------------------------------------- C1 concurrent contexts WITHOUT Web Locks: one in-flight send per identity
@@ -246,7 +246,7 @@ async function main() {
     const msg = t1.so.discardOutcomeMessage(out) ?? '';
     check('L1 the shared legacy array is byte-identical after sign-out (never rewritten, never removed)', storage.data.get(L) === legacy);
     check('S1 owned unreadable + legacy present: the owned part says none of the account\'s activity was removed, the legacy part says 2 earlier-version logs were left -- separately, no blanket "nothing removed"', out.owned?.unknown === true && out.legacyKept === 2 && /none of it was removed/.test(msg) && /2 activity logs from an earlier version/.test(msg) && !/nothing was removed/i.test(msg));
-    check('S1 the confirmation is about owned entries only (legacy entries are not removed, so not asked about)', /couldn't check/.test(asked) && !/earlier version|before an update/.test(asked));
+    check('S1 the confirmation is about owned entries only (legacy entries are not removed, so not asked about)', /couldn't read this device's unsynced activity/.test(asked) && !/earlier version|before an update/.test(asked));
   }
 
   // ---------------------------------------------------------------- S2 owned removed + legacy kept
@@ -258,7 +258,7 @@ async function main() {
     await t1.q.enqueueOwned({ ...payload('owned never sent', 'crid-s2'), tempId: 't', ownerUserId: A });
     const out = await t1.so.performSignOut({ fetch: dev.fetch as any, confirm: () => true });
     const msg = t1.so.discardOutcomeMessage(out) ?? '';
-    check('S2 an owned entry never sent is removed (not "possibly saved"); the legacy entry is reported as left on the device', out.owned?.removed === 1 && out.owned?.removedPossiblySaved === 0 && out.legacyKept === 1 && /1 activity log from an earlier version/.test(msg) && (await queuedCrids(A)).length === 0);
+    check('S2 an owned entry never sent is removed (not "possibly saved"); the legacy entry is reported as left on the device', out.owned?.removed === 1 && out.owned?.removedPossiblySent === 0 && out.legacyKept === 1 && /1 activity log from an earlier version/.test(msg) && (await queuedCrids(A)).length === 0);
   }
 
   // ---------------------------------------------------------------- S3 every outcome states whether sign-out completed

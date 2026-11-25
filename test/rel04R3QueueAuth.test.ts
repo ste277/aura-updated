@@ -70,7 +70,7 @@ async function main() {
     idbFault.read = false;
     check('Q2 a read failure is UNREADABLE, never an empty queue', read.ok === false);
     check('Q2 replay of an unreadable queue sends nothing', r.stoppedBecause === 'unreadable' && dev.count('POST', '/api/habit-logs') === 0);
-    check('Q2 sign-out asks (cannot check) and, after acknowledgement, reports the owned discard as UNKNOWN (not a clean zero)', /couldn't check/i.test(asked) && out.outcome === 'signed-out' && out.owned?.unknown === true);
+    check('Q2 sign-out asks (cannot check) and, after acknowledgement, reports the owned discard as UNKNOWN (not a clean zero)', /couldn't read this device's unsynced activity/i.test(asked) && out.outcome === 'signed-out' && out.owned?.unknown === true);
     check('Q2 nothing was removed (it stays for A)', (await queueKeys(A)).includes('r1'));
   }
 
@@ -86,7 +86,7 @@ async function main() {
     check('Q3 the identical payload reuses the existing record (no second record)', same.status === 'stored' && (same as any).recordId === (first as any).recordId);
     await putRecord(A, 'crid-c', 'rX', 'written by another build');
     const r = await tab.sync.replayOfflineQueue(dev.fetch as any);
-    check('Q3 conflicting records under one identity are QUARANTINED: reported, never sent, never removed', r.conflicts === 1 && r.attempted === 0 && (await queueKeys(A)).length === 2 && (await tab.q.readOfflineHabitQueue(A)).length === 0);
+    check('Q3 conflicting records under one identity are QUARANTINED: reported, never sent, never removed', r.conflicts === 1 && r.attempted === 0 && (await queueKeys(A)).length === 2 && (await tab.q.readOfflineHabitQueue(A))?.length === 0);
   }
 
   // ---------------------------------------------------------------- Q4 settlement never removes a different/newer record

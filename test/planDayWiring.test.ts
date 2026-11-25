@@ -27,7 +27,10 @@ function check(label: string, condition: boolean) {
 }
 
 const planDayClientSource: string = fs.readFileSync(path.join(__dirname, '../apps/web/app/plan-day/PlanDayClient.tsx'), 'utf8');
-const planDayPageSource: string = fs.readFileSync(path.join(__dirname, '../apps/web/app/plan-day/page.tsx'), 'utf8');
+// AURA-ANDROID-REL-04 (R5): the page's account-derived bootstrap moved, unchanged, into the account-scoped
+// GET /api/plan-day/bootstrap route (fetched by PlanDayLoader after verification). The page-level checks below
+// therefore read that route (plus the loader, which renders PlanDayClient with its result).
+const planDayPageSource: string = fs.readFileSync(path.join(__dirname, '../apps/web/app/api/plan-day/bootstrap/route.ts'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, '../apps/web/app/plan-day/PlanDayLoader.tsx'), 'utf8');
 const planDayBootstrapSource: string = fs.readFileSync(path.join(__dirname, '../apps/web/lib/planDayBootstrap.ts'), 'utf8');
 const homeDashboardSource: string = fs.readFileSync(path.join(__dirname, '../apps/web/components/HomeDashboard.tsx'), 'utf8');
 const pageSource: string = fs.readFileSync(path.join(__dirname, '../apps/web/app/page.tsx'), 'utf8');
@@ -103,7 +106,7 @@ function main() {
     // the named imports from lib/db", still real substring matching,
     // never weakened to "imports something from lib/db".
     '21. page.tsx (the Server Component route shell) reuses the existing canonical session verification (verifySessionToken/SESSION_COOKIE_NAME/getUserById) -- no second auth model',
-    planDayPageSource.includes("verifySessionToken, SESSION_COOKIE_NAME } from '../../lib/auth'") && /import \{[^}]*\bgetUserById\b[^}]*\} from '\.\.\/\.\.\/lib\/db'/.test(planDayPageSource)
+    planDayPageSource.includes("verifySessionToken, SESSION_COOKIE_NAME } from '../../../../lib/auth'") && /import \{[^}]*\bgetUserById\b[^}]*\} from '\.\.\/\.\.\/\.\.\/\.\.\/lib\/db'/.test(planDayPageSource)
   );
 
   // ============================================================
@@ -145,8 +148,8 @@ function main() {
     // the new multi-line form; the underlying fact (a real async Server
     // Component destructuring searchParams as its parameter) is
     // unchanged and still directly asserted.
-    '30. page.tsx is a real async Server Component doing the session/user read itself (matches the established app/moment/[token]/page.tsx precedent)',
-    /export default async function PlanDayPage\(\{\s*searchParams/.test(planDayPageSource)
+    '30. (R5) the bootstrap route does the session/user read itself, server-side, from the request\'s own searchParams',
+    /export async function GET\(req: NextRequest\)/.test(planDayPageSource) && /const searchParams = \{ horizon: pick\('horizon'\)/.test(planDayPageSource)
   );
   check('31. page.tsx reads the authoritative clock exactly once, passed by reference into resolvePlanDayServerProps', occurrences(planDayPageSource, 'new Date()') === 1 && planDayPageSource.includes('now: () => new Date()'));
   // Intent Fidelity V1 PR G3/G4 added `resolveThisWeekDeadline`'s own
@@ -182,8 +185,8 @@ function main() {
     /searchParams\.horizon/.test(planDayPageSource) &&
       !/searchParams\.(timezone|planningDate)/.test(planDayPageSource) &&
       !/req\.query|req\.headers/.test(planDayPageSource) &&
-      planDayPageSource.includes('timezone={bootstrap?.timezone ?? null}') &&
-      planDayPageSource.includes('planningDate={bootstrap?.planningDate ?? null}')
+      planDayPageSource.includes('timezone: bootstrap?.timezone ?? null') &&
+      planDayPageSource.includes('planningDate: bootstrap?.planningDate ?? null')
   );
 
   // ============================================================
@@ -667,7 +670,7 @@ function main() {
       !/buildRequestedIntentsForSubmission\(rows, timezone, planningDate, autoGoalSuggestions/.test(planDayClientSource) &&
       !/buildGoalActivityLinksForAccept\(rows, preview\.constructedDay\.proposedItems, autoGoalSuggestions/.test(planDayClientSource)
   );
-  check('115. page.tsx passes autoGoalSuggestions={autoGoalSuggestions} to <PlanDayClient>', /autoGoalSuggestions=\{autoGoalSuggestions\}/.test(planDayPageSource));
+  check('115. (R5) the bootstrap returns autoGoalSuggestions, which the loader passes to <PlanDayClient> unchanged', /\n\s*autoGoalSuggestions,\n/.test(planDayPageSource) && /<PlanDayClient \{\.\.\.load\.props\} \/>/.test(planDayPageSource));
   check(
     '116. page.tsx\'s dedup exclusion list is built from the ALREADY-RESOLVED goalActivities (never the raw activitiesParam query string -- this ticket\'s own section 19)',
     /resolveAutomaticGoalDemand\(\s*\{[\s\S]{0,400}goalActivities\.map\(\(activity\) => activity\.id\)/.test(planDayPageSource) && !/resolveAutomaticGoalDemand\([\s\S]{0,600}activitiesParam/.test(planDayPageSource)

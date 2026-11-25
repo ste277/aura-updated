@@ -155,6 +155,8 @@ function DashboardPageInner() {
   // Quarantined pre-update activity logs (no owner): shown with an explicit
   // choice, never assigned automatically.
   const [legacyCount, setLegacyCount] = useState(0);
+  // AURA-ANDROID-REL-04 (R5): the offline queue could not be read -- pending activity is UNKNOWN, not none.
+  const [queueUnavailable, setQueueUnavailable] = useState(false);
   // AURA-ANDROID-REL-04 IR-01 -- the verified account this dashboard instance
   // belongs to (set from the session answer; the instance is remounted when
   // the account changes).
@@ -425,8 +427,14 @@ function DashboardPageInner() {
     const owner = accountIdRef.current;
     void readOfflineHabitQueue(owner).then((queued) => {
       if (accountIdRef.current !== owner) return; // the account changed meanwhile: this page is being replaced
-      const queuedClientRequestIds = new Set(queued.map((item) => item.clientRequestId));
-      setLogEntries((prev) => mergeConfirmedLogEntries(confirmedEntries, prev, queuedClientRequestIds));
+      // R5: an UNREADABLE queue is unknown, not empty -- keep every pending row (never treat them as gone).
+      setQueueUnavailable(queued === null);
+      setLogEntries((prev) => {
+        const queuedClientRequestIds = queued === null
+          ? new Set(prev.filter((e) => e.syncStatus === 'pending' && e.clientRequestId).map((e) => e.clientRequestId as string))
+          : new Set(queued.map((item) => item.clientRequestId));
+        return mergeConfirmedLogEntries(confirmedEntries, prev, queuedClientRequestIds);
+      });
     });
   }, []);
 
@@ -462,7 +470,8 @@ function DashboardPageInner() {
       // verified account's own queued entries are reconstructed.
       const queued = await readOfflineHabitQueue(check.user.id);
       if (accountIdRef.current !== check.user.id) return;
-      if (queued.length > 0) {
+      setQueueUnavailable(queued === null);
+      if (queued && queued.length > 0) {
         setLogEntries((prev) => {
           const reconstructed = selectQueueItemsToReconstruct(queued, prev).map(toPendingLoggedEntry);
           return reconstructed.length === 0 ? prev : [...reconstructed, ...prev];
@@ -1881,6 +1890,11 @@ function DashboardPageInner() {
         boxSizing: 'border-box',
       }}
     >
+      {queueUnavailable && (
+        <div role="status" data-queue-state="unavailable" style={{ width: '100%', maxWidth: 560, marginBottom: 12, padding: 12, borderRadius: 10, border: '1px solid var(--as-border)', background: 'var(--as-surface)', fontSize: 13 }}>
+          Aura couldn&apos;t read this device&apos;s unsynced activity, so pending activity may not be shown here. Nothing was removed; it will sync when the device storage can be read again.
+        </div>
+      )}
       {legacyCount > 0 && (
         // AURA-ANDROID-REL-04 (R3/R4) -- pre-update offline logs have NO recorded
         // account. They stay quarantined: never synced, never assigned to any

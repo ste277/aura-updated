@@ -65,8 +65,8 @@ async function signOutWith(answer: Answer, sessionAfter: string | null) {
   check('lost answer, session now B -> account-changed to B', switched.out === 'account-changed' && acct.getVerifiedAccount() === 'user-b');
 
   check('wording: 1 owned', /1 activity log that has not synced yet/.test(so.describePendingWork({ owned: 1 })) && /remove it/.test(so.describePendingWork({ owned: 1 })));
-  check('wording (R4): the question is about OWNED entries only; already-sent ones are named as possibly saved', /2 activity logs that have not synced yet \(1 of them was already sent and may have been saved/.test(so.describePendingWork({ owned: 2, ownedSent: 1 })) && !/older|earlier version/.test(so.describePendingWork({ owned: 2, ownedSent: 1 })));
-  check('wording: unreadable storage asks instead of assuming none', /couldn't check this device/i.test(so.describePendingWork({ owned: null })));
+  check('wording (R5): OWNED entries only; already-dispatched ones named as possibly SENT; removal not promised before the outcome', /2 activity logs that have not synced yet \(1 of them may already have been sent/.test(so.describePendingWork({ owned: 2, ownedSent: 1 })) && /where it can and tell you the result/.test(so.describePendingWork({ owned: 2, ownedSent: 1 })) && !/older|earlier version/.test(so.describePendingWork({ owned: 2, ownedSent: 1 })));
+  check('wording (R5): unreadable storage says entries will be KEPT (what actually happens), never that they will be removed', /couldn't read this device's unsynced activity/i.test(so.describePendingWork({ owned: null })) && /kept on this device \(not removed\)/.test(so.describePendingWork({ owned: null })));
   check('wording: nothing pending -> no question', so.describePendingWork({ owned: 0 }) === null);
 
   console.log(`\n${passed} passed, ${failed} failed`);

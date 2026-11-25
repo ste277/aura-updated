@@ -118,7 +118,7 @@ function confirmedEntry(id: string, clientRequestId: string, title = 'Deep Work'
 // (1. pending survives reload, 2. multiple entries, 5. stable identity).
 // ============================================================
 
-async function readQ() { await pendingClear; return readOfflineHabitQueue(OWNER); }
+async function readQ() { await pendingClear; const r = await readOfflineHabitQueue(OWNER); if (r === null) throw new Error('queue unreadable'); return r; }
 (async () => {
 (global as any).localStorage.clear(); pendingClear = clearIdb();
 setQueue([queuedA]);
@@ -330,11 +330,11 @@ check(
   'page.tsx imports the extracted helpers from the new lib module',
   /import \{ readOfflineHabitQueue, toPendingLoggedEntry, mergeConfirmedLogEntries, selectQueueItemsToReconstruct \} from '\.\.\/lib\/offlineHabitQueue';/.test(pageSource)
 );
-check('loadUserDataAndLogs calls mergeConfirmedLogEntries (no re-implemented inline merge logic)', /setLogEntries\(\(prev\) => mergeConfirmedLogEntries\(confirmedEntries, prev, queuedClientRequestIds\)\);/.test(pageSource));
+check('loadUserDataAndLogs calls mergeConfirmedLogEntries (no re-implemented inline merge logic)', /return mergeConfirmedLogEntries\(confirmedEntries, prev, queuedClientRequestIds\);/.test(pageSource));
 check('the confirmed fetch propagates clientRequestId from the server row onto each entry', /clientRequestId: l\.clientRequestId \?\? undefined,/.test(pageSource));
 check('the reload-reconstruction effect calls selectQueueItemsToReconstruct (no re-implemented inline selection logic)', /const reconstructed = selectQueueItemsToReconstruct\(queued, prev\)\.map\(toPendingLoggedEntry\);/.test(pageSource));
-check('an empty queue is a no-op in the reconstruction (no unnecessary setLogEntries call)', /if \(queued\.length > 0\) \{/.test(pageSource));
-check('AURA-ANDROID-REL-04: reconstruction reads only the verified account\'s queue (R4: awaited IndexedDB read, dropped if the account changed meanwhile)', /const queued = await readOfflineHabitQueue\(check\.user\.id\);\s*if \(accountIdRef\.current !== check\.user\.id\) return;/.test(pageSource));
+check('an empty queue is a no-op in the reconstruction (no unnecessary setLogEntries call)', /if \(queued && queued\.length > 0\) \{/.test(pageSource));
+check('AURA-ANDROID-REL-04: reconstruction reads only the verified account\'s queue (R4: awaited IndexedDB read, dropped if the account changed meanwhile)', /const queued = await readOfflineHabitQueue\(check\.user\.id\);\s*if \(accountIdRef\.current !== check\.user\.id\) return;\s*setQueueUnavailable\(queued === null\);/.test(pageSource));
 
 check('handleLogActivity is unchanged: still returns Promise<\'confirmed\' | \'pending\'>', /Promise<'confirmed' \| 'pending'>/.test(pageSource));
 check(

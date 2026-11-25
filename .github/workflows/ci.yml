@@ -969,6 +969,10 @@ jobs:
         env:
           TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
         run: npx ts-node --project tsconfig.jsdom-tests.json test/rel04R4SsrAgreementJsdom.test.ts
+      - name: Run REL-04 R5 queue lifecycle test
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/rel04R5QueueLifecycle.test.ts
       - name: Run REL-04 R3-head (b323d2a) reproduction test
         env:
           TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
@@ -1083,6 +1087,47 @@ jobs:
         run: npx playwright install --with-deps chromium
       - name: Run REL-04 Chromium multi-tab test
         run: npx ts-node test/rel04Chromium.test.ts
+  rel04-next-app-rendering:
+    # AURA-ANDROID-REL-04 (R5) -- ACTUAL APPLICATION RENDERING evidence: the real
+    # production build (next build + next start) against a fresh Postgres with a
+    # synthetic account. Checks the real HTTP responses of Plan Day, Goals, Goal
+    # detail and Captures carry no account data, the real bootstrap route is
+    # account-scoped, and (real Chromium) data appears only after verification.
+    name: REL-04 Next.js app rendering tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: aura_ci
+          POSTGRES_PASSWORD: aura_ci
+          POSTGRES_DB: aura_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U aura_ci -d aura_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://aura_ci:aura_ci@localhost:5432/aura_ci
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - name: Install root deps
+        run: npm install
+      - name: Install web deps
+        working-directory: apps/web
+        run: npm install
+      - name: Apply the complete migration chain to a fresh database
+        working-directory: apps/web
+        run: npx prisma migrate deploy
+      - name: Install Chromium for Playwright
+        run: npx playwright install --with-deps chromium
+      - name: Run REL-04 Next.js app rendering test (builds the app)
+        run: npx ts-node test/rel04R5NextAppRendering.test.ts
   web-build:
     name: Next.js production build
     runs-on: ubuntu-latest

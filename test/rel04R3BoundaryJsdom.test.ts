@@ -25,6 +25,8 @@ const { NextRequest } = require(require.resolve('next/server', { paths: [path.jo
 const dev = new Device();
 dev.extra['/api/goals'] = (u) => (u === A ? [{ id: 'g-a', title: 'AliceGoal', status: 'ACTIVE' }] : [{ id: 'g-b', title: 'BobGoal', status: 'ACTIVE' }]);
 dev.extra['/api/captures'] = (u) => (u === A ? [{ id: 'c-a', title: 'AliceCapture' }] : [{ id: 'c-b', title: 'BobCapture' }]);
+dev.extra['/api/goals/g-a'] = (u) => (u === A ? { goal: { id: 'g-a', title: 'AliceGoalDetail', status: 'ACTIVE' }, activities: [], progress: { total: 0, completed: 0, hasOngoingRhythmActivity: false } } : null);
+dev.extra['/api/goals/g-b'] = () => null;
 dev.extra['/api/mcp/connections'] = (u) => ({ connections: u === A ? [{ clientId: 'a-app', label: 'AliceApp', connectedAt: 1 }] : [{ clientId: 'b-app', label: 'BobApp', connectedAt: 1 }] });
 (global as any).fetch = dev.fetch;
 (window as any).fetch = dev.fetch;
@@ -32,10 +34,10 @@ let reloads = 0;
 
 const acct = require(path.join(WEB, 'lib', 'accountSession'));
 require(path.join(WEB, 'app', 'AccountBoundaryRoot')); // installs the boundary (as the root layout does)
-const { AccountScoped, pageReload } = require(path.join(WEB, 'components', 'AccountScoped'));
-pageReload.fn = () => { reloads++; };
-const { GoalsListClient } = require(path.join(WEB, 'app', 'goals', 'GoalsListClient'));
-const { CapturesClient } = require(path.join(WEB, 'app', 'captures', 'CapturesClient'));
+const { AccountScoped } = require(path.join(WEB, 'components', 'AccountScoped'));
+const { GoalsListScoped } = require(path.join(WEB, 'app', 'goals', 'GoalsListClient'));
+const { CapturesScoped } = require(path.join(WEB, 'app', 'captures', 'CapturesClient'));
+const { GoalDetailScoped } = require(path.join(WEB, 'app', 'goals', '[goalId]', 'GoalDetailClient'));
 const { ConnectedAppsClient } = require(path.join(WEB, 'app', 'connect', 'apps', 'ConnectedAppsClient'));
 
 const settle = async (n = 10) => { for (let i = 0; i < n; i++) await flush(); };
@@ -112,8 +114,9 @@ async function main() {
   dev.signIn(A);
   acct.__resetAccountSessionForTests('tab');
   for (const [name, el, reloadMode] of [
-    ['Goals', React.createElement(AccountScoped, { onChange: 'reload', serverAccount: A }, React.createElement(GoalsListClient, { authenticated: true })), true],
-    ['Captures', React.createElement(AccountScoped, { onChange: 'reload', serverAccount: A }, React.createElement(CapturesClient, { authenticated: true })), true],
+    ['Goals', React.createElement(GoalsListScoped), true],
+    ['Captures', React.createElement(CapturesScoped), true],
+    ['Goal detail', React.createElement(GoalDetailScoped, { goalId: 'g-a' }), true],
     ['Connected Apps', React.createElement(AccountScoped, null, React.createElement(ConnectedAppsClient)), false],
   ] as const) {
     dev.signIn(A);
@@ -131,7 +134,9 @@ async function main() {
     dev.signIn(B);
     await act(async () => { acct.__deliverStorageEventForTests({ key: 'aura_account_announce_v2', newValue: JSON.stringify({ account: B, tab: 'other', at: Date.now() }) }); });
     await settle(14);
-    if (reloadMode) check(`B5 ${name}: the server-rendered page reloads on the account change (fresh render for the current account)`, reloads === 1);
+    const afterSwitch = dev.calls.slice(mark).filter((x) => /\/api\/(goals|captures)/.test(x.key));
+    const lastStated = afterSwitch.length ? afterSwitch[afterSwitch.length - 1].expected : null;
+    if (reloadMode) check(`B5 ${name} (R5 verified page): no reload -- the tree is remounted for B and fetches B's data only (Alice's gone)`, reloads === 0 && !/Alice/.test(text(c)) && lastStated === B && (name === 'Goal detail' || /Bob/.test(text(c))));
     else check(`B5 ${name}: remounts and shows only B's data`, /Bob/.test(text(c)) && !/Alice/.test(text(c)));
     await h.unmount();
   }

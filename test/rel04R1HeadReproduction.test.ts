@@ -172,7 +172,7 @@ async function main() {
       currentQueue.enqueueOwned({ ...payload('context 1', 'crid-ctx1'), tempId: 't1', ownerUserId: A }),
       currentQueue.enqueueOwned({ ...payload('context 2', 'crid-ctx2'), tempId: 't2', ownerUserId: A }),
     ]);
-    check('D4 CORRECTED (R4): concurrent enqueues are atomic transactions -- both kept', (await currentQueue.readOfflineHabitQueue(A)).length === 2);
+    check('D4 CORRECTED (R4): concurrent enqueues are atomic transactions -- both kept', (await currentQueue.readOfflineHabitQueue(A))?.length === 2);
   }
 
   // ================= D5 concurrent same-epoch session answers

@@ -467,6 +467,90 @@ async function main() {
       check(`CH11 (real Chromium, worker controlling both pages) the uncoordinated sign-in waits for the pending sign-out response, so it is NOT cleared by it (cookie now: ${now}; sign-out: ${outcome})`, controlled && !signInReachedServerEarly && now === B && outcome === 'signed-out');
       await context.close();
     }
+
+    // ------------------------------------------------------------ CH12 (R5) worker RESTART: recovery decisions do not depend on in-memory state
+    {
+      deploy.sw = NEW_SW; deploy.appHtml = 'new';
+      const { context, signIn, cookieUser } = await newContext();
+      const cur = await context.newPage();
+      await cur.goto(origin + '/app');
+      await cur.waitForFunction(async () => { await navigator.serviceWorker.ready; return Boolean(navigator.serviceWorker.controller) && (window as any).auraReady === true; }, null, { timeout: 15000 });
+      await signIn('alicesynth@example.invalid');
+      await cur.evaluate(async () => { await (window as any).aura.acct.fetchVerifiedSession(); });
+      // Wipe the persisted worker state AND stop the worker: the restarted worker knows nothing about this page.
+      await cur.evaluate(async () => { await caches.delete('aura-sw-state-v1'); });
+      const cdp = await context.newCDPSession(cur);
+      await cdp.send('ServiceWorker.enable');
+      await cdp.send('ServiceWorker.stopAllWorkers');
+      const urlBefore = cur.url();
+      const st = await cur.evaluate(async () => (await (window as any).__nativeFetch('/api/goals')).status);
+      await cur.waitForTimeout(1500);
+      check(`CH12 (R5, real Chromium) after a worker restart with NO persisted state, a current-bundle page refused as out of date (${st}) is asked, answers, and is NOT reloaded`, st === 503 && cur.url() === urlBefore);
+      // An old page under the restarted worker is still recovered.
+      deploy.appHtml = 'old';
+      const old = await context.newPage();
+      await old.goto(origin + '/app');
+      await old.waitForFunction(() => (window as any).oldReady === true && Boolean(navigator.serviceWorker.controller), null, { timeout: 15000 });
+      deploy.appHtml = 'new';
+      await cdp.send('ServiceWorker.stopAllWorkers');
+      const nav = old.waitForURL(/aura_reloaded=upgrade/, { timeout: 15000 }).then(() => true, () => false);
+      await old.evaluate(async () => { await (window as any).handleLogout(); }).catch(() => undefined);
+      check('CH12 (R5) after a restart an OLD page (cannot answer) is still reloaded after its refused sign-out; the session is untouched', (await nav) && (await cookieUser()) === A);
+      await context.close();
+    }
+
+    // ------------------------------------------------------------ CH13 (R5) reload-loop protection persists across restarts (stale old HTML keeps being served)
+    {
+      deploy.sw = NEW_SW; deploy.appHtml = 'old'; // e.g. a stale copy of the old page keeps being served
+      const { context, signIn } = await newContext();
+      const old = await context.newPage();
+      await old.goto(origin + '/app');
+      await old.waitForFunction(async () => { await navigator.serviceWorker.ready; return Boolean(navigator.serviceWorker.controller) && (window as any).oldReady === true; }, null, { timeout: 15000 });
+      await signIn('alicesynth@example.invalid');
+      let navigations = 0;
+      old.on('framenavigated', (f: any) => { if (f === old.mainFrame()) navigations++; });
+      const first = old.waitForURL(/aura_reloaded=upgrade/, { timeout: 15000 }).then(() => true, () => false);
+      await old.evaluate(async () => { await (window as any).handleLogout(); }).catch(() => undefined);
+      const reloadedOnce = await first;
+      await old.waitForFunction(() => (window as any).oldReady === true, null, { timeout: 15000 });
+      await old.evaluate(async () => { await (window as any).handleLogout(); }).catch(() => undefined);
+      await old.waitForTimeout(1500);
+      const cdp = await context.newCDPSession(old);
+      await cdp.send('ServiceWorker.enable');
+      await cdp.send('ServiceWorker.stopAllWorkers');
+      await old.evaluate(async () => { await (window as any).handleLogout(); }).catch(() => undefined);
+      await old.waitForTimeout(1500);
+      check(`CH13 (R5, real Chromium) a page that is still old after its reload is NOT reloaded again -- also after a worker restart (navigations: ${navigations})`, reloadedOnce && navigations === 1);
+      deploy.appHtml = 'new';
+      await context.close();
+    }
+
+    // ------------------------------------------------------------ CH14 (R5) a slow sign-out: the queued sign-in is refused, never sent out of order or reported complete
+    {
+      deploy.sw = NEW_SW; deploy.appHtml = 'new';
+      const { context, open, signIn, cookieUser } = await newContext();
+      const boot = await context.newPage();
+      await boot.goto(origin + '/app');
+      await boot.waitForFunction(async () => { await navigator.serviceWorker.ready; return Boolean(navigator.serviceWorker.controller); }, null, { timeout: 15000 });
+      await signIn('alicesynth@example.invalid');
+      const [x, y] = [await open(), await open()];
+      for (const t of [x, y]) await t.evaluate(async () => { await (window as any).aura.acct.fetchVerifiedSession(); });
+      const slow = hold('/api/auth/logout', 'after'); // processed, response withheld longer than the worker's settle bound
+      const logout = x.evaluate(async (A: string) => (await fetch('/api/auth/logout', { method: 'POST', headers: { 'X-Aura-Expected-Account': A } })).status, A);
+      await slow.arrived;
+      const mark = serverLog.length;
+      const t0 = Date.now();
+      const siR = await y.evaluate(async () => (window as any).aura.si.verifySignInCode({ email: 'bobsynth@example.invalid', code: '123456' }));
+      const si = siR.kind;
+      const waited = Date.now() - t0;
+      const sentEarly = serverLog.slice(mark).some((e) => e.path === '/api/auth/verify-code');
+      slow.release();
+      await logout;
+      const now = await cookieUser();
+      check(`CH14 (R5, real Chromium) behind a sign-out unsettled for >15 s the sign-in is answered "unsettled" (~${Math.round(waited / 1000)} s), NOT sent, and the app does not report it as signed in (${si}: "${siR.message}")`, !sentEarly && si !== 'VERIFIED' && /still in progress/i.test(siR.message ?? '') && waited >= 14000);
+      check(`CH14 (R5) the slow sign-out then lands; no replacement session existed for it to clear (cookie now: ${now})`, now === null);
+      await context.close();
+    }
   } finally {
     await browser.close();
     server.close();

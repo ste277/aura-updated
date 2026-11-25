@@ -12,63 +12,132 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches
       .keys()
-      .then((keys) => Promise.all(keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key))))
+      .then((keys) => Promise.all(keys.filter((key) => key !== CACHE_NAME && key !== STATE_CACHE).map((key) => caches.delete(key))))
       .then(() => self.clients.claim())
+      // R5: pages of the current bundle re-announce themselves to this (new) worker.
+      .then(() => queryAllClients())
   );
 });
 
-// AURA-ANDROID-REL-04 (R4) -- compatibility bridge for pages loaded BEFORE the
-// account boundary (old bundles cannot be changed; this worker controls them
-// once the browser has fetched this version, which it does on the next
-// navigation anywhere in the origin; skipWaiting + clients.claim above then
-// apply it to already-open pages).
-//  1. Refresh path (activation blockers A-1/A-2): an /api request WITHOUT the
-//     X-Aura-Expected-Account header that the server refuses with 503
-//     client_upgrade_required came from an out-of-date page. That page is
-//     reloaded (once) into the current bundle, with ?aura_reloaded=upgrade so
-//     the new page can say what happened. This includes an old page's sign-out
-//     (refused so it cannot clear a replacement session): instead of leaving a
-//     false "signed out" screen, the page reloads and shows the real session.
-//     Pages of the current bundle announce themselves and are never reloaded.
-//  2. Cookie settlement (A-3): sign-in and sign-out requests from EVERY page
-//     this worker controls (old or new bundle, with or without Web Locks) are
-//     sent one at a time; the next starts only after the previous response
-//     (and its Set-Cookie) has arrived, so a stale sign-out response can no
-//     longer land after a newer sign-in and clear it. Bounded wait.
-// Pages this worker does not control (service workers unavailable or
-// disabled, a hard reload, before the update) are NOT covered; see the
-// readiness report.
+// AURA-ANDROID-REL-04 (R4, R5) -- compatibility bridge for pages loaded BEFORE
+// the account boundary (old bundles cannot be changed; this worker controls
+// them once the browser has fetched this version -- on the next navigation in
+// the origin -- and skipWaiting + clients.claim apply it to open pages).
+//  1. Refresh path (A-1/A-2): an /api request WITHOUT X-Aura-Expected-Account
+//     that the server refuses with 503 client_upgrade_required came from an
+//     out-of-date page, which is reloaded into the current bundle
+//     (?aura_reloaded=upgrade lets the new page say so) -- e.g. an old page's
+//     refused sign-out no longer leaves a false "signed out" screen.
+//     R5 lifecycle: before reloading, the worker ASKS that page whether it is
+//     a current-bundle page (current pages answer; old pages cannot), so the
+//     decision survives a worker restart. Known current pages and the reload
+//     guards are also persisted in Cache Storage (STATE_CACHE), and automatic
+//     reloads are rate-limited origin-wide, so restarts cannot produce a
+//     reload loop. A failed navigation is not retried.
+//  2. Cookie settlement (A-3): sign-in and sign-out requests from every page
+//     this worker controls are sent one at a time. R5: the wait is measured
+//     from when the previous request was actually SENT; if it has still not
+//     settled after AUTH_SETTLE_TIMEOUT_MS, the next request is NOT sent out
+//     of order -- it is answered 503 auth_transition_unsettled (the page then
+//     reconciles with a fresh session read; nothing is reported as completed).
+// NOT covered (activation blockers A-1..A-3 stay open for these): pages this
+// worker does not control (service workers unavailable/disabled, hard reload,
+// no navigation since the update), requests in flight in a worker being
+// replaced, and any client outside this origin's worker. Server-side session
+// revocation is AURA-AUTH-01; neither it nor this worker alone establishes
+// complete mixed-version authentication safety.
+const STATE_CACHE = 'aura-sw-state-v1';
+const STATE_URL = '/__aura-sw-state__';
 const ACCOUNT_HEADER = 'x-aura-expected-account';
 const AUTH_COOKIE_ROUTES = ['/api/auth/logout', '/api/auth/verify-code'];
 const AUTH_SETTLE_TIMEOUT_MS = 15000;
 const RELOAD_GUARD_MS = 30000;
-const boundaryClients = new Set();
-const reloadedClients = new Map();
-let authChain = Promise.resolve();
+const RELOAD_WINDOW_MS = 10 * 60 * 1000;
+const RELOAD_WINDOW_MAX = 3;
+const ANNOUNCE_WAIT_MS = 600;
+const STATE_MAX_AGE_MS = 60 * 60 * 1000;
+let statePromise = null;
+const announceWaiters = new Map();
+
+function emptyState() { return { boundary: {}, reloaded: {}, reloads: [], navigateFailed: 0 }; }
+function loadState() {
+  if (!statePromise) {
+    statePromise = caches.open(STATE_CACHE)
+      .then((c) => c.match(STATE_URL))
+      .then((r) => (r ? r.json() : emptyState()))
+      .catch(() => emptyState())
+      .then((st) => { void queryAllClients(); return Object.assign(emptyState(), st); }); // first use after a (re)start
+  }
+  return statePromise;
+}
+async function saveState(st) {
+  const now = Date.now();
+  for (const k of Object.keys(st.boundary)) if (now - st.boundary[k] > STATE_MAX_AGE_MS) delete st.boundary[k];
+  for (const k of Object.keys(st.reloaded)) if (now - st.reloaded[k] > STATE_MAX_AGE_MS) delete st.reloaded[k];
+  st.reloads = st.reloads.filter((t) => now - t < RELOAD_WINDOW_MS);
+  try { await (await caches.open(STATE_CACHE)).put(STATE_URL, new Response(JSON.stringify(st), { headers: { 'content-type': 'application/json' } })); } catch (err) { /* in-memory state still applies */ }
+}
+async function queryAllClients() {
+  try {
+    const all = await self.clients.matchAll({ type: 'window' });
+    for (const c of all) c.postMessage({ type: 'AURA_BOUNDARY_QUERY' });
+  } catch (err) { /* ignore */ }
+}
 
 self.addEventListener('message', (event) => {
   const data = event.data || {};
-  if (data.type === 'AURA_ACCOUNT_BOUNDARY' && event.source && event.source.id) boundaryClients.add(event.source.id);
+  if (data.type !== 'AURA_ACCOUNT_BOUNDARY' || !event.source || !event.source.id) return;
+  const id = event.source.id;
+  const waiter = announceWaiters.get(id);
+  if (waiter) { announceWaiters.delete(id); waiter(); }
+  event.waitUntil(loadState().then((st) => { st.boundary[id] = Date.now(); return saveState(st); }));
 });
 
-function settleAuthSerially(request) {
-  const run = authChain.then(() => fetch(request));
-  const settled = run.then(() => undefined, () => undefined);
-  authChain = Promise.race([settled, new Promise((resolve) => setTimeout(resolve, AUTH_SETTLE_TIMEOUT_MS))]);
+/** Asks one page whether it runs the current bundle; true when it answers in time. */
+function askCurrent(client) {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => { announceWaiters.delete(client.id); resolve(false); }, ANNOUNCE_WAIT_MS);
+    announceWaiters.set(client.id, () => { clearTimeout(timer); resolve(true); });
+    try { client.postMessage({ type: 'AURA_BOUNDARY_QUERY' }); } catch (err) { clearTimeout(timer); announceWaiters.delete(client.id); resolve(false); }
+  });
+}
+
+let authInFlight = null; // { sentAt, settled }
+function unsettledResponse() {
+  return new Response(JSON.stringify({ error: 'Signing in or out is still in progress. Try again in a moment.', code: 'auth_transition_unsettled' }), { status: 503, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
+}
+async function settleAuthSerially(request) {
+  while (authInFlight) {
+    const cur = authInFlight;
+    const remaining = Math.max(0, AUTH_SETTLE_TIMEOUT_MS - (Date.now() - cur.sentAt));
+    const settled = await Promise.race([cur.settled.then(() => true), new Promise((resolve) => setTimeout(() => resolve(false), remaining))]);
+    if (!settled) return unsettledResponse(); // never sent out of order behind an unsettled response
+  }
+  const run = fetch(request);
+  const entry = { sentAt: Date.now(), settled: run.then(() => undefined, () => undefined) };
+  authInFlight = entry;
+  entry.settled.then(() => { if (authInFlight === entry) authInFlight = null; });
   return run;
 }
 
 async function reloadOutdatedClient(clientId) {
-  if (!clientId || boundaryClients.has(clientId)) return;
+  if (!clientId) return;
+  const st = await loadState();
+  if (st.boundary[clientId]) return;
   const now = Date.now();
-  if (now - (reloadedClients.get(clientId) || 0) < RELOAD_GUARD_MS) return;
-  reloadedClients.set(clientId, now);
+  if (now - (st.reloaded[clientId] || 0) < RELOAD_GUARD_MS) return;
   const client = await self.clients.get(clientId);
   if (!client || client.type !== 'window' || typeof client.navigate !== 'function') return;
   const target = new URL(client.url);
   if (target.origin !== self.location.origin || target.searchParams.get('aura_reloaded') === 'upgrade') return;
+  if (await askCurrent(client)) return; // a current-bundle page (e.g. its announcement was lost with a restart)
+  st.reloads = st.reloads.filter((t) => now - t < RELOAD_WINDOW_MS);
+  if (st.reloads.length >= RELOAD_WINDOW_MAX) return; // origin-wide loop protection
+  st.reloaded[clientId] = now;
+  st.reloads.push(now);
+  await saveState(st);
   target.searchParams.set('aura_reloaded', 'upgrade');
-  try { await client.navigate(target.toString()); } catch (err) { /* not controlled / navigation refused */ }
+  try { await client.navigate(target.toString()); } catch (err) { st.navigateFailed += 1; await saveState(st); }
 }
 
 self.addEventListener('fetch', (event) => {

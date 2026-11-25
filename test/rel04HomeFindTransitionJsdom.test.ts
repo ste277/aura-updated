@@ -10,7 +10,7 @@
  * account switch), and the same transition behaviour on /find.
  */
 import { React, mount, flush, act, click } from './jsdomReactHarness';
-import { Device, addUser, check, finish, storage, store } from './rel04AccountIsolationHarness';
+import { Device, addUser, check, finish, idbFault, storage, store } from './rel04AccountIsolationHarness';
 
 const A = 'synthetic-user-a';
 const B = 'synthetic-user-b';
@@ -127,6 +127,22 @@ async function main() {
   check('F3 during another tab\'s sign-out, /find-style saves are refused (shared runActivityOperation)', refused === 'transition');
   storage.removeItem('aura_auth_transition_v2');
   await find.unmount();
+
+  // ---------------------------------------------------------------- Q-R5: the real Home with an UNREADABLE queue says so
+  dev.signIn(A);
+  acct.__resetAccountSessionForTests('home-q');
+  idbFault.read = true;
+  const homeQ = await mount(React.createElement(Page));
+  await settle(16);
+  const cq = homeQ.container as HTMLElement;
+  const unavailable = cq.querySelector('[data-queue-state="unavailable"]');
+  idbFault.read = false;
+  check('Q-R5 (mounted Home) an unreadable offline queue is shown as UNAVAILABLE ("may not be shown; nothing was removed"), not as no pending activity', !!unavailable && /couldn.t read this device.s unsynced activity/i.test(unavailable?.textContent ?? '') && /Alicesynth/.test(textOf(cq)));
+  await homeQ.unmount();
+  const homeOk = await mount(React.createElement(Page));
+  await settle(16);
+  check('Q-R5 (mounted Home) with a readable queue there is no unavailable notice', !(homeOk.container as HTMLElement).querySelector('[data-queue-state="unavailable"]'));
+  await homeOk.unmount();
 
   finish();
 }

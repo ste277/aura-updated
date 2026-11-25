@@ -14,6 +14,11 @@ export function announceAccountBoundary(): void {
     const announce = () => sw.controller?.postMessage(BOUNDARY_MESSAGE);
     announce();
     sw.addEventListener?.('controllerchange', announce);
+    // R5: a (re)started worker asks before treating a page as out of date; answer it.
+    sw.addEventListener?.('message', (e: MessageEvent) => {
+      if ((e.data as { type?: string } | null)?.type === 'AURA_BOUNDARY_QUERY') (e.source as ServiceWorker | null)?.postMessage?.(BOUNDARY_MESSAGE) ?? announce();
+    });
+    sw.startMessages?.();
   } catch {
     /* no service worker support */
   }

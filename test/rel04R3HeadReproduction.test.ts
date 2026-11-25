@@ -104,7 +104,7 @@ async function main() {
     await settle(12);
     check(`X1 R3 HEAD: first verification answers Bob, yet the page rendered for Alice keeps showing Alice's server props (reloads: ${r3Reloads})`, acct.getVerifiedAccount() === B && /AliceTown/.test(text(h.container as HTMLElement)) && r3Reloads === 0);
     await h.unmount();
-    check('X1 CORRECTED: see rel04R4SsrAgreementJsdom S1-S6 (gated until the first verification agrees; disagreement reloads without showing the props)', true);
+    check('X1 CORRECTED (R5): see rel04R4SsrAgreementJsdom S1-S6 and rel04R5NextAppRendering (no account data in the page response; fetched only after verification)', true);
   }
 
   // ---------------------------------------------------------------- X2 migration vs settlement in another context

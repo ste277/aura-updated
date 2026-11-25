@@ -143,7 +143,7 @@ async function main() {
     gate.release();
     const committed = logsOf(A).length;
     check(`C3(${phase}) sign-out aborted the in-flight write; its outcome is unresolved, so it STAYS in A's queue`, w.kind === 'account-changed' && (w as any).keptForAccount === true && (await qA()) === 1);
-    check(`C3(${phase}) the confirmation counts it, says it may already be saved, and Cancel keeps A signed in`, out.outcome === 'cancelled' && /1 activity log/.test(asked) && /already sent and may have been saved/.test(asked) && dev.cookie !== null);
+    check(`C3(${phase}) the confirmation counts it, says it may already be saved, and Cancel keeps A signed in`, out.outcome === 'cancelled' && /1 activity log/.test(asked) && /may already have been sent/.test(asked) && dev.cookie !== null);
     await tab.acct.fetchVerifiedSession(dev.fetch as any);
     await tab.sync.replayOfflineQueue(dev.fetch as any);
     check(`C3(${phase}) replay with the original clientRequestId resolves it exactly once for A (server ${phase === 'after' ? 'had committed' : 'had not committed'})`, logsOf(A).filter((l) => l.clientRequestId === 'crid-if').length === 1 && (await qA()) === 0 && committed === (phase === 'after' ? 1 : 0));
@@ -220,7 +220,7 @@ async function main() {
     idbFault.read = true;
     let asked = '';
     const c = await tab.so.performSignOut({ fetch: dev.fetch as any, confirm: (m) => { asked = m; return false; } });
-    check('C7b unreadable storage: asked (cannot check) and Cancel keeps the session', c.outcome === 'cancelled' && /couldn't check this device/i.test(asked) && dev.cookie !== null);
+    check('C7b unreadable storage: asked (cannot check) and Cancel keeps the session', c.outcome === 'cancelled' && /couldn't read this device's unsynced activity/i.test(asked) && dev.cookie !== null);
     idbFault.read = false;
     idbFault.write = true;
     const out = await signOut(tab, dev);

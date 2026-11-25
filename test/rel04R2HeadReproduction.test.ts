@@ -138,7 +138,7 @@ async function main() {
     const tab = openTab('tab1');
     await tab.q.enqueueOwned({ ...payload('original', 'crid-e3'), ownerUserId: A, tempId: 't' });
     const c = await tab.q.enqueueOwned({ ...payload('DIFFERENT', 'crid-e3'), ownerUserId: A, tempId: 't' });
-    check('E3 CORRECTED: refused (conflict); the original is kept', c.status === 'conflict' && (await tab.q.readOfflineHabitQueue(A))[0]?.activityTitle === 'original');
+    check('E3 CORRECTED: refused (conflict); the original is kept', c.status === 'conflict' && (await tab.q.readOfflineHabitQueue(A))?.[0]?.activityTitle === 'original');
   }
 
   // ---------------------------------------------------------------- E4 migration resurrection
@@ -159,7 +159,7 @@ async function main() {
     const first = await tab.q.readOwnedQueue(A);
     if (first.ok) await tab.q.settleRecords(first.records.map((r) => r.recordId));
     storage.data.set(v2Key, src);
-    check('E4 CORRECTED: tombstoned, not recreated', (await tab.q.readOfflineHabitQueue(A)).length === 0);
+    check('E4 CORRECTED: tombstoned, not recreated', (await tab.q.readOfflineHabitQueue(A))?.length === 0);
   }
 
   // ---------------------------------------------------------------- E5 unreadable snapshot reported as clean

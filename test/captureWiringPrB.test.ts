@@ -64,8 +64,9 @@ const derive = cap('../apps/web/lib/captures.ts');
 check("PR A's LOGGED compatibility rule is retained", /linkedPlanStatus === 'LOGGED'\) return 'COMPLETED'/.test(derive));
 
 // ---- hydration: server-resolved, ids only ----
-const page = cap('../apps/web/app/plan-day/page.tsx');
-check('/plan-day resolves captures server-side from ids and passes only {id,title} items', /resolveCaptureHandoff\(/.test(page) && /captures=\{captures\}/.test(page));
+// R5: resolution moved unchanged into the account-scoped bootstrap route.
+const page = cap('../apps/web/app/api/plan-day/bootstrap/route.ts');
+check('/plan-day resolves captures server-side from ids and passes only {id,title} items', /resolveCaptureHandoff\(/.test(page) && /\n\s*captures,\n/.test(page));
 const client = cap('../apps/web/app/plan-day/PlanDayClient.tsx');
 check('PlanDayClient seeds Capture rows with the deterministic factory in the initializer', /captures\.map\(createIntentRowFromCapture\)/.test(client));
 check('PlanDayClient passes captureLinks built from rows + proposed items', /captureLinks=\{buildCaptureLinksForAccept\(rows, preview\.constructedDay\.proposedItems\)\}/.test(client));

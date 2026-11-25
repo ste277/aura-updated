@@ -44,44 +44,48 @@ function isQueuedHabitLog(value: unknown): value is QueuedHabitLog {
 }
 
 /**
- * AURA-ANDROID-REL-04 IR-01 / IR-03 (R4) -- durable offline activity queue on
- * IndexedDB.
+ * AURA-ANDROID-REL-04 IR-01 / IR-03 (R4, R5) -- durable offline activity queue
+ * on IndexedDB.
  *
- * WHY IndexedDB (decision, R4; reverses the R3 localStorage design): the
- * remaining queue findings are all check-then-act races between browsing
- * contexts (migration: "no tombstone" then "write"; replay: "still queued"
- * then "send"; discard vs. a send already under way). localStorage has no
- * atomic compare-and-set across tabs, so without Web Locks those races cannot
- * be closed there. An IndexedDB readwrite transaction is atomic and is
- * serialized against every other overlapping readwrite transaction of the
- * origin (all tabs, all contexts) -- with or without Web Locks. Every
- * lifecycle step below is ONE such transaction.
+ * WHY IndexedDB (decision R4, accepted by the R4 independent disposition): the
+ * queue's lifecycle steps are check-then-act operations between browsing
+ * contexts. localStorage has no atomic compare-and-set across tabs. An
+ * IndexedDB readwrite transaction is atomic and serialized against every
+ * other overlapping readwrite transaction of the origin (all tabs and
+ * contexts), with or without Web Locks. Every lifecycle step below is ONE
+ * such transaction.
  *
- * Stores (database `aura-offline`, version 1):
+ * Stores (database `aura-offline`, version 2):
  *   records     recordId -> { recordId, ownerUserId, clientRequestId, item, queuedAt }   (immutable once written)
- *   claims      recordId -> { recordId, tab, at }      a context is sending it now (expires after CLAIM_TTL_MS)
- *   dispatches  recordId -> { recordId, attempts, lastAt }   it has been handed to the network at least once
- *   tombstones  recordId -> { recordId, ownerUserId, at }    settled/discarded: no migration may recreate it
+ *   claims      key -> { key, ownerUserId, clientRequestId, tab, attempt, at }
+ *               ONE claim per LOGICAL request (account + clientRequestId), whatever number of
+ *               records carry it; `attempt` identifies one send attempt (expires after CLAIM_TTL_MS)
+ *   dispatches  key -> { key, attempts, lastAt }   the request has been handed to the network at least once
+ *   tombstones  recordId -> { recordId, ownerUserId, at }   settled/discarded: no migration may recreate it
+ * (R5: version 2 re-keys claims and dispatch marks by account + clientRequestId; the
+ * version-1 marks are carried over in the upgrade transaction.)
  *
  * Lifecycle guarantees:
  *   create     enqueue checks identity and writes the record (+ the caller's claim) in one transaction:
  *              one clientRequestId = one payload; a different payload is refused ('conflict').
- *   dispatch   a record is sent only after claimForDispatch() atomically confirmed it still exists and no
- *              other context holds a fresh claim, and recorded the dispatch. No await separates the
- *              caller's final account check from the send.
- *   settle     removes exactly the given records (+ claims, dispatch marks) and writes tombstones, atomically.
- *   discard    atomically removes the confirmed records EXCEPT ones another context is sending right now
- *              (kept, reported). Records already dispatched are removed but reported as "may already have
- *              been saved": a local discard never undoes what the server accepted.
- *   migration  each owned interim-format entry (localStorage: R1 `offline_habit_queue_v2:<owner>`, R2
- *              `aura_q3:<owner>:<crid>`, R3 `aura_q4:<owner>:<crid>:<recordId>`) is copied under a
- *              deterministic recordId in one transaction that first checks the record and its tombstone,
- *              so a concurrent or repeated migration can never recreate a settled entry; the source is
- *              removed only after that transaction committed (re-running is idempotent).
+ *   dispatch   sent only after claimForDispatch() atomically confirmed a record of that request still
+ *              exists and no attempt holds a fresh claim on the request, recorded the dispatch, and issued
+ *              this attempt's token. No await separates the caller's final account check from the send.
+ *   release    an unresolved attempt releases ONLY its own claim (token): a late completion after the
+ *              claim expired and another attempt took it can never release that other attempt's claim.
+ *   settle     a definitive server answer removes exactly the given records and writes tombstones; it
+ *              clears the claim only if it is still this attempt's (`superseded` reports otherwise).
+ *   discard    atomically removes the confirmed records EXCEPT those of a request another context is
+ *              sending right now (kept, reported). Records of a request already dispatched are removed
+ *              but reported as "may have been sent": a local discard never undoes a server commit.
+ *   migration  each owned interim-format entry (localStorage R1/R2/R3 formats) is copied under a
+ *              deterministic recordId in one transaction that first checks the record and its tombstone.
+ *              A source is removed only after that transaction committed AND only if it is still exactly
+ *              what was copied (a changed or unparseable source is left in place: uncertain sources are
+ *              preserved). Tombstones are kept for as long as ANY interim source of that account still
+ *              exists (source retirement), and only then expire.
  *   failures   any IndexedDB failure => reads report `ok:false` (unreadable, never "empty"), writes report
  *              'failed'. There is NO fallback to localStorage or memory.
- *   interrupt  a context that dies while sending leaves a claim that expires; the record is then sent
- *              again with the same clientRequestId, which the server de-duplicates.
  */
 export const LEGACY_QUEUE_KEY = 'offline_habit_queue';
 export const QUEUE_V2_PREFIX = 'offline_habit_queue_v2:';
@@ -89,9 +93,9 @@ export const QUEUE_V3_PREFIX = 'aura_q3:';
 export const QUEUE_V4_PREFIX = 'aura_q4:';
 export const TOMBSTONE_V4_PREFIX = 'aura_q4t:';
 export const QUEUE_DB_NAME = 'aura-offline';
-export const QUEUE_DB_VERSION = 1;
+export const QUEUE_DB_VERSION = 2;
 export const CLAIM_TTL_MS = 60_000;
-const TOMBSTONE_TTL_MS = 30 * 24 * 3600_000;
+export const TOMBSTONE_TTL_MS = 30 * 24 * 3600_000;
 
 export interface OwnedQueuedHabitLog extends QueuedHabitLog {
   ownerUserId: string;
@@ -102,9 +106,9 @@ export interface OwnedQueuedHabitLog extends QueuedHabitLog {
 export interface QueueRecord {
   recordId: string;
   item: OwnedQueuedHabitLog;
-  /** Another (or this) context is sending it now. */
+  /** Some context is sending this request now. */
   inFlight: boolean;
-  /** Handed to the network at least once (the server may have accepted it). */
+  /** This request was handed to the network at least once (it may have been sent and saved). */
   dispatched: boolean;
 }
 
@@ -157,11 +161,19 @@ export function migratedRecordId(item: QueuedHabitLog): string {
   return 'm' + hash(`${item.clientRequestId}|${canonicalPayload(item)}`);
 }
 
+/** The logical request a record belongs to (claims and dispatch marks are per request). */
+export function requestKey(ownerUserId: string, clientRequestId: string): string {
+  return `${ownerUserId}\u0000${clientRequestId}`;
+}
+
+/** Proof of one send attempt: only its holder may release or (claim-wise) settle it. */
+export interface ClaimToken { readonly key: string; readonly attempt: string }
+
 // ------------------------------------------------------------------ IndexedDB plumbing
 
 type Stored = { recordId: string; ownerUserId: string; clientRequestId: string; item: OwnedQueuedHabitLog; queuedAt: number };
-type Claim = { recordId: string; tab: string; at: number };
-type Dispatch = { recordId: string; attempts: number; lastAt: number };
+type Claim = { key: string; ownerUserId: string; clientRequestId: string; tab: string; attempt: string; at: number };
+type Dispatch = { key: string; attempts: number; lastAt: number };
 type Tomb = { recordId: string; ownerUserId: string; at: number };
 const STORES = ['records', 'claims', 'dispatches', 'tombstones'] as const;
 
@@ -175,6 +187,33 @@ function idb(): IDBFactory | null {
   }
 }
 
+/** Version-1 -> 2: claims/dispatch marks were per record; re-key them per request (inside the upgrade transaction). */
+function upgradeToV2(db: IDBDatabase, t: IDBTransaction) {
+  const oldDispatches: Array<{ recordId: string; attempts: number; lastAt: number }> = [];
+  const finish = () => {
+    if (db.objectStoreNames.contains('dispatches')) db.deleteObjectStore('dispatches');
+    if (db.objectStoreNames.contains('claims')) db.deleteObjectStore('claims'); // transient; an old attempt's claim is dropped (its send settles by record)
+    db.createObjectStore('claims', { keyPath: 'key' });
+    const d = db.createObjectStore('dispatches', { keyPath: 'key' });
+    if (!db.objectStoreNames.contains('records')) return;
+    const records = t.objectStore('records');
+    for (const od of oldDispatches) {
+      const g = records.get(od.recordId);
+      g.onsuccess = () => {
+        const r = g.result as Stored | undefined;
+        if (r) d.put({ key: requestKey(r.ownerUserId, r.clientRequestId), attempts: od.attempts, lastAt: od.lastAt } satisfies Dispatch);
+      };
+    }
+  };
+  if (db.objectStoreNames.contains('dispatches')) {
+    const cur = t.objectStore('dispatches').openCursor();
+    cur.onsuccess = () => {
+      const c = cur.result;
+      if (c) { oldDispatches.push(c.value); c.continue(); } else finish();
+    };
+  } else finish();
+}
+
 function openDb(): Promise<IDBDatabase> {
   if (dbPromise) return dbPromise;
   const factory = idb();
@@ -182,16 +221,16 @@ function openDb(): Promise<IDBDatabase> {
   const p = new Promise<IDBDatabase>((resolve, reject) => {
     let req: IDBOpenDBRequest;
     try { req = factory.open(QUEUE_DB_NAME, QUEUE_DB_VERSION); } catch (e) { reject(e); return; }
-    req.onupgradeneeded = () => {
+    req.onupgradeneeded = (ev) => {
       const db = req.result;
+      const t = req.transaction!;
       if (!db.objectStoreNames.contains('records')) {
         const r = db.createObjectStore('records', { keyPath: 'recordId' });
         r.createIndex('owner', 'ownerUserId');
         r.createIndex('ownerCrid', ['ownerUserId', 'clientRequestId']);
       }
-      if (!db.objectStoreNames.contains('claims')) db.createObjectStore('claims', { keyPath: 'recordId' });
-      if (!db.objectStoreNames.contains('dispatches')) db.createObjectStore('dispatches', { keyPath: 'recordId' });
       if (!db.objectStoreNames.contains('tombstones')) db.createObjectStore('tombstones', { keyPath: 'recordId' }).createIndex('owner', 'ownerUserId');
+      if ((ev.oldVersion ?? 0) < 2) upgradeToV2(db, t);
     };
     req.onsuccess = () => {
       const db = req.result;
@@ -251,9 +290,9 @@ const fresh = (c: Claim | undefined, now: number) => Boolean(c && now - c.at < C
 
 // ------------------------------------------------------------------ migration (owned interim formats)
 
-interface MigrationSource { key: string; candidates: Array<{ recordId: string; item: OwnedQueuedHabitLog }>; tombstoned: Set<string> }
+interface MigrationSource { key: string; raw: string; candidates: Array<{ recordId: string; item: OwnedQueuedHabitLog }>; tombstoned: Set<string> }
 
-/** Reads the owner's localStorage interim sources. Throws if storage throws. */
+/** Reads the owner's localStorage interim sources (with the exact raw value copied). Throws if storage throws. */
 function collectSources(owner: string): MigrationSource[] {
   const s = storageOrNull();
   if (!s) return [];
@@ -265,47 +304,63 @@ function collectSources(owner: string): MigrationSource[] {
     if (raw === null) continue;
     let v: unknown; try { v = JSON.parse(raw); } catch { continue; } // unparseable: left in place, never guessed at
     if (!valid(v) || !v.recordId) continue;
-    out.push({ key, candidates: [{ recordId: v.recordId, item: v }], tombstoned: lsTombs });
+    out.push({ key, raw, candidates: [{ recordId: v.recordId, item: v }], tombstoned: lsTombs });
   }
   for (const key of keysWithPrefix(s, `${QUEUE_V3_PREFIX}${owner}:`)) {
     const raw = s.getItem(key);
     if (raw === null) continue;
     let v: unknown; try { v = JSON.parse(raw); } catch { continue; }
     if (!valid(v)) continue;
-    out.push({ key, candidates: [{ recordId: migratedRecordId(v), item: v }], tombstoned: lsTombs });
+    out.push({ key, raw, candidates: [{ recordId: migratedRecordId(v), item: v }], tombstoned: lsTombs });
   }
   const v2 = s.getItem(QUEUE_V2_PREFIX + owner);
   if (v2 !== null) {
     let arr: unknown; try { arr = JSON.parse(v2); } catch { arr = null; }
-    if (Array.isArray(arr) && arr.every(valid)) out.push({ key: QUEUE_V2_PREFIX + owner, candidates: arr.map((item) => ({ recordId: migratedRecordId(item), item })), tombstoned: lsTombs });
+    if (Array.isArray(arr) && arr.every(valid)) out.push({ key: QUEUE_V2_PREFIX + owner, raw: v2, candidates: arr.map((item) => ({ recordId: migratedRecordId(item), item })), tombstoned: lsTombs });
   }
   return out;
 }
 
+/** True when no interim source (parseable or not) of this account remains. Throws if storage throws. */
+function sourcesRetired(owner: string): boolean {
+  const s = storageOrNull();
+  if (!s) return true;
+  return keysWithPrefix(s, `${QUEUE_V4_PREFIX}${owner}:`).length === 0 && keysWithPrefix(s, `${QUEUE_V3_PREFIX}${owner}:`).length === 0 && s.getItem(QUEUE_V2_PREFIX + owner) === null;
+}
+
+const prunedThisSession = new Set<string>();
+
 /** Interruption-safe, idempotent migration. Rejects if storage fails (the queue is then unreadable). */
 async function migrateOwnedSources(owner: string): Promise<void> {
   const sources = collectSources(owner);
-  if (sources.length === 0) return;
-  await tx('readwrite', async (st) => {
-    for (const src of sources) {
-      for (const c of src.candidates) {
-        if (src.tombstoned.has(c.recordId)) continue;
-        if (await asPromise(st.tombstones.get(c.recordId))) continue; // settled or discarded before
-        if (await asPromise(st.records.get(c.recordId))) continue; // already migrated
-        const rec: Stored = { recordId: c.recordId, ownerUserId: owner, clientRequestId: c.item.clientRequestId, item: { ...c.item, recordId: c.recordId }, queuedAt: c.item.queuedAt ?? 0 };
-        await asPromise(st.records.add(rec));
+  if (sources.length > 0) {
+    await tx('readwrite', async (st) => {
+      for (const src of sources) {
+        for (const c of src.candidates) {
+          if (src.tombstoned.has(c.recordId)) continue;
+          if (await asPromise(st.tombstones.get(c.recordId))) continue; // settled or discarded before
+          if (await asPromise(st.records.get(c.recordId))) continue; // already migrated
+          const rec: Stored = { recordId: c.recordId, ownerUserId: owner, clientRequestId: c.item.clientRequestId, item: { ...c.item, recordId: c.recordId }, queuedAt: c.item.queuedAt ?? 0 };
+          await asPromise(st.records.add(rec));
+        }
       }
-    }
+    });
+    // Committed. Remove a source only if it is STILL exactly what was copied; anything else is uncertain and kept.
+    const s = storageOrNull();
+    if (s) for (const src of sources) { try { if (s.getItem(src.key) === src.raw) s.removeItem(src.key); } catch { /* re-run later */ } }
+  }
+  // Tombstones expire only once source retirement is established (no interim source of any kind remains).
+  if (prunedThisSession.has(owner) || !sourcesRetired(owner)) return;
+  const now = Date.now();
+  await tx('readwrite', async (st) => {
+    const tombs = (await asPromise(st.tombstones.index('owner').getAll(IDBKeyRange.only(owner)))) as Tomb[];
+    for (const t of tombs) if (now - t.at > TOMBSTONE_TTL_MS) await asPromise(st.tombstones.delete(t.recordId));
   });
-  // Committed: only now remove the sources (each removal verified; a failure just re-runs idempotently).
-  const s = storageOrNull();
-  if (!s) return;
-  for (const src of sources) { try { s.removeItem(src.key); } catch { /* re-run later */ } }
   try {
-    if (keysWithPrefix(s, `${QUEUE_V4_PREFIX}${owner}:`).length === 0 && keysWithPrefix(s, `${QUEUE_V3_PREFIX}${owner}:`).length === 0 && s.getItem(QUEUE_V2_PREFIX + owner) === null) {
-      for (const t of keysWithPrefix(s, `${TOMBSTONE_V4_PREFIX}${owner}:`)) s.removeItem(t);
-    }
+    const s = storageOrNull();
+    if (s) for (const t of keysWithPrefix(s, `${TOMBSTONE_V4_PREFIX}${owner}:`)) s.removeItem(t);
   } catch { /* best effort */ }
+  prunedThisSession.add(owner);
 }
 
 // ------------------------------------------------------------------ reads
@@ -319,10 +374,10 @@ export async function readOwnedQueue(ownerUserId: string): Promise<QueueRead> {
       const stored = (await asPromise(st.records.index('owner').getAll(IDBKeyRange.only(ownerUserId)))) as Stored[];
       const claims = new Map<string, Claim>();
       const dispatches = new Set<string>();
-      for (const r of stored) {
-        const c = (await asPromise(st.claims.get(r.recordId))) as Claim | undefined;
-        if (c) claims.set(r.recordId, c);
-        if (await asPromise(st.dispatches.get(r.recordId))) dispatches.add(r.recordId);
+      for (const key of new Set(stored.map((r) => requestKey(r.ownerUserId, r.clientRequestId)))) {
+        const c = (await asPromise(st.claims.get(key))) as Claim | undefined;
+        if (c) claims.set(key, c);
+        if (await asPromise(st.dispatches.get(key))) dispatches.add(key);
       }
       return { stored, claims, dispatches };
     });
@@ -331,7 +386,8 @@ export async function readOwnedQueue(ownerUserId: string): Promise<QueueRead> {
     for (const r of stored) {
       const item = r.item;
       if (!isQueuedHabitLog(item) || item.ownerUserId !== ownerUserId || item.clientRequestId !== r.clientRequestId) { corruptIds.push(r.recordId); continue; }
-      records.push({ recordId: r.recordId, item: { ...item, recordId: r.recordId, queuedAt: r.queuedAt }, inFlight: fresh(claims.get(r.recordId), now), dispatched: dispatches.has(r.recordId) });
+      const key = requestKey(r.ownerUserId, r.clientRequestId);
+      records.push({ recordId: r.recordId, item: { ...item, recordId: r.recordId, queuedAt: r.queuedAt }, inFlight: fresh(claims.get(key), now), dispatched: dispatches.has(key) });
     }
     // Deterministic order: queued time, then log time, then identity (entries queued in the same millisecond).
     records.sort((a, b) => (a.item.queuedAt ?? 0) - (b.item.queuedAt ?? 0) || a.item.logTimestamp.localeCompare(b.item.logTimestamp) || a.item.clientRequestId.localeCompare(b.item.clientRequestId) || a.recordId.localeCompare(b.recordId));
@@ -349,25 +405,38 @@ export async function readOwnedQueue(ownerUserId: string): Promise<QueueRead> {
   }
 }
 
-/** Presentation read: the owner's entries, or [] if unreadable. */
-export async function readOfflineHabitQueue(ownerUserId: string | null | undefined): Promise<OwnedQueuedHabitLog[]> {
+/**
+ * Presentation read. R5: `null` when the queue could not be read -- callers
+ * must present that as UNKNOWN, never as "no pending activity".
+ */
+export async function readOfflineHabitQueue(ownerUserId: string | null | undefined): Promise<OwnedQueuedHabitLog[] | null> {
   if (!ownerUserId) return [];
   const r = await readOwnedQueue(ownerUserId);
-  return r.ok ? r.items : [];
+  return r.ok ? r.items : null;
 }
 
 // ------------------------------------------------------------------ writes
 
 export type EnqueueResult =
-  | { status: 'stored'; recordId: string; claimed: boolean }
+  | { status: 'stored'; recordId: string; claim: ClaimToken | null }
   | { status: 'conflict' }
   | { status: 'failed' };
 
+async function takeClaim(st: Record<(typeof STORES)[number], IDBObjectStore>, owner: string, crid: string, tab: string, now: number): Promise<ClaimToken | null> {
+  const key = requestKey(owner, crid);
+  if (fresh((await asPromise(st.claims.get(key))) as Claim | undefined, now)) return null;
+  const attempt = randomId() + randomId();
+  await asPromise(st.claims.put({ key, ownerUserId: owner, clientRequestId: crid, tab, attempt, at: now } satisfies Claim));
+  const d = (await asPromise(st.dispatches.get(key))) as Dispatch | undefined;
+  await asPromise(st.dispatches.put({ key, attempts: (d?.attempts ?? 0) + 1, lastAt: now } satisfies Dispatch));
+  return { key, attempt };
+}
+
 /**
  * Stores one record for its owner, atomically with the identity check and
- * (claimFor) the sender's claim. An identical payload already queued under
- * the same identity is reused; it is claimed only if no context is sending it
- * now. A different payload under the same identity is refused ('conflict').
+ * (claimFor) the sender's claim on the request. An identical payload already
+ * queued under the same identity is reused; it is claimed only if no attempt
+ * holds a fresh claim on the request. A different payload is refused.
  */
 export async function enqueueOwned(item: OwnedQueuedHabitLog, { claimFor }: { claimFor?: string } = {}): Promise<EnqueueResult> {
   if (!item.ownerUserId || !item.clientRequestId) return { status: 'failed' };
@@ -386,71 +455,82 @@ export async function enqueueOwned(item: OwnedQueuedHabitLog, { claimFor }: { cl
         const rec: Stored = { recordId, ownerUserId: item.ownerUserId, clientRequestId: item.clientRequestId, item: { ...item, recordId }, queuedAt: now };
         await asPromise(st.records.add(rec));
       }
-      if (!claimFor) return { status: 'stored', recordId, claimed: false } as const;
-      const existing = (await asPromise(st.claims.get(recordId))) as Claim | undefined;
-      if (fresh(existing, now)) return { status: 'stored', recordId, claimed: false } as const;
-      await asPromise(st.claims.put({ recordId, tab: claimFor, at: now } satisfies Claim));
-      const d = (await asPromise(st.dispatches.get(recordId))) as Dispatch | undefined;
-      await asPromise(st.dispatches.put({ recordId, attempts: (d?.attempts ?? 0) + 1, lastAt: now } satisfies Dispatch));
-      return { status: 'stored', recordId, claimed: true } as const;
+      const claim = claimFor ? await takeClaim(st, item.ownerUserId, item.clientRequestId, claimFor, now) : null;
+      return { status: 'stored', recordId, claim } as const;
     });
   } catch {
     return { status: 'failed' };
   }
 }
 
-export type ClaimResult = 'claimed' | 'gone' | 'in-flight' | 'failed';
+export type ClaimResult = { status: 'claimed'; claim: ClaimToken } | { status: 'gone' } | { status: 'in-flight' } | { status: 'failed' };
 
 /**
- * Atomically: the record still exists, no context holds a fresh claim -> this
- * context claims it and the dispatch is recorded (conservatively, before the
- * send). Only 'claimed' permits sending.
+ * Atomically: a record of this request still exists and no attempt holds a
+ * fresh claim on the request -> this attempt claims it (token) and the dispatch
+ * is recorded (conservatively, before the send). Only 'claimed' permits sending.
  */
 export async function claimForDispatch(recordId: string, tab: string): Promise<ClaimResult> {
   try {
     const now = Date.now();
     return await tx('readwrite', async (st) => {
-      if (!(await asPromise(st.records.get(recordId)))) return 'gone' as const;
-      if (fresh((await asPromise(st.claims.get(recordId))) as Claim | undefined, now)) return 'in-flight' as const;
-      await asPromise(st.claims.put({ recordId, tab, at: now } satisfies Claim));
-      const d = (await asPromise(st.dispatches.get(recordId))) as Dispatch | undefined;
-      await asPromise(st.dispatches.put({ recordId, attempts: (d?.attempts ?? 0) + 1, lastAt: now } satisfies Dispatch));
-      return 'claimed' as const;
+      const rec = (await asPromise(st.records.get(recordId))) as Stored | undefined;
+      if (!rec) return { status: 'gone' } as const;
+      const claim = await takeClaim(st, rec.ownerUserId, rec.clientRequestId, tab, now);
+      return claim ? ({ status: 'claimed', claim } as const) : ({ status: 'in-flight' } as const);
     });
   } catch {
-    return 'failed';
+    return { status: 'failed' };
   }
 }
 
-/** Releases this context's claim (the send was unresolved; the record stays queued). */
-export async function releaseClaim(recordId: string, tab: string): Promise<void> {
+/** Releases THIS attempt's claim (the send was unresolved; the records stay queued). Another attempt's claim is never touched. */
+export async function releaseClaim(token: ClaimToken): Promise<'released' | 'superseded' | 'failed'> {
   try {
-    await tx('readwrite', async (st) => {
-      const c = (await asPromise(st.claims.get(recordId))) as Claim | undefined;
-      if (c && c.tab === tab) await asPromise(st.claims.delete(recordId));
+    return await tx('readwrite', async (st) => {
+      const c = (await asPromise(st.claims.get(token.key))) as Claim | undefined;
+      if (!c || c.attempt !== token.attempt) return 'superseded' as const;
+      await asPromise(st.claims.delete(token.key));
+      return 'released' as const;
     });
   } catch {
-    /* the claim expires on its own */
+    return 'failed'; // the claim expires on its own
   }
 }
 
-export interface RemovalResult { removed: number; alreadyGone: number; failed: number }
+export interface RemovalResult { removed: number; alreadyGone: number; failed: number; superseded?: boolean }
 
-/** Settlement: removes exactly these records (with claims and dispatch marks) and tombstones them, atomically. */
-export async function settleRecords(recordIds: Iterable<string>): Promise<RemovalResult> {
+/**
+ * Settlement after a DEFINITIVE server answer: removes exactly these records
+ * and tombstones them, atomically. The request's claim is cleared only if it
+ * is still `token`'s attempt; a dispatch mark is cleared once no record of the
+ * request remains.
+ */
+export async function settleRecords(recordIds: Iterable<string>, token?: ClaimToken): Promise<RemovalResult> {
   const ids = [...recordIds];
   try {
     const now = Date.now();
     return await tx('readwrite', async (st) => {
       const out: RemovalResult = { removed: 0, alreadyGone: 0, failed: 0 };
+      const keys = new Set<string>();
       for (const id of ids) {
         const rec = (await asPromise(st.records.get(id))) as Stored | undefined;
         if (!rec) { out.alreadyGone++; continue; }
+        keys.add(requestKey(rec.ownerUserId, rec.clientRequestId));
         await asPromise(st.records.delete(id));
-        await asPromise(st.claims.delete(id));
-        await asPromise(st.dispatches.delete(id));
         await asPromise(st.tombstones.put({ recordId: id, ownerUserId: rec.ownerUserId, at: now } satisfies Tomb));
         out.removed++;
+      }
+      if (token) {
+        keys.add(token.key);
+        const c = (await asPromise(st.claims.get(token.key))) as Claim | undefined;
+        if (c && c.attempt === token.attempt) await asPromise(st.claims.delete(token.key));
+        else if (c) out.superseded = true;
+      }
+      for (const key of keys) {
+        const [owner, crid] = key.split('\u0000');
+        const left = (await asPromise(st.records.index('ownerCrid').getAll(IDBKeyRange.only([owner, crid])))) as Stored[];
+        if (left.length === 0) await asPromise(st.dispatches.delete(key));
       }
       return out;
     });
@@ -460,11 +540,11 @@ export async function settleRecords(recordIds: Iterable<string>): Promise<Remova
 }
 
 export interface DiscardResult {
-  /** Removed from this device. */
+  /** Removed from this device (includes `removedPossiblySent`). */
   removed: number;
-  /** Of `removed`: had already been handed to the network, so the server may have saved them. */
-  removedPossiblySaved: number;
-  /** Another context was sending them at that moment: kept for their account. */
+  /** Of `removed`: the request had already been handed to the network -- it may have been sent and saved. */
+  removedPossiblySent: number;
+  /** Another context was sending the request at that moment: kept for its account. */
   keptInFlight: number;
   alreadyGone: number;
   /** Could not be removed (storage failure): still stored for their account. */
@@ -472,36 +552,39 @@ export interface DiscardResult {
 }
 
 /**
- * A CONFIRMED discard of exactly these records (sign-out). Atomic. Records a
- * context is sending right now are kept (their send decides them); records
- * that were already sent are removed but reported as possibly saved.
+ * A CONFIRMED discard of exactly these records (sign-out). Atomic. Records of
+ * a request another context is sending right now are kept; records of a request
+ * already dispatched are removed but reported as possibly sent.
  */
 export async function discardRecords(recordIds: Iterable<string>, { tab }: { tab: string }): Promise<DiscardResult> {
   const ids = [...recordIds];
   try {
     const now = Date.now();
     return await tx('readwrite', async (st) => {
-      const out: DiscardResult = { removed: 0, removedPossiblySaved: 0, keptInFlight: 0, alreadyGone: 0, failed: 0 };
+      const out: DiscardResult = { removed: 0, removedPossiblySent: 0, keptInFlight: 0, alreadyGone: 0, failed: 0 };
+      const touched = new Set<string>();
       for (const id of ids) {
         const rec = (await asPromise(st.records.get(id))) as Stored | undefined;
         if (!rec) { out.alreadyGone++; continue; }
-        const c = (await asPromise(st.claims.get(id))) as Claim | undefined;
+        const key = requestKey(rec.ownerUserId, rec.clientRequestId);
+        const c = (await asPromise(st.claims.get(key))) as Claim | undefined;
         if (fresh(c, now) && c!.tab !== tab) { out.keptInFlight++; continue; }
-        const dispatched = Boolean(await asPromise(st.dispatches.get(id)));
+        const dispatched = Boolean(await asPromise(st.dispatches.get(key)));
         await asPromise(st.records.delete(id));
-        await asPromise(st.claims.delete(id));
-        await asPromise(st.dispatches.delete(id));
         await asPromise(st.tombstones.put({ recordId: id, ownerUserId: rec.ownerUserId, at: now } satisfies Tomb));
+        touched.add(key);
         out.removed++;
-        if (dispatched) out.removedPossiblySaved++;
+        if (dispatched) out.removedPossiblySent++;
       }
-      // Tombstones are only needed while an interim source could still exist.
-      const old = (await asPromise(st.tombstones.getAll())) as Tomb[];
-      for (const t of old) if (now - t.at > TOMBSTONE_TTL_MS) await asPromise(st.tombstones.delete(t.recordId));
+      for (const key of touched) {
+        const [owner, crid] = key.split('\u0000');
+        const left = (await asPromise(st.records.index('ownerCrid').getAll(IDBKeyRange.only([owner, crid])))) as Stored[];
+        if (left.length === 0) { await asPromise(st.dispatches.delete(key)); await asPromise(st.claims.delete(key)); }
+      }
       return out;
     });
   } catch {
-    return { removed: 0, removedPossiblySaved: 0, keptInFlight: 0, alreadyGone: 0, failed: ids.length };
+    return { removed: 0, removedPossiblySent: 0, keptInFlight: 0, alreadyGone: 0, failed: ids.length };
   }
 }
 
@@ -545,6 +628,7 @@ export function __openQueueDbForTests(): Promise<IDBDatabase> { return openDb();
 export async function __resetQueueDbForTests(): Promise<void> {
   const p = dbPromise;
   dbPromise = null;
+  prunedThisSession.clear();
   if (p) { try { (await p).close(); } catch { /* ignore */ } }
 }
 

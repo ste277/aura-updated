@@ -1,4 +1,5 @@
 'use client';
+import { AccountScoped } from '../../components/AccountScoped';
 
 import React, { useEffect, useRef, useState } from 'react';
 import { colors, spacing, typography } from '../../components/theme';
@@ -241,4 +242,13 @@ function CapturesView() {
       </div>
     </div>
   );
+}
+
+/**
+ * AURA-ANDROID-REL-04 IR-01 (R5) -- the route's client entry: nothing is
+ * mounted (or fetched) until the client has verified which account is signed
+ * in; the server page carries no account-derived data.
+ */
+export function CapturesScoped() {
+  return <AccountScoped verified>{(account) => <CapturesClient authenticated={account !== null} />}</AccountScoped>;
 }

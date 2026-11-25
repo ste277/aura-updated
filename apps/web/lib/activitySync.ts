@@ -82,11 +82,13 @@ export async function submitActivityLog(payload: HabitLogPayload, tempId: string
     const tab = getTabId();
     const stored = await enqueueOwned({ ...payload, tempId, ownerUserId: lease.account }, { claimFor: tab });
     if (stored.status === 'conflict') return { kind: 'not-stored' }; // never send a second payload under one identity
-    // The identical entry is already queued and another context is sending it: never send it twice at once.
-    if (stored.status === 'stored' && !stored.claimed) return lease.isCurrent() ? { kind: 'queued' } : { kind: 'account-changed', keptForAccount: true };
+    // The identical request is already queued and another attempt is sending it: never send it twice at once.
+    if (stored.status === 'stored' && !stored.claim) return lease.isCurrent() ? { kind: 'queued' } : { kind: 'account-changed', keptForAccount: true };
     const outbox = stored.status === 'stored' ? stored.recordId : null;
-    const settle = async () => { if (outbox) await settleRecords([outbox]); };
-    const release = async () => { if (outbox) await releaseClaim(outbox, tab); };
+    const token = stored.status === 'stored' ? stored.claim : null;
+    // R5: release and settlement are fenced by THIS attempt's token.
+    const settle = async () => { if (outbox) await settleRecords([outbox], token ?? undefined); };
+    const release = async () => { if (token) await releaseClaim(token); };
     // Final checks with no await before the send.
     if (!lease.isCurrent() || isTransitionActive()) {
       await release();
@@ -156,13 +158,14 @@ async function replayLocked(fetchImpl: typeof fetch, binding: AccountBinding): P
       if (!lease.isCurrent()) { result.stoppedBecause = 'account-changed'; break; }
       if (head.inFlight) continue; // another context (or this one) is sending it
       if (await isTransitionActiveNow()) { result.stoppedBecause = 'transition'; break; }
-      // The handoff: atomically confirm it is still queued and not being sent, and claim it.
+      // The handoff: atomically confirm the request is still queued and not being sent, and claim it.
       const claim = await claimForDispatch(head.recordId, tab);
-      if (claim === 'failed') { result.stoppedBecause = 'unreadable'; break; }
-      if (claim !== 'claimed') continue; // settled/discarded meanwhile, or another context is sending it
+      if (claim.status === 'failed') { result.stoppedBecause = 'unreadable'; break; }
+      if (claim.status !== 'claimed') continue; // settled/discarded meanwhile, or another attempt is sending it
+      const token = claim.claim;
       // Final checks with no await before the send.
       if (!lease.isCurrent() || isTransitionActive()) {
-        await releaseClaim(head.recordId, tab);
+        await releaseClaim(token);
         result.stoppedBecause = lease.isCurrent() ? 'transition' : 'account-changed';
         break;
       }
@@ -176,13 +179,13 @@ async function replayLocked(fetchImpl: typeof fetch, binding: AccountBinding): P
       } catch {
         status = 'network-error';
       }
-      if (res && (await isUpgradeRefusal(res))) { await releaseClaim(head.recordId, tab); reportUpgradeRequired(); result.stoppedBecause = 'upgrade-required'; break; }
-      if (typeof status === 'number' && ACCOUNT_HOLD.has(status)) { await releaseClaim(head.recordId, tab); result.stoppedBecause = 'account-hold'; break; }
+      if (res && (await isUpgradeRefusal(res))) { await releaseClaim(token); reportUpgradeRequired(); result.stoppedBecause = 'upgrade-required'; break; }
+      if (typeof status === 'number' && ACCOUNT_HOLD.has(status)) { await releaseClaim(token); result.stoppedBecause = 'account-hold'; break; }
       const outcome = classifyHabitLogSyncOutcome(status);
-      if (outcome === 'retry') { await releaseClaim(head.recordId, tab); continue; } // no response or 5xx: ambiguous, keep
+      if (outcome === 'retry') { await releaseClaim(token); continue; } // no response or 5xx: ambiguous, keep
       if (outcome === 'confirmed') result.confirmed++;
-      // Settled: remove exactly the records of this identity that were read.
-      const r = await settleRecords(group.map((g) => g.recordId));
+      // Settled: remove exactly the records of this identity that were read (claim cleared only if still ours).
+      const r = await settleRecords(group.map((g) => g.recordId), token);
       result.removed += r.removed;
       result.removeFailed += r.failed;
     }

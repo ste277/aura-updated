@@ -1,5 +1,5 @@
 /**
- * AURA-ANDROID-REL-04 IR-01 (R4) -- account-bound server-rendered state and
+ * AURA-ANDROID-REL-04 IR-01 (R4, R5) -- account-bound page state and
  * bound downloads (assessment of b323d2a, IR-01 remaining items).
  *
  *  S1-S6  The REAL PlanDayClient (and GoalsListClient) mounted inside the
@@ -29,6 +29,8 @@ addUser(A, 'alicesynth@example.invalid');
 addUser(B, 'bobsynth@example.invalid');
 
 const dev = new Device();
+// R5: Plan Day's bootstrap (the real route needs a database; the harness answers per session account BEHIND the real middleware).
+dev.extra['/api/plan-day/bootstrap'] = (u) => ({ timezone: 'Asia/Kolkata', planningDate: '2026-11-25', horizon: 'TODAY', availabilityConfigured: true, locationConfirmed: false, cityName: u === A ? 'AliceTown' : 'BobTown', goalActivities: [], captures: [{ id: 'c-x', title: u === A ? 'AliceCaptureItem' : 'BobCaptureItem' }], autoGoalSuggestions: [] });
 dev.extra['/api/goals'] = (u) => (u === A ? [{ id: 'g-a', title: 'AliceGoal', status: 'ACTIVE' }] : [{ id: 'g-b', title: 'BobGoal', status: 'ACTIVE' }]);
 dev.extra['/api/users/export'] = (u) => ({ profile: { id: u, email: u === A ? 'alice' : 'bob' } });
 dev.extra['/api/calendar/feed'] = (u) => ({ ics: `feed-for-${u}` });
@@ -37,121 +39,116 @@ dev.extra['/api/calendar/feed'] = (u) => ({ ics: `feed-for-${u}` });
 
 const acct = require(path.join(WEB, 'lib', 'accountSession'));
 require(path.join(WEB, 'app', 'AccountBoundaryRoot'));
-const { AccountScoped, pageReload } = require(path.join(WEB, 'components', 'AccountScoped'));
-let reloads = 0;
-pageReload.fn = () => { reloads++; };
-const { PlanDayClient } = require(path.join(WEB, 'app', 'plan-day', 'PlanDayClient'));
-const { GoalsListClient } = require(path.join(WEB, 'app', 'goals', 'GoalsListClient'));
+const { AccountScoped } = require(path.join(WEB, 'components', 'AccountScoped'));
+const { PlanDayLoader } = require(path.join(WEB, 'app', 'plan-day', 'PlanDayLoader'));
+const { GoalsListScoped } = require(path.join(WEB, 'app', 'goals', 'GoalsListClient'));
 const { downloadBound } = require(path.join(WEB, 'lib', 'boundDownload'));
 const { renderToString } = require(require.resolve('react-dom/server', { paths: [WEB] }));
-// PlanDayClient calls next/navigation useRouter(): provide the App Router context (navigation is not exercised).
+// PlanDayClient/PlanDayLoader use next/navigation (useRouter, useSearchParams): provide the App Router contexts.
 const { AppRouterContext } = require(require.resolve('next/dist/shared/lib/app-router-context.shared-runtime', { paths: [WEB] }));
+const { SearchParamsContext } = require(require.resolve('next/dist/shared/lib/hooks-client-context.shared-runtime', { paths: [WEB] }));
 const routerStub = { push: () => {}, replace: () => {}, refresh: () => {}, back: () => {}, forward: () => {}, prefetch: () => {} };
 
 const settle = async (n = 10) => { for (let i = 0; i < n; i++) await flush(); };
 const text = (el: HTMLElement) => (el.textContent ?? '').replace(/\s+/g, ' ');
-
-/** Plan Day props as the server resolved them FOR ALICE (her city and her captured handoff item). */
-const alicePlanDay = () => React.createElement(PlanDayClient, {
-  timezone: 'Asia/Kolkata', planningDate: '2026-11-25', horizon: 'TODAY', availabilityConfigured: true,
-  locationConfirmed: false, cityName: 'AliceTown', goalActivities: [], captures: [{ id: 'c-a', title: 'AliceCaptureItem' }], autoGoalSuggestions: [],
-});
-const gate = (serverAccount: string | null, child: unknown) => React.createElement(AppRouterContext.Provider, { value: routerStub }, React.createElement(AccountScoped, { onChange: 'reload', serverAccount }, child));
-const clearReloadGuard = () => { try { window.sessionStorage.clear(); } catch { /* ignore */ } };
+const withRouter = (child: unknown, query = '') => React.createElement(AppRouterContext.Provider, { value: routerStub }, React.createElement(SearchParamsContext.Provider, { value: new URLSearchParams(query) }, child));
+const planDay = (query = '') => withRouter(React.createElement(PlanDayLoader), query);
+const bootstrapCalls = () => dev.calls.filter((c) => c.key === 'GET /api/plan-day/bootstrap');
+const fs = require('fs');
 
 async function main() {
-  // ---------------------------------------------------------------- S1 server HTML never contains gated content
-  const html = renderToString(gate(A, alicePlanDay()));
-  check('S1 server render of a gated page contains only the neutral checking state (no AliceTown, no capture item)', /Checking your account/.test(html) && !/AliceTown|AliceCaptureItem/.test(html));
+  // ---------------------------------------------------------------- S1 no account data in the server response
+  const html = renderToString(planDay());
+  const pageSrc = fs.readFileSync(path.join(WEB, 'app', 'plan-day', 'page.tsx'), 'utf8');
+  check('S1 (R5) the server render of Plan Day is the neutral checking state, and the page module reads no session, cookie or database (no account-derived props exist to serialize)', /Checking your account/.test(html) && !/AliceTown|BobTown/.test(html) && !/cookies\(|verifySessionToken|lib\/db|SESSION_COOKIE_NAME/.test(pageSrc));
+  for (const f of [['goals', 'page.tsx'], ['goals', '[goalId]', 'page.tsx'], ['captures', 'page.tsx']]) {
+    const src = fs.readFileSync(path.join(WEB, 'app', ...f), 'utf8');
+    check(`S1 (R5) app/${f.join('/')} reads no session, cookie or database (nothing account-derived in its response)`, !/cookies\(|verifySessionToken|lib\/db|SESSION_COOKIE_NAME|serverAccount/.test(src));
+  }
 
-  // ---------------------------------------------------------------- S2 first verification DISAGREES (cookie changed to Bob before hydration)
-  clearReloadGuard();
+  // ---------------------------------------------------------------- S2 nothing account-derived is FETCHED before verification answers
   acct.__resetAccountSessionForTests('tab');
   dev.signIn(B);
-  reloads = 0;
   const sessionGate = dev.hold('GET', '/api/auth/session', 'before');
-  const h2 = await mount(gate(A, alicePlanDay()));
+  let mark = dev.calls.length;
+  const h2 = await mount(planDay('horizon=today'));
   await settle(4);
   const c2 = h2.container as HTMLElement;
-  const shownBeforeVerify = text(c2);
-  check('S2 before the first verification answers: checking state only -- no AliceTown, no capture item, no Plan Day actions', /Checking your account/.test(shownBeforeVerify) && !/AliceTown|AliceCaptureItem/.test(shownBeforeVerify) && c2.querySelectorAll('button').length === 0);
-  check('S2 the first verification does not change the epoch (why the R3 epoch-only reload missed this)', acct.getAccountEpoch() === 0);
+  check('S2 (R5) before the first verification answers: checking state only, and NO bootstrap request has been sent', /Checking your account/.test(text(c2)) && bootstrapCalls().length === 0);
+  check('S2 the first verification does not change the epoch (why the R3 epoch-only reload missed it)', acct.getAccountEpoch() === 0);
   sessionGate.release();
-  await settle(10);
-  check('S2 first verification answers Bob for a page rendered for Alice -> reload requested, Alice\'s props never shown', reloads === 1 && !/AliceTown|AliceCaptureItem/.test(text(c2)) && /account changed/i.test(text(c2)));
-  check('S2 no account-scoped request was sent by the gated page', dev.calls.every((x) => !/\/api\/(plans|plan-day|captures|goals)/.test(x.key)));
+  await settle(14);
+  const b2 = dev.calls.slice(mark).filter((c) => c.key === 'GET /api/plan-day/bootstrap');
+  check('S2 (R5) after verification (Bob) the bootstrap is fetched ONCE, stating Bob, and Bob\'s day is shown -- the query string is forwarded', b2.length === 1 && b2[0].expected === B && /BobTown/.test(text(c2)) && !/AliceTown/.test(text(c2)));
   await h2.unmount();
 
-  // ---------------------------------------------------------------- S3 automatic reload is bounded (no reload loop)
-  acct.__resetAccountSessionForTests('tab');
-  reloads = 0;
-  const h3 = await mount(gate(A, alicePlanDay()));
-  await settle(12);
-  const c3 = h3.container as HTMLElement;
-  check('S3 a second disagreement within the guard window does not auto-reload again; a Reload button is offered', reloads === 0 && /Reload/.test(text(c3)) && !/AliceTown/.test(text(c3)));
-  const reloadBtn = [...c3.querySelectorAll('button')].find((b) => /Reload/.test(b.textContent ?? '')) as HTMLElement;
-  await click(reloadBtn);
-  check('S3 the Reload button reloads', reloads === 1);
-  await h3.unmount();
-
-  // ---------------------------------------------------------------- S4 agreement -> content shown; later change -> hidden then reload
-  clearReloadGuard();
+  // ---------------------------------------------------------------- S3 account change: unmount, re-verify, refetch for the new account (no reload)
   acct.__resetAccountSessionForTests('tab');
   dev.signIn(A);
-  reloads = 0;
-  const h4 = await mount(gate(A, alicePlanDay()));
-  await settle(12);
-  const c4 = h4.container as HTMLElement;
-  check('S4 first verification agrees (Alice) -> Plan Day rendered with Alice\'s server props', /AliceTown/.test(text(c4)) && reloads === 0);
+  const h3 = await mount(planDay());
+  await settle(14);
+  const c3 = h3.container as HTMLElement;
+  check('S3 Alice verified -> Alice\'s day', /AliceTown/.test(text(c3)));
   dev.signIn(B);
-  const g4 = dev.hold('GET', '/api/auth/session', 'before');
+  const g3 = dev.hold('GET', '/api/auth/session', 'before');
+  mark = dev.calls.length;
   await act(async () => { acct.__deliverStorageEventForTests({ key: 'aura_account_announce_v2', newValue: JSON.stringify({ account: B, tab: 'other', at: Date.now() }) }); });
   await settle(4);
-  check('S4 after cross-tab news the old account\'s server props are hidden immediately (before re-verification answers)', !/AliceTown|AliceCaptureItem/.test(text(c4)) && /Checking your account/.test(text(c4)));
-  g4.release();
-  await settle(12);
-  check('S4 re-verification answers Bob -> reload; Alice\'s props stay hidden', reloads === 1 && !/AliceTown/.test(text(c4)));
-  await h4.unmount();
+  check('S3 after cross-tab news Alice\'s day is unmounted immediately (checking state), before re-verification answers', !/AliceTown/.test(text(c3)) && /Checking your account/.test(text(c3)));
+  g3.release();
+  await settle(14);
+  const b3 = dev.calls.slice(mark).filter((c) => c.key === 'GET /api/plan-day/bootstrap');
+  check('S3 (R5) re-verification answers Bob -> a fresh bootstrap for Bob (stated Bob) and Bob\'s day; no page reload is involved', b3.length === 1 && b3[0].expected === B && /BobTown/.test(text(c3)) && !/AliceTown/.test(text(c3)));
+  await h3.unmount();
 
-  // ---------------------------------------------------------------- S5 verification fails -> retry state, nothing shown
-  clearReloadGuard();
+  // ---------------------------------------------------------------- S4 verification fails -> retry, nothing fetched
   acct.__resetAccountSessionForTests('tab');
   dev.signIn(A);
   dev.fault('GET', '/api/auth/session', 'html200');
-  const h5 = await mount(gate(A, alicePlanDay()));
+  mark = dev.calls.length;
+  const h4 = await mount(planDay());
   await settle(12);
-  const c5 = h5.container as HTMLElement;
-  check('S5 failed first verification -> "couldn\'t confirm" with Try again; no Plan Day content', /couldn.t confirm/i.test(text(c5)) && !/AliceTown/.test(text(c5)));
-  const retry = [...c5.querySelectorAll('button')].find((b) => /Try again/.test(b.textContent ?? '')) as HTMLElement;
+  const c4 = h4.container as HTMLElement;
+  check('S4 failed first verification -> "couldn\'t confirm" with Try again; no bootstrap request', /couldn.t confirm/i.test(text(c4)) && dev.calls.slice(mark).every((c) => c.key !== 'GET /api/plan-day/bootstrap'));
+  const retry = [...c4.querySelectorAll('button')].find((b) => /Try again/.test(b.textContent ?? '')) as HTMLElement;
   await click(retry);
-  await settle(12);
-  check('S5 Try again verifies and, on agreement, shows the page', /AliceTown/.test(text(c5)));
-  await h5.unmount();
+  await settle(14);
+  check('S4 Try again verifies, then fetches and shows the day', /AliceTown/.test(text(c4)));
+  await h4.unmount();
 
-  // ---------------------------------------------------------------- S6 Goals (client-fetched list) and signed-out render
-  clearReloadGuard();
+  // ---------------------------------------------------------------- S5 sessionStorage unavailable: still no automatic reload, still correct
+  const ssDesc = Object.getOwnPropertyDescriptor(window, 'sessionStorage');
+  Object.defineProperty(window, 'sessionStorage', { configurable: true, get: () => { throw new Error('SecurityError (synthetic)'); } });
+  const scopedSrc = fs.readFileSync(path.join(WEB, 'components', 'AccountScoped.tsx'), 'utf8');
+  acct.__resetAccountSessionForTests('tab');
+  dev.signIn(B);
+  const h5 = await mount(planDay());
+  await settle(14);
+  const ok5 = /BobTown/.test(text(h5.container as HTMLElement));
+  await h5.unmount();
+  if (ssDesc) Object.defineProperty(window, 'sessionStorage', ssDesc);
+  check('S5 (R5) AccountScoped has no automatic reload path at all (no location.reload, no sessionStorage guard) -- so storage being unavailable cannot cause a reload loop', !/location\.reload|sessionStorage|pageReload/.test(scopedSrc) && ok5);
+
+  // ---------------------------------------------------------------- S6 Goals (verified page) and the bootstrap boundary
   acct.__resetAccountSessionForTests('tab');
   dev.signIn(A);
-  const h6 = await mount(gate(A, React.createElement(GoalsListClient, { authenticated: true })));
+  mark = dev.calls.length;
+  const h6 = await mount(withRouter(React.createElement(GoalsListScoped)));
   await settle(14);
-  check('S6 Goals with agreement: list loads for Alice with the stated account', /AliceGoal/.test(text(h6.container as HTMLElement)) && dev.calls.filter((x) => x.key.includes('/api/goals')).every((x) => x.expected === A));
+  check('S6 Goals: list fetched only after verification, stating Alice', /AliceGoal/.test(text(h6.container as HTMLElement)) && dev.calls.slice(mark).filter((x) => x.key.includes('/api/goals')).every((x) => x.expected === A));
   await h6.unmount();
-  clearReloadGuard();
-  acct.__resetAccountSessionForTests('tab');
-  reloads = 0;
-  const h6b = await mount(gate(null, React.createElement(GoalsListClient, { authenticated: false })));
-  await settle(12);
-  check('S6 page rendered SIGNED OUT while the device is signed in as Alice -> reload (never a signed-out shell acting for Alice)', reloads === 1);
-  await h6b.unmount();
+  const r1 = await dev.fetch('/api/plan-day/bootstrap', {});
+  const r2 = await dev.fetch('/api/plan-day/bootstrap', { headers: { 'X-Aura-Expected-Account': B } });
+  check('S6 (R5) the bootstrap route is account-scoped by the real middleware: headerless -> 503, another account -> 409', r1.status === 503 && r2.status === 409);
+  void AccountScoped;
 
   // ---------------------------------------------------------------- D downloads
-  clearReloadGuard();
   acct.__resetAccountSessionForTests('tab');
   dev.signIn(A);
   await acct.fetchVerifiedSession();
   const saved: Array<{ name: string; body: string }> = [];
   const target = { save: (blob: Blob, name: string) => { saved.push({ name, body: '' }); void blob.text().then((t) => { saved[saved.length - 1].body = t; }); } };
-  let mark = dev.calls.length;
+  mark = dev.calls.length;
   const d1 = await downloadBound('/api/users/export', 'export.json', { target });
   await settle(2);
   const exportCall = dev.calls.slice(mark).find((x) => x.key === 'GET /api/users/export');

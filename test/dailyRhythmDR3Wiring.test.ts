@@ -96,7 +96,8 @@ function main() {
   check('9. Home\'s "Plan my day" navigates to /plan-day', /window\.location\.href\s*=\s*['"]\/plan-day['"]/.test(pageSrc) || /onPlanDay=\{\(\) => \{ window\.location\.href = '\/plan-day'; \}\}/.test(pageSrc));
   check('9b. Goals\' "Plan with Aura" navigates to /plan-day (with its own fromGoal/activities query params, same route)', /window\.location\.href\s*=\s*`\/plan-day\?/.test(goalDetailSrc));
   check('9c. only ONE /plan-day page exists (apps/web/app/plan-day/page.tsx) -- no second, Goal-specific or Home-specific plan page', fs.existsSync(path.join(__dirname, '..', 'apps/web/app/plan-day/page.tsx')) && !fs.existsSync(path.join(__dirname, '..', 'apps/web/app/goals/plan-day')));
-  const planDayPageSrc = read('apps/web/app/plan-day/page.tsx');
+  // R5: the page renders PlanDayLoader, which renders the same PlanDayClient.
+  const planDayPageSrc = read('apps/web/app/plan-day/page.tsx') + read('apps/web/app/plan-day/PlanDayLoader.tsx');
   check('9d. the one /plan-day page renders PlanDayClient -- the single, shared client component both entry points ultimately reach', /PlanDayClient/.test(planDayPageSrc));
   const planDayClientSrc = read('apps/web/app/plan-day/PlanDayClient.tsx');
   check('9e. PlanDayClient.tsx calls previewConstructedDay -- the same Day Constructor preview pipeline for every caller, regardless of entry point', /previewConstructedDay/.test(planDayClientSrc));
