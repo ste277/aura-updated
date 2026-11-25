@@ -117,6 +117,16 @@ The deterministic scenario **"fast controls, then a healthy limiter flood under 
 | **Limiter-only degradation** (+10 ms) | pass (safe, exact) | 44.8–84.5 (81–145, 6,419–6,655) | **44.8–65.9** | **fail** (detected) |
 | Unusably slow environment (control +12 ms) | — | control above 5,000 ms | — | **fail** |
 
+**CI run 45606688808** (head `882a04f0`, round 3): **7/7**; StagingBlockersDb 68/68; offline S8 60, S10 135, S11 31, S12 86.
+
+| Scenario | A | C best (control median ms) | Verdict |
+|---|---|---|---|
+| Healthy #1 / #2 | pass | 3.20 / 3.12 (248.5 / 253.5) | pass |
+| Shared +2 ms | pass | 1.14 (1,444.5) | pass |
+| Residual | pass | 3.80 (211) | pass |
+| Degradation +10 ms | safe, exact | **25.31** | **fail** (detected) |
+| Sustained +2 ms (4b) | safe, exact | **7.15** (230.5) | **fail** (detected; ranks above healthy) |
+
 **Local, round 3** (corrected checker; 6 StagingBlockersDb runs, 68/68 each; ratios use the six-control median):
 
 | Scenario | A | C best (control median ms) | Verdict |
@@ -140,7 +150,8 @@ B's exactness and per-shard accounting pass.
 
 ### Remaining limitations
 - **C is a timing comparison.** On CI the separation is about 2× on each side of R_MAX = 5 (healthy best 1.80, degradation +10 ms 11.2); locally it is much wider. Best-of-3 absorbs one transient. With the median denominator, failing a healthy limiter needs a contention burst covering all three limiter trials while sparing at least four of the six controls.
-- **Remaining sensitivity: the smallest detectable sustained slowdown depends on the runner.** C detects a sustained slowdown once it adds roughly (R_MAX − healthy ratio) × control-flood time. Locally (controls about 70 ms) +2 ms/statement is detected at 13–22×. On CI-class runners (controls about 530 ms), scaling the +10 ms measurement (11.2×) suggests +2 ms would land near 4× and **pass C**; only about +3.5 ms/statement or more would be caught. The live 4b check therefore asserts ranking, not an R_MAX crossing, and the exact-head CI value is recorded in the PR. Closing this fully would need a non-timing performance signal (e.g. statement counts), which is out of scope for a test-only change.
+- **Healthy margin narrowed on CI (a cost of the median denominator).** The median of six controls is smaller than the old max(before, after), so every ratio rises. Healthy CI bests went from about 1.8 (previous head) to **3.12–3.20** (run 45606688808), leaving about **1.56×** headroom below R_MAX = 5; locally healthy bests are 2.40–2.57. Best of 3 still absorbs one transient (the worst single healthy trial seen locally was 5.68). R_MAX was **not** raised: raising it would weaken detection and would be tuning to one CI run. If healthy CI ratios approach 5 in future runs, the right fix is a better-matched control (not a larger R_MAX), and that needs a separate decision.
+- **Remaining sensitivity: the smallest detectable sustained slowdown depends on the runner.** C detects a sustained slowdown once it adds roughly (R_MAX − healthy ratio) × control-flood time. Locally (controls about 70 ms) +2 ms/statement is detected at 13–22×; on CI run 45606688808 (controls about 230 ms) at **7.15×**. A pre-CI estimate in this report, extrapolated from older 530 ms controls, predicted about 4× on CI; that estimate was **wrong for this run**. On a runner with markedly slower controls +2 ms could still fall below R_MAX, so the live 4b check asserts ranking above healthy, not an R_MAX crossing (the crossing is logged as informational). Closing this fully would need a non-timing performance signal (e.g. statement counts), which is out of scope for a test-only change.
 - **The response-completion bound uses a 500 ms allowance** for event-loop lag with 2,000 pending promises (observed maximum latencies 1,252–1,268 ms). It no longer has any role in admission timing.
 - **S11 offline has the same random-sample pattern** (`mcpOAuthS11.test.ts`, two 10,000-sample untagged hex rows, about 0.58% per run combined). It is outside this ticket's S8/S10/S12 scope and was **not changed**; recorded for a follow-up.
 - **ENV and R_MAX are absolute constants.** They are justified from measured ranges, not fitted to one CI run.
@@ -176,4 +187,4 @@ B's exactness and per-shard accounting pass.
 - **Repeats:** round 3 StagingBlockersDb 6/6 (68/68 each); S12 offline 3/3 after the fixed-seed correction; earlier rounds StagingBlockersDb 5/5, S10 and S8 offline 3/3.
 - **Serial, isolated:** every suite ran one at a time against a disposable local PG16 (socket only, `max_connections = 100`); no live database, no credentials.
 - **No retries** were used to hide failures.
-- **Exact-head CI:** recorded in the PR description.
+- **Exact-head CI:** run 45606688808 on `882a04f0`, 7/7 (code head; this report-only update follows it). Also recorded in the PR description.
