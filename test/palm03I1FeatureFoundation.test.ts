@@ -545,8 +545,10 @@ probe('15. invalid field type (rotationDeg as string)', q);
 {
   const BASES = POS.map(([label, inp]) => [label, JSON.parse(JSON.stringify(build(inp)))] as [string, any]);
   const stats: Record<string, { n: number; accepted: any[]; raw: any[] }> = {};
+  const distinct = new Set<string>();
   const expectReject = (cat: string, label: string, f: any) => {
     const st = (stats[cat] ??= { n: 0, accepted: [], raw: [] }); st.n++;
+    try { distinct.add(JSON.stringify(f, (k, v) => (Array.isArray(v) && Object.keys(v).length !== v.length ? { __arr: [...v], __props: Object.keys(v) } : v)) + String(Object.getPrototypeOf(f) === Object.prototype)); } catch { /* hostile */ }
     const c = adaptErr(f);
     if (c === 'accepted') st.accepted.push(label); else if (c.startsWith('RAW:')) st.raw.push(`${label}: ${c}`);
   };
@@ -679,11 +681,167 @@ probe('15. invalid field type (rotationDeg as string)', q);
   }
   const total = Object.values(stats).reduce((a, s) => a + s.n, 0);
   const acc = Object.values(stats).reduce((a, s) => a + s.accepted.length, 0), raw = Object.values(stats).reduce((a, s) => a + s.raw.length, 0);
-  console.log(`MUT summary: ${total} mutations; ${acc} accepted; ${raw} raw exceptions; ` + Object.entries(stats).map(([k, v]) => `${k}=${v.n} (accepted ${v.accepted.length})`).join('; '));
+  console.log(`MUT summary: ${total} mutations (${distinct.size} distinct serialisations); ${acc} accepted; ${raw} raw exceptions; ` + Object.entries(stats).map(([k, v]) => `${k}=${v.n} (accepted ${v.accepted.length})`).join('; '));
   for (const [cat, st] of Object.entries(stats)) check(`MUT ${cat}: ${st.n} mutations, all rejected with typed AdapterErrors`, st.n > 0 && st.accepted.length === 0 && st.raw.length === 0, { accepted: st.accepted.slice(0, 5), raw: st.raw.slice(0, 3) });
 }
 // Interpretation boundaries
 check('IB1. all 21 builder positive controls: every genuine degrading, blocked or unknown-quality record keeps its evidence in the payload and produces no interpretation', POS.every(([l, inp]) => { const f = build(inp); if (f.frame.qualityStatus === 'accepted') return true; const pay = adaptF(f, SYN); return JSON.stringify(pay.capture.quality.issues) === JSON.stringify(f.frame.qualityIssues) && pay.capture.quality.status === f.frame.qualityStatus && engine.generateReading(pay).status !== 'interpreted'; }));
 check('IB2. maximum declared confidence (scan 1) never exceeds the tentative ceiling, for every accepted positive control', POS.every(([, inp]) => { const f = build(inp); const pay = adaptF(f, { synthetic: true, scanConfidence: 1 }); const r = engine.generateReading(pay); return pay.creases.items.every((c: any) => c.detection.confidence <= 0.74) && r.sections.flatMap((sec: any) => sec.items ?? []).filter((it: any) => it.kind === 'interpreted').every((it: any) => it.tier === 'tentative'); }));
+
+// ============================================================ CX. Codex review of e20040a: C3 geometry + C3/C4 evidence
+// Ported from the independent harness (/private/tmp/palm391-m3.1ZABkEub/head/review-witness.cjs, review-targeted.cjs,
+// replay.cjs; fixture values copied, harness not executed). Fixture: 64 x 128 image, offsets around (24, 32).
+{
+  const cxPoint = ([x, y]: number[]) => ({ x: (24 + x) / 64, y: (32 + y) / 128 });
+  const cxRaw: Record<string, number[][]> = { heart: [[10, 2], [7, 2], [3, 1]], head: [[1, 4], [5, 5], [10, 6]], life: [[1, 3], [2, 6], [3, 10]], upward: [[6, 10], [6, 7], [6, 3]] };
+  const cxBase: PalmFeatureSetInput = { imageWidth: 64, imageHeight: 128, landmarks: RV_LM, hand: 'left', dominantHand: 'unknown', handednessLabel: 'Left', qualityIssues: [], rotationDeg: 0, lines: Object.keys(cxRaw).map((line) => ({ line: line as any, action: 'traced' as const, points: cxRaw[line].map(cxPoint), confirmed: true })), marks: [] };
+  const cx = (over: Partial<PalmFeatureSetInput> = {}) => build({ ...cxBase, ...over });
+  const by = (k: number, pt: P) => RV_LM.map((v, i) => (i === k ? { ...pt, z: 0 } : v));
+  const SYN1 = { synthetic: true, scanConfidence: 1 };
+  const outcome = (f: any) => { try { const out = featureSetAdapter.adaptFeatureSet(f, SYN1); const r = engine.generateReading(out.features); return { code: 'accepted', status: r.status, decline: r.decline?.reason, interpreted: r.sections.flatMap((x: any) => x.items ?? []).filter((i: any) => i.kind === 'interpreted') }; } catch (e: any) { return { code: e instanceof featureSetAdapter.AdapterError ? e.code : `RAW:${e?.message}` }; } };
+  const agree = (f: PalmFeatureSet) => (f.frame.reason === 'frame-degenerate') === (f.measurements.status === 'unavailable' && f.measurements.reasons.includes('frame-degenerate' as never)) || f.measurements.reasons.some((r: string) => ['palm-not-visible', 'hand-cut-off'].includes(r));
+
+  // CX-1 exact witness (review-witness.cjs): near-degenerate frame, image 100000 x 100000, all four quality variants.
+  const wit = Array.from({ length: 21 }, () => ({ x: 0.5, y: 0.5, z: 0 }));
+  wit[5] = { x: 0, y: 0, z: 0 }; wit[17] = { x: 9.257353612035515e-12, y: 1.448415743932128e-11, z: 0 }; wit[0] = { x: 0.33738545681117105, y: 0.5278770023257036, z: 0 };
+  const witRes = ([[], null, ['blurry'], ['hand-cut-off']] as Array<PalmFeedbackCode[] | null>).map((q) => { const f = cx({ landmarks: wit, imageWidth: 100000, imageHeight: 100000, handednessLabel: undefined, lines: [], qualityIssues: q }); return { q, frame: f.frame.reason, set: f.measurements.reasons, agree: agree(f), ...outcome(f) }; });
+  check('CX-1 (C3). exact Codex witness, accepted / unknown / blurry / hand-cut-off: frame and measurements agree (one geometry) and the adapter accepts every genuine output; nothing is interpreted', witRes.every((r) => r.agree && r.code === 'accepted' && (r.interpreted ?? []).length === 0), witRes);
+  // Root cause: the old frame offset (a projection) cancelled to 0, while the true offset 4.04e-12 px exceeds the shared
+  // threshold 1e-6 * width = 1.72e-12 px. With ONE geometry both builders now see an AVAILABLE frame and a usable set.
+  check('CX-1b. the witness is now an available frame in BOTH builders (frame ok, usable measurement set with its quality evidence); the blocked variant keeps hand-cut-off and reaches quality-not-accepted', witRes.slice(0, 3).every((r) => r.frame === 'ok' && !r.set.includes('frame-degenerate')) && JSON.stringify(witRes[1].set).includes('quality-unknown') && JSON.stringify(witRes[2].set).includes('blurry') && witRes[3].decline === 'quality-not-accepted' && JSON.stringify(witRes[3].set) === '["hand-cut-off"]', witRes);
+  // CX-2 bounded near-degenerate generator (review-targeted.cjs loop, same LCG and ranges, 20,000 draws).
+  {
+    let sd = 1234; const rnd2 = () => { sd = (Math.imul(1664525, sd) + 1013904223) >>> 0; return sd / 4294967296; };
+    let n = 0; const fails: any[] = []; const st = { degenerate: 0, available: 0 };
+    for (let i = 0; i < 20000 && fails.length < 3; i++) {
+      const sc = 0.000000000012, dx = sc * (0.2 + rnd2() * 0.8), dy = sc * (1 + rnd2());
+      const wx = 0.15 + 0.25 * rnd2(), wy = wx * (dy / dx);
+      if (wy > 1) continue;
+      const L = Array.from({ length: 21 }, () => ({ x: 0.5, y: 0.5, z: 0 })); L[5] = { x: 0, y: 0, z: 0 }; L[17] = { x: dx, y: dy, z: 0 }; L[0] = { x: wx, y: wy, z: 0 };
+      const f = cx({ landmarks: L, imageWidth: 100000, imageHeight: 100000, handednessLabel: undefined, lines: [] }); n++;
+      st[f.frame.available ? 'available' : 'degenerate']++;
+      const o = outcome(f);
+      if (!agree(f) || o.code !== 'accepted') fails.push({ dx, dy, wx, wy, frame: f.frame.reason, set: f.measurements.reasons, o: o.code });
+    }
+    check(`CX-2 (C3). bounded near-degenerate generator: ${n} genuine builder outputs, frame/measurement availability agree and all are accepted`, n > 5000 && fails.length === 0, { n, st, fails });
+  }
+  // CX-3 geometry thresholds on both sides, with rotation / scale / translation invariance of the classification.
+  {
+    const res: any[] = [];
+    for (const k of [0.5, 0.9, 0.99, 1.01, 1.1, 2]) for (const rot of [0, 33, -71]) for (const scale of [0.05, 0.3]) for (const shift of [0, 0.1]) {
+      // knuckles 5 and 17 a palm width w apart; wrist at perpendicular offset k * 1e-6 * w from the knuckle line, far along it
+      const w = scale * 0.5, t = (rot * Math.PI) / 180, c = Math.cos(t), sn = Math.sin(t), cxx = 0.45 + shift, cyy = 0.5 - shift / 2;
+      const R2 = (u: number, v: number) => ({ x: cxx + (u * c - v * sn), y: cyy + (u * sn + v * c), z: 0 });
+      const L = Array.from({ length: 21 }, () => R2(w * 0.3, -w * 0.4)); L[5] = R2(0, 0); L[17] = R2(w, 0); L[9] = R2(w / 3, 0); L[0] = R2(w * 0.4, k * 1e-6 * w);
+      const f = cx({ landmarks: L, imageWidth: 1000, imageHeight: 1000, handednessLabel: undefined, lines: [] });
+      res.push({ k, rot, scale, shift, degenerate: f.frame.reason === 'frame-degenerate', agree: agree(f), code: outcome(f).code });
+    }
+    const byK = (k: number) => res.filter((r) => r.k === k);
+    check('CX-3 (C3). wrist offset at 0.5x..2x the 1e-6 threshold: degenerate below, available above, identical under rotation / scale / translation; builders agree and the adapter accepts every output', [0.5, 0.9, 0.99].every((k) => byK(k).every((r) => r.degenerate)) && [1.01, 1.1, 2].every((k) => byK(k).every((r) => !r.degenerate)) && res.every((r) => r.agree && r.code === 'accepted'), res.filter((r) => !r.agree || r.code !== 'accepted' || (r.k < 1) !== r.degenerate).slice(0, 4));
+  }
+  const axisWrist = cx({ landmarks: by(0, cxPoint([6, 0.0000012])) });
+  check('CX-3b (C3, replay positive revised). wrist on the knuckle axis: BOTH builders now report frame-degenerate (previously frame available + set degenerate); accepted', axisWrist.frame.reason === 'frame-degenerate' && JSON.stringify(axisWrist.measurements.reasons) === '["frame-degenerate"]' && outcome(axisWrist).code === 'accepted');
+  const fakeAvail = clone(axisWrist); fakeAvail.frame = clone(cx().frame); for (const id of ALL_LINES) fakeAvail.lines[id] = clone(cx().lines[id]); reprov(fakeAvail);
+  check('CX-3c (C3). an available frame paired with a frame-degenerate set is no longer a builder state and is rejected', outcome(fakeAvail).code === 'contradictory-quality', outcome(fakeAvail));
+
+  // CX-4 proportion diagnostics below / at / above both thresholds (review-targeted.cjs values) + forged flips.
+  const pts: Array<[number, boolean]> = [[4, true], [22, true], [12, false], [8.3995, true], [8.4005, false], [21.5995, false], [21.6005, true]];
+  const bnd = pts.map(([y, exp]) => { const f = cx({ landmarks: by(0, cxPoint([4, y])) }); return { y, exp, pl: f.measurements.measurements.palmLength.value, flagged: f.measurements.reasons.includes('implausible-proportions' as never), code: outcome(f).code, f }; });
+  check('CX-4 (C4). genuine proportion diagnostics at y = 4, 22, 12, 8.3995, 8.4005, 21.5995, 21.6005 match the raw thresholds and are all accepted (incl. both sides of 0.700 and 1.800)', bnd.every((b) => b.flagged === b.exp && b.code === 'accepted'), bnd.map(({ f, ...r }) => r));
+  const flip = (f: any) => { const g = clone(f); const on = !g.measurements.reasons.includes('implausible-proportions'); const R = on ? [...g.measurements.reasons, 'implausible-proportions'] : g.measurements.reasons.filter((x: string) => x !== 'implausible-proportions'); g.measurements.reasons = R; g.measurements.status = R.length ? 'uncertain' : 'measured'; for (const m of Object.values(g.measurements.measurements) as any[]) if (m.status !== 'unavailable') { m.reasons = R.slice(); m.status = g.measurements.status; } return g; };
+  const flips = bnd.map((b) => ({ y: b.y, pl: b.pl, code: outcome(flip(b.f)).code }));
+  check('CX-4b (C4). flipping the diagnostic is rejected for 0.333 (missing), 1.833 (missing) and 1.000 (spurious); at exactly 0.700 / 1.800 the flipped record is ALSO builder-possible and is accepted (rounding ambiguity)', flips.every((r) => ((r.pl === 0.7 || r.pl === 1.8) ? r.code === 'accepted' : r.code === 'invalid-measurement')), flips);
+  {
+    // Fine sweep across both thresholds: generated genuine outputs accepted, flips rejected unless serialized at 0.700 / 1.800.
+    const bad: any[] = []; let n = 0;
+    for (const [lo, hi] of [[8.39, 8.41], [21.59, 21.61]]) for (let y = lo; y <= hi + 1e-12; y += 0.00025) {
+      const f = cx({ landmarks: by(0, cxPoint([4, y])) }); n++;
+      const pl = f.measurements.measurements.palmLength.value as number, g = outcome(f).code, fl = outcome(flip(f)).code;
+      const ambiguous = pl === 0.7 || pl === 1.8;
+      if (g !== 'accepted' || (ambiguous ? fl !== 'accepted' : fl !== 'invalid-measurement')) bad.push({ y, pl, g, fl });
+    }
+    check(`CX-4c (C4). fine sweep of ${n} genuine outputs across 0.7 and 1.8: all accepted; every flipped diagnostic rejected except at the serialized 0.700 / 1.800 values`, bad.length === 0 && n > 150, bad.slice(0, 4));
+  }
+  // CX-5 precision and computation-nonfinite.
+  const offGrid = clone(cx()); offGrid.measurements.measurements.thumbLength.value += 0.0001;
+  check('CX-5 (C4). off-grid measurement value (thumb + 0.0001 -> ' + offGrid.measurements.measurements.thumbLength.value + ') is rejected', outcome(offGrid).code === 'invalid-measurement', outcome(offGrid));
+  const grid = MEASUREMENT_IDS.map((id: any) => { const g = clone(cx()); const m = g.measurements.measurements[id]; if (m.value === null) return 'n/a'; m.value = Math.round(m.value * 1000) / 1000 + 0.0004; return outcome(g).code; });
+  check('CX-5b. every usable measurement shifted off the 3-decimal grid by 0.0004 is rejected', grid.every((c) => c === 'n/a' || c === 'invalid-measurement'), grid);
+  const nfHand = clone(cx()); nfHand.measurements.measurements.handLength = { id: 'handLength', unit: 'palm-width', status: 'unavailable', value: null, reasons: ['computation-nonfinite'] }; reprov(nfHand);
+  check('CX-5c (C4). handLength labelled computation-nonfinite despite finite operands is rejected', outcome(nfHand).code === 'invalid-measurement', outcome(nfHand));
+  const nfAll = MEASUREMENT_IDS.map((id: any) => { const g = clone(cx()); g.measurements.measurements[id] = { id, unit: id.endsWith('Ratio') ? 'ratio' : 'palm-width', status: 'unavailable', value: null, reasons: ['computation-nonfinite'] }; return outcome(reprov(g)).code; });
+  check('CX-5d. computation-nonfinite on any item of an ordinary record (finite operands, ring > 0) is rejected', nfAll.every((c) => c !== 'accepted' && !c.startsWith('RAW')), nfAll);
+  const setNF = clone(cx()); setNF.measurements.status = 'unavailable'; setNF.measurements.reasons = ['computation-nonfinite']; for (const m of Object.values(setNF.measurements.measurements) as any[]) Object.assign(m, { status: 'unavailable', value: null, reasons: ['depends-on-unavailable'] }); reprov(setNF);
+  check('CX-5e (C3). forged set-level computation-nonfinite is rejected (unreachable under the input contract)', outcome(setNF).code === 'contradictory-quality', outcome(setNF));
+  const tinyRing = RV_LM.map((pt, i) => (i === 0 || (i >= 13 && i <= 15) ? { x: 0, y: 0, z: 0 } : i === 16 ? { x: 1e-320, y: 0, z: 0 } : i === 8 ? { x: 1, y: 1, z: 0 } : pt));
+  const tr = cx({ landmarks: tinyRing, handednessLabel: undefined, lines: [] });
+  check('CX-6. genuine overflow (ring length rounds to 0, index / ring = Infinity): builder emits computation-nonfinite on indexToRingRatio only, and it is accepted', tr.measurements.measurements.ringLength.value === 0 && JSON.stringify(tr.measurements.measurements.indexToRingRatio.reasons) === '["computation-nonfinite"]' && outcome(tr).code === 'accepted', [tr.measurements.status, tr.measurements.measurements.ringLength, tr.measurements.measurements.indexToRingRatio, outcome(tr).code]);
+  const nzr = cx({ landmarks: RV_LM.map((v, i) => (i >= 13 && i <= 16 ? { ...cxPoint([2 + (i === 16 ? 0.001 : 0), 12]), z: 0 } : v)) });
+  check('CX-6b. valid rounded-zero denominator: ringLength 0.000 with a finite large ratio (' + nzr.measurements.measurements.indexToRingRatio.value + ') is accepted', nzr.measurements.measurements.ringLength.value === 0 && (nzr.measurements.measurements.indexToRingRatio.value as number) > 1000 && outcome(nzr).code === 'accepted');
+  const nzrNF = clone(nzr); nzrNF.measurements.measurements.indexToRingRatio = { id: 'indexToRingRatio', unit: 'ratio', status: 'unavailable', value: null, reasons: ['computation-nonfinite'] }; reprov(nzrNF);
+  check('CX-6c (documented limitation). with ringLength serialized as 0 the record cannot show whether index / ring overflowed, so computation-nonfinite is accepted there too', outcome(nzrNF).code === 'accepted');
+  // CX-7 quality: all 255 non-empty issue subsets preserve evidence, reach quality-not-accepted, zero interpretations, record unchanged.
+  {
+    const codes: PalmFeedbackCode[] = ['hand-too-small', 'hand-rotated', 'too-dark', 'too-bright', 'low-contrast', 'blurry', 'palm-not-visible', 'hand-cut-off'];
+    const bad: any[] = [];
+    for (let mask = 1; mask < 256; mask++) {
+      const issues = codes.filter((_, i) => mask & (1 << i)).reverse();
+      const f = cx({ qualityIssues: issues }); const before = JSON.stringify(f);
+      const out = featureSetAdapter.adaptFeatureSet(f, SYN1); const r = engine.generateReading(out.features);
+      const ok = JSON.stringify(out.features.capture.quality) === JSON.stringify({ status: 'needs-retake', issues }) && r.decline?.reason === 'quality-not-accepted' && r.sections.flatMap((x: any) => x.items ?? []).filter((i: any) => i.kind === 'interpreted').length === 0 && JSON.stringify(f) === before;
+      if (!ok) bad.push(issues);
+    }
+    check('CX-7. all 255 non-empty quality-issue subsets: evidence preserved, quality-not-accepted, zero interpretations, record unchanged', bad.length === 0, bad.slice(0, 3));
+  }
+  const nullQ = [null, undefined].map((q) => { const f = cx({ qualityIssues: q }); const out = featureSetAdapter.adaptFeatureSet(f, SYN1); const r = engine.generateReading(out.features); return out.features.capture.quality.status === 'unknown' && r.decline?.reason === 'quality-not-accepted'; });
+  check('CX-7b. null and omitted quality feedback: unknown status preserved, quality-not-accepted', nullQ.every(Boolean));
+  // CX-8 replay of the 28 original independent probes (replay.cjs): all rejected with a typed AdapterError before any payload.
+  {
+    const rec2 = (over: Partial<PalmFeatureSetInput> = {}) => clone(cx(over));
+    const blockedR = () => rec2({ qualityIssues: ['hand-cut-off'] }), unknownR = () => rec2({ qualityIssues: null }), degradedR = () => rec2({ qualityIssues: ['blurry'] }), framelessR = () => rec2({ landmarks: null });
+    const splice2 = (fr: () => any, ms: () => any) => { const x = fr(); x.measurements = ms().measurements; return reprov(x); };
+    const cases: Array<[string, string[], (x: any) => any]> = [
+      ['legacy accepted plus blocking issue', ['contradictory-quality'], (x) => { x.frame.qualityIssues = ['hand-cut-off']; }],
+      ['accepted plus blocked measurement set', ['contradictory-quality'], () => splice2(rec2, blockedR)],
+      ['accepted plus unknown measurement set', ['contradictory-quality'], () => splice2(rec2, unknownR)],
+      ['unknown frame plus clean set', ['contradictory-quality'], () => splice2(unknownR, rec2)],
+      ['blocked frame plus clean set', ['contradictory-quality'], () => splice2(blockedR, rec2)],
+      ['degraded frame plus clean set', ['contradictory-quality'], () => splice2(degradedR, rec2)],
+      ['clean frame plus degrading measurement set', ['contradictory-quality'], () => splice2(rec2, degradedR)],
+      ['unavailable frame plus measured set', ['contradictory-quality'], () => splice2(framelessR, rec2)],
+      ['available frame plus invalid landmark measurement set', ['contradictory-quality'], () => splice2(rec2, framelessR)],
+      ['not facing plus measured set', ['contradictory-quality'], (x) => { x.frame.palmFacing = false; }],
+      ['undecided facing plus measured set', ['contradictory-quality'], (x) => { x.frame.palmFacing = null; }],
+      ['unassessed mark with placement', ['invalid-mark'], (x) => { x.marks.vedi.approximatePalmLocation = { x: 0.4, y: 0.4 }; }],
+      ['missing frame reason', ['invalid-frame'], (x) => { delete x.frame.reason; }],
+      ['inconsistent frame reason', ['invalid-frame'], (x) => { x.frame.reason = 'landmarks-invalid'; }],
+      ['partial identity', ['invalid-line'], (x) => { delete x.lines.heart.identity.indian; }],
+      ['contradictory identity', ['invalid-line'], (x) => { x.lines.heart.identity.indianId = 'pitrlekha'; }],
+      ['inherited frame fields', ['invalid-input'], (x) => { x.frame = Object.create(x.frame); }],
+      ['sparse trace', ['sparse-array'], (x) => { delete x.lines.heart.palmPoints[1]; }],
+      ['extra field', ['invalid-feature-set'], (x) => { x.extra = true; }],
+      ['per-item quality unknown on accepted clean frame', ['contradictory-quality'], (x) => { x.measurements.measurements.palmLength = unknownR().measurements.measurements.palmLength; }],
+      ['per-item blurry reason on accepted clean frame', ['contradictory-quality'], (x) => { x.measurements.measurements.palmLength = degradedR().measurements.measurements.palmLength; }],
+      ['per-item facing unknown on known facing frame', ['contradictory-quality'], (x) => { x.measurements.measurements.palmLength = rec2({ handednessLabel: undefined }).measurements.measurements.palmLength; }],
+      ['missing degrading reason on usable item', ['invalid-measurement', 'contradictory-quality'], () => { const x = degradedR(); x.measurements.measurements.palmLength.reasons = ['implausible-proportions']; return x; }],
+      ['ratio usable despite unavailable ring input', ['invalid-measurement'], (x) => { x.measurements.measurements.ringLength = rec2({ landmarks: by(16, cxPoint([9, -1])) }).measurements.measurements.ringLength; return reprov(x); }],
+      ['unavailable frame with reported mark placement', ['invalid-mark'], () => { const x = framelessR(); x.marks.vedi = { mark: 'vedi', provenance: 'user-reported', approximatePalmLocation: { x: 0.4, y: 0.4 } }; return reprov(x); }],
+      ['available frame with line reason frame-unavailable', ['invalid-line'], (x) => { x.lines.heart = { line: 'heart', identity: x.lines.heart.identity, provenance: 'unassessed', confirmation: 'confirmed', reason: 'frame-unavailable' }; return reprov(x); }],
+      ['line reason array coerced to string', ['invalid-line'], () => { const x = rec2({ lines: [] }); x.lines.heart.reason = ['not-requested']; return x; }],
+      ['extra field on quality array', ['invalid-input'], (x) => { x.frame.qualityIssues.note = 'hand-cut-off'; }],
+    ];
+    const res = cases.map(([label, codes, fn]) => { const root = rec2(); const x = fn(root) ?? root; const o = outcome(x); return { label, code: o.code, ok: codes.includes(o.code) }; });
+    check(`CX-8. replay of the ${cases.length} original independent probes: all rejected with the expected typed AdapterError before any payload`, cases.length === 28 && res.every((r) => r.ok), res.filter((r) => !r.ok));
+  }
+  // CX-9 replay positives: blocked/unknown gate, folded + tentative, degraders, marks, confirmed unusable trace, wrong facing.
+  const gate = ([null, undefined, ['palm-not-visible'], ['hand-cut-off'], ['hand-cut-off', 'blurry']] as any[]).map((q) => outcome(cx({ qualityIssues: q })));
+  const fold = cx({ landmarks: by(16, cxPoint([9, -1])) }); const fo = outcome(fold);
+  const degr = (['hand-too-small', 'hand-rotated', 'too-dark', 'too-bright', 'low-contrast', 'blurry'] as PalmFeedbackCode[]).map((iss) => { const f = cx({ qualityIssues: [iss] }); return f.measurements.status === 'uncertain' && Object.values(f.measurements.measurements).every((v: any) => v.value !== null && v.status === 'uncertain' && v.reasons.includes(iss)) && outcome(f).decline === 'quality-not-accepted'; });
+  const obs = cx({ lines: [{ line: 'heart', action: 'traced', points: [cxPoint([0, 0]), cxPoint([0, 0])], confirmed: true }], marks: [{ mark: 'yava', action: 'reported', approximateLocation: cxPoint([6, 6]) }, { mark: 'matsya', action: 'reported' }, { mark: 'shankha', action: 'skipped' }, { mark: 'chatra', action: 'reported', approximateLocation: { x: 2, y: 0 } }] });
+  const misc = cx({ handednessLabel: 'Right' });
+  const markVariants = [RV_LM, null].map((L) => outcome(cx({ landmarks: L, marks: [{ mark: 'yava', action: 'reported', approximateLocation: cxPoint([6, 6]) }, { mark: 'matsya', action: 'reported', approximateLocation: { x: 0, y: 0 } }, { mark: 'shankha', action: 'reported', approximateLocation: { x: 2, y: 0 } }] })).code);
+  check('CX-9. replay positives: blocked/unknown reach quality-not-accepted; folded ring interprets (tentative only); each degrader keeps per-item evidence and is declined; confirmed unusable trace + mark variants (with and without frame) + wrong facing all accepted', gate.every((g) => g.decline === 'quality-not-accepted' && (g.interpreted ?? []).length === 0) && fo.status === 'interpreted' && (fo.interpreted ?? []).length > 0 && (fo.interpreted ?? []).every((i: any) => i.tier === 'tentative') && degr.every(Boolean) && obs.lines.heart.provenance === 'unassessed' && obs.lines.heart.confirmation === 'confirmed' && outcome(obs).code === 'accepted' && featureSetAdapter.adaptFeatureSet(obs, SYN1).notMapped.filter((m: any) => m.feature.startsWith('mark:')).map((m: any) => m.feature).join() === 'mark:yava,mark:matsya' && misc.frame.palmFacing === false && JSON.stringify(misc.measurements.reasons) === '["palm-not-facing"]' && outcome(misc).code === 'accepted' && markVariants.every((c) => c === 'accepted'), { gate, fo: fo.status, degr, mv: markVariants });
+  check('CX-9b. synthetic-only enforcement intact: synthetic:false is refused', (() => { try { featureSetAdapter.adaptFeatureSet(fold, { synthetic: false, scanConfidence: 1 }); return false; } catch (e: any) { return e.code === 'synthetic-required'; } })());
+}
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed > 0 ? 1 : 0);

@@ -27,7 +27,7 @@
  */
 import type { PalmFeedbackCode } from './types';
 import { LM, orientation } from './quality';
-import { measureHand, KNOWN_QUALITY_CODES, type HandMeasurementSet } from './measurements';
+import { measureHand, palmGeometry, KNOWN_QUALITY_CODES, type HandMeasurementSet } from './measurements';
 
 export const PALM_FEATURE_SET_VERSION = 'palm-03-i1-feature-set@0.1.0';
 
@@ -225,14 +225,14 @@ export function palmFrameFromLandmarks(landmarks: PalmFeatureSetInput['landmarks
   }
   if (pts.some((p) => p.x < 0 || p.x > 1 || p.y < 0 || p.y > 1)) return { frame: null, reason: 'landmark-out-of-frame' };
   const px = (k: number) => ({ x: pts[k].x * w, y: pts[k].y * h });
-  const I = px(LM.INDEX_MCP), P = px(LM.PINKY_MCP), Wr = px(LM.WRIST);
-  const widthPx = Math.hypot(P.x - I.x, P.y - I.y);
-  if (!(isNum(widthPx) && widthPx > 1e-6)) return { frame: null, reason: 'frame-degenerate' };
+  const I = px(LM.INDEX_MCP), P = px(LM.PINKY_MCP);
+  // One authoritative geometry with measureHand() (C3 fix): same offset calculation, same thresholds.
+  const geo = palmGeometry(px(LM.WRIST), I, P, px(LM.MIDDLE_MCP));
+  if (!geo.ok) return { frame: null, reason: 'frame-degenerate' };
+  const widthPx = geo.widthPx;
   const ex = { x: (P.x - I.x) / widthPx, y: (P.y - I.y) / widthPx };
-  let ey = { x: -ex.y, y: ex.x };
-  const wristSide = (Wr.x - I.x) * ey.x + (Wr.y - I.y) * ey.y;
-  if (!(isNum(wristSide) && Math.abs(wristSide) > 1e-9 * widthPx)) return { frame: null, reason: 'frame-degenerate' };
-  if (wristSide < 0) ey = { x: -ey.x, y: -ey.y };
+  // signedOffset = (wrist - index knuckle) . (-ex.y, ex.x): choose the normal that points towards the wrist.
+  const ey = geo.signedOffset > 0 ? { x: -ex.y, y: ex.x } : { x: ex.y, y: -ex.x };
   return { frame: { origin: I, ex, ey, widthPx, w, h }, reason: 'ok' };
 }
 

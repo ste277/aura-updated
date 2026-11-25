@@ -165,6 +165,30 @@ function readLandmarks(lm: unknown): { ok: true; points: Pt[] } | { ok: false; r
   return outOfFrame ? { ok: false, reason: 'landmark-out-of-frame' } : { ok: true, points };
 }
 
+/**
+ * AURA-PALM-03-I1 C3 fix: the ONE authoritative palm-frame geometry, shared by measureHand() and the feature
+ * builder's palm frame (features.ts), so availability can never disagree between them.
+ *  - widthPx: index knuckle (5) to little-finger knuckle (17); palmLengthPx: wrist (0) to middle knuckle (9).
+ *  - signedOffset: signed distance of the wrist from the knuckle line, as a cross product divided by the width.
+ *    (A projection onto the unit normal is mathematically equal but loses the result to cancellation when the
+ *    knuckles are very close together and the wrist is far away; the cross product does not.)
+ *  - degenerate unless widthPx > 1e-6, palmLengthPx > 1e-6 and |signedOffset| > 1e-6 * widthPx (the thresholds
+ *    measureHand() has always used; unchanged).
+ * Inputs are pixel coordinates (normalised landmarks multiplied by the image size).
+ */
+export type PalmGeometry =
+  | { readonly ok: true; readonly widthPx: number; readonly palmLengthPx: number; readonly signedOffset: number }
+  | { readonly ok: false; readonly reason: 'frame-degenerate' | 'computation-nonfinite' };
+export function palmGeometry(wrist: Pt, indexMcp: Pt, pinkyMcp: Pt, middleMcp: Pt): PalmGeometry {
+  const widthPx = Math.hypot(pinkyMcp.x - indexMcp.x, pinkyMcp.y - indexMcp.y);
+  const palmLengthPx = Math.hypot(wrist.x - middleMcp.x, wrist.y - middleMcp.y);
+  const cross = (pinkyMcp.x - indexMcp.x) * (wrist.y - indexMcp.y) - (pinkyMcp.y - indexMcp.y) * (wrist.x - indexMcp.x);
+  const signedOffset = cross / (widthPx || 1);
+  if (!(widthPx > 1e-6) || !(palmLengthPx > 1e-6) || !(Math.abs(signedOffset) > 1e-6 * widthPx)) return { ok: false, reason: 'frame-degenerate' };
+  if (!isFiniteNum(widthPx) || !isFiniteNum(palmLengthPx) || !isFiniteNum(signedOffset)) return { ok: false, reason: 'computation-nonfinite' };
+  return { ok: true, widthPx, palmLengthPx, signedOffset };
+}
+
 /** Quality contract: null/undefined = unknown; otherwise a dense array of known codes. */
 function readQuality(q: unknown): { kind: 'known'; issues: PalmFeedbackCode[] } | { kind: 'unknown' } | { kind: 'invalid' } {
   if (q === null || q === undefined) return { kind: 'unknown' };
@@ -212,13 +236,10 @@ function measureHandUnsafe(input: HandMeasurementInput): HandMeasurementSet {
 
   const px: Pt[] = read.points.map((p) => ({ x: p.x * w, y: p.y * h }));
   const dist = (a: Pt, b: Pt) => Math.hypot(a.x - b.x, a.y - b.y);
-  const palmWidth = dist(px[LM.INDEX_MCP], px[LM.PINKY_MCP]);
-  const palmLengthPx = dist(px[LM.WRIST], px[LM.MIDDLE_MCP]);
-  // A degenerate frame: zero width, or the wrist on the knuckle line.
-  const i = px[LM.INDEX_MCP], p = px[LM.PINKY_MCP], wr = px[LM.WRIST];
-  const wristOffset = Math.abs((p.x - i.x) * (wr.y - i.y) - (p.y - i.y) * (wr.x - i.x)) / (palmWidth || 1);
-  if (!(palmWidth > 1e-6) || !(palmLengthPx > 1e-6) || !(wristOffset > 1e-6 * palmWidth)) return unavailableSet(['frame-degenerate']);
-  if (!isFiniteNum(palmWidth) || !isFiniteNum(palmLengthPx) || !isFiniteNum(wristOffset)) return unavailableSet(['computation-nonfinite']);
+  // A degenerate frame (zero width, zero palm length, or the wrist on the knuckle line): shared geometry.
+  const geo = palmGeometry(px[LM.WRIST], px[LM.INDEX_MCP], px[LM.PINKY_MCP], px[LM.MIDDLE_MCP]);
+  if (!geo.ok) return unavailableSet([geo.reason]);
+  const palmWidth = geo.widthPx, palmLengthPx = geo.palmLengthPx;
   const setReasons: MeasurementReason[] = DEGRADING_ISSUES.filter((c) => issues.includes(c)) as MeasurementReason[];
   if (quality.kind === 'unknown') setReasons.push('quality-unknown');
   // Palm facing: the existing G5 test, on pixel-space landmarks so aspect ratio cannot flip it. The test needs the

@@ -8,7 +8,7 @@
 // The FULL result { features, declined, notMapped } is the integration and audit contract (review L1).
 //
 // ---------------------------------------------------------------------------------------------------------------
-// VALIDATION CONTRACT (v0.4.0). Authoritative basis: measureHand() (measurements.ts) and buildPalmFeatureSet()
+// VALIDATION CONTRACT (v0.5.0). Authoritative basis: measureHand() (measurements.ts) and buildPalmFeatureSet()
 // (features.ts). Every rule below is something those builders always produce; anything else is a malformed or
 // contradictory record and is rejected with a typed AdapterError BEFORE any engine payload is built. Nothing is repaired.
 //
@@ -23,19 +23,26 @@
 //                                 (and conversely those frame reasons always produce it);
 //      BLOCKING ∩ F.issues        (ordered, non-empty) when F has blocking issues and F.reason ∈ {ok, frame-degenerate}
 //                                 (and conversely: blocking issues always produce it unless the line above applies);
-//      ['frame-degenerate']       no blocking issues, F.reason ∈ {ok, frame-degenerate}  [geometry];
-//      ['computation-nonfinite']  no blocking issues, F available;
+//      ['frame-degenerate']       no blocking issues and F.reason === 'frame-degenerate' (both builders share ONE
+//                                 geometry, palmGeometry() in measurements.ts, so they always agree)  [geometry];
 //      ['palm-not-facing']        no blocking issues, F available and F.palmFacing === false
 //                                 (and conversely: palmFacing false never leaves S usable).
 //    S usable (measured/uncertain): F available, no blocking issue, palmFacing ≠ false, and reasons EXACTLY
 //      (DEGRADING ∩ F.issues, in order) + ['quality-unknown' iff F unknown] + ['palm-facing-unknown' iff palmFacing null]
-//      + optionally ['implausible-proportions']  [geometry]. status = uncertain iff reasons non-empty.
+//      + ['implausible-proportions'] as decided from the serialized palmLength v (raw thresholds 0.7 / 1.8, strict):
+//        v < 0.700 or v > 1.800 ⇒ present; 0.700 < v < 1.800 ⇒ absent; v = 0.700 or 1.800 ⇒ either (the raw value
+//        may lie on either side of the threshold and only its rounding is recorded). status = uncertain iff non-empty.
+//    (['computation-nonfinite'] at set level cannot arise under the input contract: coordinates in [0,1] and image
+//    sides ≤ 100,000 px keep every geometry term finite. It is rejected.)
 // C4 Measurement items under a usable S (reasons R):
-//      palmLength:     R, or ['computation-nonfinite'];
-//      finger lengths: R, ['finger-not-extended'] [geometry exception], or ['computation-nonfinite'];
+//      palmLength:     R;
+//      finger lengths: R, or ['finger-not-extended'] [geometry exception];
 //      derived (handLength = palm + middle; middleToPalmRatio = middle / palm; indexToRingRatio = index / ring):
-//        ['depends-on-unavailable'] ⇔ an operand is unavailable; otherwise R or ['computation-nonfinite'];
+//        ['depends-on-unavailable'] ⇔ an operand is unavailable; otherwise R, except that indexToRingRatio may be
+//        ['computation-nonfinite'] ONLY when ringLength is usable with serialized value 0 (a ring length below the
+//        rounding step makes index / ring overflow; every other value is a bounded finite quotient or sum);
 //        a usable derived value must agree with its rounded operands within the rounding bound.
+//    Every usable value is on the serialization grid: exactly 3 decimals (round3(v) === v).
 //    Reasons R ⇒ status from R (measured iff empty, else uncertain), finite value ≥ 0; any other reason ⇒
 //    unavailable, value null. Under an unavailable S every item is unavailable with ['depends-on-unavailable'].
 //    Unit is 'ratio' for *Ratio ids, else 'palm-width'.
@@ -57,7 +64,7 @@
 import { FEATURE_SCHEMA_ID, FEATURE_SCHEMA_VERSION, COORDINATE_FRAME, FRAME_BOUNDS, MAX_POINTS, QUALITY_ISSUES, polylineProblem } from '../prototype/src/schema.mjs';
 import { TENTATIVE_CAP } from '../prototype/src/policy.mjs';
 
-export const FEATURE_SET_ADAPTER_VERSION = 'palm-03-i1-feature-set-adapter@0.4.0';
+export const FEATURE_SET_ADAPTER_VERSION = 'palm-03-i1-feature-set-adapter@0.5.0';
 export const ACCEPTED_FEATURE_SET_VERSIONS = Object.freeze(['palm-03-i1-feature-set@0.1.0']);
 export const ACCEPTED_MEASUREMENT_VERSIONS = Object.freeze(['palm-03-i1-hand-measurements@0.1.0']);
 export const LINE_TO_CLASS = Object.freeze({ heart: 'DTC', head: 'PTC', life: 'TC', upward: 'MINOR' });
@@ -173,8 +180,7 @@ function validMeasurements(ms, fr) {
     let ok = false;
     if (R.length === 1 && FRAME_INPUT_REASONS.includes(R[0])) ok = fr.reason === R[0];
     else if (R.length && R.every((r) => BLOCKING_QUALITY.includes(r))) ok = eq(R, blocking) && ['ok', 'frame-degenerate'].includes(fr.reason);
-    else if (one('frame-degenerate')) ok = !blocking.length && ['ok', 'frame-degenerate'].includes(fr.reason);
-    else if (one('computation-nonfinite')) ok = !blocking.length && fr.available;
+    else if (one('frame-degenerate')) ok = !blocking.length && fr.reason === 'frame-degenerate';
     else if (one('palm-not-facing')) ok = !blocking.length && fr.available && fr.palmFacing === false;
     if (!ok) bad(`measurement set unavailable with reasons ${JSON.stringify(R)} contradicts frame (reason ${fr.reason}, issues ${JSON.stringify(fr.qualityIssues)}, palmFacing ${fr.palmFacing})`);
     if (FRAME_INPUT_REASONS.includes(fr.reason) && !one(fr.reason)) bad(`frame reason ${fr.reason} requires measurement reasons ["${fr.reason}"]`);
@@ -189,19 +195,34 @@ function validMeasurements(ms, fr) {
   // C3, usable set.
   if (!fr.available || blocking.length || fr.palmFacing === false) bad(`a usable measurement set contradicts the frame (available ${fr.available}, blocking ${JSON.stringify(blocking)}, palmFacing ${fr.palmFacing})`);
   const base = [...DEGRADING_QUALITY.filter((c) => fr.qualityIssues.includes(c)), ...(fr.qualityStatus === 'unknown' ? ['quality-unknown'] : []), ...(fr.palmFacing === null ? ['palm-facing-unknown'] : [])];
-  if (!(eq(R, base) || eq(R, [...base, 'implausible-proportions']))) bad(`measurement reasons ${JSON.stringify(R)} must be ${JSON.stringify(base)} (+ optional implausible-proportions) for this frame`);
+  if (!(eq(R, base) || eq(R, [...base, 'implausible-proportions']))) bad(`measurement reasons ${JSON.stringify(R)} must be ${JSON.stringify(base)} (+ implausible-proportions where applicable) for this frame`);
   if (ms.status !== (R.length ? 'uncertain' : 'measured')) fail('invalid-measurement', `measurement set status ${ms.status} with reasons ${JSON.stringify(R)}`);
+  // Proportion diagnostic vs the serialized palm length (raw thresholds 0.7 / 1.8 are strict; 0.700 and 1.800 are
+  // ambiguous after rounding and accept either).
+  const pl = items.palmLength.value, flagged = R.includes('implausible-proportions');
+  if (isNum(pl)) {
+    const must = pl < 0.7 || pl > 1.8, mustNot = pl > 0.7 && pl < 1.8;
+    if ((must && !flagged) || (mustNot && flagged)) fail('invalid-measurement', `palmLength ${pl} ${must ? 'requires' : 'forbids'} implausible-proportions`);
+  }
   // C4, items.
   const usableReasons = (m) => eq(m.reasons, R);
+  const onGrid = (v) => Math.round(v * 1000) / 1000 === v;
   const shape = (id, m) => {
     if (usableReasons(m)) {
       if (m.status !== (R.length ? 'uncertain' : 'measured') || !isNum(m.value) || m.value < 0) fail('invalid-measurement', `measurements.${id}: reasons ${JSON.stringify(m.reasons)} require status ${R.length ? 'uncertain' : 'measured'} and a finite value`);
+      if (!onGrid(m.value)) fail('invalid-measurement', `measurements.${id}: value ${m.value} is not on the 3-decimal serialization grid`);
     } else if (m.status !== 'unavailable' || m.value !== null) fail('invalid-measurement', `measurements.${id}: reasons ${JSON.stringify(m.reasons)} require status unavailable and value null`);
   };
   for (const id of MEASUREMENT_IDS) {
     const m = items[id];
-    let allowed = usableReasons(m) || eq(m.reasons, ['computation-nonfinite']);
+    let allowed = usableReasons(m);
     if (FINGER_IDS.includes(id)) allowed = allowed || eq(m.reasons, ['finger-not-extended']);
+    if (eq(m.reasons, ['computation-nonfinite'])) {
+      const ring = items.ringLength, index = items.indexLength;
+      const legit = id === 'indexToRingRatio' && usableReasons(ring) && ring.value === 0 && usableReasons(index);
+      if (!legit) fail('invalid-measurement', `measurements.${id}: computation-nonfinite is impossible here (finite operands; only index / ring with a ring length that rounds to 0 can overflow)`);
+      allowed = true;
+    }
     if (own(DERIVED, id)) {
       const opUnavailable = DERIVED[id].some((d) => items[d].status === 'unavailable');
       if (opUnavailable !== eq(m.reasons, ['depends-on-unavailable'])) fail('invalid-measurement', `measurements.${id}: depends-on-unavailable ⇔ an operand (${DERIVED[id].join(', ')}) is unavailable`);
