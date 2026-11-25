@@ -173,41 +173,54 @@ async function main() {
       check('I2b-1 exactness: 300 concurrent decisions on 3 instances, one address limit 50 -> exactly 50', perAddr.filter((d) => d.allowed).length === 50, perAddr.filter((d) => d.allowed).length);
       check('I2b-1 exactness: global shards counted exactly the admitted requests', (await counts('preauth-mcp:global:%')) === 50);
 
-      // I2b-S10 / S11 / S12 (run 45372768632; S10 review P2-3; S11 review
-      // R-P2-2). The 2000-decision flood at the SAME concurrency is a
-      // regression GATE under the production 1250 ms deadline and the
-      // application pool bounds (5 per instance). It passes only if:
-      //   - no decision failed unexpectedly: causes checkout / driver /
-      //     internal / commit_failed (explicit COMMIT refusal) / commit_lost
-      //     (connection failed after COMMIT was sent) all FAIL the gate;
-      //     expected shedding is deadline / commit_timeout / commit_late;
-      //   - admitted <= counted <= G, and any over-count is explained by the
-      //     genuinely ambiguous / late COMMITs (commit_timeout + commit_late +
-      //     commit_lost);
-      //   - availability: admitted >= min(G, 1/2 x capacity), where capacity is
-      //     anchored to an INDEPENDENT runner control -- plain PostgreSQL
-      //     transactions on a session-local TEMP table, with the same three
-      //     round trips as a warm limiter decision (BEGIN+SET LOCAL, UPDATE,
-      //     COMMIT) but none of the limiter's code:
-      //        capacity = instances x connections x deadline / (K x controlLatency)
-      //     K = 4 is FIXED: a cold limiter decision is ~7 round trips (BEGIN,
-      //     DECIDE, ROLLBACK, BEGIN, INSERT, DECIDE, COMMIT) vs the control's 3
-      //     (x2.33), times ~1.7 for lock contention on 16 hot shard rows. A
-      //     slower LIMITER therefore cannot lower its own floor; a slower
-      //     RUNNER lowers it proportionally.
-      // Negative controls prove the gate fails on: injected pre-COMMIT driver
-      // faults, post-send connection loss, explicit COMMIT refusal, a
-      // limiter-only slowdown, and the "0 admitted, 2000 unavailable" outcome.
+      // AURA-MCP-CI-01 (post-merge run 45444221976, attempt 1: 476 / 477 / 480).
+      // The 2000-decision flood under the PRODUCTION 1250 ms deadline and the
+      // application pool bounds (5 per instance) is a regression GATE.
+      //
+      // Why S12's gate was flaky: its runner control was ONE sequential
+      // connection and its floor was on ADMISSIONS, min(G, capacity / 2). A
+      // fast sequential control (0.43 ms) saturated the floor at exactly G,
+      // while the runner was slow under the concurrent flood (1296 ms) --
+      // and under any deadline shedding, lock queues on the 16 hot shards can
+      // leave a shard short of 30, so a healthy limiter admitted 476.
+      //
+      // Corrected gate (nothing derived from the limiter run being judged):
+      //  1. Runner baseline = a CONTROL flood with the flood's own shape: 3
+      //     pools x 5 connections, 2000 concurrent units of 4 round trips
+      //     (BEGIN + SET LOCAL, advisory lock on one of 16 hot keys, advisory
+      //     lock on one of 500 network keys, COMMIT) -- no limiter code, no
+      //     table. It runs immediately BEFORE and AFTER the limiter flood and
+      //     the SLOWER of the two is used, so a slowdown that starts during
+      //     the flood is captured.
+      //  2. capacity = 2000 x deadline / (K x controlMs), with K = 2.5 fixed: the
+      //     measured limiter/control duration ratio is 1.8-2.43 on an idle
+      //     runner and 1.2-1.4 under contention (+1 / +2 ms per statement), so
+      //     2.5 bounds it in every regime -- capacity is a LOWER-bound estimate,
+      //     and the separate 1/2 margin in step 3 absorbs run-to-run variance.
+      //  3. Availability is judged on COMPLETED decisions (admitted + 429, i.e.
+      //     not shed): completed >= floor = min(2000, capacity / 2). It never
+      //     saturates at G, so ordinary shedding cannot fail it.
+      //  4. Meaningfulness: if floor < G / 2 (240) the environment is too slow
+      //     to certify availability, and the gate FAILS (it never passes
+      //     vacuously).
+      //  5. Exact accounting, timing-free: each decision's shard is assigned
+      //     deterministically (i mod 16), so for every shard admitted =
+      //     min(30, completed) and a 429 is legitimate only on a FULL shard.
+      //  6. Safety (unchanged): 0 unexpected causes (checkout / driver /
+      //     internal / commit_failed / commit_lost); admitted <= counted <= G;
+      //     over-count only from ambiguous / late COMMITs.
+      // Every result is reported; there are no retries.
       const G = 480;
-      const CONN = 5; // MCP_PG_POOL_BOUNDS.max (the application's per-instance pool)
+      const N = 2000;
+      const SHARDS = 16;
       const DEADLINE = 1250;
-      const K = 4;
+      const K = 2.5;
       type FloodResult = { out: RateLimitDecision[]; admitted: number; by: Record<string, number>; ms: number; shardRows: Record<string, unknown>[]; shardSum: number };
       const flood = async (limiters: PostgresRateLimiter[]): Promise<FloodResult> => {
         await admin.query('TRUNCATE "McpRateLimitWindow"');
         const t0 = Date.now();
         const out = await Promise.all(
-          Array.from({ length: 2000 }, (_, i) => limiters[i % 3].check(buildPreAuthRules('preauth-mcp', `2001:db8:${(i % 500).toString(16)}::${i}`, { perAddress: 480, global: G, globalShards: 16 }))),
+          Array.from({ length: N }, (_, i) => limiters[i % 3].check(buildPreAuthRules('preauth-mcp', `2001:db8:${(i % 500).toString(16)}::${i}`, { perAddress: 480, global: G, globalShards: SHARDS }, (n) => i % n))),
         );
         const by: Record<string, number> = {};
         for (const d of out) {
@@ -217,87 +230,127 @@ async function main() {
         const shardRows = await q(`SELECT "key", "count" FROM "McpRateLimitWindow" WHERE "key" LIKE 'preauth-mcp:global:%'`);
         return { out, admitted: by.admitted ?? 0, by, ms: Date.now() - t0, shardRows, shardSum: await counts('preauth-mcp:global:%') };
       };
-      type Connectable = { connect(): Promise<{ query(t: string, p?: unknown[]): Promise<unknown>; release(e?: unknown): void }> };
-      /** Independent runner control: plain transactions on a TEMP table (no limiter code, no MCP table). */
-      const runnerControl = async (p: Connectable) => {
-        const c = await p.connect();
-        try {
-          await c.query('CREATE TEMP TABLE IF NOT EXISTS s12_runner_control (k int PRIMARY KEY, n int NOT NULL)');
-          await c.query('INSERT INTO s12_runner_control VALUES (1, 0) ON CONFLICT (k) DO NOTHING');
-          const n = 40;
-          const t0 = Date.now();
-          for (let i = 0; i < n; i += 1) {
-            await c.query("BEGIN; SET LOCAL statement_timeout = '1000ms'; SET LOCAL lock_timeout = '1000ms'");
-            await c.query('UPDATE s12_runner_control SET n = n + 1 WHERE k = 1 RETURNING n');
-            await c.query('COMMIT');
-          }
-          const latencyMs = Math.max(0.05, (Date.now() - t0) / n);
-          await c.query('DROP TABLE IF EXISTS s12_runner_control');
-          const capacity = Math.floor((3 * CONN * DEADLINE) / (K * latencyMs));
-          return { controlLatencyMs: Math.round(latencyMs * 100) / 100, K, capacity, threshold: Math.min(G, Math.floor(capacity / 2)) };
-        } finally {
-          c.release();
-        }
-      };
-      const EXPECTED = new Set(['deadline', 'commit_timeout', 'commit_late']);
-      const AMBIGUOUS = new Set(['commit_timeout', 'commit_late', 'commit_lost']);
-      const gate = (r: FloodResult, threshold: number) => {
-        const unexpected = r.out.filter((d) => !d.allowed && (d.limitedBy !== 'unavailable' ? d.limitedBy !== 'preauth-mcp' : !EXPECTED.has(String(d.cause ?? 'none')))).length;
-        const ambiguous = r.out.filter((d) => AMBIGUOUS.has(String(d.cause))).length;
-        const reasons: string[] = [];
-        if (unexpected > 0) reasons.push(`${unexpected} unexpected failures`);
-        if (!(r.admitted <= r.shardSum && r.shardSum <= G)) reasons.push('admitted <= counted <= G violated');
-        if (r.shardSum - r.admitted > ambiguous) reasons.push('over-count not explained by ambiguous / late COMMITs');
-        if (r.admitted < threshold) reasons.push(`availability ${r.admitted} < threshold ${threshold}`);
-        return { ok: reasons.length === 0, reasons, unexpected, ambiguous };
-      };
-      const appLimiter = (p: unknown) => createPostgresRateLimiter({ pool: p as never, windowMs: 60_000 });
-      /** A pool whose statements each take +10 ms (a starved runner). */
-      const slowPool = () => {
-        const real = pool();
+      /** A pg-like pool whose statements each take +ms (deterministic contention injection). */
+      const slowed = (ms: number, extra: PoolConfig = {}) => {
+        const real = pool(extra);
         return { connect: async () => {
           const c = await real.connect();
           return { on: c.on.bind(c), off: c.off.bind(c), query: async (t: string, p2?: unknown[]) => {
-            await sleep(10);
+            if (ms) await sleep(ms);
             return c.query(t, p2 as unknown[]);
           }, release: (e?: unknown) => c.release(e as Error | undefined) };
         } };
       };
-
-      // I2b-S12: every scenario closes the pools it opened (CI Postgres has
-      // max_connections = 100; leaking them turned later decisions into
-      // "checkout" failures -- which the cause classification exposed).
-      const endSince = async (mark: number) => {
-        const fresh = pools.splice(mark);
+      /** The control flood: the flood's concurrency and lock shape, without the limiter. */
+      const controlFlood = async (ms: number) => {
+        const ps = [0, 1, 2].map(() => slowed(ms, { connectionTimeoutMillis: 120_000 }));
+        const t0 = Date.now();
+        await Promise.all(Array.from({ length: N }, async (_, i) => {
+          const c = await ps[i % 3].connect();
+          try {
+            await c.query("BEGIN; SET LOCAL statement_timeout = '60000ms'; SET LOCAL lock_timeout = '60000ms'");
+            await c.query('SELECT pg_advisory_xact_lock(7700000 + $1::int)', [i % SHARDS]);
+            await c.query('SELECT pg_advisory_xact_lock(7800000 + $1::int)', [i % 500]);
+            await c.query('COMMIT');
+          } finally {
+            c.release();
+          }
+        }));
+        return Date.now() - t0;
+      };
+      const appLimiter = (p: unknown) => createPostgresRateLimiter({ pool: p as never, windowMs: 60_000 });
+      const EXPECTED = new Set(['deadline', 'commit_timeout', 'commit_late']);
+      const AMBIGUOUS = new Set(['commit_timeout', 'commit_late', 'commit_lost']);
+      const floorFrom = (controlMs: number) => {
+        const capacity = Math.floor((N * DEADLINE) / (K * Math.max(1, controlMs)));
+        return { capacity, floor: Math.min(N, Math.floor(capacity / 2)) };
+      };
+      const gate = (r: FloodResult, floor: number) => {
+        const reasons: string[] = [];
+        const unexpected = r.out.filter((d) => !d.allowed && (d.limitedBy !== 'unavailable' ? d.limitedBy !== 'preauth-mcp' : !EXPECTED.has(String(d.cause ?? 'none')))).length;
+        const ambiguous = r.out.filter((d) => AMBIGUOUS.has(String(d.cause))).length;
+        const completed = r.out.filter((d) => d.allowed || d.limitedBy === 'preauth-mcp').length;
+        // Exact per-shard accounting (shard of decision i is i mod 16).
+        const shardCount = new Map(r.shardRows.map((row) => [Number(String(row.key).split(':').pop()), Number(row.count)]));
+        let illegit429 = 0;
+        let shortAdmit = 0;
+        for (let s = 0; s < SHARDS; s += 1) {
+          const mine = r.out.filter((_, i) => i % SHARDS === s);
+          const adm = mine.filter((d) => d.allowed).length;
+          const lim = mine.filter((d) => !d.allowed && d.limitedBy === 'preauth-mcp').length;
+          if (lim > 0 && (shardCount.get(s) ?? 0) < G / SHARDS) illegit429 += lim; // a 429 only on a FULL shard
+          if (adm !== Math.min(G / SHARDS, adm + lim)) shortAdmit += 1; // admitted = min(30, completed) per shard
+        }
+        if (unexpected > 0) reasons.push(`${unexpected} unexpected failures`);
+        if (!(r.admitted <= r.shardSum && r.shardSum <= G)) reasons.push('admitted <= counted <= G violated');
+        if (r.shardSum - r.admitted > ambiguous) reasons.push('over-count not explained by ambiguous / late COMMITs');
+        if (illegit429 > 0) reasons.push(`${illegit429} rate-limit refusals on shards that were not full`);
+        if (shortAdmit > 0) reasons.push(`${shortAdmit} shards admitted fewer than min(30, completed)`);
+        if (floor < G / 2) reasons.push(`environment too slow to certify availability (floor ${floor} < ${G / 2})`);
+        if (completed < floor) reasons.push(`availability: ${completed} completed < floor ${floor}`);
+        return { ok: reasons.length === 0, reasons, completed, unexpected, ambiguous };
+      };
+      // Every scenario closes the pools it opened (CI Postgres max_connections = 100).
+      const endSince = async (from: number) => {
+        const fresh = pools.splice(from);
         await Promise.all(fresh.map((p) => endWithin(p, 5000)));
       };
-      // (a) production deadline, real runner.
-      let mark = pools.length;
-      const ctl = await runnerControl(pool() as unknown as Connectable);
-      const safe = await flood([0, 1, 2].map(() => appLimiter(pool())));
-      await endSince(mark);
-      const g1 = gate(safe, ctl.threshold);
-      const diag = { runnerControl: ctl, elapsedMs: safe.ms, outcomes: safe.by, counted: safe.shardSum, gate: g1 };
-      console.log(`  I2b-1 aggregate (production deadline, app pool bounds) diagnostics: ${JSON.stringify(diag)}`);
-      check('I2b-1 aggregate gate (production 1250 ms deadline): no unexpected failure, admitted <= counted <= G (over-count only from ambiguous / late COMMITs), availability >= the INDEPENDENTLY anchored floor', g1.ok, diag);
+      const runs: Record<string, unknown>[] = [];
+      /** One gated run: control before, limiter flood, control after (each with its own injected latency). */
+      const gatedRun = async (label: string, inj: { before: number; limiter: number; after: number }) => {
+        let m = pools.length;
+        const before = await controlFlood(inj.before);
+        await endSince(m);
+        m = pools.length;
+        const r = await flood([0, 1, 2].map(() => appLimiter(inj.limiter ? slowed(inj.limiter) : pool())));
+        await endSince(m);
+        m = pools.length;
+        const after = await controlFlood(inj.after);
+        await endSince(m);
+        const controlMs = Math.max(before, after);
+        const { capacity, floor } = floorFrom(controlMs);
+        const g = gate(r, floor);
+        const row = { case: label, injectedMs: inj, controlBeforeMs: before, controlAfterMs: after, capacity, floor, floodMs: r.ms, completed: g.completed, admitted: r.admitted, counted: r.shardSum, outcomes: r.by, gate: { ok: g.ok, reasons: g.reasons } };
+        runs.push(row);
+        console.log(`  I2b-1 gated run ${JSON.stringify(row)}`);
+        return { r, g, row, controlMs, floor };
+      };
+      let mark = 0;
 
-      // (b) a SHARED slowdown (the whole runner / database is slow): the
-      // independent control sees it too, so the floor drops proportionally.
-      mark = pools.length;
-      const sharedCtl = await runnerControl(slowPool() as unknown as Connectable);
-      const shared = await flood([0, 1, 2].map(() => appLimiter(slowPool())));
-      await endSince(mark);
-      const g2 = gate(shared, sharedCtl.threshold);
-      const sharedDiag = { runnerControl: sharedCtl, elapsedMs: shared.ms, outcomes: shared.by, counted: shared.shardSum, gate: g2 };
-      console.log(`  I2b-1 aggregate (shared slowdown, production deadline) diagnostics: ${JSON.stringify(sharedDiag)}`);
-      check('I2b-1 shared slowdown (runner and database both +10 ms/statement): fewer than G admitted, the shortfall is expected shedding only, and the gate passes against the independently measured floor', shared.admitted < G && (shared.by['unavailable:deadline'] ?? 0) > 0 && g2.ok, sharedDiag);
-
-      // (c) a LIMITER-ONLY slowdown (an implementation regression): the runner
-      // control is unaffected, so the floor stays high and the gate FAILS.
-      const g3 = gate(shared, ctl.threshold);
-      check('I2b-1 negative control: a limiter-only slowdown cannot lower its own floor -- the same slow result FAILS against the real runner control', !g3.ok && g3.reasons.some((r) => r.startsWith('availability')), { threshold: ctl.threshold, admitted: shared.admitted, gate: g3 });
-
-      // (d) injected pre-COMMIT driver faults.
+      // (a) healthy, three times.
+      for (let k = 1; k <= 3; k += 1) {
+        const h = await gatedRun(`healthy #${k}`, { before: 0, limiter: 0, after: 0 });
+        check(`I2b-1 gate healthy #${k}: passes (no unexpected failures, exact per-shard accounting, completed >= concurrent-baseline floor)`, h.g.ok, h.row);
+      }
+      // (b) representative runner contention, shared by baseline and limiter.
+      for (const ms of [1, 2]) {
+        const c = await gatedRun(`shared contention +${ms} ms/statement`, { before: ms, limiter: ms, after: ms });
+        check(`I2b-1 gate tolerates shared runner contention (+${ms} ms per statement everywhere): passes`, c.g.ok, c.row);
+      }
+      // (c) the original failure class: the runner slows DURING the flood (and stays slow), after a fast start.
+      const spike = await gatedRun('spike during flood (+2 ms limiter and after-control; before-control fast)', { before: 0, limiter: 2, after: 2 });
+      // Reproduction of the original failure (deterministic replay of the recorded
+      // attempt-1 values through the S12 formula): sequential baseline 0.43 ms
+      // -> capacity 3 x 5 x 1250 / (4 x 0.43) = 10901 -> admission floor
+      // min(480, 5450) = 480; observed admitted 476 -> FAIL, with 0 unexpected.
+      const s12 = (seqMs: number, admitted: number) => {
+        const cap = Math.floor((3 * 5 * DEADLINE) / (4 * seqMs));
+        const fl = Math.min(G, Math.floor(cap / 2));
+        return { floor: fl, ok: admitted >= fl };
+      };
+      const replay = s12(0.43, 476);
+      check('I2b-1 reproduction: the S12 gate on the recorded attempt-1 values (baseline 0.43 ms, admitted 476, 0 unexpected) FAILS -- floor saturated at exactly G = 480', replay.floor === G && !replay.ok, replay);
+      const s12Live = s12(0.43, spike.r.admitted);
+      console.log(`  I2b-1 S12 verdict on the live mid-flood slowdown run (informational): ${JSON.stringify({ s12Floor: s12Live.floor, admitted: spike.r.admitted, s12Ok: s12Live.ok, correctedOk: spike.g.ok })}`);
+      check('I2b-1 corrected gate: the same mid-flood slowdown is captured by the after-control and PASSES', spike.g.ok, spike.row);
+      // (d) genuine limiter degradation: only the LIMITER is slow; the runner is not.
+      const degraded = await gatedRun('limiter-only degradation (+10 ms/statement in the limiter)', { before: 0, limiter: 10, after: 0 });
+      check('I2b-1 negative control: limiter-only degradation FAILS the gate (availability below the independent floor)', !degraded.g.ok && degraded.g.reasons.some((x) => x.startsWith('availability')), degraded.row);
+      // (e) an environment too slow to certify must not pass vacuously.
+      const tooSlowFloor = floorFrom(4000).floor;
+      check('I2b-1 negative control: a baseline too slow to certify (control 4000 ms -> floor below G/2) FAILS the gate rather than passing', tooSlowFloor < G / 2 && !gate({ out: Array.from({ length: N }, (_, i) => (i < 300 ? { allowed: true, retryAfterSeconds: 0 } : { allowed: false, retryAfterSeconds: 1, limitedBy: 'unavailable', cause: 'deadline' as const })), admitted: 300, by: {}, ms: 0, shardRows: [], shardSum: 300 }, tooSlowFloor).ok, { tooSlowFloor });
+      const healthyFloor = (runs[0] as { floor: number }).floor;
+      // (f) deterministic fault injection (unchanged controls, judged by the corrected gate).
       const faultyPool = (mode: 'decide' | 'commit_lost' | 'commit_refused') => {
         const real = pool();
         let n = 0;
@@ -320,25 +373,28 @@ async function main() {
       mark = pools.length;
       const faulty = await flood([0, 1, 2].map(() => appLimiter(faultyPool('decide'))));
       await endSince(mark);
-      const g4 = gate(faulty, ctl.threshold);
+      const g4 = gate(faulty, healthyFloor);
       console.log(`  I2b-1 aggregate (injected driver faults) diagnostics: ${JSON.stringify({ outcomes: faulty.by, gate: g4 })}`);
       check('I2b-1 negative control: injected pre-COMMIT driver faults are classified "driver" and FAIL the gate', !g4.ok && (faulty.by['unavailable:driver'] ?? 0) > 0, { outcomes: faulty.by, gate: g4 });
       mark = pools.length;
       const lost = await flood([0, 1, 2].map(() => appLimiter(faultyPool('commit_lost'))));
       await endSince(mark);
-      const g5 = gate(lost, ctl.threshold);
+      const g5 = gate(lost, healthyFloor);
       console.log(`  I2b-1 aggregate (post-send connection loss) diagnostics: ${JSON.stringify({ outcomes: lost.by, counted: lost.shardSum, gate: g5 })}`);
       check('I2b-1 post-send driver failure: classified "commit_lost" (ambiguous accounting: counted may exceed admitted), never shedding -- it FAILS the gate', (lost.by['unavailable:commit_lost'] ?? 0) > 0 && !g5.ok && lost.admitted <= lost.shardSum && lost.shardSum <= G, { outcomes: lost.by, counted: lost.shardSum, gate: g5 });
       mark = pools.length;
       const refused = await flood([0, 1, 2].map(() => appLimiter(faultyPool('commit_refused'))));
       await endSince(mark);
-      const g6 = gate(refused, ctl.threshold);
+      const g6 = gate(refused, healthyFloor);
       console.log(`  I2b-1 aggregate (explicit COMMIT refusal) diagnostics: ${JSON.stringify({ outcomes: refused.by, counted: refused.shardSum, gate: g6 })}`);
       check('I2b-1 explicit COMMIT failure (server SQLSTATE): classified "commit_failed", nothing counted for it, and it FAILS the gate', (refused.by['unavailable:commit_failed'] ?? 0) > 0 && !g6.ok && refused.shardSum === refused.admitted, { outcomes: refused.by, counted: refused.shardSum, gate: g6 });
-      const allDown: FloodResult = { out: Array.from({ length: 2000 }, () => ({ allowed: false, retryAfterSeconds: 1, limitedBy: 'unavailable', cause: 'checkout' as const })), admitted: 0, by: {}, ms: 0, shardRows: [], shardSum: 0 };
-      check('I2b-1 negative control: "0 admitted, 2000 unavailable" FAILS the gate', !gate(allDown, ctl.threshold).ok);
+      const allDown: FloodResult = { out: Array.from({ length: N }, () => ({ allowed: false, retryAfterSeconds: 1, limitedBy: 'unavailable', cause: 'checkout' as const })), admitted: 0, by: {}, ms: 0, shardRows: [], shardSum: 0 };
+      check('I2b-1 negative control: "0 admitted, 2000 unavailable" FAILS the gate', !gate(allDown, healthyFloor).ok);
       const allShed: FloodResult = { ...allDown, out: allDown.out.map((d) => ({ ...d, cause: 'deadline' as const })) };
-      check('I2b-1 negative control: even pure deadline shedding with 0 admitted FAILS the availability floor', !gate(allShed, ctl.threshold).ok && ctl.threshold > 0, { threshold: ctl.threshold });
+      check('I2b-1 negative control: pure deadline shedding (0 completed) FAILS the availability floor', !gate(allShed, healthyFloor).ok && healthyFloor > 0, { healthyFloor });
+      const denyAll: FloodResult = { out: Array.from({ length: N }, () => ({ allowed: false, retryAfterSeconds: 5, limitedBy: 'preauth-mcp' })), admitted: 0, by: {}, ms: 0, shardRows: [], shardSum: 0 };
+      check('I2b-1 negative control: a limiter that answers 429 to everything (2000 "completed", 0 admitted) FAILS the exact per-shard accounting', !gate(denyAll, healthyFloor).ok && gate(denyAll, healthyFloor).reasons.some((x) => x.includes('not full')), gate(denyAll, healthyFloor).reasons);
+      console.log(`  I2b-1 gated runs summary: ${JSON.stringify(runs.map((r) => ({ case: r.case, controlMs: [r.controlBeforeMs, r.controlAfterMs], floor: r.floor, floodMs: r.floodMs, completed: r.completed, admitted: r.admitted, counted: r.counted, ok: (r.gate as { ok: boolean }).ok })))}`);
 
       mark = pools.length;
       const roomy = [0, 1, 2].map(() => createPostgresRateLimiter({ pool: pool(), windowMs: 60_000, decisionDeadlineMs: 30_000, lockTimeoutMs: 5000, statementTimeoutMs: 6000 }));

@@ -14,7 +14,7 @@
  *   S5    COMMIT confirmed only by its command tag; COMMIT round trip bounded
  */
 import http from 'http';
-import { generateKeyPairSync, randomBytes } from 'crypto';
+import { createHmac, generateKeyPairSync, randomBytes } from 'crypto';
 import { ephemeralOAuthKeys, estimateSecretBits, loadOAuthKeysFromEnv, validateSigningJwks } from '../packages/mcp-tools/src/auth/keys';
 import { createMemoryAdapterStore } from '../packages/mcp-tools/src/auth/memoryAdapter';
 import type { OAuthStore } from '../packages/mcp-tools/src/auth/oauthStore';
@@ -157,7 +157,34 @@ async function main() {
     const rules = buildPreAuthRules('preauth-mcp', '2001:db8:1:2::77', { perAddress: 120, global: 6000 }, () => 5, h1);
     check('S3-7 shard key encodes ceiling and shard count', rules[0].key === 'preauth-mcp:global:g6000n16:5' && rules[0].limit === 375, rules);
     check('S3-7 a different configuration uses a different row', buildPreAuthRules('preauth-mcp', null, { perAddress: 120, global: 480, globalShards: 4 }, () => 0)[0].key === 'preauth-mcp:global:g480n4:0');
-    check('S3-6 address bucket is a keyed hash: no address text in the key', /^preauth-mcp:addr:h:[0-9a-f]{32}$/.test(rules[1].key) && !rules[1].key.includes('2001') && !rules[1].key.includes('db8'), rules[1].key);
+    // AURA-MCP-CI-01: the S8 check excluded the substrings "2001" / "db8" from a
+    // RANDOM-keyed 32-hex-character hash, which fails by chance in ~0.7% of runs
+    // (CI saw "preauth-mcp:addr:h:8279a8d5a62002391ea7cdb81db70872"). It is
+    // replaced by exact cryptographic verification against an independently
+    // computed HMAC for a fixed synthetic secret.
+    const oldPredicate = (k: string) => /^preauth-mcp:addr:h:[0-9a-f]{32}$/.test(k) && !k.includes('2001') && !k.includes('db8');
+    check('S3-6 reproduction: the old substring predicate rejects the hash CI recorded (a legitimate keyed hash)', !oldPredicate('preauth-mcp:addr:h:8279a8d5a62002391ea7cdb81db70872'));
+    // A deterministic synthetic fixture on which the old predicate fails end to end.
+    let fixture = '';
+    for (let i = 0; i < 10_000 && !fixture; i += 1) {
+      const cand = `synthetic-s8-bucket-secret-${i}`;
+      if (!oldPredicate(buildPreAuthRules('preauth-mcp', '2001:db8:1:2::77', { perAddress: 120, global: 6000 }, () => 0, createBucketHasher(deriveBucketKey(cand)))[1].key)) fixture = cand;
+    }
+    const expectedBucketKey = (secret: string, bucket: string) => {
+      // Independent computation (node crypto, not the module under test).
+      const k = createHmac('sha256', secret).update('aura-mcp-preauth-bucket-key-v1').digest();
+      return `h:${createHmac('sha256', k).update(`aura-mcp-preauth-bucket-v1\0${bucket}`).digest('hex').slice(0, 32)}`;
+    };
+    const fixedHasher = createBucketHasher(deriveBucketKey(fixture));
+    const fixedKey = buildPreAuthRules('preauth-mcp', '2001:db8:1:2::77', { perAddress: 120, global: 6000 }, () => 0, fixedHasher)[1].key;
+    const expected = `preauth-mcp:addr:${expectedBucketKey(fixture, 'v6:2001:db8:1:2::/64')}`;
+    check('S3-6 reproduction: a fixed synthetic secret whose legitimate hash the old predicate rejects', fixture !== '' && !oldPredicate(fixedKey), { fixture, fixedKey });
+    check('S3-6 address bucket is EXACTLY the independently computed HMAC-SHA-256 (keyed, /64 bucket, truncated to 128 bits)', fixedKey === expected, { fixedKey, expected });
+    check('S3-6 output format: preauth-mcp:addr:h: + 32 lower-case hex characters', /^preauth-mcp:addr:h:[0-9a-f]{32}$/.test(fixedKey));
+    check('S3-6 negative control: an HMAC under a different key does not match', expected !== `preauth-mcp:addr:${expectedBucketKey(`${fixture}-other`, 'v6:2001:db8:1:2::/64')}` && fixedKey !== `preauth-mcp:addr:${expectedBucketKey(`${fixture}-other`, 'v6:2001:db8:1:2::/64')}`);
+    const cleartext = 'preauth-mcp:addr:v6:2001:db8:1:2::/64';
+    check('S3-6 negative control: a cleartext bucket (no hash) is not the expected key and fails the format', cleartext !== expected && !/^preauth-mcp:addr:h:[0-9a-f]{32}$/.test(cleartext) && buildPreAuthRules('preauth-mcp', '2001:db8:1:2::77', { perAddress: 120, global: 6000 }, () => 0)[1].key === cleartext);
+    check('S3-6 the random-keyed hash in this run is well-formed and differs from the fixed one', /^preauth-mcp:addr:h:[0-9a-f]{32}$/.test(rules[1].key) && rules[1].key !== fixedKey);
     const same = buildPreAuthRules('preauth-mcp', '2001:db8:1:2::99', { perAddress: 120, global: 6000 }, () => 0, h2)[1].key;
     check('S3-6 instances sharing the key agree; the /64 grouping is preserved', same === rules[1].key);
     check('S3-6 different networks get different keys', buildPreAuthRules('preauth-mcp', '2001:db8:1:3::1', { perAddress: 120, global: 6000 }, () => 0, h1)[1].key !== rules[1].key);
