@@ -1,0 +1,19 @@
+$ npx ts-node --project tsconfig.jsdom-tests.json test/rel04HomeFindTransitionJsdom.test.ts
+# job=math-core-tests step=Run REL-04 Home and /find transition test (IR-01/IR-03) env={"TS_NODE_COMPILER_OPTIONS":"{\"jsx\":\"react-jsx\"}"}
+OK   H1 Home shows account A (greeting derived from the verified account record)
+OK   H1 A's dashboard requests carried A's session only
+OK   H2 sign-out acknowledged; Home leaves account A (no A name or data on screen)
+OK   H3 B signs in: Home shows B
+OK   H4 the late session answer for A was discarded as stale (account stays B)
+OK   H4 no surface shows A after the late responses: neither dashboard instance
+OK   H4 every dashboard request issued after the switch carried B's session (none for A)
+OK   H5 session expiry (no logout) is noticed on return to foreground: Home leaves B
+OK   H6 A again: Home shows A
+OK   H6 ... and announced it: this tab drops A and re-verifies as B
+OK   F1 /find verifies the session through the shared boundary (account A)
+OK   F2 after sign-out /find treats the visitor as a guest (guest details step, not the signed-in Plan route)
+OK   F3 during another tab's sign-out, /find-style saves are refused (shared runActivityOperation)
+
+13 passed, 0 failed
+
+# exit=0 signal=

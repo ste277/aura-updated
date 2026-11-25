@@ -1,0 +1,59 @@
+$ npx ts-node test/findATimeConstraintsDb.test.ts
+# job=day-constructor-acceptance-db-tests step=Run Find a Time constraints DB test (HPG5-V2-I1) env={"TS_NODE_COMPILER_OPTIONS":"{\"jsx\":\"react\"}"}
+OK   fixture: legacy saves (no overlapPolicy) succeed
+OK   T1 route: FIND returns candidates
+OK   T1 route: every candidate inside saved availability (06:00-22:00)
+OK   T6 route: no candidate overlaps Learn or Running
+OK   T9 route: constraintsApplied reports CONFIGURED + 2 blocking plans
+OK   route: no emptyReason on a non-empty result
+OK   T8 route: adjacent 06:30 (ends exactly when Learn starts) or 08:00 (starts as it ends) may be offered; nothing overlapping
+OK   T3 route: UNCONFIGURED reported, existing plan still counted
+OK   T3 route: no candidate overlaps the existing plan
+OK   T3 route: no new overnight restriction for unconfigured users (NIGHT still returns results)
+OK   T11 route: a D2-only search still excludes the overnight plan that started on D1 (load bounds)
+OK   T11 route: overnight plan counted as a blocker for the D2 search
+OK   T15 route: Daily Rhythm notes still produced
+OK   T15 route: candidates still inside availability and conflict-free with Daily Rhythm on
+OK   T15 route: outside-work preference kept (all before 09:00 or after 17:00)
+OK   T16 route: CHECK of a time overlapping Learn still scores that exact instant
+OK   T16 route: CHECK outside availability still scores that exact instant
+OK   T16 route: CHECK responses carry no constraintsApplied (never filtered)
+OK   T23 route: fully occupied availability -> zero candidates, emptyReason NO_ELIGIBLE_TIME
+OK   T4/T23 route: configured but no period on that weekday -> NO_AVAILABILITY_IN_RANGE
+OK   T19 legacy save without overlapPolicy still allows an explicit overlap (S2 contract)
+OK   T19 explicit ALLOW behaves like absent
+OK   unknown overlapPolicy -> 400, nothing written
+OK   T17 setup: a valid recommendation exists
+OK   T17 setup: competing plan created after the search
+OK   T17 stale save with REJECT_ACTIVE_OVERLAP -> 409
+OK   T17 code PLAN_OVERLAP
+OK   T17 conflict names the competing plan and its time
+OK   T17 conflict carries only title/start/end (no ids or other fields)
+OK   T17 zero rows written
+OK   T18 "Save anyway" (ALLOW) -> 200, overlap now present by explicit choice
+OK   T8 save: adjacent (starts when Learn ends) accepted under REJECT
+OK   T8 save: adjacent (ends when Learn starts) accepted under REJECT
+OK   T7 save: partial overlap rejected under REJECT
+OK   T10 fixture: the lifecycle user starts with no plans (nothing else can occupy its slots)
+OK   T10 control: while still UPCOMING, the plan blocks the same slot under REJECT (409 naming it)
+OK   T10 save: a CANCELLED plan does not block under REJECT
+OK   T10 control: while still UPCOMING, the plan blocks the same slot under REJECT (409 naming it)
+OK   T10 save: a SKIPPED plan does not block under REJECT
+OK   T11 save: the D1->D2 overnight plan blocks a D2 00:00 save under REJECT
+OK   T21 N_PER_WEEK goal save rejected with PLAN_OVERLAP
+OK   T21 409 rolls back: no occurrence row, no extra plan
+OK   T21 Save anyway links the N_PER_WEEK activity exactly once, to the new plan
+OK   T21 finite (NONE) goal activity: 409 leaves it unlinked
+OK   T21 conflict-free REJECT save links the finite activity to the new plan
+OK   T20 two simultaneous REJECT saves for one slot -> exactly one 200 and one 409
+OK   T20 exactly one row written
+OK   TX 409: overlap check runs on the transaction client, after the advisory lock
+OK   TX 409: no INSERT, then ROLLBACK, no COMMIT
+OK   TX 409: BEGIN precedes the lock on the same client
+OK   TX 200: lock -> overlap check -> INSERT -> COMMIT, all on one client
+OK   TX legacy (no policy): no overlap query at all, insert as before
+
+52 checks
+ALL CHECKS PASSED
+
+# exit=0 signal=

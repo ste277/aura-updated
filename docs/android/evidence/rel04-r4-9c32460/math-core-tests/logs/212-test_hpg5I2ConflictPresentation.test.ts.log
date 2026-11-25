@@ -1,0 +1,19 @@
+$ npx ts-node test/hpg5I2ConflictPresentation.test.ts
+# job=math-core-tests step=Run conflict presentation test (HPG5-V2-I2) env={"TS_NODE_COMPILER_OPTIONS":"{\"jsx\":\"react\"}"}
+OK   headline
+OK   proposed line: title, date, start–end in IST
+OK   conflict line: title, date, start–end in IST, nothing saved
+OK   detail = both lines
+OK   button text carries the exact proposed start time
+OK   accessible name: proposed date/time, activity, conflicting plan
+OK   same instants rendered in America/New_York (9:37 AM EST)
+OK   DST day: 06:30Z–07:30Z shows 1:30 AM – 3:30 AM (clock jumps)
+OK   cross-midnight range names the end date
+OK   same-day range keeps the short form
+OK   no conflict details: still names the proposed time, generic existing line
+OK   I1 presentPlanOverlap output unchanged
+
+12 checks
+ALL CHECKS PASSED
+
+# exit=0 signal=

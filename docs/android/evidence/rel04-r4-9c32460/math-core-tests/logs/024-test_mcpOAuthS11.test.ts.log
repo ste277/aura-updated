@@ -1,0 +1,38 @@
+$ npx ts-node test/mcpOAuthS11.test.ts
+# job=math-core-tests step=Run I2b-S11 offline remediation test env={}
+OK   P3-1 review probe: budget 100 ms, clock at 150 ms during the statement -> NO COMMIT, no success (StoreUnavailableError)
+OK   P3-1 pre-COMMIT expiry with the timer not yet run: COMMIT is never sent, timeout, connection discarded (rollback)
+OK   P3-1 late checkout: the connection is returned UNUSED (clean, no BEGIN), timeout
+OK   P3-1 late COMMIT acknowledgement (confirmed tag, past the deadline): reported as failure (outcome unknown -- it landed), never a late success; the finished connection is returned clean
+OK   P3-1 control: within the deadline the statement commits and succeeds
+OK   P3-1 held: a hold whose instant has passed (timer not yet run) -> not_committed, COMMIT never sent, connection discarded
+OK   P3-1 held: a confirmed but LATE COMMIT acknowledgement -> "unknown" (it landed; never reported as a timely success)
+OK   P3-1 held phase 1 past its deadline: rejected, connection discarded, nothing held
+OK   P3-1 limiter: decision past its absolute deadline before COMMIT -> unavailable/deadline, COMMIT never sent, connection discarded
+OK   P3-1 limiter: a confirmed but LATE COMMIT is not an admission -> unavailable/commit_unknown (counted, not admitted: over-count only)
+OK   P3-1 limiter control: a timely confirmed COMMIT admits
+OK   P2-3 limiter cause: a checkout failure is reported as cause "checkout" (unexpected, not shedding)
+OK   P3-1 the request budget runs on the monotonic clock (600 ms later: 0 left)
+OK   P2-1 guard attaches exactly one error listener at checkout
+OK   P2-1 clean release removes exactly our listener and returns the client normally
+OK   P2-1 two connection errors: handled once (no throw, no crash), client marked broken
+OK   P2-1 releasing a broken client DISCARDS it (release with an error) and keeps the listener for late socket errors
+OK   P2-1 a late error after discard is still absorbed
+OK   P3-2 odd-length hex is NOT treated as hex (legacy S8 rule applies)
+OK   P3-2 an impossible base64 length (33 chars) is NOT treated as base64 (legacy rule; no 198-bit format estimate)
+OK   P3-2 non-canonical base64 pad bits are NOT treated as base64 (legacy rule)
+OK   P3-2 strength is the DECODED length: a 43-char base64url encoding of 32 bytes is 256 bits (not 258)
+OK   P3-2 canonical 24-byte base64 = 192 bits; 16-byte hex = 128 bits
+OK   P3-2 documented limitation: a deterministic digest of a public label is a canonical encoding and PASSES -- provenance is D9, not detectable at runtime
+OK   P3-2 explicit legacy policy: a canonical value with a >= 12 run is REFUSED as patterned even though the S8 rule would accept it (regenerate it)
+OK   P3-2 hex 16 B: 10,000 CSPRNG samples all canonical and accepted
+OK   P3-2 HEX 16 B: 10,000 CSPRNG samples all canonical and accepted
+OK   P3-2 base64 24 B: 10,000 CSPRNG samples all canonical and accepted
+OK   P3-2 base64 32 B: 10,000 CSPRNG samples all canonical and accepted
+OK   P3-2 base64url 24 B: 10,000 CSPRNG samples all canonical and accepted
+OK   P3-2 base64url 32 B: 10,000 CSPRNG samples all canonical and accepted
+
+All 31 AURA-MCP-02-I2b-S11 offline checks passed.
+oidc-provider WARNING: Unsupported runtime. Use Node.js v22.x LTS, or a later LTS release.
+
+# exit=0 signal=

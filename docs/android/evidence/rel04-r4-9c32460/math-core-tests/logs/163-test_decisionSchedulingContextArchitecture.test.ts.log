@@ -1,0 +1,59 @@
+$ npx ts-node test/decisionSchedulingContextArchitecture.test.ts
+# job=math-core-tests step=Run decision scheduling context architecture test env={}
+=== the real tree conforms ===
+OK   THE REAL PRODUCTION TREE HAS ZERO SCHEDULING-SNAPSHOT ARCHITECTURE VIOLATIONS (565 production files scanned)
+=== the transaction: actual REPEATABLE READ, nothing else ===
+OK   ACTUAL ISOLATION LEVEL: the helper issues exactly one `BEGIN ISOLATION LEVEL REPEATABLE READ` -- not the default, not SERIALIZABLE -- (the DB suite proves `transaction_isolation` reads "repeatable read" and that a commit after the snapshot is invisible, with a READ COMMITTED control that does see it)
+OK   NO ESCALATION: no row lock (FOR UPDATE / FOR SHARE), table lock, advisory lock or write in the helper, the loader or the context -- so there is no new deadlock surface; and no retry loop (a read-only snapshot needs none)
+OK   SNAPSHOT START IS DOCUMENTED: PostgreSQL takes the snapshot at the FIRST non-transaction-control statement, not at BEGIN (the first read is the candidates query); this is stated in the helper and the loader, and the DB suite pins it by committing before / after every statement
+OK   READ-ONLY AT THE APPLICATION LEVEL: the executor accepts one SELECT / WITH statement only, stops working when the callback settles, and the transaction is committed (it wrote nothing) or rolled back, with the connection always released; the client is never handed to the callback
+OK   the executor type is the narrowest thing a read needs: `ReadQueryExecutor` has exactly one member, `query`, and no release / connect / end / transaction control
+OK   THE SEVEN READS TAKE THE EXECUTOR (default: the global pool, so every existing caller is unchanged) and use it, never `pool.query`: candidates, occurrence rows, preferences, habit logs, availability flag, availability periods, overlapping plans
+OK   READ SQL IS UNCHANGED (hash-pinned to the P3b baseline): the lifecycle filters, the half-open overlap, the candidate eligibility join, the occurrence join, the 50-log window and the availability ordering are byte-for-byte the SQL the live providers always ran
+OK   the existing live Rhythm facts function still exists and is now the raw read plus the pure mapping (no second counting implementation): `loadGoalActivityRhythmFactsForActivities` = `buildGoalActivityRhythmFactsFromOccurrenceRows(await listGoalActivityOccurrenceRowsForActivities(...))`
+=== the loader: the reads and nothing else, once per evaluation ===
+OK   EXACTLY THE SEVEN READS, IN ORDER, ALL THROUGH THE SNAPSHOT EXECUTOR: the callback awaits only the seven read functions and each receives `executor` as its last argument
+OK   NOTHING ELSE INSIDE THE TRANSACTION: no Constructor, no orchestration, no opportunity projection or adaptation, no timing / astronomy search, no Rhythm eligibility counting, no duration resolution, no behavioral derivation, no loop or collection pipeline (beyond projecting the candidate ids for the one batched occurrence read), no network call, no clock
+OK   NO ESCAPED TRANSACTION CLIENT: the callback uses `executor` only as the last argument of a read -- it is never returned, stored, captured or passed on -- and the loader's result is built from rows only, AFTER the snapshot has ended
+OK   ONE SNAPSHOT PER EVALUATION, NOT PER CANDIDATE: the loader has exactly one `runSnapshot` call, takes a user and a planning date (no candidate list), and every read function appears exactly once in it
+OK   THE PRODUCTION CALL GRAPH: the context is acquired by exactly one production call site -- the preview route, once per request -- and the snapshot runner is injectable only so a test can interleave a commit into a REAL snapshot (the default is the real REPEATABLE READ runner)
+OK   FAILURE: the loader has no try / catch, no retry and no fallback -- a failing statement rejects the whole acquisition (the helper rolls back), so no partially filled context is ever produced
+=== the context: data, ownership, no database, no policy ===
+OK   GENERIC, CARRIES NO POLICY: three authority groups only (recurrence, durationSources, opportunity); no DecisionPressure, LAST_KNOWN_OPPORTUNITY, DecisionEvidence, DecisionFacts, shadow, contention, promotion or Constructor concept
+OK   NO DATABASE HANDLE: only type imports from the database layer; no executor, client, pool, query or snapshot name -- the transaction executor cannot reach the context
+OK   OWNERSHIP AND IMMUTABILITY: the context is built by copying rows into new objects with instants as ISO strings and is deep-frozen before it is returned; every derivation constructs fresh Date instances and arrays
+OK   A MISSING RANGE OR AVAILABILITY FAILS, IT NEVER FALLS BACK: the context-backed range deps throw when the context holds no opportunity part or the request lies outside the snapshot range
+OK   the duration assembly is shared, not copied: the live orchestrator dependencies and the snapshot-backed ones both call the one pure `buildDurationContext`
+=== the consumers: preview boundary, route, Goal provider ===
+OK   NO MIXED-SNAPSHOT FALLBACK (critical): in the binding branch the independent live providers (`decisionFactsSource`, `opportunityRangeDeps`, the real range / demand deps, any plan or availability read) are never referenced; on a failed acquisition the orchestration deps are reset to the caller's own (no evidence provider), so there is NO evidence rather than live-read evidence
+OK   ONE CONTEXT FEEDS EVERYTHING: the recurrence facts come from `decisionFactsFromContext`, the duration resolution from `schedulingContextDurationContext`, the availability / blocker adaptation from `schedulingContextOpportunityRangeDeps` -- all built from the same `coherent` context, with exactly one `loadContext` call per request
+OK   THE PRODUCTION ROUTE USES THE SNAPSHOT AND NOT THE LIVE PROVIDERS: it wires `loadSchedulingContext` and `loadDecisionFactsFromContext`, and does not wire `loadDecisionFacts`, `createOpportunityRangeDeps`, `createRealOpportunityRangeDeps` or the live demand deps
+OK   SOURCE-NEUTRAL: the context, its loader and the binding know nothing of manual / automatic / Goal provenance or the UI (the loader takes a user id, a planning date and a timezone; the only Goal-aware piece is the existing Rhythm provider, which now reads the context)
+OK   the context-backed Goal demand dependencies read the context only: no pool, no query, no database read function -- the recurrence facts therefore derive exclusively from the coherent context
+=== untouched: evidence, pressure, shadow, trace, Constructor, comparator, placement, capacity, acceptance ===
+OK   THE CONTEXT IS KNOWN ONLY TO ITS FIVE MODULES: the context vocabulary appears in exactly the context, its loader, the preview boundary, the preview route and the Goal provider -- not in the Constructor, comparator, placement, capacity, replenishment, evidence, preparation, facts, pressure, shadow, trace, opportunity projection, acceptance, persistence, Recomposition or Move code
+OK   the orchestrator does not import or name the context (evidence preparation still happens in the orchestrator, from the facts and the durations it is handed, before the first `constructDay`)
+OK   NO PER-CANDIDATE OR PER-REQUEST CACHE: the context is a function result, never stored in a module-level variable, map or cache (a later evaluation always reads afresh)
+=== MUTATIONS OF THE GUARD: each violation class, injected into the real tree, is detected ===
+OK   MUTATION: the snapshot is opened WITHOUT REPEATABLE READ (default isolation) or escalated to SERIALIZABLE / given a row lock -> detected
+OK   MUTATION: the transaction client / executor escapes (the helper hands the raw client to the callback, or the context module imports and holds the executor type) -> detected
+OK   MUTATION: CPU / the opportunity projection / the Constructor inside the transaction -> detected
+OK   MUTATION: a read moved OUT of the transaction (recurrence, blockers, availability, preferences, habit logs) or issued live -> detected
+OK   MUTATION: the plans read is split into a SECOND snapshot (a second runSnapshot) or a read per candidate -> detected
+OK   MUTATION: a second production module opens its own snapshot, or acquires a context outside the route -> detected
+OK   MUTATION: FALLBACK TO THE LIVE READS on a failed acquisition (the binding branch calls the old independent provider) -> detected
+OK   MUTATION: the production route wires the independent live providers again -> detected
+OK   MUTATION: the context-backed Goal deps read the database -> detected
+OK   MUTATION: the context becomes mutable (no deep freeze) -> detected
+OK   MUTATION: the context carries pressure / evidence / a Constructor concept, or the Constructor / comparator / shadow / evidence modules start to know the context -> detected
+OK   MUTATION: a read function stops using the executor (back to the global pool) or its SQL changes -> detected
+OK   the SQL pin is sensitive: changing the overlap boundary or a lifecycle filter changes the hash
+OK   the mutations were applied to in-memory copies only: the real tree still has zero violations afterwards
+=== wiring and honest scope ===
+OK   the pure suites (context behavior, architecture guard) run in the required PURE job and the concurrency / snapshot suite in the required DB job
+OK   the new suites assert invariants only: no sleeps, timers, randomness, wall-clock reads, heap layout or query-plan mechanics -- the concurrent commit is placed by an awaited hook at an exact statement, never by timing
+OK   no assertion label claims pressure is active, that P4 is ready, or that this slice promotes anything
+OK   NO SCHEMA, NO MIGRATION: the Prisma schema and every migration directory's own contents name no scheduling context (count-independent -- holds regardless of how many unrelated migrations exist)
+ALL DECISION SCHEDULING CONTEXT ARCHITECTURE CHECKS PASSED
+
+# exit=0 signal=

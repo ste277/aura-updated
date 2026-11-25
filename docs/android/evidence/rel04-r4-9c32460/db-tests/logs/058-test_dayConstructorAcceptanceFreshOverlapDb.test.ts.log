@@ -1,0 +1,66 @@
+$ npx ts-node test/dayConstructorAcceptanceFreshOverlapDb.test.ts
+# job=day-constructor-acceptance-db-tests step=Run acceptance fresh-overlap DB test env={}
+=== real preview, then a conflicting plan is persisted, then acceptance ===
+   [diag] A. planning date 2026-10-07; window 2026-10-07T03:30:00.000Z (09:00 IST) .. 2026-10-07T11:30:00.000Z (17:00 IST); preview proposal 2026-10-07T03:30:00.000Z (09:00 IST) .. 2026-10-07T04:30:00.000Z (10:00 IST); acceptance now 2026-10-07T02:30:00.000Z (08:00 IST); late plan 2026-10-07T03:00:00.000Z (08:30 IST) .. 2026-10-07T04:45:00.000Z (10:15 IST); result REJECTED/CONFLICT details=["OVERLAPS_FRESH_BLOCKER"]; proposalStart<=now: false
+OK   A. SAME-DAY IN-PROGRESS plan (starts 08:30, before the 09:00 window start, ends after the proposal): determinism guard -- the scenario clock precedes the construction window, so the preview-chosen proposal (start 2026-10-07T03:30:00.000Z (09:00 IST)) cannot be stale
+OK   A. SAME-DAY IN-PROGRESS plan (starts 08:30, before the 09:00 window start, ends after the proposal): the preview was valid (signed token verifies) and the proposal really overlaps the late plan
+OK   A. SAME-DAY IN-PROGRESS plan (starts 08:30, before the 09:00 window start, ends after the proposal): acceptance is REJECTED as CONFLICT with zero new rows
+   [diag] B. planning date 2026-10-07; window 2026-10-07T03:30:00.000Z (09:00 IST) .. 2026-10-07T11:30:00.000Z (17:00 IST); preview proposal 2026-10-07T03:30:00.000Z (09:00 IST) .. 2026-10-07T04:30:00.000Z (10:00 IST); acceptance now 2026-10-07T02:30:00.000Z (08:00 IST); late plan 2026-10-06T14:30:00.000Z (20:00 IST) .. 2026-10-07T04:45:00.000Z (10:15 IST); result REJECTED/CONFLICT details=["OVERLAPS_FRESH_BLOCKER"]; proposalStart<=now: false
+OK   B. OVERNIGHT plan (starts the previous evening 20:00, ends after the proposal): determinism guard -- the scenario clock precedes the construction window, so the preview-chosen proposal (start 2026-10-07T03:30:00.000Z (09:00 IST)) cannot be stale
+OK   B. OVERNIGHT plan (starts the previous evening 20:00, ends after the proposal): the preview was valid (signed token verifies) and the proposal really overlaps the late plan
+OK   B. OVERNIGHT plan (starts the previous evening 20:00, ends after the proposal): acceptance is REJECTED as CONFLICT with zero new rows
+   [diag] C. planning date 2026-10-07; window 2026-10-07T03:30:00.000Z (09:00 IST) .. 2026-10-07T11:30:00.000Z (17:00 IST); preview proposal 2026-10-07T03:30:00.000Z (09:00 IST) .. 2026-10-07T04:30:00.000Z (10:00 IST); acceptance now 2026-10-07T02:30:00.000Z (08:00 IST); late plan 2026-10-07T03:20:00.000Z (08:50 IST) .. 2026-10-07T04:40:00.000Z (10:10 IST); result REJECTED/CONFLICT details=["OVERLAPS_FRESH_BLOCKER"]; proposalStart<=now: false
+OK   C. control: plan that STARTS INSIDE the window: determinism guard -- the scenario clock precedes the construction window, so the preview-chosen proposal (start 2026-10-07T03:30:00.000Z (09:00 IST)) cannot be stale
+OK   C. control: plan that STARTS INSIDE the window: the preview was valid (signed token verifies) and the proposal really overlaps the late plan
+OK   C. control: plan that STARTS INSIDE the window: acceptance is REJECTED as CONFLICT with zero new rows
+=== boundary semantics: half-open [start, end), at millisecond precision ===
+OK   blocker ending EXACTLY at the window start does not conflict (and is not even loaded): SAVED, blocker rows loaded = 0
+OK   blocker ending ONE ms after the window start overlaps the first minute (loaded and conflicting): REJECTED, blocker rows loaded = 1
+OK   blocker starting EXACTLY at the window end does not conflict (and is not even loaded): SAVED, blocker rows loaded = 0
+OK   blocker starting ONE ms before the window end overlaps the last minute (loaded and conflicting): REJECTED, blocker rows loaded = 1
+OK   FULL-SPAN blocker (starts before and ends after the window) is loaded and conflicts: REJECTED, blocker rows loaded = 1
+OK   blocker ENTIRELY BEFORE the window: not loaded, no rejection: SAVED, blocker rows loaded = 0
+OK   blocker ENTIRELY AFTER the window: not loaded, no rejection: SAVED, blocker rows loaded = 0
+OK   in-window blocker that does NOT touch the accepted item (13:00-14:00 vs item 10:30-11:30): loaded, NO false rejection: SAVED, blocker rows loaded = 1
+OK   an in-progress blocker overlapping the WINDOW but not the item (08:30-09:45 vs item 10:30-11:30): loaded, NO false rejection: SAVED, blocker rows loaded = 1
+OK   an in-window blocker ending EXACTLY where the item starts (10:30) does not conflict: acceptance compares half-open item and blocker intervals: SAVED, blocker rows loaded = 1
+OK   an in-window blocker starting EXACTLY where the item ends (11:30) does not conflict: SAVED, blocker rows loaded = 1
+OK   same-window blocker overlapping the item (existing behavior): REJECTED, blocker rows loaded = 1
+=== lifecycle is unchanged ===
+OK   overnight UPCOMING plan: blocks (REJECTED)
+OK   overnight LOGGED plan: blocks (REJECTED)
+OK   overnight CANCELLED plan: does not block (SAVED)
+OK   overnight SKIPPED plan: does not block (SAVED)
+OK   overnight MOVED plan: does not block (SAVED)
+=== isolation, multiplicity, atomicity ===
+OK   another USER's overlapping plan never rejects (and is not loaded)
+OK   MULTIPLE blockers are all loaded (3) and the right one decides: REJECTED naming only item A
+OK   MULTIPLE items: one conflicting item rejects the WHOLE request atomically -- the clean item B was not written either (0 new rows)
+OK   and no accepted-plan INSERT was even attempted on the conflict path
+=== transaction, lock order, query count, row volume ===
+OK   the fresh blocker read happens AFTER the advisory lock, BEFORE the accepted-plan INSERT, and the transaction then commits
+OK   the fresh blocker read goes through the canonical OVERLAP loader, not the start-scoped day loader
+OK   the loader receives the acceptance TRANSACTION client (not the global pool)
+OK   the loader is asked for exactly the SIGNED window (not the civil day)
+OK   ONE fresh-blocker query per acceptance (no N+1) even with several items
+OK   160 historical/future plans plus one overnight plan: the fresh read returns ONLY the 1 overlapping row, and acceptance rejects
+=== claim rollback, retry, replay ===
+OK   a REJECTED acceptance rolls back its idempotency claim: the SAME request id is retryable once the blocker is gone (SAVED)
+OK   REPLAY of a successful acceptance is classified before fresh validation (ALREADY_ACCEPTED, no new row)
+OK   a replay stays ALREADY_ACCEPTED even though a plan overlapping it now exists (replay is not a new authorization attempt)
+=== Goal side effects: a conflict leaves no Goal write behind ===
+OK   a Goal-linked proposal blocked by an overnight plan is REJECTED with no occurrence, no GoalActivity link and no new plan
+OK   control: the same Goal-linked proposal with no blocker is SAVED and materializes its occurrence (Goal handling unchanged, no Goal-specific branch)
+=== cross-midnight window and DST (absolute instants, no civil-day assumption) ===
+OK   a window CROSSING midnight: a plan that started before the window and runs past midnight is loaded and rejects the overlapping item
+OK   a blocker beginning on the next civil date but inside the absolute window rejects an overlapping item
+OK   and the same blocker does not reject a disjoint item in that window
+OK   SPRING FORWARD (2027-03-14, 23-hour day): an overnight plan ending 11:00 rejects an overlapping item, and an item starting exactly at 11:00 is accepted
+OK   FALL BACK (2026-11-01, 25-hour day): an overnight plan ending 11:00 rejects an overlapping item, and an item starting exactly at 11:00 is accepted
+=== unchanged known debt (documented, not solved here) ===
+OK   ZERO-LENGTH debt unchanged: acceptance's in-memory overlap treats a zero-length plan strictly inside an item as a conflict (same as before S1; not aligned with the Constructor's clipping here)
+=== known LIMIT: a writer that bypasses the schedule lock is not serialized (the ordinary POST /api/plans route takes the lock since schedule-write S2; see scheduleWriteManualSerializationDb) ===
+OK   KNOWN LIMIT: a plan written by a writer that BYPASSES the schedule lock (a direct createPlannedActivity call outside the serialized route) after acceptance's read and before its commit is not seen -- acceptance saves and both rows overlap; the ordinary manual route no longer behaves this way since S2, and this characterization is about the lock being the only protection
+ALL ACCEPTANCE FRESH-OVERLAP DB CHECKS PASSED
+
+# exit=0 signal=

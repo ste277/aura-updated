@@ -1,0 +1,26 @@
+$ npx ts-node --project tsconfig.jsdom-tests.json test/rel04R4SsrAgreementJsdom.test.ts
+# job=math-core-tests step=Run REL-04 R4 server-rendered account agreement and bound download test env={"TS_NODE_COMPILER_OPTIONS":"{\"jsx\":\"react-jsx\"}"}
+OK   S1 server render of a gated page contains only the neutral checking state (no AliceTown, no capture item)
+OK   S2 before the first verification answers: checking state only -- no AliceTown, no capture item, no Plan Day actions
+OK   S2 the first verification does not change the epoch (why the R3 epoch-only reload missed this)
+OK   S2 first verification answers Bob for a page rendered for Alice -> reload requested, Alice's props never shown
+OK   S2 no account-scoped request was sent by the gated page
+OK   S3 a second disagreement within the guard window does not auto-reload again; a Reload button is offered
+OK   S3 the Reload button reloads
+OK   S4 first verification agrees (Alice) -> Plan Day rendered with Alice's server props
+OK   S4 after cross-tab news the old account's server props are hidden immediately (before re-verification answers)
+OK   S4 re-verification answers Bob -> reload; Alice's props stay hidden
+OK   S5 failed first verification -> "couldn't confirm" with Try again; no Plan Day content
+OK   S5 Try again verifies and, on agreement, shows the page
+OK   S6 Goals with agreement: list loads for Alice with the stated account
+OK   S6 page rendered SIGNED OUT while the device is signed in as Alice -> reload (never a signed-out shell acting for Alice)
+OK   D1 export download states the tapped account and saves Alice's file
+OK   D2 account changed while the download was in flight -> account-changed, nothing handed to the browser
+OK   D3 a binding from before the change is refused before any request
+OK   D4 headerless export (old link navigation) -> 503 client_upgrade_required; stating Alice while Bob is signed in -> 409
+OK   D5 in-app calendar download states Bob and saves; headerless feed (subscription/link) still answers; a stated mismatch is refused
+OK   D6 during a sign-in/out the download is refused (no request)
+
+20 passed, 0 failed
+
+# exit=0 signal=

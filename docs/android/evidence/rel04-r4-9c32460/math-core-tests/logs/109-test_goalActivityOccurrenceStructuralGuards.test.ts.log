@@ -1,0 +1,39 @@
+$ npx ts-node test/goalActivityOccurrenceStructuralGuards.test.ts
+# job=math-core-tests step=Run Goal activity occurrence structural guards test env={}
+OK   Goal Detail (GoalDetailClient.tsx) does not reference GoalActivityOccurrence
+OK   Goal API (goals/[goalId]/route.ts) does not reference GoalActivityOccurrence
+OK   Goal creation API (goals/route.ts) does not reference GoalActivityOccurrence
+OK   Home (HomeDashboard.tsx) does not reference GoalActivityOccurrence
+OK   Timeline (HomeTimeline.tsx) does not reference GoalActivityOccurrence
+OK   DailyAgenda (dailyAgenda.ts) does not reference GoalActivityOccurrence
+OK   MyDay orchestrator (myDayOrchestrator.ts) does not reference GoalActivityOccurrence
+OK   Home timeline composer (homeTimelineComposer.ts) does not reference GoalActivityOccurrence
+OK   Constructor core (dayConstructor.ts) does not reference GoalActivityOccurrence
+OK   Constructor orchestrator (dayConstructorOrchestrator.ts) does not reference GoalActivityOccurrence
+OK   Recomposition decision engine (remainingDayRecomposition.ts) does not reference GoalActivityOccurrence
+OK   Recomposition server wiring (remainingDayRecompositionServer.ts) does not reference GoalActivityOccurrence
+OK   Recomposition acceptance (remainingDayRecompositionAcceptance.ts) does not reference GoalActivityOccurrence
+OK   Recomposition integrity (remainingDayRecompositionIntegrity.ts) does not reference GoalActivityOccurrence
+OK   Recomposition card (RecompositionCard.tsx) does not reference GoalActivityOccurrence
+OK   Home recomposition lib (homeRecomposition.ts) does not reference GoalActivityOccurrence
+OK   Plan with Aura handoff (planDayBootstrap.ts) does not reference GoalActivityOccurrence
+OK   GOAL_TEMPLATES (goals.ts) does not reference GoalActivityOccurrence
+OK   Goal completion domain (goalCompletion.ts) does not reference GoalActivityOccurrence
+OK   Goal activity execution domain (goalActivityExecution.ts) does not reference GoalActivityOccurrence
+OK   Goals presentation (goalsPresentation.ts) does not reference GoalActivityOccurrence
+OK   Move (planMove.ts) references GoalActivityOccurrence ONLY via its documented repoint UPDATE (R3) and the two capacity-check SELECTs (Final Capacity Safety Gate) -- never INSERT/DELETE, never a fourth/undocumented reference
+OK   db.ts references GoalActivityOccurrence ONLY inside the allowed, intentionally-reviewed functions (loadGoalActivityRhythmFacts [read-only], loadGoalActivityRhythmFactsForActivities [R4's batched read-only sibling], listGoalActivityOccurrenceRowsForActivities [O5 P2d: that sibling's raw read-only SELECT, moved unchanged so it can run on the snapshot executor], materializeGoalActivityRhythmOccurrence [R3's sole writer], logPlannedActivity [Insights V1 PR3's corrected, occurrence-keyed completion lookup], checkDailyOccurrenceEligibility [HPG3-A2's shared daily-capacity read], and listGoalActivityDailyOccupancyForActivities [HPG-FIX-01's read-only presentation counterpart]) -- no additional, undocumented function in real code, no UPDATE/DELETE anywhere
+OK   logPlannedActivity references GoalActivityOccurrence ONLY via its new, correct occurrence-keyed completion lookup -- a single read-only SELECT, never a write
+OK   skipPlannedActivity itself does not reference GoalActivityOccurrence
+OK   schema.prisma DOES define the GoalActivityOccurrence model (the one allowed production reference)
+OK   migration 0042_goal_activity_occurrence exists and creates exactly the GoalActivityOccurrence table
+OK   R1 introduced GoalActivityOccurrence exactly once: no OTHER migration directory's own contents also reference it (count-independent -- holds regardless of how many unrelated migrations exist)
+OK   GoalActivityOccurrence has no persisted status column (lifecycle stays derivable from its linked PlannedActivity, this ticket's own section 6 decision)
+OK   GoalActivityOccurrence has no windowKey/eligibility column (Rhythm semantics deliberately deferred, this ticket's own section 7 decision)
+OK   GoalActivityOccurrence.goalActivityId carries NO uniqueness constraint (multiple occurrences per GoalActivity must remain possible -- the fundamental R1 capability)
+OK   GoalActivityOccurrence.plannedActivityId IS unique when present (one live PlannedActivity claimed by at most one occurrence)
+OK   GoalActivity.plannedActivityId remains String? @unique, unchanged by R1
+OK   GoalActivityExecution gained exactly one new column from Insights V1 PR3 (goalActivityOccurrenceId, nullable+unique+SET NULL) -- no windowKey, no other GoalActivityOccurrence reference
+ALL GOAL ACTIVITY OCCURRENCE STRUCTURAL GUARD CHECKS PASSED
+
+# exit=0 signal=

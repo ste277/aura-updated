@@ -1,0 +1,26 @@
+$ npx ts-node test/goalContextDb.test.ts
+# job=day-constructor-acceptance-db-tests step=Run Goal context DB test env={}
+OK   27. non-Goal plan: no entry in the returned Map
+OK   28. legacy DONE: goal identity correct
+OK   28. legacy DONE: goalActivity id correct
+OK   28. legacy DONE: completionRequirement normalizes NULL fields to DONE
+OK   28. legacy DONE: currentValue = null (no execution)
+OK   29. DURATION before completion: target = 30
+OK   29. DURATION before completion: currentValue = null, NOT 30 -- target and actual are distinct
+OK   30. DURATION after completion (default): target = 30, currentValue = 30
+OK   30. DURATION after completion (override): target = 30, currentValue = 18
+OK   31. MEASURED_TARGET: kind/target/unit correct
+OK   31. MEASURED_TARGET: currentValue = 12
+OK   32. exceeds target: currentValue = 25, no clamp
+OK   33. zero: currentValue = 0, no falsy-value bug
+OK   34. B (live successor) receives Goal context
+OK   34. A (current-linkage lookup) does NOT receive Goal context -- no lineage traversal
+OK   35. querying as a different user for another user's Goal-linked plan id returns no context (userId scoping on the base GoalActivity row)
+OK   36. Goal Detail: DONE activity currentValue = null
+OK   36. Goal Detail: DURATION activity (completed, override 22) currentValue = 22
+OK   36. Goal Detail: MEASURED_TARGET activity with no linked plan currentValue = null
+OK   36. Goal Detail: no execution internals present (row has no id/source/snapshot-prefixed keys beyond GoalActivity's own)
+OK   37. one loadGoalContextsForPlanIds call resolves all 5 plan ids at once (batched, not N calls)
+ALL GOAL CONTEXT DB CHECKS PASSED
+
+# exit=0 signal=
