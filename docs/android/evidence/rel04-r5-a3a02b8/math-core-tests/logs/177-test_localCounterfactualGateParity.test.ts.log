@@ -1,0 +1,12 @@
+$ npx ts-node test/localCounterfactualGateParity.test.ts
+# job=math-core-tests step=Run local counterfactual gate parity test env={}
+     parity: 9072 cases; verdict categories seen by the REAL Constructor: {"OUTSIDE_CONSTRUCTION_WINDOW":924,"INSUFFICIENT_DURATION":1008,"MALFORMED_CANDIDATE":4032,"WRONG_INTENT":1008,"FEASIBLE":1572,"BLOCKED_BY_COMMITMENT":288,"CONFLICTS_WITH_PROPOSED_ITEM":240}
+OK   GATE PARITY: over 9072 deterministic cases (2 durations x 9 blocker / Proposed scenarios x boundary +/- 1 ms starts x candidate shapes) the local gate's verdict -- feasibility, the rejection reason AND the placed interval -- equals the REAL Constructor's: ZERO mismatches
+OK   COVERAGE: the real Constructor produced every verdict the local gate can: FEASIBLE and all six rejection reasons each appear many times (so no gate is vacuously "equal")
+OK   HALF-OPEN OVERLAP: placements that merely touch (end == other.start) do NOT conflict, one millisecond of overlap DOES -- identical to the Constructor, for blockers and Proposed placements
+OK   WINDOW INCLUSIVITY: an interval that starts exactly at the window start and one that ends exactly at the window end are INSIDE; one millisecond beyond either is OUTSIDE -- identical to the Constructor
+OK   DURATION: the placed interval is [start, start + required duration), never the raw (longer) span, and a span one millisecond short is INSUFFICIENT -- identical to the Constructor
+OK   the gate is pure: it does not mutate its inputs (blockers, placements, candidate Dates are byte-identical afterwards)
+ALL LOCAL GATE PARITY CHECKS PASSED
+
+# exit=0 signal=

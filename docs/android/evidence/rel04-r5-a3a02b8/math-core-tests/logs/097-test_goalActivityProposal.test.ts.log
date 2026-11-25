@@ -1,0 +1,52 @@
+$ npx ts-node test/goalActivityProposal.test.ts
+# job=math-core-tests step=Run Goal activity proposal test env={"TS_NODE_COMPILER_OPTIONS":"{\"jsx\":\"react\"}"}
+OK   B1 integration: "Get fitter" -> GET_FITTER -> canonical 3-activity template
+OK   B1 integration: resolved rows carry real catalog activityId where the catalog supports it
+OK   B1 integration: resolved rows are TEMPLATE-sourced
+OK   B1 integration: "Learn Spanish" -> no match -> no automatic proposal (never forced into an unrelated template)
+OK   auto title-change: fitness proposal present
+OK   auto title-change: switching to a meditation title replaces the proposal with the meditation template
+OK   auto title-change: no stale fitness activity remains
+OK   auto title-change: an unmatched title clears the proposal entirely (no stale meditation activity)
+OK   auto title-change: a title edit that resolves to the SAME category does not regenerate rows (identical row localIds)
+OK   user-edited: row removed, edited=true
+OK   user-edited: a later title change does NOT regenerate/destroy the edited rows
+OK   user-edited: still marked edited (UI must not claim this is a fresh automatic suggestion)
+OK   user-edited: pristineAutoCategory is left untouched (never silently advanced past what the user is looking at)
+OK   manual override: AUTO resolves GET_FITTER first
+OK   manual override: explicit manual selection replaces the proposal with STUDY_CONSISTENTLY
+OK   manual override: isManualCategory true, PRISTINE (edited=false)
+OK   manual override: a Goal title change afterward does NOT override the manual choice
+OK   manual override: manual mode persists across the title change
+OK   start from scratch: explicit null choice clears the proposal
+OK   start from scratch: a subsequent "Get fitter" title does NOT auto-repopulate the template
+OK   remove/submission: exactly the remaining 2 activities are submitted
+OK   remove/submission: the removed activity never reappears
+OK   rename/submission: edited title is submitted verbatim
+OK   rename/submission: the ORIGINAL template-resolved activityId is preserved (never rematched from the new title)
+OK   freeform: source is FREEFORM, activityId null before edit
+OK   freeform/submission: custom title submitted
+OK   freeform/submission: activityId null (never inferred from the typed title)
+OK   freeform/submission: no completionRequirement key (server-side DONE default applies)
+OK   freeform/submission: default Rhythm NONE
+OK   completion preservation: MEDITATE_REGULARLY keeps DURATION/10 through submission mapping, never flattened to DONE
+OK   Rhythm submission: the exact selected Rhythm is present on the correct row
+OK   Rhythm submission: untouched sibling rows keep their own default Rhythm (no cross-row leakage)
+OK   zero-activity: removing every row submits an empty activities[] array
+OK   zero-activity: isProposalReadyToSubmit is true for an empty, fully-valid proposal
+OK   zero-write: goalActivityProposal.ts never references fetch/db.ts/pg/POST in real code
+OK   zero-write: goalActivityProposal.ts imports only type-only React-adjacent dependencies (no `from 'react'` value import)
+OK   refresh: proposal is edited (2 of 3 rows) before refresh
+OK   refresh: regenerates the full canonical 3-activity template fresh
+OK   refresh: resets to PRISTINE
+OK   use-automatic-suggestion: escaping manual mode resolves the CURRENT title (meditation), not the old manual choice or the old auto title
+OK   use-automatic-suggestion: isManualCategory is false again
+OK   stable identity: the SAME localId still identifies the row after a rename (never title-keyed)
+OK   stable identity: every row has a distinct, non-empty localId
+OK   submit gating: a blank freeform row title blocks submission
+OK   submit gating: a valid title unblocks submission
+OK   submit gating: a null (unresolved Custom) Rhythm blocks submission
+OK   template source of truth: FINISH_PROJECT activities resolve with activityId null exactly as resolveGoalTemplateActivities itself establishes (no fallback id invented here)
+ALL GOAL ACTIVITY PROPOSAL CHECKS PASSED
+
+# exit=0 signal=

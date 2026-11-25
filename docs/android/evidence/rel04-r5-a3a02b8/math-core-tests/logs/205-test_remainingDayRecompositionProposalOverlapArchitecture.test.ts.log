@@ -1,0 +1,32 @@
+$ npx ts-node test/remainingDayRecompositionProposalOverlapArchitecture.test.ts
+# job=math-core-tests step=Run Recomposition proposal overlap architecture test env={}
+OK   LOADER: the proposal wiring imports the canonical overlap loader `listPlannedActivitiesOverlappingRange` from db
+OK   NO START-SCOPED LOADER: no proposal module references `listPlannedActivitiesForDay` (the `plannedStartAt BETWEEN` loader)
+OK   the real `loadPlansForDay` dependency is exactly the overlap loader called with the user id and the supplied range bounds
+OK   the loader is user-scoped by the authenticated user object the deps were created for (never a request value)
+OK   NO NEW SQL: no proposal module contains any SQL against PlannedActivity (no table reference, SELECT, INSERT, UPDATE, DELETE or BETWEEN)
+OK   NO START-ONLY MEMBERSHIP: the proposal never filters plans by `plannedStartAt` range membership at load (it only reads fields of rows already loaded)
+OK   the canonical overlap predicate is defined exactly once in db.ts and is half-open: `plannedStartAt < $3 AND plannedEndAt > $2`
+OK   the overlap loader is unchanged in shape: still `(userId, from, to, executor = pool)`, user-scoped, ordered by start
+OK   the start-scoped `listPlannedActivitiesForDay` still exists unchanged for its other (non-blocker) callers
+OK   RANGE: the service asks the loader for exactly the target civil day, derived with the existing helper (`localDayBoundsUTC(targetDate, timezone)`), not millisecond arithmetic
+OK   the service performs exactly ONE plan load per run (`loadPlansForDay` is called once)
+OK   the Constructor's blockers are the SAME preloaded rows (no second blocker query): `loadBlockingPlans` filters `rows`, never loads
+OK   SELF-BLOCKING: the reconsidered plans are released at the loading boundary by an explicit id set only; `isActivePlanBlocker` is not touched or reimplemented
+OK   LIFECYCLE / REFERENCE INSTANT: the proposal reuses the request `now` as the single reference instant (`baseRequest.now`); no second clock is read
+OK   NO SERIALIZATION: no proposal module takes any advisory lock, row lock or transaction
+OK   READ-ONLY: no proposal module imports or calls a plan writer (createPlannedActivity, applyMoveWrites, movePlannedActivity, cancel/skip/log/delete)
+OK   the proposal route is still a read-only calculation (no body read, no write)
+OK   no lock helper or new lock key was introduced anywhere in production code by this slice
+OK   ACCEPTANCE UNCHANGED (structure): still takes the shared lock, locks rows in id order, revalidates with `findBlockingPlanForRange` on its own transaction client, writes through `applyMoveWrites`
+OK   ACCEPTANCE INDEPENDENCE: acceptance does not import the proposal loader or trust proposal blocker data (it never reads `loadPlansForDay` or `protectedPlans`)
+OK   MOVE UNCHANGED (structure): `applyMoveWrites` and `findBlockingPlanForRange` are still defined in planMove with the shared lock in `movePlannedActivity`
+OK   MANUAL CREATE UNCHANGED (structure): POST /api/plans still takes the lock and inserts on the same transaction client (S2)
+OK   CONSTRUCTOR UNCHANGED (structure): the orchestrator still loads blockers with the canonical overlap loader and `resolveBlockerLoadBounds`; acceptance persistence still has the lock
+OK   the shared advisory lock is still taken at exactly the same four production sites, byte-identical (S3 invariant: no new blocker-adding writer)
+OK   NO SCHEMA CHANGE: no exclusion constraint or new index for the proposal read, in the Prisma schema or in any migration directory's own contents (count-independent)
+OK   the DB test makes no snapshot-coherence, race-freedom or serialization claim about the proposal in any assertion label
+OK   the DB test drives the real proposal handler with the real deps and an explicit fixed clock (no wall clock) and covers: overnight, same-day early start, lifecycle, cross-user, boundaries, multiple blockers, row volume, DST, acceptance revalidation
+ALL RECOMPOSITION PROPOSAL OVERLAP ARCHITECTURE CHECKS PASSED
+
+# exit=0 signal=

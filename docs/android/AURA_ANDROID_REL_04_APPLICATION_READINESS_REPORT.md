@@ -2,38 +2,141 @@
 
 **Date:** 2026-11-25 · **PR:** #392 · **Branch:** `aura-android-rel04-app-readiness`, cut from `main` `ad49e6a`
 
-**Revision:** **R4** (ticket 39213). It resolves the remaining findings of the independent evidence assessment of `b323d2a9dfd8ddc1a0ea430357611ebe25dd90b4` (`~/Documents/ChatGPT/Product Onboarding/AURA_ANDROID_REL_04_INDEPENDENT_EVIDENCE_ASSESSMENT_b323d2a.md`). R4 code commit: `9c324602faef9567cf5212150d367cafa9d3a99f`. Evidence for that commit is in `docs/android/evidence/rel04-r4-9c32460/`.
+**Revision:** **R5** (ticket 39216). It addresses the remaining application findings of the R4 independent disposition of `a59a934dd0b1f3d2ce32a333543a4fbdd21cb72d` (code head `9c324602…`), at `~/Documents/ChatGPT/Product Onboarding/AURA_ANDROID_REL_04_R4_INDEPENDENT_DISPOSITION_a59a934.md`.
 
-The R3 sections that follow (R1 to R6) are kept as history. **§R4-1 to §R4-8 supersede them** where they differ, in particular R3 storage, legacy discard, R5 and R6.
+- **R5 code commit:** `a3a02b816e35733739f428e85cf0810c4f17f50a`.
+- **Evidence:** `docs/android/evidence/rel04-r5-a3a02b8/`.
+- **IndexedDB architecture:** accepted by that disposition, and preserved.
+
+**§R5-1 to §R5-4 supersede R4 where they differ.** The R4 sections (§R4-1 to §R4-8) and the R3 sections (R1 to R6) are kept as history.
 
 **Earlier independent reviews (kept unchanged as historical evidence):**
 - `AURA_ANDROID_REL_04_INDEPENDENT_REVIEW_REPORT.md` (of `a54daf6`);
 - `AURA_ANDROID_REL_04_DELTA_INDEPENDENT_REVIEW_REPORT.md` (of `d09449b`, sha256 `11becd10…`);
-- `AURA_ANDROID_REL_04_FINAL_INDEPENDENT_DISPOSITION_091e3ce.md` (sha256 `232eec9f…`).
+- `AURA_ANDROID_REL_04_FINAL_INDEPENDENT_DISPOSITION_091e3ce.md` (sha256 `232eec9f…`);
+- `AURA_ANDROID_REL_04_INDEPENDENT_EVIDENCE_ASSESSMENT_b323d2a.md`;
+- `AURA_ANDROID_REL_04_R4_INDEPENDENT_DISPOSITION_a59a934.md`.
 
-**Mode:** code; offline tests; real Chromium multi-page tests (real IndexedDB, Web Locks, cookies and service workers); an isolated throwaway Postgres for the DB suites; a generated-Prisma-client type check; read-only hosting reads.
+**Mode:**
+- code and offline tests;
+- real Chromium multi-page tests (real IndexedDB, Web Locks, cookies and service workers, including forced worker restarts);
+- the **real production Next.js build** served by `next start`, against an isolated Postgres, for rendering evidence;
+- a generated-Prisma-client type check.
 
-**Not done:** no merge, deployment, live or Production database, credential, ADB, emulator, device, signing, packaging or Play Console activity. No hosting or repository setting was changed.
+**Not done:** no merge, deployment, hosting-setting change, live or Production database, credential, emulator, physical device, signing, packaging or Play Store activity. AUTH-01 remains separately authorized.
 
 ## 1. Verdict
 
-**REMAINING ACCOUNT AND DATA INTEGRITY FINDINGS RESOLVED — READY FOR INDEPENDENT EVIDENCE ASSESSMENT.**
+**REMAINING APPLICATION IMPLEMENTATION FINDINGS RESOLVED — ACTIVATION REQUIREMENTS EXPLICITLY DEFERRED.**
 
-| Gate | State |
+| Disposition | State |
 |---|---|
-| IR-01 (account isolation) | **Corrected (R4), OPEN** until independent assessment |
-| IR-03 (sign-in/out transitions) | **Corrected (R4), OPEN** until independent assessment |
-| IR-06 (location search) | **CLOSED at code level** (unchanged) |
-| Implementation | Complete for the assessed findings (§R4-7) |
-| Controlled merge | **NO-GO** until independent assessment, the REL-05 option decision (§R4-6) and owner approval |
-| Shared-web Production activation | **NO-GO**: A-1 to A-3 are narrowed but remain for clients the service worker does not control; activation criteria are in §R4-8; separate decision |
-| Android public release, REL-03 acceptance | **HOLD** (REL-03 supervised acceptance deferred, not waived) |
+| **1. Application implementation** | **Corrected (R5)** for every application-level finding of the R4 disposition (§R5-1). It stays OPEN until independent assessment. |
+| **2. Controlled merge readiness** | **NO-GO**. It needs: independent assessment; exact-head CI recorded (§R5-2); owner approval; the deployment boundary re-confirmed at merge time. PR #392 stays **separate from REL-05**. |
+| **3. Production activation and native acceptance** | **NO-GO / HOLD**. A-1 to A-3 stay **open**. The rollout gate, supported-client compatibility, device acceptance and worker-rollback requirements in §R5-4 are mandatory before activation, and are deferred (not executed in this ticket). REL-03 supervised acceptance is deferred, not waived. |
 
-Chromium results are not WKWebView, Android WebView or device acceptance.
+IR-06 is unchanged and stays closed at code level. Chromium results are not WKWebView, Android WebView or device acceptance.
 
 ---
 
-## R4-1. Findings and dispositions (assessment of `b323d2a`)
+## R5-1. R4 disposition findings and R5 corrections
+
+| Area (R4 disposition) | R5 correction | Implementation | Regression evidence |
+|---|---|---|---|
+| **Reload fallback when `sessionStorage` is unavailable** (could loop) | The automatic page reload is **removed entirely**. Account-specific pages no longer contain server-rendered account state, so there is nothing to reload for. An account change unmounts the page, re-verifies, and mounts a fresh tree for the account now verified. | `components/AccountScoped.tsx` | `rel04R4SsrAgreementJsdom` S5: `sessionStorage` throwing; no reload path exists in the component |
+| **Account data in the initial response** (RSC payload) | Plan Day, Goals, Goal detail and Captures read **no session, cookie or database** on the server; their responses carry no account data. Pages mount, and therefore fetch, only **after** the client's verification (`AccountScoped verified`). Plan Day's bootstrap moved unchanged into `GET /api/plan-day/bootstrap`, which the shared middleware treats as account-scoped. | `app/api/plan-day/bootstrap/route.ts`, `app/plan-day/PlanDayLoader.tsx`, `app/plan-day/page.tsx`, the `*Scoped` client entries for Goals, Goal detail and Captures | **Real app:** `rel04R5NextAppRendering`. It runs `next build` and `next start` against Postgres. N1: real responses with the session cookie contain no id, email, city or goal title. N2: bootstrap returns 503 headerless, 409 for another account, 200 for the own account. N3: real Chromium, data appears only after the session answer, from requests stating the verified account (Plan Day, **Goal detail**, Goals, Captures). Also `rel04R4SsrAgreementJsdom` S1–S6 and `rel04R3BoundaryJsdom` B5 (mounted Goal detail included). |
+| **Migration tombstones pruned at 30 days** while a source may survive | Tombstones expire **only once source retirement is established**, meaning no interim source of that account remains, parseable or not. | `migrateOwnedSources`, `sourcesRetired` | `rel04R5QueueLifecycle` T1: cleanup failing for 45 days, tombstone kept, no resurrection; pruned after retirement |
+| **Uncertain migration sources** | A source is removed after commit **only if it is still exactly what was copied**. A changed source is preserved and its new content migrates next time. | `migrateOwnedSources` (raw comparison) | T2 |
+| **Claims per record** | **One claim per account + `clientRequestId`**. Database version 2 re-keys claims and dispatch marks; the upgrade carries v1 dispatch marks over. | `requestKey`, `takeClaim`, `upgradeToV2` | T3 (two records of one request); T7 (v1 → v2 upgrade) |
+| **Release and settlement by the wrong attempt** | Every claim carries an **attempt token**. `releaseClaim(token)` releases only its own claim. `settleRecords(ids, token)` removes the records, since the answer is definitive for the payload, but clears the claim only if it is still that attempt's; otherwise it reports `superseded`. | `activitySync.ts`, `offlineHabitQueue.ts` | T4 (late release and settle after a reclaim); T5 (integration: a delayed send completing after another attempt reclaimed and settled leaves no record, claim or dispatch mark) |
+| **Home converts an unreadable queue to empty** | `readOfflineHabitQueue` returns `null` when unreadable. Home shows an **unavailable** notice ("may not be shown; nothing was removed") and keeps pending rows. | `app/page.tsx` | T6; `rel04HomeFindTransitionJsdom` Q-R5 (mounted Home) |
+| **Cleanup confirmation promises removal** (unreadable or concurrent) | The confirmation says unreadable entries **will be kept**. For readable entries it says Aura will remove them "where it can and tell you the result". The outcome reports separately: **removed** (count); **possibly sent** ("may already have been sent"); **retained** (being sent elsewhere, or a storage error); **unreadable**; and **observed legacy** entries. | `lib/signOut.ts` | `signOutRel04`; `rel04R4QueueIntegrity` D1/S1/S2; `rel04AccountIsolation` C3/C7 |
+| **Worker state lost on restart** (announcements, reload guards) | Known current pages and reload guards are persisted in Cache Storage. Before reloading, the worker **asks** the page (current pages answer), and it re-queries all pages after activation and after a restart. The marker blocks a second reload of the same page, and an origin-wide limit allows 3 reloads per 10 minutes. | `public/sw.js`, `lib/serviceWorkerBridge.ts` | Chromium CH12: forced worker stop **and** persisted state wiped; current page not reloaded, old page still recovered. CH13: stale old HTML; reloaded once, never again, including after a restart. |
+| **Auth timeout released later requests without settlement** | The timer starts when the previous request is actually **sent**. A request waiting behind one that is still unsettled is **not sent**; it gets 503 `auth_transition_unsettled`. The bound is 8 s, below the client's own sign-out (10 s) and sign-in (15 s) timeouts, so the page receives the answer before giving up. The page reconciles with a session read: sign-in reports "still in progress, nothing was changed" and sign-out ends `busy`. Nothing is presented as completed. | `public/sw.js` (`settleAuthSerially`), `lib/signInCode.ts`, `lib/signOut.ts` | Chromium CH14 (queued sign-in answered at about 8 s, never sent, message shown); `rel04R5QueueLifecycle` T8 (sign-out → busy; sign-in → "still in progress") |
+| Reminder notification compatibility | The push and notification-click handlers are unchanged. `/api/reminders/seen` stays `optional`, with ownership checked in the route. | — | `rel04R3BoundaryJsdom` inventory |
+
+**Not addressed in R5:**
+- **A-2 / A-3 for clients the updated worker does not control.** This covers worker unavailable, a hard reload, no navigation since the update, and a request in flight inside a worker being replaced.
+- The auth design that would prevent a stale logout from clearing a replacement session for *any* client. This is coordinated with AUTH-01 and **not** claimed. Neither the worker nor revocation alone establishes complete mixed-version authentication safety.
+
+## R5-2. Evidence (commit `a3a02b8`)
+
+Evidence is in `docs/android/evidence/rel04-r5-a3a02b8/`. It has manifests (head SHA, clean-tree flag, Node version, step env, exit code, duration and log sha256) and per-command logs, produced by `test/evidence-tools/`.
+
+| Run | Result | Kind |
+|---|---|---|
+| `math-core-tests`, every `npx ts-node` command | **246/246** (10 non-`ts-node` steps listed as skipped) | real application code (jsdom-mounted components, real routes and middleware); harness simulations labelled |
+| Day Constructor DB suites, fresh isolated Postgres 16 (54 migrations) | **76/76** | real routes + real database |
+| Chromium multi-page | **27/27** (Chromium 151.0.7922.34; CH12–CH14 new) | real browser; loopback harness with synthetic accounts |
+| `rel04R5NextAppRendering` | **11/11** | **real production Next.js build and server**, real Postgres, real Chromium |
+| Generated-Prisma type check, root `tsc` | exit 0, exit 0, exit 0 | — |
+| Exact-head CI | **Run 45637045491 on `a3a02b8`: success, 9/9 jobs.** The jobs include the new `REL-04 Next.js app rendering tests`, Chromium, the DB suites, the math-core job, migration validation, the Next.js build, Palmistry G5 and both MCP jobs. | — |
+
+**Superseded intermediate commit.** On `0f260d7` (R5 first commit), run 45634108973 failed two jobs:
+
+- **Chromium CH14.** This was a real timing issue. The worker's 15 s bound equalled the client's 15 s sign-in timeout, so the client could give up first. Its 503 was also shown as "couldn't reach the server". Both are fixed in `a3a02b8`: the bound is now 8 s, and the explicit message is shown.
+- **Ephemeris / panchang.** This is the known MCP S10 "0 refused in 20 000 hex samples" statistical flake (about 0.6% per run, a test-only issue tracked in PR #394). It is unrelated to #392. It was not rerun.
+
+No AURA-CI-07 recurrence was observed in R5.
+
+The CI-07 occurrence-5 archive (run 45625122499, job 139243144597) is now also committed under `docs/android/evidence/ci07-occurrence5-a59a934/`, with SHA256SUMS. The original is at the repository root. The R4 assessor could not locate it there.
+
+## R5-3. Deployment and REL-05 separation
+
+- Unchanged from §R4-6, and still point-in-time evidence. Re-read the Ignored Build Step immediately before any merge, and confirm the merge's deployment is cancelled.
+- PR #392 adds no migration.
+- **PR #392 is kept out of REL-05's release commit.** Its activation is a separate decision under §R5-4.
+
+## R5-4. Activation and native acceptance requirements (carried forward; mandatory before activation; NOT executed here)
+
+**Open activation blockers:**
+- **A-1:** older-client recovery outside an updated-worker-controlled page.
+- **A-2:** a supported path that verifies session state before an affected client can claim sign-out succeeded.
+- **A-3:** an auth design that prevents a stale logout response from clearing a replacement session, plus evidence for slow, interrupted and worker-replacement cases beyond CH11/CH14. AUTH-01 is coordinated.
+- **A-4:** point-in-time; must be re-confirmed.
+
+**Rollout gate.** These complete §R4-8 as the R4 disposition requires.
+1. Record the exact release commit, the Preview smoke results, and D-S8, D-S9, D-Q1, D-X1, D-W1 and D-W2 on the release build.
+2. Record the owner-approved treatment of uncontrolled clients.
+3. Define, per metric:
+   - a **baseline** (7 days before promotion);
+   - a **denominator** (requests or sessions);
+   - an **observation window**;
+   - a **numeric stop threshold**;
+   - a named **decision owner**.
+
+   The metrics are:
+   - `client_upgrade_required` 503s per active session;
+   - unbound-logout 503s without a following reload;
+   - 409 `account_mismatch` rate;
+   - 5xx rate;
+   - habit-log duplicate `clientRequestId` conflicts.
+4. Demonstrate privacy-preserving telemetry that can correlate four things: the refusal, the navigation, receipt of the new bundle (the page's boundary announcement), and verified session state. A reload marker alone establishes only navigation.
+5. Pair server metrics with **queue-retention checks on devices**, because lost local work may never reach server logs. Use D-Q1 plus the in-app unavailable-queue notice rate, if instrumented.
+
+**Supported-client compatibility.**
+- Record the supported browsers and WebViews, and which of them run the worker.
+- For each one without a worker: record the A-1 to A-3 exposure, and whether it is accepted or blocked.
+
+**Device acceptance (§11).** Required on the release build, with the REL-03 supervised acceptance (deferred, not waived):
+- D-S1 to D-S9;
+- D-Q1;
+- D-X1;
+- D-W1;
+- D-W2.
+
+**Worker rollback.**
+- **Rollback candidate:** reconcile to **one** approved rollback deployment for this activation, chosen from the current live `dpl_3Sst…` and the REL-04 record's `dpl_EhhkW…`. Record the choice.
+- **Restore lag:** restoring the alias leaves already-active workers subject to their update lifecycle. They switch on the next navigation, which fetches the restored `sw.js`.
+- **Rollback acceptance must verify:**
+  - (a) the restored worker takes control;
+  - (b) the reload loop protection and the recovery notice behave;
+  - (c) reminder notification clicks still focus or open the app.
+
+
+---
+
+## R4-1. Findings and dispositions (assessment of `b323d2a`) — R4 round, historical
 
 | # | Finding (assessment) | R4 disposition | Implementation | Regression evidence |
 |---|---|---|---|---|
@@ -477,7 +580,7 @@ Open:
 | | (h) Session verification unavailable | Session endpoint blocked after sign-out | Unverified state, Retry, pending work kept |
 | D-S5 / D-S6 / D-S7 | Switch, interruption, expiry | As in R2 | As in R2 |
 | **D-S8** | Mixed versions (R4) | An old-build page open, deploy, open any other page of the app, then use the old page and sign out from it | Writes and reads refused without loss. The old page is reloaded by the updated service worker and shows the real session plus the "reloaded" notice. Record whether the worker took control; without it, A-2 is observed and recorded. The legacy notice shows a count only, with no removal |
-| **D-S9** | Account-scoped pages (R4) | Open Plan Day, Goals, Goal detail and Captures. Switch the account in another tab; also switch it *before* the page's first verification (cold start with a changed cookie) | Only "Checking your account…" until verification agrees; on disagreement the page reloads; no previous-account content or actions at any point |
+| **D-S9** | Account-scoped pages (R4/R5) | Open Plan Day, Goals, Goal detail and Captures. Switch the account in another tab; also switch it *before* the page's first verification (cold start with a changed cookie) | R5: only "Checking your account…" until verification answers, then the page fetches its data for the verified account; after a switch it unmounts and refetches for the new account (no reload); no previous-account content or actions at any point; offline/unreadable-storage cases show the unavailable-queue notice on Home |
 | **D-Q1** | IndexedDB queue (R4) | Log offline; kill and cold-start; log offline in two windows; sign out with an unanswered send | Entries survive restarts; each syncs exactly once; sign-out reports "already sent, may have been saved" for the unanswered one. If IndexedDB is unavailable, "not stored" is shown, never "pending" |
 | **D-X1** | Bound downloads (R4) | Export Data and Download calendar; switch account mid-download | File for the tapped account only; after a switch, nothing downloaded and the message shown. Record whether the Android WebView hands a blob download to the system (the WebView `DownloadListener` path is unverified) |
 | **D-W2** | Service worker in the WebView (R4) | Hosted bundle in the Capacitor WebView: check that the worker registers and controls the page, then run the D-S8 steps | Record the controller state. If no worker controls the WebView, A-1, A-2 and A-3 stay as documented for that client |

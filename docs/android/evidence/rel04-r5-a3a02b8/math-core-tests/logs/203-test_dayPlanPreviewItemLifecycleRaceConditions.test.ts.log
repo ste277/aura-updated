@@ -1,0 +1,18 @@
+$ npx ts-node test/dayPlanPreviewItemLifecycleRaceConditions.test.ts
+# job=math-core-tests step=Run day plan preview item lifecycle race condition test env={}
+OK   1a. Escape while saving is a no-op -- the modal does not close
+OK   1b. once the (now-waited-for) response resolves, it applies normally -- Escape never cancelled the save itself, only its own premature dismissal
+OK   2. Discard -> late UPDATED response: the preview stays discarded (null), never resurrected
+OK   3a. Regenerate -> late UPDATED response: the newly regenerated preview is never stomped by the stale edit
+OK   3b. Regenerate produces a fresh item with the SAME intentId the stale edit targeted -- the stale response still cannot overwrite it (proves the generation guard itself, not just applyUpdatedProposedItem's unrelated intentId-lookup defense)
+OK   4. unmount during save: the stale response can never call replacePreview on an unmounted owner (mountedRef guard, independent of the generation check)
+OK   5a. a rejected edit leaves the modal open (no close call) and applies nothing
+OK   5b. the resubmitted edit (same item, same session) applies, and the modal closes
+OK   5c. a later, independent edit of the SAME item reflects only its OWN latest selection
+OK   6. normal successful edit: applies, closes the modal, bumps the generation exactly once
+OK   6. the applied item carries its new acceptanceToken and the untouched sibling is byte-identical
+OK   7. rejected edit: the preview/original item/token are preserved unchanged, and the modal stays open for the user to try again
+
+ALL DAY PLAN PREVIEW ITEM LIFECYCLE RACE CONDITION CHECKS PASSED
+
+# exit=0 signal=

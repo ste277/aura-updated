@@ -1,0 +1,31 @@
+$ npx ts-node test/goalActivityRhythmGoalDetailUi.test.ts
+# job=math-core-tests step=Run Goal activity rhythm Goal Detail UI test env={}
+OK   9. 1/week -> "Once a week" (singular, the one consistent wording this app uses)
+OK   9. 2/week -> "2 times a week"
+OK   9. 5/week -> "5 times a week"
+OK   9. 7/week never reads "Daily" (not semantically identical to "every day" under the current model)
+OK   9. never the vague "A few times a week" -- the exact N is always shown
+OK   21. empty week (0 completed, 0 committed) reads calmly, no warning language
+OK   10. 1 completed, 0 committed -> "1 session this week" (singular)
+OK   10. 3 completed, 0 committed -> "3 sessions this week" (plural, no ratio)
+OK   22. partial week (2 completed, 1 committed) distinguishes both facts, never silently sums them
+OK   11. an UPCOMING occurrence is never presented as completed (0 completed, 1 committed never reads "1 completed")
+OK   45/23. target met (3 completed, 0 committed, 3/week) still just factual "3 sessions this week", never "COMPLETED"/"Goal complete"
+OK   47/24. over target (4 completed against 3/week) reads the real count, never clamped/negative language
+OK   NONE returns null (nothing to say)
+OK   10. no motivational judgment word appears across any weekly-progress wording (behind/on track/perfect/missed/failed/streak/score/consistency)
+OK   10/11. no "X of Y" ratio framing appears across any weekly-progress wording
+OK   15. NONE + COMPLETED still reads "Completed" -- finite semantics fully preserved
+OK   15. NONE + SUGGESTED/PLANNED/DISMISSED pass through unchanged
+OK   14/15. N_PER_WEEK + COMPLETED + still eligible -> never the permanent "Completed" badge
+OK   23. N_PER_WEEK + COMPLETED + target met (not eligible) -> still never "Completed" (ongoing, not finished)
+OK   15. N_PER_WEEK + SUGGESTED/PLANNED pass through unchanged (only COMPLETED is remapped)
+OK   4/12. ActivityRow wires in both the frequency and weekly-progress formatters
+OK   15/16. ActivityRow's state label comes from the Rhythm-aware wrapper, never the original presentGoalActivityStateLabel directly for a row that could be N_PER_WEEK
+OK   24. still never a per-activity progress bar (role="progressbar" appears at most once, the existing Goal-level bar)
+OK   13. Plan with Aura selectability still reads the one canonical eligibleForAnotherOccurrence field, never a second flag
+OK   32. no Rhythm configuration control was added (no input/select tied to a rhythm field)
+OK   33. no history/calendar/streak/trend UI was added
+ALL GOAL ACTIVITY RHYTHM GOAL DETAIL UI CHECKS PASSED
+
+# exit=0 signal=

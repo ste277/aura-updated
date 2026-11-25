@@ -1,0 +1,31 @@
+$ npx ts-node test/dayConstructorOverloadDecisionArchitecture.test.ts
+# job=math-core-tests step=Run Constructor overload decision architecture test env={}
+OK   the overload PRECEDENCE code is exactly the pinned baseline (importance rank, deadline-today, deadline, original order) -- hash f3d11aa9c907d9e8
+OK   the candidate PLACEMENT ranking code is exactly the pinned baseline (timingFit, earlier start, candidateOrder) -- hash 8acdbbede12cee16
+OK   the construction call sites are the pinned baseline: ONE precedence sort of the intents, and the per-intent candidate sort by the placement comparator
+OK   compareByOverloadPrecedence reads EXACTLY deadline, importance and originalOrder -- nothing else (current precedence: deadline today, importance, deadline, original order)
+OK   the order of the dimensions is the pinned one: deadline-today, then importance, then deadline presence/earlier deadline, then original order
+OK   the importance ranking is HIGH < MEDIUM < LOW (HIGH first)
+OK   the final tie-break is submission order, ascending (a.originalOrder - b.originalOrder)
+OK   the comparators take no timing/Muhurta quality and no decision facts: selection is isolated from placement quality
+OK   dayIntent.ts has no Decision Pressure, score, scarcity, shortfall or deficit concept in its code
+OK   dayConstructor.ts has no Decision Pressure, score, scarcity, shortfall or deficit concept in its code
+OK   dayCapacity.ts has no Decision Pressure, score, scarcity, shortfall or deficit concept in its code
+OK   the orchestrator has no Decision Pressure, score, scarcity, shortfall or deficit concept in its code
+OK   no decision module (precedence, placement, capacity, orchestrator) READS an opportunity or recurrence fact: facts remain inert metadata
+OK   the orchestrator still attaches facts as opaque metadata only (resolveDecisionFactsForIntent lookup, never inspected)
+OK   no decision module has a source branch: no Goal / automatic / manual vocabulary in precedence, placement, capacity or the orchestrator code
+OK   constructDay is reached ONLY through the orchestrator in production (no second construction path)
+OK   no backtracking or second optimization pass was introduced: the only repeat of constructDay is the existing bounded replenishment loop
+OK   no test-only production hook: no fixture/force-overload/debug flag/environment branch in the decision modules
+OK   the primary fixture exercises the real preview boundary and real persistence and never calls a comparator directly
+OK   the fixture uses no mocked availability, plans, facts or Constructor result (no fake deps objects)
+OK   the fixture asserts INDIVIDUAL feasibility of each candidate, the combined contention, the winner and the deferred loser
+OK   the fixture asserts ORDER INDEPENDENCE for unequal importance (both submission orders) and the importance matrix
+OK   the fixture documents and asserts the current TIE behavior (submission order) and the deadline controls (today, earlier, none, and their rank against importance)
+OK   the fixture asserts the non-overloaded and fixed/blocker controls, the empty day, the Goal source-neutrality control, and the capacity-metadata discrepancy
+OK   the fixture runs 20 determinism repetitions and both input permutations, and a UTC civil-time control
+OK   the fixture isolates selection from placement: equal activity, equal RESOLVED duration, explicit configured availability (no unconfigured fallback, no generic-fallback duration)
+ALL OVERLOAD DECISION ARCHITECTURE CHECKS PASSED
+
+# exit=0 signal=

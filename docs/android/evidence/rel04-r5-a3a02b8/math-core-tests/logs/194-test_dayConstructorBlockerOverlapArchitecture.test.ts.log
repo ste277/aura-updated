@@ -1,0 +1,28 @@
+$ npx ts-node test/dayConstructorBlockerOverlapArchitecture.test.ts
+# job=math-core-tests step=Run Constructor blocker overlap architecture test env={}
+OK   the real Constructor blocker loader calls listPlannedActivitiesOverlappingRange
+OK   it no longer uses the start-date-only listPlannedActivitiesForDay anywhere in the orchestrator (code)
+OK   the orchestrator imports no start-date-only plan loader
+OK   the loader still makes ONE plan query (a single call, no loop, no per-intent query)
+OK   the orchestrator calls deps.loadBlockingPlans exactly once, with bounds derived from the day AND the resolved window
+OK   the window is resolved BEFORE the blocker load (the range can depend on it)
+OK   resolveBlockerLoadBounds is pure and generic: no I/O, no clock, no clipping, no policy vocabulary
+OK   db.ts contains exactly ONE half-open overlap predicate over plannedStartAt/plannedEndAt (a single shared definition)
+OK   the overlap predicate is strictly half-open: strict < and > only (no <= / >= on either end)
+OK   the overlap query is user-scoped and excludes CANCELLED at the SQL level
+OK   the overlap query has BOTH bounds (it can never degrade to "all history"): lower and upper
+OK   O2 PARITY: the O2 range loader and the Constructor loader both use that one query
+OK   the shared start-date-only loader keeps its documented semantics for its OTHER consumers (this fix did not widen it)
+OK   lifecycle is unchanged: CANCELLED/SKIPPED/MOVED never block, LOGGED always blocks, UPCOMING blocks until it has elapsed
+OK   lifecycle is still applied by the orchestrator after the load (the loader never filters by lifecycle)
+OK   clipping to the construction window is still owned by dayCapacity (single owner): the orchestrator never clips
+OK   the two decision modules are untouched by this fix (precedence and placement sources still contain no overlap/blocker-loading concern)
+OK   acceptance persistence reads its fresh blockers through the SAME canonical overlap loader as the Constructor (updated deliberately by schedule-write S1: this guard previously pinned acceptance's old start-scoped read as known debt), on its transaction client
+OK   no snapshot machinery was introduced: no REPEATABLE READ / SERIALIZABLE / transaction in the orchestrator
+OK   no feature flag or environment switch was introduced in the orchestrator
+OK   no policy vocabulary was introduced into the orchestrator or the plan loaders (pressure, scarcity, last opportunity, promotion, shadow, policy score)
+OK   the real-DB regression reproduces the overnight case, asserts the mathematical non-overlap, the boundaries, lifecycle, cross-user, DST, explicit window, row volume and O2 parity
+OK   the pure suite covers the bounds helper, the single load, lifecycle statuses, adjacency, zero-length and DST day lengths
+ALL BLOCKER OVERLAP ARCHITECTURE CHECKS PASSED
+
+# exit=0 signal=

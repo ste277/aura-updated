@@ -1,0 +1,227 @@
+$ npx ts-node test/palm01I1Content.test.ts
+# job=math-core-tests step=Run Palmistry content, privacy and isolation test env={}
+OK   A1. exactly the four approved line categories, in order
+OK   A2. at most five marks (ticket: up to five verified marks)
+OK   A3. entry ids are unique
+OK   A4. PALMISTRY_ENTRY_IDS matches the entries exactly
+OK   A5. line/mark id lists match categories
+OK   B1. ayurlekha: has >= 1 source
+OK   B2. ayurlekha: every sourceId resolves in the register
+OK   B3. ayurlekha: every source ref has a locator
+OK   B4. ayurlekha: has a tradition label
+OK   B5. ayurlekha: tradition label is Indian-first
+OK   B6. ayurlekha: has attribution status + confidence
+OK   B7. ayurlekha: has non-empty description, interpretation and context note
+OK   B8. ayurlekha: not placeholder content
+OK   B9. ayurlekha: no entry is labelled a modern interpretation (Indian-first MVP)
+OK   B10. ayurlekha: at least one cited source was read directly or via a scholarly edition (never "not-read" only)
+OK   B11. ayurlekha: Western comparison is explicitly labelled as Western
+OK   B1. dhanamatrlekha: has >= 1 source
+OK   B2. dhanamatrlekha: every sourceId resolves in the register
+OK   B3. dhanamatrlekha: every source ref has a locator
+OK   B4. dhanamatrlekha: has a tradition label
+OK   B5. dhanamatrlekha: tradition label is Indian-first
+OK   B6. dhanamatrlekha: has attribution status + confidence
+OK   B7. dhanamatrlekha: has non-empty description, interpretation and context note
+OK   B8. dhanamatrlekha: not placeholder content
+OK   B9. dhanamatrlekha: no entry is labelled a modern interpretation (Indian-first MVP)
+OK   B10. dhanamatrlekha: at least one cited source was read directly or via a scholarly edition (never "not-read" only)
+OK   B11. dhanamatrlekha: Western comparison is explicitly labelled as Western
+OK   B1. pitrlekha: has >= 1 source
+OK   B2. pitrlekha: every sourceId resolves in the register
+OK   B3. pitrlekha: every source ref has a locator
+OK   B4. pitrlekha: has a tradition label
+OK   B5. pitrlekha: tradition label is Indian-first
+OK   B6. pitrlekha: has attribution status + confidence
+OK   B7. pitrlekha: has non-empty description, interpretation and context note
+OK   B8. pitrlekha: not placeholder content
+OK   B9. pitrlekha: no entry is labelled a modern interpretation (Indian-first MVP)
+OK   B10. pitrlekha: at least one cited source was read directly or via a scholarly edition (never "not-read" only)
+OK   B11. pitrlekha: Western comparison is explicitly labelled as Western
+OK   B1. urdhvarekha: has >= 1 source
+OK   B2. urdhvarekha: every sourceId resolves in the register
+OK   B3. urdhvarekha: every source ref has a locator
+OK   B4. urdhvarekha: has a tradition label
+OK   B5. urdhvarekha: tradition label is Indian-first
+OK   B6. urdhvarekha: has attribution status + confidence
+OK   B7. urdhvarekha: has non-empty description, interpretation and context note
+OK   B8. urdhvarekha: not placeholder content
+OK   B9. urdhvarekha: no entry is labelled a modern interpretation (Indian-first MVP)
+OK   B10. urdhvarekha: at least one cited source was read directly or via a scholarly edition (never "not-read" only)
+OK   B11. urdhvarekha: Western comparison is explicitly labelled as Western
+OK   B1. yava: has >= 1 source
+OK   B2. yava: every sourceId resolves in the register
+OK   B3. yava: every source ref has a locator
+OK   B4. yava: has a tradition label
+OK   B5. yava: tradition label is Indian-first
+OK   B6. yava: has attribution status + confidence
+OK   B7. yava: has non-empty description, interpretation and context note
+OK   B8. yava: not placeholder content
+OK   B9. yava: no entry is labelled a modern interpretation (Indian-first MVP)
+OK   B10. yava: at least one cited source was read directly or via a scholarly edition (never "not-read" only)
+OK   B1. matsya: has >= 1 source
+OK   B2. matsya: every sourceId resolves in the register
+OK   B3. matsya: every source ref has a locator
+OK   B4. matsya: has a tradition label
+OK   B5. matsya: tradition label is Indian-first
+OK   B6. matsya: has attribution status + confidence
+OK   B7. matsya: has non-empty description, interpretation and context note
+OK   B8. matsya: not placeholder content
+OK   B9. matsya: no entry is labelled a modern interpretation (Indian-first MVP)
+OK   B10. matsya: at least one cited source was read directly or via a scholarly edition (never "not-read" only)
+OK   B1. shankha: has >= 1 source
+OK   B2. shankha: every sourceId resolves in the register
+OK   B3. shankha: every source ref has a locator
+OK   B4. shankha: has a tradition label
+OK   B5. shankha: tradition label is Indian-first
+OK   B6. shankha: has attribution status + confidence
+OK   B7. shankha: has non-empty description, interpretation and context note
+OK   B8. shankha: not placeholder content
+OK   B9. shankha: no entry is labelled a modern interpretation (Indian-first MVP)
+OK   B10. shankha: at least one cited source was read directly or via a scholarly edition (never "not-read" only)
+OK   B1. chatra: has >= 1 source
+OK   B2. chatra: every sourceId resolves in the register
+OK   B3. chatra: every source ref has a locator
+OK   B4. chatra: has a tradition label
+OK   B5. chatra: tradition label is Indian-first
+OK   B6. chatra: has attribution status + confidence
+OK   B7. chatra: has non-empty description, interpretation and context note
+OK   B8. chatra: not placeholder content
+OK   B9. chatra: no entry is labelled a modern interpretation (Indian-first MVP)
+OK   B10. chatra: at least one cited source was read directly or via a scholarly edition (never "not-read" only)
+OK   B1. vedi: has >= 1 source
+OK   B2. vedi: every sourceId resolves in the register
+OK   B3. vedi: every source ref has a locator
+OK   B4. vedi: has a tradition label
+OK   B5. vedi: tradition label is Indian-first
+OK   B6. vedi: has attribution status + confidence
+OK   B7. vedi: has non-empty description, interpretation and context note
+OK   B8. vedi: not placeholder content
+OK   B9. vedi: no entry is labelled a modern interpretation (Indian-first MVP)
+OK   B10. vedi: at least one cited source was read directly or via a scholarly edition (never "not-read" only)
+OK   B12. marks are symbol-only (never placed on the hand)
+OK   B13. lines are drawn from source descriptions
+OK   B14. upward line is NOT equated with the Western Sun line
+OK   B15. longevity line is explicitly NOT the Western life line
+OK   B16. every traditionalName is on the verified-terms list
+OK   C1. zysk-2025: has author, title, sections, edition, licensing, verification
+OK   C2. zysk-2025: url is https
+OK   C1. sardulakarnavadana: has author, title, sections, edition, licensing, verification
+OK   C2. sardulakarnavadana: url is https
+OK   C1. brhatsamhita: has author, title, sections, edition, licensing, verification
+OK   C2. brhatsamhita: url is https
+OK   C1. samudrikatilaka: has author, title, sections, edition, licensing, verification
+OK   C2. samudrikatilaka: url is https
+OK   C1. hastasanjivana: has author, title, sections, edition, licensing, verification
+OK   C2. hastasanjivana: url is https
+OK   C1. hand-diagrams-18c: has author, title, sections, edition, licensing, verification
+OK   C2. hand-diagrams-18c: url is https
+OK   C3. CC BY-SA licensing is recorded for the Zysk edition
+OK   C3b. Zysk carries a structured licence notice (name, official URL, copyright holder) for in-app attribution
+OK   C4. no source is Wikipedia
+OK   C5. every source in the register is cited by at least one entry or is the edition other sources rely on
+OK   D1. general disclosure is the exact I1-B sentence plus the G3 W4 sentence
+OK   D2. longevity disclosure states Aura does not estimate lifespan or predict death
+OK   D3. hand-convention note is historical and says Aura does not infer anything
+OK   D4. diagram note says the drawing is schematic and not every hand shows every feature
+OK   D5. user-facing content avoids /\byou will\b/i
+OK   D5. user-facing content avoids /\byour palm (proves|shows|means)\b/i
+OK   D5. user-facing content avoids /\bguarantee/i
+OK   D5. user-facing content avoids /\bdestined\b/i
+OK   D5. user-facing content avoids /\bpredicts? your\b/i
+OK   D5. user-facing content avoids /\bwill definitely\b/i
+OK   D5. user-facing content avoids /\byou are\b/i
+OK   D5. user-facing content avoids /\byour (lifespan|life span|future|health|death)\b/i
+OK   D5. user-facing content avoids /\b\d{2,3} years\b/i
+OK   D5. user-facing content avoids /\bdie\b|\bdeath will\b/i
+OK   D5. user-facing content avoids /\bdanger\b|\bwarning\b|\bbeware\b/i
+OK   D7. no unverified tradition names (Hasta Sāmudrika / Sāmudrika Śāstra) in user-facing text
+OK   D8. the early Buddhist chapter is never called simply "9th-century" (it is dated after the mid-9th century)
+OK   D9. no internal review-workflow wording in user-facing text
+OK   D6. no Western planetary mount is presented as an entry
+OK   E1. content review status is APPROVED (Product Owner approval, 2026-11-24)
+OK   E2. approver is the Product Owner editorial/cultural review, explicitly NOT an independent scholarly review
+OK   F1. unknown id returns undefined
+OK   F2. non-string id returns undefined
+OK   F3. prototype-ish ids are rejected
+OK   G1. PALMISTRY_GUIDE_OPENED is a known event
+OK   G2. per-feature selections are NOT tracked (no profile built from selections)
+OK   G3. no PALMISTRY_GUIDE_COMPLETED event was invented
+OK   G4. GUIDE_OPENED accepts empty metadata
+OK   G5. GUIDE_OPENED rejects an entry id
+OK   G6. GUIDE_OPENED rejects observation-like metadata
+OK   G7. GUIDE_OPENED rejects image-like metadata
+OK   G8. no PALMISTRY_* event other than GUIDE_OPENED exists
+OK   H1. packages/palmistry/src/content.ts: no fetch() / XMLHttpRequest / sendBeacon
+OK   H2. packages/palmistry/src/content.ts: no camera / media capture
+OK   H3. packages/palmistry/src/content.ts: no file input / upload / FileReader / canvas
+OK   H4. packages/palmistry/src/content.ts: no AI / LLM service
+OK   H5. packages/palmistry/src/content.ts: no browser storage
+OK   H6. packages/palmistry/src/content.ts: no API route / db / prisma / session access
+OK   H7. packages/palmistry/src/content.ts: no external image service
+OK   H1. packages/palmistry/src/sources.ts: no fetch() / XMLHttpRequest / sendBeacon
+OK   H2. packages/palmistry/src/sources.ts: no camera / media capture
+OK   H3. packages/palmistry/src/sources.ts: no file input / upload / FileReader / canvas
+OK   H4. packages/palmistry/src/sources.ts: no AI / LLM service
+OK   H5. packages/palmistry/src/sources.ts: no browser storage
+OK   H6. packages/palmistry/src/sources.ts: no API route / db / prisma / session access
+OK   H7. packages/palmistry/src/sources.ts: no external image service
+OK   H1. apps/web/components/PalmistryView.tsx: no fetch() / XMLHttpRequest / sendBeacon
+OK   H2. apps/web/components/PalmistryView.tsx: no camera / media capture
+OK   H3. apps/web/components/PalmistryView.tsx: no file input / upload / FileReader / canvas
+OK   H4. apps/web/components/PalmistryView.tsx: no AI / LLM service
+OK   H5. apps/web/components/PalmistryView.tsx: no browser storage
+OK   H6. apps/web/components/PalmistryView.tsx: no API route / db / prisma / session access
+OK   H7. apps/web/components/PalmistryView.tsx: no external image service
+OK   H1. apps/web/components/PalmHandDiagram.tsx: no fetch() / XMLHttpRequest / sendBeacon
+OK   H2. apps/web/components/PalmHandDiagram.tsx: no camera / media capture
+OK   H3. apps/web/components/PalmHandDiagram.tsx: no file input / upload / FileReader / canvas
+OK   H4. apps/web/components/PalmHandDiagram.tsx: no AI / LLM service
+OK   H5. apps/web/components/PalmHandDiagram.tsx: no browser storage
+OK   H6. apps/web/components/PalmHandDiagram.tsx: no API route / db / prisma / session access
+OK   H7. apps/web/components/PalmHandDiagram.tsx: no external image service
+OK   H8. the guide components never import the tracker or any lib/ module
+OK   I1. no migration mentions palm
+OK   I2. schema.prisma has no palmistry model/field
+OK   J1. packages/palmistry imports nothing outside itself
+OK   J2. no engine package (panchang, muhurta, recommendation, window-ranking, ...) references palmistry
+OK   J3. only lib/productEvents.ts (analytics enum) references palmistry in apps/web/lib
+OK   J4. palmistry is referenced only by its own components (not Home, Plan, Timeline, Panchang, Muhurtham)
+OK   K1. review-status.json holds exactly the Product Owner approval record (single source of truth; independentScholarlyReview false)
+OK   K2. content.ts derives its review status from review-status.json
+OK   K3. build exclusion reads the same file and reports approved
+OK   K4. production + not approved: exactly one replacement plugin pointing at the stand-in
+OK   K5. dev builds keep the real module
+OK   K6. approved content is not excluded
+OK   K7. default (no `approved` passed) reads the file -> real APPROVED record -> not excluded in production
+OK   K8. replacement pattern matches the PalmistryView request forms
+OK   K9. replacement pattern does not match the stand-in, the diagram or similar names
+OK   K9b. approval state is part of the webpack cache key (pending vs approved differ)
+OK   K9c. a config without a cache object is left alone
+OK   K10. next.config.js wires the exclusion into its webpack hook (reads the real APPROVED file; image-input exclusion still applied)
+OK   K11. only PalmistryView and PalmHandDiagram import packages/palmistry (relative imports inside the package excluded)
+OK   K12. only app/page.tsx imports components/PalmistryView
+OK   K13. only PalmistryView imports PalmHandDiagram
+OK   K14. only the build-exclusion module refers to the stand-in (nothing imports it directly)
+OK   K15. stand-in contains none of the bundle sentinels
+OK   K16. stand-in imports nothing from packages/palmistry or the real view
+OK   K17. every name page.tsx imports from PalmistryView is exported by BOTH the real module and the stand-in
+OK   K18. bundle sentinel present in source: zysk-2025
+OK   K18. bundle sentinel present in source: palm-line-ayurlekha
+OK   K18. bundle sentinel present in source: PENDING_HUMAN_REVIEW
+OK   K18. bundle sentinel present in source: Palmistry is a traditional interpretive practice
+OK   K18. bundle sentinel present in source: Learn the lines of the hand
+OK   K18. bundle sentinel present in source: Aura does not estimate lifespan
+OK   K18. bundle sentinel present in source: History of Science in South Asia
+OK   K18. bundle sentinel present in source: Western palmistry, for comparison
+OK   K18b. every bundle sentinel is ASCII-only (survives minifier escaping)
+OK   K18c. at least 8 sentinels, covering content, sources, UI copy and review state
+OK   K19. no sentinel occurs in ExploreView (card copy moved out)
+OK   K21a. scanner reports nothing for a clean build
+OK   K21b. scanner flags leaked sentinels with file paths
+OK   K20. CI runs the bundle check right after the production build
+OK   J5. no API route references palmistry
+
+221 passed, 0 failed
+
+# exit=0 signal=
