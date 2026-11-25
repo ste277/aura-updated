@@ -59,7 +59,6 @@ const RELOAD_WINDOW_MAX = 3;
 const ANNOUNCE_WAIT_MS = 600;
 const STATE_MAX_AGE_MS = 60 * 60 * 1000;
 let statePromise = null;
-const announceWaiters = new Map();
 
 function emptyState() { return { boundary: {}, reloaded: {}, reloads: [], navigateFailed: 0 }; }
 function loadState() {
@@ -79,6 +78,14 @@ async function saveState(st) {
   st.reloads = st.reloads.filter((t) => now - t < RELOAD_WINDOW_MS);
   try { await (await caches.open(STATE_CACHE)).put(STATE_URL, new Response(JSON.stringify(st), { headers: { 'content-type': 'application/json' } })); } catch (err) { /* in-memory state still applies */ }
 }
+// R6: every read-check-write of the persisted state runs in ONE serialized step, so concurrent
+// recovery checks cannot both pass a stale guard read (atomic reservation within this worker).
+let stateLock = Promise.resolve();
+function withState(fn) {
+  const run = stateLock.then(async () => { const st = await loadState(); const out = await fn(st); await saveState(st); return out; });
+  stateLock = run.then(() => undefined, () => undefined);
+  return run;
+}
 async function queryAllClients() {
   try {
     const all = await self.clients.matchAll({ type: 'window' });
@@ -86,21 +93,28 @@ async function queryAllClients() {
   } catch (err) { /* ignore */ }
 }
 
+// R6: pending "are you current?" checks, per page; EVERY check for a page is answered by that
+// page's acknowledgement (a nonce ties a reply to its query; any announcement from the page proves it current).
+const pendingChecks = new Map(); // clientId -> Map<nonce, resolve>
 self.addEventListener('message', (event) => {
   const data = event.data || {};
   if (data.type !== 'AURA_ACCOUNT_BOUNDARY' || !event.source || !event.source.id) return;
   const id = event.source.id;
-  const waiter = announceWaiters.get(id);
-  if (waiter) { announceWaiters.delete(id); waiter(); }
-  event.waitUntil(loadState().then((st) => { st.boundary[id] = Date.now(); return saveState(st); }));
+  const waiting = pendingChecks.get(id);
+  if (waiting) { pendingChecks.delete(id); for (const resolve of waiting.values()) resolve(true); }
+  event.waitUntil(withState((st) => { st.boundary[id] = Date.now(); }));
 });
 
 /** Asks one page whether it runs the current bundle; true when it answers in time. */
 function askCurrent(client) {
   return new Promise((resolve) => {
-    const timer = setTimeout(() => { announceWaiters.delete(client.id); resolve(false); }, ANNOUNCE_WAIT_MS);
-    announceWaiters.set(client.id, () => { clearTimeout(timer); resolve(true); });
-    try { client.postMessage({ type: 'AURA_BOUNDARY_QUERY' }); } catch (err) { clearTimeout(timer); announceWaiters.delete(client.id); resolve(false); }
+    const nonce = Math.random().toString(36).slice(2) + Date.now().toString(36);
+    const forClient = pendingChecks.get(client.id) || new Map();
+    pendingChecks.set(client.id, forClient);
+    const done = (answer) => { clearTimeout(timer); forClient.delete(nonce); if (forClient.size === 0 && pendingChecks.get(client.id) === forClient) pendingChecks.delete(client.id); resolve(answer); };
+    const timer = setTimeout(() => done(false), ANNOUNCE_WAIT_MS);
+    forClient.set(nonce, () => done(true));
+    try { client.postMessage({ type: 'AURA_BOUNDARY_QUERY', nonce }); } catch (err) { done(false); }
   });
 }
 
@@ -122,24 +136,39 @@ async function settleAuthSerially(request) {
   return run;
 }
 
-async function reloadOutdatedClient(clientId) {
-  if (!clientId) return;
-  const st = await loadState();
-  if (st.boundary[clientId]) return;
-  const now = Date.now();
-  if (now - (st.reloaded[clientId] || 0) < RELOAD_GUARD_MS) return;
+// R6: concurrent refusals from one page share ONE recovery check (coalesced).
+const recoveryInFlight = new Map(); // clientId -> Promise
+function reloadOutdatedClient(clientId) {
+  if (!clientId) return Promise.resolve();
+  const existing = recoveryInFlight.get(clientId);
+  if (existing) return existing;
+  const p = recoverClient(clientId).finally(() => { if (recoveryInFlight.get(clientId) === p) recoveryInFlight.delete(clientId); });
+  recoveryInFlight.set(clientId, p);
+  return p;
+}
+
+const eligible = (st, clientId, now) => !st.boundary[clientId] && now - (st.reloaded[clientId] || 0) >= RELOAD_GUARD_MS;
+
+async function recoverClient(clientId) {
+  if (!eligible(await loadState(), clientId, Date.now())) return;
   const client = await self.clients.get(clientId);
   if (!client || client.type !== 'window' || typeof client.navigate !== 'function') return;
   const target = new URL(client.url);
   if (target.origin !== self.location.origin || target.searchParams.get('aura_reloaded') === 'upgrade') return;
   if (await askCurrent(client)) return; // a current-bundle page (e.g. its announcement was lost with a restart)
-  st.reloads = st.reloads.filter((t) => now - t < RELOAD_WINDOW_MS);
-  if (st.reloads.length >= RELOAD_WINDOW_MAX) return; // origin-wide loop protection
-  st.reloaded[clientId] = now;
-  st.reloads.push(now);
-  await saveState(st);
+  // Re-check eligibility and reserve the reload in one serialized step (origin-wide limit, persisted).
+  const reserved = await withState((st) => {
+    const now = Date.now();
+    if (!eligible(st, clientId, now)) return false;
+    st.reloads = st.reloads.filter((t) => now - t < RELOAD_WINDOW_MS);
+    if (st.reloads.length >= RELOAD_WINDOW_MAX) return false; // origin-wide loop protection
+    st.reloaded[clientId] = now;
+    st.reloads.push(now);
+    return true;
+  });
+  if (!reserved) return;
   target.searchParams.set('aura_reloaded', 'upgrade');
-  try { await client.navigate(target.toString()); } catch (err) { st.navigateFailed += 1; await saveState(st); }
+  try { await client.navigate(target.toString()); } catch (err) { await withState((st) => { st.navigateFailed += 1; }); }
 }
 
 self.addEventListener('fetch', (event) => {

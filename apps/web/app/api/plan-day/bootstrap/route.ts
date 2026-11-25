@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
 import { verifySessionToken, SESSION_COOKIE_NAME } from '../../../../lib/auth';
+import { getSessionFromRequest } from '../../../../lib/session';
 import { getUserById, listGoalActivitiesWithLinkedPlanStatus, listCapturesWithLinkedPlanStatus, loadGoalActivityRhythmFacts } from '../../../../lib/db';
 import { resolvePlanDayServerProps, resolveGoalActivityHandoff, resolveCaptureHandoff, resolveAutomaticGoalDemand, markCanonicalGoalDemandHandoff } from '../../../../lib/planDayBootstrap';
 import { createRealGoalDemandCandidatesDeps } from '../../../../lib/goalDemandCandidates';
@@ -33,10 +33,9 @@ import { parseHorizonSearchParam } from '../../../../lib/planningHorizon';
  * plain props, never recomputed from the browser's clock. This reuses the
  * EXACT SAME canonical session verification (`verifySessionToken`,
  * `SESSION_COOKIE_NAME`) and user lookup (`getUserById`) every route
- * handler in this app already uses -- `next/headers`'s `cookies()` is the
- * standard, first-party Next.js primitive for reading that SAME cookie
- * from within a Server Component (where a `NextRequest` isn't available),
- * not a second authentication model (this ticket's own section 15).
+ * handler in this app already uses -- read from this route's own request
+ * cookies (R6; formerly `next/headers`'s `cookies()` in the page), not a
+ * second authentication model (this ticket's own section 15).
  *
  * Planning Horizon V1 PR P2 -- `searchParams.horizon` is parsed here,
  * server-side, into a real `PlanningHorizon` (`parseHorizonSearchParam`,
@@ -51,18 +50,24 @@ export const dynamic = 'force-dynamic';
 
 const one = (v: string | null) => (v === null ? undefined : v);
 
+const NOT_AUTHENTICATED = () => NextResponse.json({ error: 'Not authenticated.' }, { status: 401, headers: { 'Cache-Control': 'no-store' } });
+
 export async function GET(req: NextRequest) {
+  // R6: the protected-API contract -- no (or an invalid) session is 401, never an empty 200.
+  // (A session without the account statement, or stating another account, is refused earlier by the middleware: 503 / 409.)
+  if (!getSessionFromRequest(req)) return NOT_AUTHENTICATED();
   const q = req.nextUrl.searchParams;
   // Same shape the page received from Next.js; a repeated key stays an array (treated as absent below, as before).
   const pick = (k: string): string | string[] | undefined => { const all = q.getAll(k); return all.length > 1 ? all : one(q.get(k)); };
   const searchParams = { horizon: pick('horizon'), fromGoal: pick('fromGoal'), activities: pick('activities'), captures: pick('captures') };
   const horizon = parseHorizonSearchParam(searchParams.horizon);
   const bootstrap = await resolvePlanDayServerProps({
-    getSessionToken: () => cookies().get(SESSION_COOKIE_NAME)?.value,
+    getSessionToken: () => req.cookies.get(SESSION_COOKIE_NAME)?.value,
     verifySession: (token) => verifySessionToken(token),
     getUser: (userId) => getUserById(userId),
     now: () => new Date(),
   }, horizon);
+  if (!bootstrap) return NOT_AUTHENTICATED(); // the session's user no longer exists
 
   // Goals -> Planning Integration V1 PR C -- resolved fresh on every
   // render (this ticket's own section 8: reload-safety), entirely
@@ -73,7 +78,7 @@ export async function GET(req: NextRequest) {
   const activitiesParam = typeof searchParams.activities === 'string' ? searchParams.activities : null;
   const goalActivities = await resolveGoalActivityHandoff(
     {
-      getSessionToken: () => cookies().get(SESSION_COOKIE_NAME)?.value,
+      getSessionToken: () => req.cookies.get(SESSION_COOKIE_NAME)?.value,
       verifySession: (token) => verifySessionToken(token),
       listGoalActivities: (userId, goalId) => listGoalActivitiesWithLinkedPlanStatus(userId, goalId),
       loadGoalActivityRhythmFacts: (userId, goalActivityId, timezone) => loadGoalActivityRhythmFacts(userId, goalActivityId, timezone),
@@ -91,7 +96,7 @@ export async function GET(req: NextRequest) {
   const capturesParam = typeof searchParams.captures === 'string' ? searchParams.captures : null;
   const captures = await resolveCaptureHandoff(
     {
-      getSessionToken: () => cookies().get(SESSION_COOKIE_NAME)?.value,
+      getSessionToken: () => req.cookies.get(SESSION_COOKIE_NAME)?.value,
       verifySession: (token) => verifySessionToken(token),
       listCaptures: (userId) => listCapturesWithLinkedPlanStatus(userId),
     },
@@ -112,7 +117,7 @@ export async function GET(req: NextRequest) {
   // inside the resolver itself.
   const automaticGoalDemand = await resolveAutomaticGoalDemand(
     {
-      getSessionToken: () => cookies().get(SESSION_COOKIE_NAME)?.value,
+      getSessionToken: () => req.cookies.get(SESSION_COOKIE_NAME)?.value,
       verifySession: (token) => verifySessionToken(token),
       ...createRealGoalDemandCandidatesDeps(),
     },

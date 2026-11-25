@@ -78,6 +78,14 @@ async function main() {
     const b1 = await fetch(`${origin}/api/plan-day/bootstrap`, { headers: { cookie, 'X-Aura-Expected-Account': other.id } });
     const b2 = await fetch(`${origin}/api/plan-day/bootstrap`, { headers: { cookie, 'X-Aura-Expected-Account': user.id } });
     const j2 = b2.ok ? await b2.json() : null;
+    // R6: missing or invalid session -> 401 (the protected-API contract), never an empty 200.
+    const bNone = await fetch(`${origin}/api/plan-day/bootstrap`);
+    // An invalid cookie WITH the stated account (what the client sends) reaches the route -> 401. (Headerless with any
+    // cookie stays the existing boundary rule: 503 client_upgrade_required from the middleware, unchanged.)
+    const bBad = await fetch(`${origin}/api/plan-day/bootstrap`, { headers: { cookie: 'as_session=not-a-valid-token', 'X-Aura-Expected-Account': user.id } });
+    const bBadHeaderless = await fetch(`${origin}/api/plan-day/bootstrap`, { headers: { cookie: 'as_session=not-a-valid-token' } });
+    const bNoneBody = await bNone.json().catch(() => null);
+    check(`N2 (R6) real GET /api/plan-day/bootstrap without a session -> ${bNone.status} ${JSON.stringify(bNoneBody)}, with an invalid session stating an account -> ${bBad.status} (both 401); headerless + invalid cookie -> ${bBadHeaderless.status} (existing middleware rule, 503)`, bNone.status === 401 && bNoneBody?.error === 'Not authenticated.' && bBad.status === 401 && bBadHeaderless.status === 503);
     check(`N2 real GET /api/plan-day/bootstrap: headerless ${b0.status} (503), other account ${b1.status} (409), own account ${b2.status} with the account's city and a server planning date`, b0.status === 503 && b1.status === 409 && b2.status === 200 && j2?.cityName === city && typeof j2?.planningDate === 'string');
 
     // ---------------------------------------------------------------- N3 real Chromium: data only after verification, bound requests

@@ -973,6 +973,10 @@ jobs:
         env:
           TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
         run: npx ts-node --project tsconfig.jsdom-tests.json test/rel04R5QueueLifecycle.test.ts
+      - name: Run REL-04 R6 findings test (R5-head reproductions + corrections)
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/rel04R6Findings.test.ts
       - name: Run REL-04 R3-head (b323d2a) reproduction test
         env:
           TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'

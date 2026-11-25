@@ -16,7 +16,12 @@ export function announceAccountBoundary(): void {
     sw.addEventListener?.('controllerchange', announce);
     // R5: a (re)started worker asks before treating a page as out of date; answer it.
     sw.addEventListener?.('message', (e: MessageEvent) => {
-      if ((e.data as { type?: string } | null)?.type === 'AURA_BOUNDARY_QUERY') (e.source as ServiceWorker | null)?.postMessage?.(BOUNDARY_MESSAGE) ?? announce();
+      const q = e.data as { type?: string; nonce?: string } | null;
+      if (q?.type !== 'AURA_BOUNDARY_QUERY') return;
+      // R6: the reply carries the query's nonce, tying it to that recovery check.
+      const reply = { ...BOUNDARY_MESSAGE, nonce: q.nonce };
+      const target = (e.source as ServiceWorker | null) ?? sw.controller;
+      target?.postMessage?.(reply);
     });
     sw.startMessages?.();
   } catch {

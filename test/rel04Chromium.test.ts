@@ -91,6 +91,7 @@ let BUNDLE = '';
 // R4 service-worker cases: what the "deployment" currently serves at /sw.js and at the app URL.
 const OLD_SW = fs.readFileSync(path.join(__dirname, 'fixtures', 'rel04-prod-head', 'sw.js.txt'), 'utf8'); // Production ac46fc3
 const NEW_SW = fs.readFileSync(path.join(WEB, 'public', 'sw.js'), 'utf8');
+const R5_SW = fs.readFileSync(path.join(__dirname, 'fixtures', 'rel04-r5-head', 'sw.js.txt'), 'utf8'); // R6 before/after (CH15)
 const OLD_LOGOUT = fs.readFileSync(path.join(__dirname, 'fixtures', 'rel04-prod-head', 'page.handleLogout.txt'), 'utf8');
 const deploy = { sw: NEW_SW, appHtml: 'new' as 'old' | 'new' };
 // The pre-boundary page: registers the worker like Home does, and signs out with Production's own handleLogout body.
@@ -551,6 +552,40 @@ async function main() {
       check(`CH14 (R5) the slow sign-out then lands; no replacement session existed for it to clear (cookie now: ${now})`, now === null);
       await context.close();
     }
+
+    // ------------------------------------------------------------ CH15 (R6) concurrent refusals from a CURRENT page, acknowledgement delayed 150 ms
+    // The R5 independent assessment's probe: worker restarted with its state wiped, 8 concurrent refusals.
+    for (const [label, sw] of [['R5 HEAD (a3a02b8) worker', R5_SW], ['current worker', NEW_SW]] as const) {
+      deploy.sw = sw; deploy.appHtml = 'new';
+      const { context, signIn } = await newContext();
+      await context.addInitScript(() => {
+        const proto = ServiceWorker.prototype;
+        const send = proto.postMessage;
+        proto.postMessage = function (message: any, ...options: any[]) {
+          if (message?.type === 'AURA_ACCOUNT_BOUNDARY') { Reflect.apply(setTimeout, window, [() => Reflect.apply(send, this, [message, ...options]), 150]); return; }
+          Reflect.apply(send, this, [message, ...options]);
+        };
+      });
+      const cur = await context.newPage();
+      await cur.goto(origin + '/app');
+      await cur.waitForFunction(() => Boolean(navigator.serviceWorker.controller) && (window as any).auraReady, null, { timeout: 15000 });
+      await signIn('alicesynth@example.invalid');
+      await cur.evaluate(async () => { await caches.delete('aura-sw-state-v1'); });
+      const cdp = await context.newCDPSession(cur);
+      await cdp.send('ServiceWorker.enable');
+      await cdp.send('ServiceWorker.stopAllWorkers');
+      const before = cur.url();
+      let domNavigations = 0;
+      cur.on('framenavigated', (f: any) => { if (f === cur.mainFrame()) domNavigations++; });
+      const statuses: number[] = await cur.evaluate(async () => Promise.all(Array.from({ length: 8 }, async () => (await (window as any).__nativeFetch('/api/goals')).status))).catch(() => []);
+      await cur.waitForTimeout(1600);
+      const reloaded = cur.url() !== before;
+      console.log(`CH15 ${label}:`, JSON.stringify({ statuses, reloaded, domNavigations }));
+      if (sw === R5_SW) check(`CH15 (R6, real Chromium) ${label} reproduces the assessment: 8 concurrent refusals + 150 ms acknowledgement -> the CURRENT page is reloaded`, statuses.length === 8 && statuses.every((x) => x === 503) && reloaded);
+      else check(`CH15 (R6, real Chromium) ${label}: the same 8 concurrent refusals + 150 ms acknowledgement -> the current page is NOT reloaded (checks coalesced, acknowledgement correlated)`, statuses.length === 8 && statuses.every((x) => x === 503) && !reloaded && domNavigations === 0);
+      await context.close();
+    }
+    deploy.sw = NEW_SW;
   } finally {
     await browser.close();
     server.close();

@@ -156,8 +156,17 @@ function randomId(): string {
   }
 }
 
-/** Deterministic id for an entry migrated from an interim format. */
-export function migratedRecordId(item: QueuedHabitLog): string {
+/**
+ * Deterministic id for an entry migrated from an interim format. R6: the
+ * OWNING ACCOUNT is part of the identity -- two accounts' entries with the same
+ * clientRequestId and payload are two different records.
+ */
+export function migratedRecordId(item: QueuedHabitLog, ownerUserId: string): string {
+  return 'm' + hash(`${ownerUserId}|${item.clientRequestId}|${canonicalPayload(item)}`);
+}
+
+/** The R4/R5 (owner-less) migrated id; honoured only for a record or marker OWNED by the same account. */
+export function legacyMigratedRecordId(item: QueuedHabitLog): string {
   return 'm' + hash(`${item.clientRequestId}|${canonicalPayload(item)}`);
 }
 
@@ -290,85 +299,132 @@ const fresh = (c: Claim | undefined, now: number) => Boolean(c && now - c.at < C
 
 // ------------------------------------------------------------------ migration (owned interim formats)
 
-interface MigrationSource { key: string; raw: string; candidates: Array<{ recordId: string; item: OwnedQueuedHabitLog }>; tombstoned: Set<string> }
+/** One interim entry: the id it migrates to, plus earlier ids that also identify it (owned by the same account only). */
+interface Candidate { recordId: string; aliases: string[]; item: OwnedQueuedHabitLog }
+interface MigrationSource { key: string; raw: string; candidates: Candidate[] }
+/**
+ * R6 -- what inspecting the account's interim (localStorage) sources established:
+ *   'unavailable'  storage could not be inspected (access denied, a read threw, no storage):
+ *                  NOTHING is concluded -- no source is assumed absent, no marker is pruned;
+ *   'ok'           inspected; `remaining` = some interim key of this account still exists
+ *                  (parseable or not), i.e. retirement is NOT established.
+ */
+type Inspection = { state: 'unavailable' } | { state: 'ok'; sources: MigrationSource[]; remaining: boolean; lsTombs: Set<string> };
 
-/** Reads the owner's localStorage interim sources (with the exact raw value copied). Throws if storage throws. */
-function collectSources(owner: string): MigrationSource[] {
-  const s = storageOrNull();
-  if (!s) return [];
-  const out: MigrationSource[] = [];
-  const lsTombs = new Set(keysWithPrefix(s, `${TOMBSTONE_V4_PREFIX}${owner}:`).map((k) => k.slice(`${TOMBSTONE_V4_PREFIX}${owner}:`.length)));
-  const valid = (v: unknown): v is OwnedQueuedHabitLog => isQueuedHabitLog(v) && (v as OwnedQueuedHabitLog).ownerUserId === owner;
-  for (const key of keysWithPrefix(s, `${QUEUE_V4_PREFIX}${owner}:`)) {
-    const raw = s.getItem(key);
-    if (raw === null) continue;
-    let v: unknown; try { v = JSON.parse(raw); } catch { continue; } // unparseable: left in place, never guessed at
-    if (!valid(v) || !v.recordId) continue;
-    out.push({ key, raw, candidates: [{ recordId: v.recordId, item: v }], tombstoned: lsTombs });
+function inspectSources(owner: string): Inspection {
+  let s: Storage;
+  try {
+    if (typeof localStorage === 'undefined' || localStorage === null) return { state: 'unavailable' };
+    s = localStorage;
+  } catch {
+    return { state: 'unavailable' }; // the property itself denied
   }
-  for (const key of keysWithPrefix(s, `${QUEUE_V3_PREFIX}${owner}:`)) {
-    const raw = s.getItem(key);
-    if (raw === null) continue;
-    let v: unknown; try { v = JSON.parse(raw); } catch { continue; }
-    if (!valid(v)) continue;
-    out.push({ key, raw, candidates: [{ recordId: migratedRecordId(v), item: v }], tombstoned: lsTombs });
+  try {
+    const sources: MigrationSource[] = [];
+    const lsTombs = new Set(keysWithPrefix(s, `${TOMBSTONE_V4_PREFIX}${owner}:`).map((k) => k.slice(`${TOMBSTONE_V4_PREFIX}${owner}:`.length)));
+    const valid = (v: unknown): v is OwnedQueuedHabitLog => isQueuedHabitLog(v) && (v as OwnedQueuedHabitLog).ownerUserId === owner;
+    const v4 = keysWithPrefix(s, `${QUEUE_V4_PREFIX}${owner}:`);
+    const v3 = keysWithPrefix(s, `${QUEUE_V3_PREFIX}${owner}:`);
+    const v2 = s.getItem(QUEUE_V2_PREFIX + owner);
+    for (const key of v4) {
+      const raw = s.getItem(key);
+      if (raw === null) continue;
+      let v: unknown; try { v = JSON.parse(raw); } catch { continue; } // unparseable: left in place, never guessed at
+      if (!valid(v) || !v.recordId) continue;
+      sources.push({ key, raw, candidates: [{ recordId: v.recordId, aliases: [], item: v }] });
+    }
+    for (const key of v3) {
+      const raw = s.getItem(key);
+      if (raw === null) continue;
+      let v: unknown; try { v = JSON.parse(raw); } catch { continue; }
+      if (!valid(v)) continue;
+      sources.push({ key, raw, candidates: [{ recordId: migratedRecordId(v, owner), aliases: [legacyMigratedRecordId(v)], item: v }] });
+    }
+    if (v2 !== null) {
+      let arr: unknown; try { arr = JSON.parse(v2); } catch { arr = null; }
+      if (Array.isArray(arr) && arr.every(valid)) sources.push({ key: QUEUE_V2_PREFIX + owner, raw: v2, candidates: arr.map((item) => ({ recordId: migratedRecordId(item, owner), aliases: [legacyMigratedRecordId(item)], item })) });
+    }
+    return { state: 'ok', sources, remaining: v4.length > 0 || v3.length > 0 || v2 !== null, lsTombs };
+  } catch {
+    return { state: 'unavailable' };
   }
-  const v2 = s.getItem(QUEUE_V2_PREFIX + owner);
-  if (v2 !== null) {
-    let arr: unknown; try { arr = JSON.parse(v2); } catch { arr = null; }
-    if (Array.isArray(arr) && arr.every(valid)) out.push({ key: QUEUE_V2_PREFIX + owner, raw: v2, candidates: arr.map((item) => ({ recordId: migratedRecordId(item), item })), tombstoned: lsTombs });
-  }
-  return out;
-}
-
-/** True when no interim source (parseable or not) of this account remains. Throws if storage throws. */
-function sourcesRetired(owner: string): boolean {
-  const s = storageOrNull();
-  if (!s) return true;
-  return keysWithPrefix(s, `${QUEUE_V4_PREFIX}${owner}:`).length === 0 && keysWithPrefix(s, `${QUEUE_V3_PREFIX}${owner}:`).length === 0 && s.getItem(QUEUE_V2_PREFIX + owner) === null;
 }
 
 const prunedThisSession = new Set<string>();
 
-/** Interruption-safe, idempotent migration. Rejects if storage fails (the queue is then unreadable). */
-async function migrateOwnedSources(owner: string): Promise<void> {
-  const sources = collectSources(owner);
-  if (sources.length > 0) {
-    await tx('readwrite', async (st) => {
-      for (const src of sources) {
+export type MigrationState = 'retired' | 'pending' | 'unavailable';
+
+/**
+ * Interruption-safe, idempotent migration. Rejects if IndexedDB fails. Returns
+ * what is established about the interim sources afterwards. A source is removed
+ * only when EVERY entry in it is confirmed in this account's own store -- an
+ * owned record or an owned settlement marker -- and the source is still exactly
+ * what was copied. Markers are pruned only once retirement is positively
+ * established ('retired'); never when storage is 'unavailable'.
+ */
+async function migrateOwnedSources(owner: string): Promise<MigrationState> {
+  const first = inspectSources(owner);
+  if (first.state === 'unavailable') return 'unavailable';
+  if (first.sources.length > 0) {
+    const confirmed = await tx('readwrite', async (st) => {
+      const ok = new Set<string>(); // source keys whose every entry is confirmed for THIS account
+      for (const src of first.sources) {
+        let all = true;
         for (const c of src.candidates) {
-          if (src.tombstoned.has(c.recordId)) continue;
-          if (await asPromise(st.tombstones.get(c.recordId))) continue; // settled or discarded before
-          if (await asPromise(st.records.get(c.recordId))) continue; // already migrated
-          const rec: Stored = { recordId: c.recordId, ownerUserId: owner, clientRequestId: c.item.clientRequestId, item: { ...c.item, recordId: c.recordId }, queuedAt: c.item.queuedAt ?? 0 };
-          await asPromise(st.records.add(rec));
+          const ids = [c.recordId, ...c.aliases];
+          let found = ids.some((id) => first.lsTombs.has(id));
+          for (const id of ids) {
+            if (found) break;
+            const t = (await asPromise(st.tombstones.get(id))) as Tomb | undefined;
+            if (t && t.ownerUserId === owner) { found = true; break; } // settled or discarded before, for this account
+            const r = (await asPromise(st.records.get(id))) as Stored | undefined;
+            if (r && r.ownerUserId === owner) { found = true; break; } // already migrated, for this account
+          }
+          if (!found) {
+            const existing = (await asPromise(st.records.get(c.recordId))) as Stored | undefined;
+            if (existing) { all = false; continue; } // never reuse another account's record (cannot happen with owner-scoped ids)
+            const rec: Stored = { recordId: c.recordId, ownerUserId: owner, clientRequestId: c.item.clientRequestId, item: { ...c.item, recordId: c.recordId }, queuedAt: c.item.queuedAt ?? 0 };
+            await asPromise(st.records.add(rec));
+          }
         }
+        if (all) ok.add(src.key);
       }
+      return ok;
     });
-    // Committed. Remove a source only if it is STILL exactly what was copied; anything else is uncertain and kept.
-    const s = storageOrNull();
-    if (s) for (const src of sources) { try { if (s.getItem(src.key) === src.raw) s.removeItem(src.key); } catch { /* re-run later */ } }
+    // Committed. Remove a source only if every entry was confirmed for this account AND it is still exactly what was copied.
+    try {
+      const s = localStorage;
+      for (const src of first.sources) {
+        if (!confirmed.has(src.key)) continue;
+        try { if (s.getItem(src.key) === src.raw) s.removeItem(src.key); } catch { /* re-run later */ }
+      }
+    } catch { /* storage became unavailable: sources stay; re-run later */ }
   }
-  // Tombstones expire only once source retirement is established (no interim source of any kind remains).
-  if (prunedThisSession.has(owner) || !sourcesRetired(owner)) return;
+  // Markers expire only once source retirement is POSITIVELY established.
+  const after = inspectSources(owner);
+  if (after.state === 'unavailable') return 'unavailable';
+  if (after.remaining) return 'pending';
+  if (prunedThisSession.has(owner)) return 'retired';
   const now = Date.now();
   await tx('readwrite', async (st) => {
     const tombs = (await asPromise(st.tombstones.index('owner').getAll(IDBKeyRange.only(owner)))) as Tomb[];
     for (const t of tombs) if (now - t.at > TOMBSTONE_TTL_MS) await asPromise(st.tombstones.delete(t.recordId));
   });
   try {
-    const s = storageOrNull();
-    if (s) for (const t of keysWithPrefix(s, `${TOMBSTONE_V4_PREFIX}${owner}:`)) s.removeItem(t);
+    const s = localStorage;
+    for (const t of keysWithPrefix(s, `${TOMBSTONE_V4_PREFIX}${owner}:`)) s.removeItem(t);
   } catch { /* best effort */ }
   prunedThisSession.add(owner);
+  return 'retired';
 }
 
 // ------------------------------------------------------------------ reads
 
-/** The owner's queue. `ok:false` when storage is unavailable or ANY step fails. */
+/** The owner's queue. `ok:false` when IndexedDB or the interim (localStorage) sources cannot be read, or ANY step fails. */
 export async function readOwnedQueue(ownerUserId: string): Promise<QueueRead> {
   try {
-    await migrateOwnedSources(ownerUserId);
+    // R6: if the interim sources cannot be inspected, the queue is NOT known -- report it unreadable.
+    if ((await migrateOwnedSources(ownerUserId)) === 'unavailable') return { ok: false };
     const now = Date.now();
     const { stored, claims, dispatches } = await tx('readonly', async (st) => {
       const stored = (await asPromise(st.records.index('owner').getAll(IDBKeyRange.only(ownerUserId)))) as Stored[];
