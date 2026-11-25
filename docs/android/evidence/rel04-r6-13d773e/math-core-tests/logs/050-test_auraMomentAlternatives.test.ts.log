@@ -1,0 +1,58 @@
+$ npx ts-node test/auraMomentAlternatives.test.ts
+# job=math-core-tests step=Run Aura Moment alternatives (rescheduling) test env={}
+OK   EARLIER searches strictly BEFORE the original date
+OK   EARLIER's range is bounded by the 14-day horizon (start is not more than 14 days before original)
+OK   EARLIER ends the day before the original date
+OK   EARLIER does not set excludeDate (the range itself already excludes the original date)
+OK   LATER searches strictly AFTER the original date
+OK   LATER starts the day after the original date
+OK   LATER's range is bounded by the 14-day horizon
+OK   DIFFERENT_DAY searches a range spanning BOTH before and after the original date
+OK   DIFFERENT_DAY explicitly excludes the original date
+OK   NO_PREFERENCE searches the same wide range as DIFFERENT_DAY
+OK   NO_PREFERENCE does NOT set excludeDate (only the specific original CANDIDATE is excluded, not the whole date -- section 9 vs section 8)
+OK   EARLIER never produces an inverted range when the original moment is today (start <= end, collapses to a single day rather than searching the past)
+OK   EARLIER collapsing to today has start === end === today when there is no valid earlier date
+OK   EARLIER with a valid single-day gap (original is tomorrow) searches exactly today
+OK   LATER never starts before today even if that is after original+1 day
+OK   DIFFERENT_DAY/NO_PREFERENCE never search before today, even within the horizon
+OK   findAuraMomentAlternatives is NOT_APPLICABLE for a GENERAL moment (SHARED-only in V1)
+OK   findAuraMomentAlternatives is NOT_APPLICABLE for a PERSONAL moment
+OK   findAuraMomentAlternatives is NOT_APPLICABLE when responseState is ACCEPTED (terminal, brief section 16)
+OK   findAuraMomentAlternatives is NOT_APPLICABLE when there is no response yet at all
+OK   EARLIER search returns status OK with real candidates
+OK   EARLIER candidates are all before the original date
+OK   EARLIER candidates preserve the original activity (start-journey), never broadened
+OK   LATER search returns status OK
+OK   LATER candidates are all after the original date
+OK   DIFFERENT_DAY search returns status OK
+OK   DIFFERENT_DAY candidates never include the original date
+OK   NO_PREFERENCE search returns status OK
+OK   NO_PREFERENCE CAN include the original date (only the exact original candidate instant is excluded, not the whole day)
+OK   NO_PREFERENCE never returns the exact original startAt instant (section 9 dedup)
+OK   At least one of the four preference searches returned a non-empty candidate list (the underlying search genuinely works end to end)
+OK   PLAN + GENERAL: alternatives returned (never NOT_APPLICABLE, never Muhurtham-gated)
+OK   PLAN + GENERAL: original instant excluded
+OK   PLAN + GENERAL: LATER preference respected (all candidates after the original date)
+OK   PLAN + GENERAL: at most 3 alternatives (brief section 10)
+OK   PLAN + PERSONAL: alternatives returned even with NO owner natal profile (never an error, brief section 11)
+OK   PLAN + PERSONAL: DIFFERENT_DAY excludes the original date
+OK   PLAN + SHARED (Date Night): alternatives returned
+OK   PLAN + SHARED: no Muhurtham eligibility required (date-night is not Muhurtham-eligible)
+OK   PLAN + SHARED: LATER preference respected
+OK   PLAN + SHARED: original instant excluded
+OK   PLAN + SHARED: ratingLabel uses the everyday shared vocabulary, never a Muhurtham rating
+OK   Ranking parity: direct findEverydaySharedTiming() also returns OK
+OK   Ranking parity: the alternative's top candidate exists in a direct findEverydaySharedTiming() call over the same range
+OK   Ranking parity: identical rating for the identical candidate (same scoring, not reimplemented)
+OK   PLAN preference EARLIER returns OK status
+OK   PLAN preference LATER returns OK status
+OK   PLAN preference DIFFERENT_DAY returns OK status
+OK   PLAN preference NO_PREFERENCE returns OK status
+OK   PLAN + PERSONAL never requires or references a SavedPerson
+OK   PLAN + SHARED alternatives never serialize birth/natal/person-identity fields
+OK   PLAN + GENERAL in a DST timezone (America/New_York) returns OK, not an error
+
+ALL AURA MOMENT ALTERNATIVES CHECKS PASSED
+
+# exit=0 signal=

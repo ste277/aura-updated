@@ -1,0 +1,27 @@
+$ npx ts-node --project tsconfig.jsdom-tests.json test/landingGuestEntryJsdom.test.ts
+# job=math-core-tests step=Run landing guest-entry component test (AURA-READY-02-F3) env={}
+OK   1. intro heading "Make time for what matters." is shown
+OK   1. intro explains Aura and Panchangam in plain words
+OK   1. intro section is labelled by its heading (accessible landmark)
+OK   3. "Try it without an account" is a real link to the existing /find route
+OK   3. it is keyboard-reachable (a native <a href>, no tabindex=-1)
+OK   3. it is a secondary action: after the email form, not the submit button
+OK   3. touch target is at least 44 px tall
+OK   3. honest helper text: explore now, sign in to save (no claim that everything works without an account)
+OK   3. primary action is still the email "Continue" submit button
+OK   2. Continue calls the existing request-link endpoint with the email
+OK   2. code step appears with Resend code / Change email (F2 intact)
+OK   2. intro and guest link are hidden on the code step (focused, no extra scrolling)
+OK   2. verify-code is sent for the same address
+OK   2. the sign-in is confirmed with a fresh session read
+OK   2. a correct code signs in
+OK   2. Change email returns to the landing step with the intro and guest link
+OK   4/5. no separate guest experience: the link targets the existing /find route only
+OK   no registration gate / allowlist / auth-logic change introduced (verify-code now called via lib/signInCode.ts, AURA-ANDROID-REL-04 R2)
+
+18 checks
+All landing guest-entry checks passed.
+(node:96346) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+# exit=0 signal=

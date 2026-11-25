@@ -2,44 +2,89 @@
 
 **Date:** 2026-11-25 · **PR:** #392 · **Branch:** `aura-android-rel04-app-readiness`, cut from `main` `ad49e6a`
 
-**Revision:** **R5** (ticket 39216). It addresses the remaining application findings of the R4 independent disposition of `a59a934dd0b1f3d2ce32a333543a4fbdd21cb72d` (code head `9c324602…`), at `~/Documents/ChatGPT/Product Onboarding/AURA_ANDROID_REL_04_R4_INDEPENDENT_DISPOSITION_a59a934.md`.
+**Revision:** **R6** (ticket 39219). R6 is a targeted correction of the four application findings that the R5 independent assessment reproduced against `0c97d3a406bce24b5ea2490aebb7d1cd2ad66bdc` (code `a3a02b8`). The assessment is at `~/Documents/ChatGPT/Product Onboarding/AURA_ANDROID_REL_04_R5_INDEPENDENT_DISPOSITION_0c97d3a.md`.
 
-- **R5 code commit:** `a3a02b816e35733739f428e85cf0810c4f17f50a`.
-- **Evidence:** `docs/android/evidence/rel04-r5-a3a02b8/`.
-- **IndexedDB architecture:** accepted by that disposition, and preserved.
+- **R6 code commit:** `13d773eef0717952e8fcb940b83498c0d09e67fa`.
+- **Evidence:** `docs/android/evidence/rel04-r6-13d773e/`.
+- **Closures kept:** all independently closed findings are preserved, none is reopened, and the IndexedDB architecture and attempt-token fencing are unchanged.
 
-**§R5-1 to §R5-4 supersede R4 where they differ.** The R4 sections (§R4-1 to §R4-8) and the R3 sections (R1 to R6) are kept as history.
+**§R6 supersedes R5 where they differ.** R5, R4 and R3 sections are kept as history.
 
-**Earlier independent reviews (kept unchanged as historical evidence):**
-- `AURA_ANDROID_REL_04_INDEPENDENT_REVIEW_REPORT.md` (of `a54daf6`);
-- `AURA_ANDROID_REL_04_DELTA_INDEPENDENT_REVIEW_REPORT.md` (of `d09449b`, sha256 `11becd10…`);
-- `AURA_ANDROID_REL_04_FINAL_INDEPENDENT_DISPOSITION_091e3ce.md` (sha256 `232eec9f…`);
-- `AURA_ANDROID_REL_04_INDEPENDENT_EVIDENCE_ASSESSMENT_b323d2a.md`;
-- `AURA_ANDROID_REL_04_R4_INDEPENDENT_DISPOSITION_a59a934.md`.
+**Independent reviews (kept unchanged):**
+- `…_INDEPENDENT_REVIEW_REPORT.md` (`a54daf6`);
+- `…_DELTA_INDEPENDENT_REVIEW_REPORT.md` (`d09449b`);
+- `…_FINAL_INDEPENDENT_DISPOSITION_091e3ce.md`;
+- `…_INDEPENDENT_EVIDENCE_ASSESSMENT_b323d2a.md`;
+- `…_R4_INDEPENDENT_DISPOSITION_a59a934.md`;
+- `…_R5_INDEPENDENT_DISPOSITION_0c97d3a.md`.
 
-**Mode:**
-- code and offline tests;
-- real Chromium multi-page tests (real IndexedDB, Web Locks, cookies and service workers, including forced worker restarts);
-- the **real production Next.js build** served by `next start`, against an isolated Postgres, for rendering evidence;
-- a generated-Prisma-client type check.
-
-**Not done:** no merge, deployment, hosting-setting change, live or Production database, credential, emulator, physical device, signing, packaging or Play Store activity. AUTH-01 remains separately authorized.
+**Not done:** no merge, deployment, hosting-setting change, Production access, credential, infrastructure, emulator, physical device, signing or Play Store activity.
 
 ## 1. Verdict
 
-**REMAINING APPLICATION IMPLEMENTATION FINDINGS RESOLVED — ACTIVATION REQUIREMENTS EXPLICITLY DEFERRED.**
+**ALL REMAINING R5 APPLICATION FINDINGS CORRECTED — FOCUSED REGRESSIONS PASS — READY FOR INDEPENDENT VERIFICATION.**
 
 | Disposition | State |
 |---|---|
-| **1. Application implementation** | **Corrected (R5)** for every application-level finding of the R4 disposition (§R5-1). It stays OPEN until independent assessment. |
-| **2. Controlled merge readiness** | **NO-GO**. It needs: independent assessment; exact-head CI recorded (§R5-2); owner approval; the deployment boundary re-confirmed at merge time. PR #392 stays **separate from REL-05**. |
-| **3. Production activation and native acceptance** | **NO-GO / HOLD**. A-1 to A-3 stay **open**. The rollout gate, supported-client compatibility, device acceptance and worker-rollback requirements in §R5-4 are mandatory before activation, and are deferred (not executed in this ticket). REL-03 supervised acceptance is deferred, not waived. |
-
-IR-06 is unchanged and stays closed at code level. Chromium results are not WKWebView, Android WebView or device acceptance.
+| **1. Application implementation** | **Corrected (R6)** for the four reproduced R5 findings (§R6-1). The findings stay OPEN until independent verification. |
+| **2. Controlled merge readiness** | **NO-GO**. Still needed: independent verification, owner approval, and deployment-boundary reconfirmation at merge time. PR #392 stays **separate from REL-05**. |
+| **3. Production activation and native acceptance** | **NO-GO / HOLD**, unchanged. The separately gated items are listed in §R5-4: A-1 to A-3, AUTH-01 dependencies, rollout criteria and telemetry, supported-client compatibility, worker rollback, and native plus REL-03 supervised acceptance. |
 
 ---
 
-## R5-1. R4 disposition findings and R5 corrections
+## R6-1. Findings, root causes, corrections, before/after evidence
+
+Each finding has a permanent reproduction. `test/rel04R6Findings.test.ts` runs the assessment's own probes against the **R5 code** (vendored byte-for-byte in `test/fixtures/rel04-r5-head`, checked against git) and against the current code. Chromium CH15 does the same in a real browser.
+
+| # | Finding (R5 assessment) | Root cause | Correction | Before (R5 code) → After (R6) |
+|---|---|---|---|---|
+| 1 | Two owned interim entries with the same request id and payload under **different accounts**: one migrated entry, B's source deleted | `migratedRecordId` hashed `clientRequestId + payload` without the owner, so B's candidate matched A's record and migration treated B's entry as already copied | The owner is part of the migrated identity. The R4/R5 owner-less id is honoured only for a record or marker **owned by the same account**. A source is deleted only after every entry is confirmed in its own account's store (record or marker) and the source is unchanged. | **Before:** `{a:1, b:0, bSourceStillPresent:false}`. **After:** `{a:1, b:1}`, two distinct owned records, and both sources retired after confirmation. The two accounts' lifecycles are independent: A's replay settles only A; B's entry survives, then B's discard removes exactly it; markers are per account; re-appearing sources are not recreated. (`rel04R6Findings` Q1) |
+| 2 | Temporary `localStorage` denial over 45 days was treated as retirement: marker pruned, settled entry recreated | `storageOrNull()` turned an access error into "no storage", and `sourcesRetired()` returned true for no storage, so the code read it as retirement | Source inspection now has three states: **retired**, **pending** or **unavailable**. Any access or read failure is *unavailable*: nothing is concluded, no marker is pruned, and `readOwnedQueue` reports **unreadable**. Markers expire only after a positive inspection finds no interim key. | **Before:** `{reportedUnreadable:false, markerKept:false, restoredAlreadySettled:true}`. **After:** `{true, true, false}`. Once access is restored, the source is retired against its marker and nothing is replayed. While storage is denied, Home's read is `null` (shown as unavailable) and sign-out reports "couldn't read; kept". (Q2) |
+| 3a | Concurrent refusals plus a **150 ms** acknowledgement: real Chromium **reloaded an acknowledged current page** | One acknowledgement callback per page, so each new check overwrote the previous callback and the earlier check timed out | Recovery is **coalesced** per page (one check in flight). An acknowledgement from the page resolves **every** pending check for it; a nonce is echoed for correlation. Eligibility is **re-checked** before a slot is reserved. | Real Chromium, worker restarted with state wiped, 8 concurrent refusals. **Before:** the R5 worker reloaded the page. **After:** not reloaded, 0 navigations. (CH15, both workers in one run) |
+| 3b | Three overlapping checks for one old page used **all three** reload slots | Each check read the guard before any check reserved, then each reserved independently | Coalescing, plus a **serialized** read-check-reserve step over the persisted state (atomic within the worker). The limit stays persisted across restarts. | Worker harness. **Before:** `{queries:3, navigations:3, budgetUsed:3}`. **After:** `{queries:1, navigations:1, budgetUsed:1}`. The limit across restarts is still `1,1,1,0,0`. (W1–W3) |
+| 4 | `GET /api/plan-day/bootstrap` returned an **empty 200** for a missing or invalid session | The route resolved props with a null session instead of enforcing authentication | **401 `{"error":"Not authenticated."}`** (no-store) for a missing or invalid session, or a session whose user no longer exists. The route now reads its own request cookies. Middleware 503 (account not stated, session present) and 409 (account disagreement) are unchanged, and data still goes only to the matching account. | **Before (R5 route):** 200 with null props. **After (real handler):** 401 / 401 / 401, with no data loader reached. **Real production build (N2):** no cookie gives 401; invalid cookie stating an account gives 401; headerless with any cookie gives the existing 503; other account 409; own account 200. |
+
+## R6-2. Evidence (commit `13d773e`)
+
+| Run | Result |
+|---|---|
+| `rel04R6Findings` (R5 reproductions + corrections) | **22/22**: 3 fixture-provenance checks, 9 R5 reproductions (all fail on R5 as the assessment reported), and the corrections |
+| `math-core-tests`, every `npx ts-node` command | **247/247** |
+| Day Constructor DB suites (fresh isolated Postgres 16, 54 migrations) | **76/76** |
+| Chromium (CH15 new) | **29/29**: the R5 worker reloads the current page and the R6 worker does not |
+| Real Next.js app rendering (N2 401 checks new) | **12/12** |
+| Generated-Prisma type check, root `tsc` | exit 0, exit 0, exit 0 |
+| Exact-head CI | **Run 45647285770 on `13d773e`: success, 9/9 jobs.** No AURA-CI-07 or MCP I2b-S2 recurrence. |
+
+**Focused suites run locally at `13d773e`.** All of these pass:
+
+| Suite | Result |
+|---|---|
+| Queue lifecycle | 16/16 |
+| Queue integrity | 27/27 |
+| R3 queue/auth | 26/26 |
+| Sign-out | 19/19 |
+| Account isolation | 50/50 |
+| Boundary | 29/29 |
+| SSR agreement | 21/21 |
+| R1–R3 and reviewed-head reproductions | pass |
+| Home/find | 15/15 |
+| Bound writes | 22/22 |
+| IR-06 location | 22/22 |
+| Token replay | 8/8 |
+
+`planDayWiring` 87c and the DR3 migration count also fail on `main` and are not in CI; they are unchanged.
+
+## R6-3. Remaining limitations
+
+- **Within the worker instance:** reservation is serialized there. Correctness across two worker instances relies on the browser running only one active worker per registration. Pages the updated worker does not control are outside this mechanism (A-1 to A-3, §R5-4).
+- **Unavailable interim storage:** while legacy storage cannot be inspected, the owned queue is reported unreadable even when IndexedDB is readable. This is deliberately conservative. Replay of that account's queue pauses until storage is readable again; direct writes still store and send.
+- **Headerless requests with any cookie:** these still receive the boundary's 503 before authentication. That is the existing, independently closed middleware rule, and it is unchanged.
+- **Device and native behaviour:** nothing here is device or native evidence. Chromium and the loopback harness are not WebView or WKWebView acceptance.
+
+---
+
+## R5-1. R4 disposition findings and R5 corrections — R5 round, historical
 
 | Area (R4 disposition) | R5 correction | Implementation | Regression evidence |
 |---|---|---|---|

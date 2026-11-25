@@ -1,0 +1,39 @@
+$ npx ts-node test/shadowEvidenceArchitecture.test.ts
+# job=math-core-tests step=Run shadow evidence architecture test env={}
+=== the real tree conforms ===
+OK   THE REAL PRODUCTION TREE HAS ZERO SHADOW-EVIDENCE ARCHITECTURE VIOLATIONS (567 files scanned)
+=== the rules ===
+OK   CONFINEMENT: the evidence derivation is imported only by the boundary and called only there; the invariant check is imported and called only by the derivation
+OK   ACTIVE IS ABSENT: the mode is exactly OFF | SHADOW (fail-closed parse), no ACTIVE word in the boundary, the evidence modules, the preparation boundary or the composition
+OK   SHADOW RETURNS THE BASELINE: the only success return is `observed.result`, the evidence is never part of a return value, and the materialized result never leaves `deriveShadowEvidence` (it reaches only the invariant check)
+OK   OFF DOES NO EVIDENCE WORK: the OFF return is the first statement and no evidence reference precedes it
+OK   THE REAL PIECES, IN ORDER, ONE PASS: the real selector over the run's own observations, the real gate on APPLY, the real materializer on MATERIALIZABLE with the same baseline and the authority's own basis, the invariant check on READY; no loop, no async, each stage isolated with a bounded failure category
+OK   NO SECOND CONSTRUCTOR / SEARCH / QUERY / MINT / GENERATION / PREDICATE / PREPARATION / SIGNING, no database, clock, randomness, environment, logging or persistence in the evidence modules or the boundary
+OK   NO PRIVATE OR HIGH-CARDINALITY FIELD: the evidence is a closed five-field record of categories; the metrics add only count buckets, that record and a latency bucket; no open-valued metric field
+OK   THE INVARIANT CHECK IS A VERIFIER: provenance first, the bounded categories, PASS only at the end of the full try, any failure of the check itself is CHECK_FAILED (never a pass), no policy vocabulary
+OK   THE FUNNEL IS COUNTS FROM THE SAME RUN: two numbers taken from the pressure map and the trace the same preparation derived (one orchestration), carried through the composition unchanged
+OK   EVIDENCE IS DERIVED AFTER THE EXISTING LATENCY IS READ and only on the SHADOW emit path, isolated (a failure is EVIDENCE_FAILED and the baseline is still returned)
+OK   CI RUNS BOTH EVIDENCE SUITES
+=== mutations (in-memory; the real tree is untouched) ===
+OK   MUTATION: SHADOW STOPS RETURNING THE BASELINE (the evidence, or a substituted result, is returned instead) -> detected
+OK   MUTATION: the materialized result is returned from the derivation -> detected
+OK   MUTATION: SKIP THE SELECTOR (selector forced to APPLY) -> detected
+OK   MUTATION: COLLAPSE MULTIPLE_ACCEPTS INTO APPLY (the selector reason is overwritten) -> detected
+OK   MUTATION: SKIP THE GATE (materializer reached without the real gate) -> detected
+OK   MUTATION: SKIP THE MATERIALIZER PROVENANCE CHECK (a baseline other than the run's own is handed to the materializer) -> detected
+OK   MUTATION: SKIP THE INVARIANT VERIFIER'S PROVENANCE CHECK -> detected
+OK   MUTATION: SUPPRESS AN INVARIANT FAILURE (the check is replaced by PASS) -> detected
+OK   MUTATION: AN INVARIANT FAILURE BECOMES A PASS (the catch of the check) -> detected
+OK   MUTATION: A SECOND PASS OF A REAL PIECE / a loop over observations -> detected
+OK   MUTATION: EVIDENCE IN OFF (the derivation is reached before the OFF return) -> detected
+OK   MUTATION: A RAW / PRIVATE FIELD LEAKS INTO THE EVIDENCE OR THE METRICS (an intent id, a title) -> detected
+OK   MUTATION: ACTIVE appears (mode type, env parse, a metrics word, the evidence modules) -> detected
+OK   MUTATION: A SECOND CONSTRUCTOR / SEARCH / MINT / GENERATION / DATABASE / CLOCK / LOG / PERSISTENCE in the evidence modules or the boundary -> detected
+OK   MUTATION: ANOTHER MODULE CALLS THE EVIDENCE DERIVATION OR THE INVARIANT CHECK / imports them -> detected
+OK   MUTATION: THE FUNNEL STOPS BEING COUNTS FROM THE SAME RUN (an id list, a second orchestration, the trace dropped) -> detected
+OK   MUTATION: THE EVIDENCE IS NOT ISOLATED / not measured after the existing latency / an extra await -> detected
+OK   MUTATION: CI STOPS RUNNING THE EVIDENCE SUITES -> detected
+OK   the mutations were applied to in-memory copies only: the real tree still has zero violations afterwards
+ALL SHADOW EVIDENCE ARCHITECTURE CHECKS PASSED
+
+# exit=0 signal=

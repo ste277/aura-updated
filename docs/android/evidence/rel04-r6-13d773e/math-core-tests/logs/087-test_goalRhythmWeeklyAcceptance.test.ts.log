@@ -1,0 +1,107 @@
+$ npx ts-node test/goalRhythmWeeklyAcceptance.test.ts
+# job=math-core-tests step=Run Goal Rhythm weekly acceptance test env={}
+OK   1. one selected session is accepted end-to-end
+OK   1. the real EXPLICIT_RANGE preview request targeted exactly the selected date
+OK   1. the intent sent to the real preview pipeline is FIXED, pinned to the EXACT approved start, with the EXACT approved duration (30min) -- never FLEXIBLE
+OK   1. the ACCEPTED outcome reports the exact approved start/end, unchanged
+OK   2. three sessions across three distinct dates are all accepted
+OK   2. each session was previewed against its own distinct date, in submitted order
+OK   4. end-before-start is rejected INVALID_TIME_RANGE before any preview is attempted
+OK   4. a non-whole-minute duration is rejected INVALID_TIME_RANGE
+OK   4. a malformed start instant is rejected INVALID_TIME_RANGE
+OK   4. a start whose resolved local date differs from the claimed localDate is rejected TIME_DATE_MISMATCH, never silently reinterpreted
+OK   5. a zero-length duration is rejected INVALID_TIME_RANGE
+OK   5. a multi-day duration is rejected INVALID_TIME_RANGE
+OK   3. a FIXED instant the real pipeline could not place is reported FAILED (TIME_NO_LONGER_AVAILABLE), never silently placed at a different time
+OK   3. no persist call was ever attempted for a deferred FIXED intent
+OK   defensive: a signed item whose own start/end differ from the approved selection is rejected PLACEMENT_MISMATCH, never persisted
+OK   a start at or before the authoritative current instant is rejected TIME_ALREADY_ELAPSED, before any preview is attempted
+OK   9/10. the first acceptance genuinely succeeds and reaches preview+persist
+OK   9/10. retrying the IDENTICAL (goalActivityId, localDate, start, end) resolves ALREADY_ACCEPTED, with the real committed identity/time -- never a fresh ACCEPTED, never a false FAILED
+OK   9/10. the retry resolved WITHOUT ever calling preview or persist again -- the read-only reconciliation short-circuit fired, so the already-committed session can never collide with itself as a fresh blocker
+OK   10. the replay response carries the SAME real plannedActivityId/start/end as the original acceptance
+OK   F-1 precondition: the first acceptance genuinely succeeds
+OK   F-1: a retry whose claimed Plan is now CANCELLED never returns ALREADY_ACCEPTED against it
+OK   F-1: it is reported as a clean, specific failure (COMMITMENT_NO_LONGER_LIVE) -- never silently recreated, and never leaking a raw IDEMPOTENCY_CONFLICT/internal code instead
+OK   F-1: the dead-claim detection short-circuits before ever reaching preview or persist again -- it never attempts (and is never tempted to retry) the doomed-to-collide fresh call
+OK   F-1: a retry whose claimed Plan is now MOVED (the old, pre-move row, its times untouched) never returns ALREADY_ACCEPTED against it
+OK   F-1: it is reported as a clean, specific failure (COMMITMENT_NO_LONGER_LIVE) rather than referencing the stale moved-away record
+OK   F-1: no additional preview/persist call was ever attempted for the moved-away retry
+OK   F-1: a retry whose claimed Plan is now LOGGED (genuinely completed) still correctly resolves ALREADY_ACCEPTED -- LOGGED counts as a live, real outcome, not a dead record
+OK   11. the first (original-time) session is accepted
+OK   11. a DIFFERENT approved time for the SAME activity/date, under its OWN acceptanceId, derives a DIFFERENT clientRequestId and is genuinely attempted fresh, never short-circuited as a replay of the first
+OK   11. the two sessions produced two REAL, distinct plannedActivityIds -- never collapsed into one
+OK   17. a session outside a CONFIGURED hard availability boundary is rejected OUTSIDE_AVAILABILITY, never silently placed outside it
+OK   17. a session INSIDE a CONFIGURED availability window proceeds normally
+OK   17. an UNCONFIGURED user is treated exactly as every other EXPLICIT_RANGE caller already treats one -- no new boundary introduced by this adapter
+OK   5/17. a GoalActivity id absent from this user's own eligible demand is rejected NOT_ELIGIBLE, never disclosed as anything more specific
+OK   5/17/15. no preview/persist call was ever attempted for an unauthorized id
+OK   6. a fully-satisfied weekly target, caught by the real write-time capacity check (CAPACITY_EXHAUSTED), is reported NOT_ELIGIBLE -- never a raw internal error code leaked
+OK   6. the session still genuinely reached preview+persist (eligibility is NOT pre-gated on the displayed remaining count alone)
+OK   7/8. a date before the planning date is rejected OUTSIDE_CURRENT_WEEK, never silently clamped
+OK   7/8. a date in NEXT week is rejected OUTSIDE_CURRENT_WEEK, never conflated with this week's target
+OK   7/8/15. an out-of-week rejection never reaches preview or persist
+OK   9/10 regression precondition: the first acceptance succeeds, fully consuming target 1
+OK   9/10 regression: a retry of an already-accepted session is reported ALREADY_ACCEPTED even when the weekly target it consumed is now fully met, never misreported as a fresh NOT_ELIGIBLE rejection
+OK   9/10 regression: the retry never reached preview or persist again -- the reconciliation short-circuit resolved the session before either call, which is what actually prevents it from colliding with its own prior commitment (ownership resolution itself always re-runs, cheap and read-only, regardless)
+OK   12/13. session 2 of 3 fails while 1 and 3 succeed -- an honest, accurate partial-success count, never "all 3 accepted"
+OK   12. the response never claims all sessions succeeded when one did not
+OK   12. session 3 was still attempted independently after session 2 failed -- never short-circuited by an earlier failure
+OK   12. the two real successes are correctly identified by their own date, not just a count
+OK   13 precondition: the original batch fully succeeds
+OK   13. retrying the IDENTICAL full batch reports BOTH sessions ALREADY_ACCEPTED, with their real original identities -- never a fresh ACCEPTED, never a false failure
+OK   retrying only the originally-failed session never re-touches a session the caller does not resubmit
+OK   14. session 1 consumes the last remaining weekly slot and is accepted
+OK   14. session 2 is independently attempted (never skipped merely because session 1 succeeded) and is rejected NOT_ELIGIBLE by the real capacity check
+OK   14. the batch summary's own final remaining-demand figure reflects session 1's real write (0), not the demand snapshot read before the batch started (1)
+OK   15. a NO_USABLE_CAPACITY preview result is reported FAILED, never a fabricated acceptance
+OK   15/16. no persist call is ever made when the preview itself was not READY
+OK   a READY preview whose own intent was deferred (NO_CANDIDATES, not placed) is reported FAILED, never accepted as if it were placed
+OK   a batch larger than MAX_WEEKLY_ACCEPTANCE_SESSIONS (3) is bounded, never processed in full
+OK   the loadCandidateGoalActivities read model is called again AFTER the batch (not reused from the pre-batch read) to recompute remaining demand
+OK   the reported remaining-this-week reflects live demand, not this function's own arithmetic
+OK   buildWeeklySessionClientRequestId is deterministic for the same (acceptanceId, goalActivityId, localDate, start, end)
+OK   buildWeeklySessionClientRequestId differs for a different localDate
+OK   buildWeeklySessionClientRequestId differs for a different goalActivityId
+OK   buildWeeklySessionClientRequestId differs for a different approved start/end, even for the SAME (acceptanceId, goalActivityId, localDate) -- this is the key fix preventing a different intended session from ever being misclassified as a replay
+OK   HGR3-C1: buildWeeklySessionClientRequestId differs for a different acceptanceId, even for the IDENTICAL (goalActivityId, localDate, start, end) -- this is what lets a fresh confirmation re-book an identical, previously-cancelled slot
+OK   HGR3-C1 precondition: the first acceptance (identity A) genuinely succeeds
+OK   HGR3-C1: retrying the SAME (stale) identity A after cancellation still correctly fails COMMITMENT_NO_LONGER_LIVE -- HGR3-BH's own F-1 protection is completely unweakened by this change
+OK   HGR3-C1: the SAME nominal slot, explicitly re-approved under a FRESH acceptanceId B, is genuinely accepted -- a real, NEW live commitment is created
+OK   HGR3-C1: the new commitment is a GENUINELY DIFFERENT real Plan, never the resurrected original
+OK   HGR3-C1: the cancelled original remains cancelled, completely untouched by the new booking
+OK   HGR3-C1: retrying the NEW identity B now correctly resolves ALREADY_ACCEPTED, pointing at the NEW live commitment -- never the old dead one
+OK   HGR3-C1 payload-binding precondition: the first request under identity X succeeds
+OK   HGR3-C1: reusing the SAME acceptanceId X for a DIFFERENT approved time on the same (goalActivityId, localDate) is rejected ACCEPTANCE_IDENTITY_CONFLICT
+OK   HGR3-C1: the rejected conflict never reached preview or persist
+OK   HGR3-C1: retrying the ORIGINAL, unchanged content under the SAME identity X is still correctly ALREADY_ACCEPTED, not a conflict
+OK   HGR3-C1 cross-activity precondition: the first request under identity Y succeeds
+OK   HGR3-C1: reusing the SAME acceptanceId Y for a DIFFERENT GoalActivity is rejected ACCEPTANCE_IDENTITY_CONFLICT, never silently processed as an independent fresh session
+OK   HGR3-C1: three sibling sessions sharing one acceptanceId (the normal "Accept all" batch shape) are ALL genuinely accepted -- no false payload-binding conflict between legitimate siblings
+OK   HGR3-C1: retrying the identical full batch under the SAME acceptanceId resolves all three ALREADY_ACCEPTED, never a false conflict
+OK   HGR3-C1 cross-user precondition: user-1's request under this id succeeds
+OK   HGR3-C1: the IDENTICAL acceptanceId string used by a DIFFERENT user is fully independent -- a fresh acceptance, never ALREADY_ACCEPTED, never any cross-user leakage
+OK   HGR3-C1: a successful acceptance claims the expected hgr3b-bind:... binding key, in the SAME generic PlanCreationIdempotency-shaped store /api/plans already uses -- never a new table
+OK   HGR3-C1 [STRUCTURAL]: the payload-binding check reuses the real, unmodified findPlanCreationClaimsByPrefix/claimPlanCreation -- never a second idempotency-table shape of its own
+OK   HGR3-C1 [STRUCTURAL]: no new signing primitive or format is introduced for the acceptance identity -- it is a plain string folded into the EXISTING clientRequestId derivation, never a token
+OK   P2-1 UTC+14 (Pacific/Kiritimati): explicitStart/End exactly equal localDayBoundsUTC's own from/to
+OK   P2-1 UTC+14: the real boundary genuinely differs from naive UTC-midnight arithmetic (proving timezone-awareness, not coincidence)
+OK   P2-1 UTC-11 (Pacific/Niue): explicitStart/End exactly equal localDayBoundsUTC's own from/to
+OK   P2-1 UTC-11: the real boundary genuinely differs from naive UTC-midnight arithmetic
+OK   P2-1 IST (UTC+5:30, Asia/Kolkata): explicitStart/End exactly equal localDayBoundsUTC's own from/to, correctly honoring the half-hour offset
+OK   P2-1 DST spring-forward (America/New_York, 2026-03-08): explicitStart/End exactly equal localDayBoundsUTC's own from/to -- a 23-hour local day correctly handled
+OK   P2-1 DST fall-back (America/New_York, 2026-11-01): explicitStart/End exactly equal localDayBoundsUTC's own from/to -- a 25-hour local day correctly handled
+OK   P2-1 last day of the local week: explicitStart/End exactly equal localDayBoundsUTC's own from/to
+OK   P2-1 today, partially elapsed: explicitStart is the authoritative clock (NOW), never local midnight
+OK   P2-1 today, partially elapsed: explicitEnd is still the real end-of-local-day boundary
+OK   P2-1 future date: explicitStart is the real start-of-local-day boundary, never clamped to NOW (NOW is on an earlier date entirely)
+OK   P2-1 future date: explicitEnd is the real end-of-local-day boundary
+OK   18/19. [STRUCTURAL] this file never calls a lower-level write directly (createPlannedActivity/materializeGoalActivityRhythmOccurrence/linkGoalActivityToPlannedActivity) -- every write goes through the injected, real persistAcceptedConstructedDay
+OK   18/19. [STRUCTURAL] this file imports verifyAcceptanceItems/authorizeGoalActivityLinks/persistAcceptedConstructedDay from their real modules, never reimplements them
+OK   18. [STRUCTURAL] no new signing primitive is introduced -- the file never imports auth.ts's sign/verify directly
+OK   18. [STRUCTURAL] the reconciliation short-circuit reuses the real, unmodified deriveAcceptanceIdempotencyKey/getPlanCreationClaim/getPlannedActivityForOwner -- never a second idempotency-table shape of its own
+OK   [STRUCTURAL] Availability Context enforcement reuses the real, unmodified resolveAvailability -- never a second availability-resolution formula
+
+ALL GOAL RHYTHM WEEKLY ACCEPTANCE CHECKS PASSED
+
+# exit=0 signal=

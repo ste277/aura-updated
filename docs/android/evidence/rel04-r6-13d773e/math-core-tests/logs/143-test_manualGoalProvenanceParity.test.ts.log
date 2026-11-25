@@ -1,0 +1,46 @@
+$ npx ts-node test/manualGoalProvenanceParity.test.ts
+# job=math-core-tests step=Run manual Goal provenance parity test env={}
+OK   marking is by EXACT id only: the recurring item is marked, a finite item with an identical title/activity is NOT (no title or label matching)
+OK   marking with no canonical ids (e.g. a failed load) leaves every item as the legacy manual item
+OK   marking never mutates its input and adds no other field
+OK   resolveAutomaticGoalDemand reports which MANUAL ids the SAME single load recognizes as canonical demand (recurring yes; finite, exhausted and unknown no)
+OK   ...with the manual id excluded from the automatic suggestions exactly as before, and ONE discovery + ONE facts load (no extra query for the marking)
+OK   unauthenticated / missing context: nothing is marked and nothing is loaded
+OK   a failed load stays LOAD_FAILED (the page then marks nothing: legacy manual rows)
+OK   same user + activity + planning date: the canonical manual row is field-for-field the SAME row an automatic inclusion creates
+OK   ...with the canonical id from the ONE encoder (goal-demand:<date>:<activityId>)
+OK   ...carrying provenance only as the client row field the accept-link builder already reads (goalActivityId), never in the preview request
+OK   an UNMARKED handoff item keeps the unmodified legacy manual row (plan-day-goal-<id>)
+OK   a MARKED item with no canonical id available (no planning date) falls back to the legacy row, never a guessed id
+OK   a normal freeform row never gains Goal provenance
+OK   the accept-time link for a canonical manual row equals the automatic one (same builder, same row shape)
+OK   an activity with a canonical manual row is not offered again as an automatic suggestion (dedup by activity id, as before)
+OK   UTC Wednesday: automatic and manual entry produce IDENTICAL recurrence facts (2026-10-05..2026-10-11)
+OK   UTC Wednesday: the planning date is the user's LOCAL date (2026-10-07) and lies inside the emitted period
+OK   Sunday (last day of the period): automatic and manual entry produce IDENTICAL recurrence facts (2026-10-05..2026-10-11)
+OK   Sunday (last day of the period): the planning date is the user's LOCAL date (2026-10-11) and lies inside the emitted period
+OK   next Monday (new period): automatic and manual entry produce IDENTICAL recurrence facts (2026-10-12..2026-10-18)
+OK   next Monday (new period): the planning date is the user's LOCAL date (2026-10-12) and lies inside the emitted period
+OK   Asia/Kolkata: UTC Sunday is already local Monday: automatic and manual entry produce IDENTICAL recurrence facts (2026-10-12..2026-10-18)
+OK   Asia/Kolkata: UTC Sunday is already local Monday: the planning date is the user's LOCAL date (2026-10-12) and lies inside the emitted period
+OK   America/Los_Angeles: UTC Monday is still local Sunday: automatic and manual entry produce IDENTICAL recurrence facts (2026-10-05..2026-10-11)
+OK   America/Los_Angeles: UTC Monday is still local Sunday: the planning date is the user's LOCAL date (2026-10-11) and lies inside the emitted period
+OK   through the real preview boundary: automatic and manual intents carry IDENTICAL decisionFacts (recurrence AND opportunity)
+OK   ...identical duration basis, horizon and coverage
+OK   ...and an identical constructed day (the facts remain inert; entry path changes nothing)
+OK   the LEGACY manual id (stale tab, old state) stays fact-free and is never promoted by title or activity matching
+OK   an exhausted recurring activity gets no facts even with a canonical id (zero-remaining exclusion intact)
+OK   a non-recurrent activity gets no recurrence facts even if (wrongly) given a canonical id -- the provider only honors server-eligible ids
+OK   cross-user: user B supplying user A's canonical id gets NO facts (matching is against B's own eligible demand)
+OK   forged canonical ids -- wrong planning date, nonexistent activity, malformed, missing id, extra component -- all yield NO facts
+OK   a legitimate canonical id with an altered title yields the same facts (the id, not the title, is the identity)
+OK   acceptance authorization: a client link that DIFFERS from the signed canonical id is rejected (a forged title/link cannot redirect provenance)
+OK   acceptance authorization: a matching link, or none at all, is authorized from the verified id (manual canonical rows are now MORE tightly bound than legacy ones)
+OK   acceptance authorization: a canonical id for another planning date is rejected
+OK   acceptance authorization: the legacy manual id behaves exactly as before (client link passes through; still validated transactionally at persistence)
+OK   the same canonical identity entered twice in one request is rejected by the existing duplicate-id rule (no duplicate candidate)
+OK   canonical identity includes the planning date: the same activity on different dates is a different intent (dates are never collapsed)
+OK   preview-time Goal queries are identical for 3 automatic and 3 manual intents (1 discovery + 1 facts load, never per intent)
+ALL MANUAL GOAL PROVENANCE PARITY CHECKS PASSED
+
+# exit=0 signal=

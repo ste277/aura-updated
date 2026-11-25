@@ -1,0 +1,147 @@
+$ npx ts-node test/homeRecomposition.test.ts
+# job=math-core-tests step=Run Home recomposition test env={"TS_NODE_COMPILER_OPTIONS":"{\"jsx\":\"react\"}"}
+OK   47/48. CHANGES_PROPOSED parses to 3 moves, 2 keeps and the signed token (only presentable fields kept)
+OK   5. no evidence/tier/protected-plan/scheduling field survives parsing
+OK   47. NO_CHANGES parses (no token needed)
+OK   47. NEEDS_ATTENTION parses with its unresolved rows and no token
+OK   47. NO_USABLE_CAPACITY parses to its own view
+OK   47. TIMING_FAILED is a retryable failure outcome, not a view
+OK   5. every malformed/unknown/inconsistent F2 response fails closed to ERROR: non-2xx, null body, string body, array body, unknown status, TIMEZONE_MISSING, INVALID_REQUEST, READY without proposal, unknown summary state, decisions not an array, unknown decision kind, MOVE without destination, MOVE with unparseable time, CHANGES_PROPOSED without token, CHANGES_PROPOSED without a MOVE, NO_CHANGES that contains a MOVE, NEEDS_ATTENTION without unresolved, duplicate plan ids, empty token, NO_CHANGES carrying a token, NEEDS_ATTENTION carrying a token
+OK   28/29. only CHANGES_PROPOSED may carry a proposalToken: NO_CHANGES/NEEDS_ATTENTION with one attached fails closed (never silently dropped)
+OK   19. ACCEPTED parses every source -> successor mapping; successor times become Dates
+OK   21. ALREADY_ACCEPTED parses as a committed result
+OK   24-26. STALE / INVALID_TOKEN / SAVE_FAILED parse from their non-2xx bodies
+OK   27. anything without a trustworthy answer is UNKNOWN (never a failure claim): 401, html 500, unparseable 200, 200 without moves, 200 with unknown status, ACCEPTED on a non-2xx, STALE on a 200, successor not UPCOMING, successor id mismatch, successor equals source, unparseable successor time, duplicate source, mapping does not match the proposal
+OK   44. initial state is IDLE (nothing offered, generation 0)
+OK   44. IDLE -> LOADING bumps the generation
+OK   44. LOADING -> PROPOSAL on a current VIEW outcome
+OK   44. LOADING -> ERROR (TIMING_FAILED / GENERIC) on failure outcomes
+OK   44. a response for an old generation never applies
+OK   44. a response outside LOADING never applies
+OK   44. PROPOSAL -> ACCEPTING (same generation), only for CHANGES_PROPOSED
+OK   44. ACCEPTING -> reconciling flag
+OK   44. ACCEPTING -> IDLE(updated) on success
+OK   44. ACCEPTING -> PROPOSAL(SAVE_FAILED) keeps the same view for retry
+OK   44. ACCEPTING -> PROPOSAL(UNCONFIRMED) keeps the same view for retry
+OK   44. ACCEPTING -> STALE and ERROR(INVALID_TOKEN): the token/proposal is dropped from state
+OK   44. accept results for a superseded generation never apply
+OK   44. DISMISS: any non-accepting state -> IDLE with a bumped generation; ignored while ACCEPTING
+OK   44. INVALIDATE: bumps generation and closes any open proposal; also detaches an accepting UI
+OK   44. INVALIDATE on an idle, quiet state is a no-op (no needless generation churn)
+OK   44. RESET always returns to IDLE with a newer generation
+OK   30. a re-run from PROPOSAL/STALE/ERROR supersedes (LOADING, newer generation); an accepting state is never displaced
+OK   28. COMMITTED_ELSEWHERE closes anything older and reports the update
+OK   2. F2 is invoked via POST /api/day/recompose with NO body
+OK   10/47. a CHANGES_PROPOSED response opens the PROPOSAL state
+OK   45. two requests are now in flight
+OK   45. B stays authoritative and the late A response is discarded
+OK   46. a response arriving after dismiss never reopens the proposal
+OK   46. ...nor after an invalidation (a successful Done/Skip/Move/Recovery)
+OK   35. ...nor after a reset (day rollover / navigation)
+OK   57. two synchronous requests produce ONE F2 call
+OK   14/47. TIMING_FAILED -> ERROR(TIMING_FAILED); a thrown request -> ERROR(GENERIC); both are re-runnable from the error state
+OK   17/49. the accept request body is EXACTLY { proposalToken } to /api/day/recompose/accept
+OK   19/50. ACCEPTED projects the whole batch in ONE applyConfirmedMoves call (3 moves) and ends at IDLE(updated)
+OK   19/23. projection happens before the state change in the same tick, then Home reconciles once
+OK   21/51. ALREADY_ACCEPTED is treated exactly like ACCEPTED (projected, updated, reconciled, no error)
+OK   18/57. two synchronous Accept clicks produce ONE accept request; the store reports accepting
+OK   18. while ACCEPTING, dismiss and a new request are ignored
+OK   18. the guard releases after settlement
+OK   24/52. STALE: proposal/token discarded, Home refreshed, nothing projected
+OK   24/52. the old token cannot be resubmitted from the UI (no accept possible from STALE)
+OK   24. Check again runs a fresh F2 request
+OK   25. INVALID_TOKEN: proposal discarded, Home refreshed, error state (no token vocabulary in state)
+OK   26/53. SAVE_FAILED: no projection, proposal kept for retry with the failure notice
+OK   53. the retry re-sends the SAME token and succeeds
+OK   13. lost response: the outcome stays UNKNOWN/UNCONFIRMED -- refreshed Home state is never treated as proof this proposal committed
+OK   13. no success is claimed: nothing is projected and no "Your day is updated" status
+OK   13. the exact same token is retained for retry (the view -- and its proposalToken -- is unchanged)
+OK   11/13. the refresh happens (visible-truth reconciliation) but the store makes no /api/my-day (or any other) identity read of its own
+OK   14. all-sources-MOVED is not special-cased back in: still UNCONFIRMED for a proposal with 3 MOVE sources
+OK   15. UNKNOWN, then a same-token retry: no premature success
+OK   15. retry -> ALREADY_ACCEPTED with authoritative mappings: same token, atomic projection, success status, refresh
+OK   16. retry -> ACCEPTED takes the exact same successful projection path as ALREADY_ACCEPTED
+OK   8. UNKNOWN retry -> STALE discards the proposal/token exactly as a direct STALE would
+OK   9. UNKNOWN retry -> INVALID_TOKEN behaves exactly as a direct INVALID_TOKEN would
+OK   10. UNKNOWN retry -> SAVE_FAILED is its own explicit notice, never conflated with UNCONFIRMED
+OK   17. a malformed ACCEPTED body (no usable moves) is UNKNOWN, never treated as success
+OK   17. only the retry's valid, authoritative response resolves it
+OK   27. after a transport error the UI enters ACCEPTING(reconciling) and stays blocked until the refresh settles
+OK   11/27. ...then settles UNCONFIRMED (the refresh reconciles VISIBLE state; it is never proof of THIS commit)
+OK   30. accept() itself refuses to start an accept request while a plan mutation is in flight
+OK   55. after a local invalidation the UI is IDLE but an accept is still in flight
+OK   28/55. the late ACCEPTED is still projected (committed server truth) and reconciled
+OK   28/55. ...and the UI reports the update (IDLE, updated) instead of dropping it
+OK   28. a late STALE for an already-invalidated UI request is ignored (no state resurrected)
+OK   28. no new request can start while an accept is in flight
+OK   28. the committed batch is applied exactly once
+OK   34. after unmount (detach) the store neither projects nor notifies
+OK   58. BEFORE acceptance the Timeline shows the actual committed plans at their actual times (proposal times exist nowhere in it)
+OK   20/50. ONE projection swaps all sources for all successors together: A,B,C disappear and A2,B2,C2 appear at their new times
+OK   20. there is no reachable intermediate "A moved, B and C not yet" state from one confirmed response (the helpers take the whole batch)
+OK   19. the projected day stays chronological
+OK   19. projection does not mutate the maps it was given
+OK   1/9. offered: today + an upcoming plan + nothing conflicting running
+OK   1. hidden when the viewed day is not today, or has no date
+OK   1. hidden with nothing upcoming (done/skipped/missed/moved/current only, or no plan rows)
+OK   1. hidden while a conflicting Home mutation/accept is running
+OK   1. the heuristic never looks at scheduling flexibility (it only reads the presentation status)
+OK   8/48. MOVE rows show the title and old -> new time, with the accessible "from X to Y" equivalent
+OK   8. the arrow is decorative only (aria-hidden) so the change is never conveyed by an arrow alone
+OK   7. the proposal card is labelled as not applied yet
+OK   9/48. unchanged plans are collapsed to a count, not listed
+OK   17/18. unresolved items render plainly under "Needs your attention" with the time and copy supported by F2 (found infeasible AND Aura's own search found nothing else), never "nothing else fits" / "no other time exists" / "impossible"
+OK   10/16. a proposal that also has unresolved items still offers no partial acceptance: exactly one Accept, for the whole proposal
+OK   48. no internal enum, timing tier, Constructor/Panchang/Vedic terminology or token appears in ANY rendering
+OK   11. no Why/causal copy is invented anywhere
+OK   20/22. NO_CHANGES with real KEEP decisions: "Nothing needs to move." (not the overstated "Your day already works."), no Accept, a Done control
+OK   21/22. NO_CHANGES with zero decisions/keeps: neutral copy that never implies the whole day was evaluated, no Accept
+OK   19/48. the NO_CHANGES variants carry no internal vocabulary and no overclaim either
+OK   13/47. NEEDS_ATTENTION: decision summary + unresolved rows, no Accept
+OK   14/47. TIMING_FAILED: retryable failure copy and "Try again", never implying the day is optimal
+OK   15/47. NO_USABLE_CAPACITY: concise practical copy, no Accept
+OK   16. CHANGES_PROPOSED: primary "Accept new arrangement" and secondary "Not now"; no modal/dialog markup
+OK   24. STALE copy + Check again; INVALID copy + Check again; neither exposes token vocabulary
+OK   26/35. SAVE_FAILED shows its own concise failure with the proposal still acceptable; UNCONFIRMED is a distinct, neutral notice that claims neither success nor failure
+OK   22. success status: "Your day is updated." as a focusable status
+OK   18. ACCEPTING: aria-busy, Accept and Not now disabled, saving status; reconciling says "Checking your day…"
+OK   18. Accept also waits while a conflicting plan mutation runs (acceptBlocked)
+OK   59. accessibility: a labelled region, headed by a focusable heading
+OK   59. loading/success use role="status"; failures use role="alert"; every action is a real <button>
+OK   38. mobile: 44px-class tap targets, a wrapping action row and a flexible full-width-capable Accept (no hover/drag dependency)
+OK   36. reduced motion: the card introduces no animation or transition
+OK   7. an idle, quiet state renders nothing (no persistent clutter)
+OK   HPG4-1. parseAcceptResponse carries each of the 3 known scheduling-conflict codes through on SAVE_FAILED
+OK   HPG4-1. an unrecognized code, a missing code, and a non-string code all fall back to the exact pre-existing codeless SAVE_FAILED (never trusted blindly)
+OK   HPG4-1. the reducer carries a validated code from ACCEPT_SAVE_FAILED into PROPOSAL.noticeCode
+OK   HPG4-1. ACCEPT_SAVE_FAILED with no code, and ACCEPT_UNCONFIRMED (which never carries one), both leave noticeCode unset
+OK   HPG4-1. CAPACITY_EXCEEDED shows the shared weekly-capacity explanation (not the generic fallback)
+OK   HPG4-1. DAILY_CAPACITY_EXCEEDED shows the shared daily-capacity explanation (not the generic fallback)
+OK   HPG4-1. DAILY_ATTRIBUTION_UNRESOLVED shows its own distinct unresolved-attribution explanation, never collapsed into the daily-capacity wording
+OK   HPG4-1. the three conflict explanations are mutually distinct, and distinct from the generic fallback
+OK   HPG4-1. a codeless/unrelated SAVE_FAILED still renders the exact original generic message, byte-for-byte unchanged
+OK   HPG4-1. no raw scheduling-eligibility enum code ever appears in any rendering (same discipline as check 48)
+OK   HPG4-1. success and UNCONFIRMED presentation are untouched by this change
+OK   HPG4-1. every known-code failure still keeps role="alert" and a real, enabled Accept/Not now pair -- same recovery actions as the generic case, never a dead end
+OK   42. Home recomposition modules import nothing from the scheduling domain (Constructor, Timing Search, placement/collision, scheduling-mode authority, F2/F3 internals)
+OK   42. ...and contain no scheduling vocabulary or logic
+OK   43. trust boundary: the ONLY request body the client can build is { proposalToken }; it never references moves/times/plan ids/scheduling mode in a request
+OK   2/43. the only endpoints touched are the two existing routes (no new route)
+OK   3. the proposal is not in DailyAgenda and not global state (no context/store library, no agenda type change)
+OK   6. the card is presentational: no fetch, no state hooks, no store
+OK   7/58. Home never feeds the proposal into the Timeline: buildHomeTimeline/applyConfirmedSuccessors inputs do not mention the recomposition state
+OK   7. the card renders inside the Your Day area, above the Timeline rows, and not inside Right Now
+OK   1. entry copy is "Reorganize the rest of my day" and appears only through the visibility heuristic
+OK   20. Home projects a confirmed batch with ONE applier that uses the shared executionFacts/confirmedSuccessors overlays
+OK   22. batch recomposition never uses the successor-focus controller
+OK   23. reconciliation reuses the existing best-effort refresh (onPlanCompleted) and adds no ranking logic
+OK   56. invalidation is wired after successful Done, Skip and Move (Missed Recovery uses the same three handlers), plus Skip-all-missed (HPG4-2)
+OK   32/56. Quick Capture does NOT invalidate a proposal
+OK   18/33. conflicting plan mutations are blocked while accepting (handlers early-return, buttons disabled, including HPG4-2's Skip-all-missed)
+OK   34/35. leaving Home detaches the store; a local-day change resets it
+OK   37. focus: heading on appear, status after success, entry action after dismiss
+OK   39. no analytics: no trackEvent/productEvents in the F4 code and no product-events change
+OK   41/66. no backend/domain/schema change is needed: no migration directory's own contents mention Home Recomposition's own client-side store/presentation vocabulary (count-independent -- holds regardless of how many unrelated migrations exist), no new dependency in package.json
+ALL HOME RECOMPOSITION CHECKS PASSED
+
+# exit=0 signal=

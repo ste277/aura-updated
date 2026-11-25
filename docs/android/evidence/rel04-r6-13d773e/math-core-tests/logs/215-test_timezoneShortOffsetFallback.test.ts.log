@@ -1,0 +1,166 @@
+$ npx ts-node test/timezoneShortOffsetFallback.test.ts
+# job=math-core-tests step=Run COMPAT-05 timezone shortOffset fallback test env={}
+OK   [apps/web/lib/timezone] [primary (shortOffset supported)] environment supports shortOffset as intended
+OK   [apps/web/lib/timezone] [primary (shortOffset supported)] UTC -- expected 0, got 0
+OK   [apps/web/lib/timezone] [primary (shortOffset supported)] Asia/Kolkata +05:30 (half-hour) -- expected 330, got 330
+OK   [apps/web/lib/timezone] [primary (shortOffset supported)] Asia/Kathmandu +05:45 (quarter-hour) -- expected 345, got 345
+OK   [apps/web/lib/timezone] [primary (shortOffset supported)] Pacific/Chatham +12:45 standard (quarter-hour) -- expected 765, got 765
+OK   [apps/web/lib/timezone] [primary (shortOffset supported)] Pacific/Chatham +13:45 daylight (quarter-hour + DST) -- expected 825, got 825
+OK   [apps/web/lib/timezone] [primary (shortOffset supported)] America/St_Johns -03:30 (negative half-hour) -- expected -210, got -210
+OK   [apps/web/lib/timezone] [primary (shortOffset supported)] America/St_Johns -02:30 daylight -- expected -150, got -150
+OK   [apps/web/lib/timezone] [primary (shortOffset supported)] America/New_York winter EST -05:00 -- expected -300, got -300
+OK   [apps/web/lib/timezone] [primary (shortOffset supported)] America/New_York summer EDT -04:00 -- expected -240, got -240
+OK   [apps/web/lib/timezone] [primary (shortOffset supported)] NY spring transition: 1 s before -- expected -300, got -300
+OK   [apps/web/lib/timezone] [primary (shortOffset supported)] NY spring transition: at the instant -- expected -240, got -240
+OK   [apps/web/lib/timezone] [primary (shortOffset supported)] NY autumn transition: 1 s before -- expected -240, got -240
+OK   [apps/web/lib/timezone] [primary (shortOffset supported)] NY autumn transition: at the instant -- expected -300, got -300
+OK   [apps/web/lib/timezone] [primary (shortOffset supported)] London spring: 1 s before -- expected 0, got 0
+OK   [apps/web/lib/timezone] [primary (shortOffset supported)] London spring: at the instant -- expected 60, got 60
+OK   [apps/web/lib/timezone] [primary (shortOffset supported)] London autumn: 1 s before -- expected 60, got 60
+OK   [apps/web/lib/timezone] [primary (shortOffset supported)] London autumn: at the instant -- expected 0, got 0
+OK   [apps/web/lib/timezone] [primary (shortOffset supported)] Lord Howe +11:00 summer (30-min DST) -- expected 660, got 660
+OK   [apps/web/lib/timezone] [primary (shortOffset supported)] Lord Howe +10:30 winter -- expected 630, got 630
+OK   [apps/web/lib/timezone] [primary (shortOffset supported)] Honolulu -10:00 (local date is the previous day) -- expected -600, got -600
+OK   [apps/web/lib/timezone] [primary (shortOffset supported)] Kolkata across a year boundary (local 1 Jan 01:30) -- expected 330, got 330
+OK   [apps/web/lib/timezone] [primary (shortOffset supported)] Kiritimati +14:00 (largest positive) -- expected 840, got 840
+OK   [apps/web/lib/timezone] [primary (shortOffset supported)] Pago Pago -11:00 (large negative) -- expected -660, got -660
+OK   [apps/web/lib/timezone] [primary (shortOffset supported)] sub-second instant -- expected 330, got 330
+OK   [apps/web/lib/timezone] [primary (shortOffset supported)] LA 0.5 s before spring transition (10:00Z) -- expected -480, got -480
+OK   [apps/web/lib/timezone] [primary (shortOffset supported)] LA at spring transition -- expected -420, got -420
+OK   [apps/web/lib/timezone] [primary (shortOffset supported)] invalid IANA timezone still throws RangeError (not silently 0/UTC) -- RangeError
+OK   [apps/web/lib/timezone] [primary (shortOffset supported)] invalid Date still throws RangeError -- RangeError
+OK   [apps/web/lib/timezone] [fallback (simulated WebView 91)] environment rejects shortOffset as intended
+OK   [apps/web/lib/timezone] [fallback (simulated WebView 91)] UTC -- expected 0, got 0
+OK   [apps/web/lib/timezone] [fallback (simulated WebView 91)] Asia/Kolkata +05:30 (half-hour) -- expected 330, got 330
+OK   [apps/web/lib/timezone] [fallback (simulated WebView 91)] Asia/Kathmandu +05:45 (quarter-hour) -- expected 345, got 345
+OK   [apps/web/lib/timezone] [fallback (simulated WebView 91)] Pacific/Chatham +12:45 standard (quarter-hour) -- expected 765, got 765
+OK   [apps/web/lib/timezone] [fallback (simulated WebView 91)] Pacific/Chatham +13:45 daylight (quarter-hour + DST) -- expected 825, got 825
+OK   [apps/web/lib/timezone] [fallback (simulated WebView 91)] America/St_Johns -03:30 (negative half-hour) -- expected -210, got -210
+OK   [apps/web/lib/timezone] [fallback (simulated WebView 91)] America/St_Johns -02:30 daylight -- expected -150, got -150
+OK   [apps/web/lib/timezone] [fallback (simulated WebView 91)] America/New_York winter EST -05:00 -- expected -300, got -300
+OK   [apps/web/lib/timezone] [fallback (simulated WebView 91)] America/New_York summer EDT -04:00 -- expected -240, got -240
+OK   [apps/web/lib/timezone] [fallback (simulated WebView 91)] NY spring transition: 1 s before -- expected -300, got -300
+OK   [apps/web/lib/timezone] [fallback (simulated WebView 91)] NY spring transition: at the instant -- expected -240, got -240
+OK   [apps/web/lib/timezone] [fallback (simulated WebView 91)] NY autumn transition: 1 s before -- expected -240, got -240
+OK   [apps/web/lib/timezone] [fallback (simulated WebView 91)] NY autumn transition: at the instant -- expected -300, got -300
+OK   [apps/web/lib/timezone] [fallback (simulated WebView 91)] London spring: 1 s before -- expected 0, got 0
+OK   [apps/web/lib/timezone] [fallback (simulated WebView 91)] London spring: at the instant -- expected 60, got 60
+OK   [apps/web/lib/timezone] [fallback (simulated WebView 91)] London autumn: 1 s before -- expected 60, got 60
+OK   [apps/web/lib/timezone] [fallback (simulated WebView 91)] London autumn: at the instant -- expected 0, got 0
+OK   [apps/web/lib/timezone] [fallback (simulated WebView 91)] Lord Howe +11:00 summer (30-min DST) -- expected 660, got 660
+OK   [apps/web/lib/timezone] [fallback (simulated WebView 91)] Lord Howe +10:30 winter -- expected 630, got 630
+OK   [apps/web/lib/timezone] [fallback (simulated WebView 91)] Honolulu -10:00 (local date is the previous day) -- expected -600, got -600
+OK   [apps/web/lib/timezone] [fallback (simulated WebView 91)] Kolkata across a year boundary (local 1 Jan 01:30) -- expected 330, got 330
+OK   [apps/web/lib/timezone] [fallback (simulated WebView 91)] Kiritimati +14:00 (largest positive) -- expected 840, got 840
+OK   [apps/web/lib/timezone] [fallback (simulated WebView 91)] Pago Pago -11:00 (large negative) -- expected -660, got -660
+OK   [apps/web/lib/timezone] [fallback (simulated WebView 91)] sub-second instant -- expected 330, got 330
+OK   [apps/web/lib/timezone] [fallback (simulated WebView 91)] LA 0.5 s before spring transition (10:00Z) -- expected -480, got -480
+OK   [apps/web/lib/timezone] [fallback (simulated WebView 91)] LA at spring transition -- expected -420, got -420
+OK   [apps/web/lib/timezone] [fallback (simulated WebView 91)] invalid IANA timezone still throws RangeError (not silently 0/UTC) -- RangeError
+OK   [apps/web/lib/timezone] [fallback (simulated WebView 91)] invalid Date still throws RangeError -- RangeError
+OK   [apps/web/lib/timezone] fallback == primary for 26486 zone/instant pairs across 2026 (19 zones incl. DST, half/quarter-hour)
+OK   [apps/web/lib/timezone] unrelated formatter error (TypeError) propagates; fallback not activated -- TypeError
+OK   [apps/web/lib/timezone] feature detection runs once and is cached (1 probe for 50 calls) -- probes=1
+OK   [packages/panchang/src/localDate] [primary (shortOffset supported)] environment supports shortOffset as intended
+OK   [packages/panchang/src/localDate] [primary (shortOffset supported)] UTC -- expected 0, got 0
+OK   [packages/panchang/src/localDate] [primary (shortOffset supported)] Asia/Kolkata +05:30 (half-hour) -- expected 330, got 330
+OK   [packages/panchang/src/localDate] [primary (shortOffset supported)] Asia/Kathmandu +05:45 (quarter-hour) -- expected 345, got 345
+OK   [packages/panchang/src/localDate] [primary (shortOffset supported)] Pacific/Chatham +12:45 standard (quarter-hour) -- expected 765, got 765
+OK   [packages/panchang/src/localDate] [primary (shortOffset supported)] Pacific/Chatham +13:45 daylight (quarter-hour + DST) -- expected 825, got 825
+OK   [packages/panchang/src/localDate] [primary (shortOffset supported)] America/St_Johns -03:30 (negative half-hour) -- expected -210, got -210
+OK   [packages/panchang/src/localDate] [primary (shortOffset supported)] America/St_Johns -02:30 daylight -- expected -150, got -150
+OK   [packages/panchang/src/localDate] [primary (shortOffset supported)] America/New_York winter EST -05:00 -- expected -300, got -300
+OK   [packages/panchang/src/localDate] [primary (shortOffset supported)] America/New_York summer EDT -04:00 -- expected -240, got -240
+OK   [packages/panchang/src/localDate] [primary (shortOffset supported)] NY spring transition: 1 s before -- expected -300, got -300
+OK   [packages/panchang/src/localDate] [primary (shortOffset supported)] NY spring transition: at the instant -- expected -240, got -240
+OK   [packages/panchang/src/localDate] [primary (shortOffset supported)] NY autumn transition: 1 s before -- expected -240, got -240
+OK   [packages/panchang/src/localDate] [primary (shortOffset supported)] NY autumn transition: at the instant -- expected -300, got -300
+OK   [packages/panchang/src/localDate] [primary (shortOffset supported)] London spring: 1 s before -- expected 0, got 0
+OK   [packages/panchang/src/localDate] [primary (shortOffset supported)] London spring: at the instant -- expected 60, got 60
+OK   [packages/panchang/src/localDate] [primary (shortOffset supported)] London autumn: 1 s before -- expected 60, got 60
+OK   [packages/panchang/src/localDate] [primary (shortOffset supported)] London autumn: at the instant -- expected 0, got 0
+OK   [packages/panchang/src/localDate] [primary (shortOffset supported)] Lord Howe +11:00 summer (30-min DST) -- expected 660, got 660
+OK   [packages/panchang/src/localDate] [primary (shortOffset supported)] Lord Howe +10:30 winter -- expected 630, got 630
+OK   [packages/panchang/src/localDate] [primary (shortOffset supported)] Honolulu -10:00 (local date is the previous day) -- expected -600, got -600
+OK   [packages/panchang/src/localDate] [primary (shortOffset supported)] Kolkata across a year boundary (local 1 Jan 01:30) -- expected 330, got 330
+OK   [packages/panchang/src/localDate] [primary (shortOffset supported)] Kiritimati +14:00 (largest positive) -- expected 840, got 840
+OK   [packages/panchang/src/localDate] [primary (shortOffset supported)] Pago Pago -11:00 (large negative) -- expected -660, got -660
+OK   [packages/panchang/src/localDate] [primary (shortOffset supported)] sub-second instant -- expected 330, got 330
+OK   [packages/panchang/src/localDate] [primary (shortOffset supported)] LA 0.5 s before spring transition (10:00Z) -- expected -480, got -480
+OK   [packages/panchang/src/localDate] [primary (shortOffset supported)] LA at spring transition -- expected -420, got -420
+OK   [packages/panchang/src/localDate] [primary (shortOffset supported)] invalid IANA timezone still throws RangeError (not silently 0/UTC) -- RangeError
+OK   [packages/panchang/src/localDate] [primary (shortOffset supported)] invalid Date still throws RangeError -- RangeError
+OK   [packages/panchang/src/localDate] [fallback (simulated WebView 91)] environment rejects shortOffset as intended
+OK   [packages/panchang/src/localDate] [fallback (simulated WebView 91)] UTC -- expected 0, got 0
+OK   [packages/panchang/src/localDate] [fallback (simulated WebView 91)] Asia/Kolkata +05:30 (half-hour) -- expected 330, got 330
+OK   [packages/panchang/src/localDate] [fallback (simulated WebView 91)] Asia/Kathmandu +05:45 (quarter-hour) -- expected 345, got 345
+OK   [packages/panchang/src/localDate] [fallback (simulated WebView 91)] Pacific/Chatham +12:45 standard (quarter-hour) -- expected 765, got 765
+OK   [packages/panchang/src/localDate] [fallback (simulated WebView 91)] Pacific/Chatham +13:45 daylight (quarter-hour + DST) -- expected 825, got 825
+OK   [packages/panchang/src/localDate] [fallback (simulated WebView 91)] America/St_Johns -03:30 (negative half-hour) -- expected -210, got -210
+OK   [packages/panchang/src/localDate] [fallback (simulated WebView 91)] America/St_Johns -02:30 daylight -- expected -150, got -150
+OK   [packages/panchang/src/localDate] [fallback (simulated WebView 91)] America/New_York winter EST -05:00 -- expected -300, got -300
+OK   [packages/panchang/src/localDate] [fallback (simulated WebView 91)] America/New_York summer EDT -04:00 -- expected -240, got -240
+OK   [packages/panchang/src/localDate] [fallback (simulated WebView 91)] NY spring transition: 1 s before -- expected -300, got -300
+OK   [packages/panchang/src/localDate] [fallback (simulated WebView 91)] NY spring transition: at the instant -- expected -240, got -240
+OK   [packages/panchang/src/localDate] [fallback (simulated WebView 91)] NY autumn transition: 1 s before -- expected -240, got -240
+OK   [packages/panchang/src/localDate] [fallback (simulated WebView 91)] NY autumn transition: at the instant -- expected -300, got -300
+OK   [packages/panchang/src/localDate] [fallback (simulated WebView 91)] London spring: 1 s before -- expected 0, got 0
+OK   [packages/panchang/src/localDate] [fallback (simulated WebView 91)] London spring: at the instant -- expected 60, got 60
+OK   [packages/panchang/src/localDate] [fallback (simulated WebView 91)] London autumn: 1 s before -- expected 60, got 60
+OK   [packages/panchang/src/localDate] [fallback (simulated WebView 91)] London autumn: at the instant -- expected 0, got 0
+OK   [packages/panchang/src/localDate] [fallback (simulated WebView 91)] Lord Howe +11:00 summer (30-min DST) -- expected 660, got 660
+OK   [packages/panchang/src/localDate] [fallback (simulated WebView 91)] Lord Howe +10:30 winter -- expected 630, got 630
+OK   [packages/panchang/src/localDate] [fallback (simulated WebView 91)] Honolulu -10:00 (local date is the previous day) -- expected -600, got -600
+OK   [packages/panchang/src/localDate] [fallback (simulated WebView 91)] Kolkata across a year boundary (local 1 Jan 01:30) -- expected 330, got 330
+OK   [packages/panchang/src/localDate] [fallback (simulated WebView 91)] Kiritimati +14:00 (largest positive) -- expected 840, got 840
+OK   [packages/panchang/src/localDate] [fallback (simulated WebView 91)] Pago Pago -11:00 (large negative) -- expected -660, got -660
+OK   [packages/panchang/src/localDate] [fallback (simulated WebView 91)] sub-second instant -- expected 330, got 330
+OK   [packages/panchang/src/localDate] [fallback (simulated WebView 91)] LA 0.5 s before spring transition (10:00Z) -- expected -480, got -480
+OK   [packages/panchang/src/localDate] [fallback (simulated WebView 91)] LA at spring transition -- expected -420, got -420
+OK   [packages/panchang/src/localDate] [fallback (simulated WebView 91)] invalid IANA timezone still throws RangeError (not silently 0/UTC) -- RangeError
+OK   [packages/panchang/src/localDate] [fallback (simulated WebView 91)] invalid Date still throws RangeError -- RangeError
+OK   [packages/panchang/src/localDate] fallback == primary for 26486 zone/instant pairs across 2026 (19 zones incl. DST, half/quarter-hour)
+OK   [packages/panchang/src/localDate] unrelated formatter error (TypeError) propagates; fallback not activated -- TypeError
+OK   [packages/panchang/src/localDate] feature detection runs once and is cached (1 probe for 50 calls) -- probes=1
+OK   apps/web and packages/panchang implementations agree (native, 6312 pairs)
+OK   apps/web and packages/panchang implementations agree (webview91, 6312 pairs)
+OK   [apps/web/lib/timezone] historical offsets with seconds (1800-1960, 648 pairs): fallback == primary (truncation)
+OK   [apps/web/lib/timezone] fallback: UTC in year 0050 -> 0 (no 1900-1999 remap) -- 0
+OK   [apps/web/lib/timezone] fallback: missing formatter part -> RangeError, not silent NaN -- RangeError
+OK   [packages/panchang/src/localDate] historical offsets with seconds (1800-1960, 648 pairs): fallback == primary (truncation)
+OK   [packages/panchang/src/localDate] fallback: UTC in year 0050 -> 0 (no 1900-1999 remap) -- 0
+OK   [packages/panchang/src/localDate] fallback: missing formatter part -> RangeError, not silent NaN -- RangeError
+OK   [apps/web/lib/timezone] [F1 fallback] month boundary: local 1 Feb 00:30 from 31 Jan UTC -- expected 330, got 330
+OK   [apps/web/lib/timezone] [F1 fallback] month boundary: local 30 Apr 22:00 from 1 May UTC -- expected -240, got -240
+OK   [apps/web/lib/timezone] [F1 fallback] year boundary: local 1 Jan 00:30 (+14:00) -- expected 840, got 840
+OK   [apps/web/lib/timezone] [F1 fallback] year boundary: local 31 Dec 18:00 (-11:00) -- expected -660, got -660
+OK   [apps/web/lib/timezone] [F1 fallback] leap day: local 29 Feb 2024 00:30 -- expected 330, got 330
+OK   [apps/web/lib/timezone] [F1 fallback] leap day: local 29 Feb 2024 23:59:59 -- expected -480, got -480
+OK   [apps/web/lib/timezone] [F1 fallback] leap day 2000 (divisible by 400) -- expected 0, got 0
+OK   [apps/web/lib/timezone] [F1 fallback] 2100 is not a leap year: local 1 Mar 00:30 -- expected 540, got 540
+OK   [apps/web/lib/timezone] [F1 fallback] leap day in winter time (EST) -- expected -300, got -300
+OK   [apps/web/lib/timezone] [F1 fallback] leap day 2028 during 30-min DST -- expected 660, got 660
+OK   [apps/web/lib/timezone] [F1 fallback] input Date unchanged and 20 repeated calls stable -- runs=-240
+OK   [packages/panchang/src/localDate] [F1 fallback] month boundary: local 1 Feb 00:30 from 31 Jan UTC -- expected 330, got 330
+OK   [packages/panchang/src/localDate] [F1 fallback] month boundary: local 30 Apr 22:00 from 1 May UTC -- expected -240, got -240
+OK   [packages/panchang/src/localDate] [F1 fallback] year boundary: local 1 Jan 00:30 (+14:00) -- expected 840, got 840
+OK   [packages/panchang/src/localDate] [F1 fallback] year boundary: local 31 Dec 18:00 (-11:00) -- expected -660, got -660
+OK   [packages/panchang/src/localDate] [F1 fallback] leap day: local 29 Feb 2024 00:30 -- expected 330, got 330
+OK   [packages/panchang/src/localDate] [F1 fallback] leap day: local 29 Feb 2024 23:59:59 -- expected -480, got -480
+OK   [packages/panchang/src/localDate] [F1 fallback] leap day 2000 (divisible by 400) -- expected 0, got 0
+OK   [packages/panchang/src/localDate] [F1 fallback] 2100 is not a leap year: local 1 Mar 00:30 -- expected 540, got 540
+OK   [packages/panchang/src/localDate] [F1 fallback] leap day in winter time (EST) -- expected -300, got -300
+OK   [packages/panchang/src/localDate] [F1 fallback] leap day 2028 during 30-min DST -- expected 660, got 660
+OK   [packages/panchang/src/localDate] [F1 fallback] input Date unchanged and 20 repeated calls stable -- runs=-240
+OK   [apps/web/lib/timezone] [F1 fallback] years 0001-0120 incl. 0099/0100 boundary and leap days 0004/0096 (2184 pairs): fallback == primary
+OK   [apps/web/lib/timezone] [F1 fallback] UTC at 0099-12-31T23:59:59Z -> 0 and 0100-01-01T00:00:00Z -> 0 (no 1900-1999 remap)
+OK   [packages/panchang/src/localDate] [F1 fallback] years 0001-0120 incl. 0099/0100 boundary and leap days 0004/0096 (2184 pairs): fallback == primary
+OK   [packages/panchang/src/localDate] [F1 fallback] UTC at 0099-12-31T23:59:59Z -> 0 and 0100-01-01T00:00:00Z -> 0 (no 1900-1999 remap)
+OK   [apps/web/lib/timezone] [F1 fallback] identical to the pre-F1 mutating construction (3700 zone/instant pairs, incl. 1 BC wall clock)
+OK   [packages/panchang/src/localDate] [F1 fallback] identical to the pre-F1 mutating construction (3700 zone/instant pairs, incl. 1 BC wall clock)
+OK   [apps/web/lib/timezone] [F1 fallback] 1970-2100 month-end / leap-day / DST sweep (1776 pairs): fallback == primary
+OK   [packages/panchang/src/localDate] [F1 fallback] 1970-2100 month-end / leap-day / DST sweep (1776 pairs): fallback == primary
+
+160 passed, 0 failed
+
+# exit=0 signal=

@@ -1,0 +1,107 @@
+$ npx ts-node test/decisionPressure.test.ts
+# job=math-core-tests step=Run decision pressure test env={}
+=== the canonical positive fixture and the positive cases ===
+OK   POSITIVE: the minimal canonical fixture (every predicate satisfied) is LAST_KNOWN_OPPORTUNITY
+OK   output is a primitive categorical value (a string literal), never an object or a number
+OK   REMAINING 1: any positive remaining qualifies (not only 1) -- "last known opportunity for at least one remaining occurrence"
+OK   REMAINING 2: any positive remaining qualifies (not only 1) -- "last known opportunity for at least one remaining occurrence"
+OK   REMAINING 3: any positive remaining qualifies (not only 1) -- "last known opportunity for at least one remaining occurrence"
+OK   REMAINING 7: any positive remaining qualifies (not only 1) -- "last known opportunity for at least one remaining occurrence"
+OK   NO SHORTFALL MATH: 9 remaining occurrences against 1 viable day is still just LAST_KNOWN_OPPORTUNITY (occurrences and civil days are different units; nothing is subtracted or scored)
+OK   ONE-DAY HORIZON (Sunday, the period end): afterStart counts are all zero, every other predicate passes -> LAST_KNOWN_OPPORTUNITY
+OK   MONDAY (the period start): planning date equals periodStartDate -> qualifies
+OK   MIDWEEK (Friday, two later days both known infeasible): qualifies
+OK   YEAR BOUNDARY: a Monday 2026-12-28 .. Sunday 2027-01-03 period with the planning date in January qualifies (string-ordered civil dates, no Date arithmetic)
+OK   YEAR BOUNDARY: the planning date in December, the horizon running into January, qualifies
+OK   DST (civil-date evidence only): US spring-forward Sunday 2026-03-08 -> deterministic LAST_KNOWN_OPPORTUNITY; no DST arithmetic exists in the deriver
+OK   DST: the Monday of that week (2026-03-02) is equally deterministic
+OK   DST (civil-date evidence only): US fall-back Sunday 2026-11-01 -> deterministic LAST_KNOWN_OPPORTUNITY; no DST arithmetic exists in the deriver
+OK   DST: the Monday of that week (2026-10-26) is equally deterministic
+OK   DST (civil-date evidence only): Auckland spring-forward Sunday 2026-09-27 -> deterministic LAST_KNOWN_OPPORTUNITY; no DST arithmetic exists in the deriver
+OK   DST: the Monday of that week (2026-09-21) is equally deterministic
+=== the semantic matrix: each predicate individually falsified from the positive fixture -> NONE ===
+OK   NONE: FIXED candidate (pressure is for deferrable work)
+OK   NONE: unknown flexibility value
+OK   NONE: missing flexibility
+OK   NONE: recurrence evidence absent
+OK   NONE: opportunity evidence absent
+OK   NONE: recurrence period is not LOCAL_CALENDAR_WEEK (a future kind is never inferred)
+OK   NONE: recurrence period missing
+OK   NONE: planning date before periodStartDate
+OK   NONE: planning date after periodEndDate
+OK   NONE: remainingInPeriod 0 (no demand left)
+OK   NONE: horizon starts before the planning date (start mismatch)
+OK   NONE: horizon starts after the planning date (start mismatch)
+OK   NONE: horizon ends before the period end (end mismatch)
+OK   NONE: horizon ends after the period end (end mismatch)
+OK   NONE: GENERIC_FALLBACK duration (even though every other fact looks scarce)
+OK   NONE: unknown duration basis
+OK   NONE: current day KNOWN_INFEASIBLE (impossible work is never labelled urgent)
+OK   NONE: current day UNKNOWN
+OK   NONE: unrecognized current-day state
+OK   NONE: a later day is known viable
+OK   NONE: several later days are known viable
+OK   NONE: a later day is unknown
+OK   NONE: every later day is unknown
+OK   NONE: coverage PARTIAL
+OK   NONE: coverage UNKNOWN
+OK   NONE: unrecognized coverage
+OK   NONE: evaluated partition broken (evaluatedDays != 1 + afterStartEvaluatedDays), too high
+OK   NONE: evaluated partition broken, too low
+OK   NONE: viable partition broken (viableDays counts a day nothing accounts for)
+OK   NONE: viable partition broken (viableDays 0 although the start day is KNOWN_FEASIBLE)
+OK   NONE: unknown partition broken (unknownDays 1 with nothing unknown)
+OK   NONE: recurrence arithmetic: remaining larger than max(0, target - completed - committed)
+OK   NONE: recurrence arithmetic: remaining smaller than max(0, target - completed - committed) but still positive
+OK   NONE: recurrence arithmetic: completed + committed exceed the target but remaining is positive
+OK   NONE: periodStartDate after periodEndDate
+OK   NONE: horizonStartDate after horizonEndDate
+OK   MALFORMED COUNTS: all 80 cases (NaN, Infinity, negative, fractional, string, null, undefined, object in each of the 4 recurrence and 6 opportunity counts) -> NONE
+OK   MALFORMED DURATION: all 8 cases (0, negative, NaN, Infinity, fractional, string, null, undefined) -> NONE
+OK   MALFORMED DATES: all 50 cases (impossible calendar dates, wrong shapes, empty, number, null, undefined) at each of the 5 date inputs -> NONE
+   [info] semantic matrix: 174 individually falsified fixtures, every one NONE
+OK   THE MATRIX IS EXHAUSTIVE: 174 single-predicate falsifications of the one positive fixture all yield NONE
+=== absence and malformed evidence never throw ===
+OK   absent evidence -> NONE (no throw)
+OK   empty evidence object -> NONE
+OK   evidence whose property access throws fails CLOSED to NONE (no throw, nothing logged)
+OK   non-object evidence (5) -> NONE
+OK   non-object evidence ("x") -> NONE
+OK   non-object evidence (true) -> NONE
+OK   non-object evidence ([]) -> NONE
+OK   non-object evidence (null) -> NONE
+OK   absent input fields do not throw: planning date undefined -> NONE
+=== purity: immutable input, deterministic, idempotent, no clock, no logging ===
+OK   DETERMINISM / IDEMPOTENCE: 50 repeated calls on the same input all return LAST_KNOWN_OPPORTUNITY
+OK   EVIDENCE IMMUTABILITY: the (frozen) evidence and the (frozen) input are unchanged after every call, and no call threw writing to them
+OK   NO CLOCK: the deriver never read Date.now()
+OK   NO LOGGING: the deriver wrote nothing to the console, for either result or for malformed evidence
+OK   STRUCTURALLY EQUAL INPUTS give the same pressure regardless of object identity
+=== source neutrality and independence between candidates ===
+OK   SOURCE NEUTRALITY: the deriver has no id, title or source input at all; identical evidence derived for an "automatic" and a "manual canonical" candidate is identical pressure
+OK   MULTIPLE CANDIDATES: each is derived independently from its own evidence, in any order, with no comparison (A pressured, B not, A pressured, B not)
+OK   TWO CANDIDATES MAY BOTH BE LAST_KNOWN_OPPORTUNITY: the deriver does not choose between them
+OK   the deriver is independent of the order candidates are asked about
+OK   LEGACY / FACT-FREE candidate (no evidence): NONE
+OK   NON-GOAL candidate: a generic candidate that carries the same authoritative evidence qualifies identically (the deriver cannot see what produced it)
+=== the REAL producers: opportunity projection + recurrence arithmetic -> evidence -> pressure ===
+OK   REAL PRODUCER: Friday, availability Mon-Fri, Saturday/Sunday known infeasible -> today is the last known opportunity (the real projection satisfies every partition invariant the deriver checks)
+OK   REAL PRODUCER: Wednesday with Thursday and Friday still viable -> NONE (a later day is known viable)
+OK   REAL PRODUCER: unconfigured availability -> every day UNKNOWN -> NONE (uncertainty suppresses pressure)
+OK   REAL PRODUCER: Friday fully blocked by an existing plan -> the start day is KNOWN_INFEASIBLE -> NONE (impossible work is not urgent)
+OK   REAL PRODUCER: the same scarce Friday but with a GENERIC_FALLBACK duration -> NONE
+OK   REAL PRODUCER: Friday with Saturday also available -> NONE
+OK   REAL PRODUCER: target met (3 = 2 completed + 1 committed) -> remainingInPeriod 0 -> NONE
+OK   REAL PRODUCER: 7 remaining against a single viable day -> LAST_KNOWN_OPPORTUNITY (remaining > 1)
+OK   REAL PRODUCER: identical evidence for a FIXED candidate -> NONE
+OK   REAL PRODUCER: Sunday, the period end (one-day horizon, availability on Sunday) -> LAST_KNOWN_OPPORTUNITY
+OK   REAL PRODUCER: Monday (period start) with availability only on Monday -> LAST_KNOWN_OPPORTUNITY
+OK   REAL PRODUCER: Monday with Tuesday-Friday available -> NONE
+OK   REAL PRODUCER, YEAR BOUNDARY: the real week bounds 2026-12-28 .. 2027-01-03 with the planning date Friday 2027-01-01 -> aligned horizon, LAST_KNOWN_OPPORTUNITY
+OK   REAL PRODUCER, YEAR BOUNDARY: planning Wednesday 2026-12-30, Friday 2027-01-01 still viable -> NONE
+OK   REAL PRODUCER, DST: US spring-forward Sunday (23-hour day), the period end -> deterministic LAST_KNOWN_OPPORTUNITY
+OK   REAL PRODUCER, DST: US fall-back Sunday (25-hour day), the period end -> deterministic LAST_KNOWN_OPPORTUNITY
+OK   REAL PRODUCER, DST: the week containing the spring-forward date, Thursday with Friday still viable -> NONE
+ALL DECISION PRESSURE CHECKS PASSED
+
+# exit=0 signal=
