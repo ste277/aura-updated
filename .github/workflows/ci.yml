@@ -940,6 +940,28 @@ jobs:
         env:
           TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
         run: npx ts-node --project tsconfig.jsdom-tests.json test/rel04R1HeadReproduction.test.ts
+      # R3 -- final independent disposition of 091e3ce: queue durability and auth
+      # transitions; shared account boundary across every surface; overlap-override
+      # binding on the mounted My Day / PlanWithAura flows; 091e3ce reproductions.
+      - name: Run REL-04 R3 queue durability and auth-transition test
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/rel04R3QueueAuth.test.ts
+      - name: Run REL-04 R3 shared account boundary test (route inventory, surfaces)
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/rel04R3BoundaryJsdom.test.ts
+      - name: Run REL-04 R3 overlap-override binding test (mounted)
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/rel04R3OverrideBindingJsdom.test.ts
+      - name: Run REL-04 R2-head (091e3ce) reproduction test
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/rel04R2HeadReproduction.test.ts
+      # Pending replay reconciliation (was outside CI; structural assertion corrected in R3).
+      - name: Run pending replay reconciliation test
+        run: npx ts-node test/pendingReplayReconciliation.test.ts
       # S5-A RV-1 in-process: logout clears the cookie; a copied token stays valid
       # until exp (documents the accepted residual of revocation Option B).
       - name: Run REL-04 RV-1 token replay test
@@ -1025,6 +1047,28 @@ jobs:
       # emitting content, LHA, pack, gzip LZH, old-magic gzip; real readers on Ubuntu.
       - name: Run Palm bundle scanner reader-versus-scanner matrix (G5-C17)
         run: npx ts-node test/palmG5C17ReaderMatrix.test.ts
+  rel04-chromium-multitab:
+    # AURA-ANDROID-REL-04 (R3) -- REAL Chromium multi-tab checks: two tabs in one
+    # browser context (real localStorage, Web Locks and cookie jar) running the
+    # actual client modules against the real middleware and route handlers over
+    # HTTP. Synthetic accounts, in-memory db stub, no network beyond localhost.
+    # Chromium only: not WKWebView / Android WebView / device acceptance.
+    name: REL-04 Chromium multi-tab tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Install root deps
+        run: npm install
+      - name: Install web deps
+        working-directory: apps/web
+        run: npm install
+      - name: Install Chromium for Playwright
+        run: npx playwright install --with-deps chromium
+      - name: Run REL-04 Chromium multi-tab test
+        run: npx ts-node test/rel04Chromium.test.ts
   web-build:
     name: Next.js production build
     runs-on: ubuntu-latest
@@ -1316,6 +1360,18 @@ jobs:
         run: npx prisma migrate deploy
       - name: Run Day Constructor acceptance persistence DB tests
         run: npx ts-node test/dayConstructorAcceptancePersistenceDb.test.ts
+      # AURA-ANDROID-REL-04 (R3) -- five DB suites changed by REL-04 (they call the
+      # account-bound plan route) that were outside this workflow until now.
+      - name: Run plan goal-activity link DB test
+        run: npx ts-node test/planGoalActivityLinkDb.test.ts
+      - name: Run plan goal-activity completion integrity DB test
+        run: npx ts-node test/planGoalActivityCompletionIntegrityDb.test.ts
+      - name: Run plan goal-activity archived lifecycle DB test
+        run: npx ts-node test/planGoalActivityArchivedLifecycleDb.test.ts
+      - name: Run plan status preservation DB test
+        run: npx ts-node test/planStatusPreservationDb.test.ts
+      - name: Run planned activity scheduling mode DB test
+        run: npx ts-node test/plannedActivitySchedulingModeDb.test.ts
       - name: Run Goal demand candidates DB test
         run: npx ts-node test/goalDemandCandidatesDb.test.ts
       # AURA-HPG-FIX-01 -- read-only daily-occupancy loader agrees with the

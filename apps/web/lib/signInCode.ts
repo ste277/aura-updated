@@ -11,7 +11,7 @@
  * outcomes the screens can show.
  */
 
-import { DEADLINE, beginTransition, boundedExchange, isJsonMediaType, readSessionAnswer, withAuthLock } from './accountSession';
+import { DEADLINE, beginTransition, boundedExchange, getVerifiedAccount, isJsonMediaType, readSessionAnswer, withAuthLock } from './accountSession';
 
 /** Client-side pause between sends, so a quick double-tap or impatient
  * re-tap can't burn the user's server quota (3 requests per 10 minutes). The
@@ -96,6 +96,7 @@ async function readVerifyAnswer(res: Response): Promise<{ ok: true; userId: stri
 
 export async function verifySignInCode(body: { email: string; code: string }, fetchImpl: typeof fetch = (i, n) => fetch(i, n)): Promise<VerifySignInResult> {
   const r = await withAuthLock(async (): Promise<VerifySignInResult> => {
+    const previous = getVerifiedAccount();
     const tx = beginTransition('signing-in');
     if (!tx) return { kind: 'BUSY', message: SIGN_IN_BUSY_MESSAGE };
     let answer: Awaited<ReturnType<typeof readVerifyAnswer>> | typeof DEADLINE = null;
@@ -111,15 +112,29 @@ export async function verifySignInCode(body: { email: string; code: string }, fe
     } catch {
       answer = null;
     }
-    if (answer && answer !== DEADLINE && !answer.ok) {
-      // A definitive refusal of the code: no session was issued.
-      tx.end('resumed');
-      return { kind: 'REJECTED', message: answer.error ?? `That code did not work (${answer.status}). Try again.` };
-    }
-    if (!answer || answer === DEADLINE) {
-      // Unknown whether a session was issued: re-verify before anything is bound.
+    if (!answer || answer === DEADLINE || !answer.ok) {
+      // R3 -- ANY non-success (4xx included: it may come from an intermediary,
+      // and a session may have changed) is reconciled with a fresh, strictly
+      // parsed session answer before anything resumes; the previous account is
+      // never restored on the strength of the error alone.
+      let check: Awaited<ReturnType<typeof readSessionAnswer>> | typeof DEADLINE = null;
+      try {
+        check = await boundedExchange(fetchImpl, '/api/auth/session', { cache: 'no-store', credentials: 'same-origin', redirect: 'error' }, VERIFY_TIMEOUT_MS, readSessionAnswer);
+      } catch {
+        check = null;
+      }
+      const message = answer && answer !== DEADLINE && !answer.ok
+        ? answer.error ?? `That code did not work (${answer.status}). Try again.`
+        : SIGN_IN_OFFLINE_MESSAGE;
+      if (check && check !== DEADLINE) {
+        if (check.kind === 'none') { tx.end(previous === null ? 'resumed-verified' : 'signed-out'); return { kind: 'REJECTED', message }; }
+        if (check.kind === 'user' && check.id === previous) { tx.end('resumed-verified'); return { kind: 'REJECTED', message }; }
+        // The session changed anyway (or differs from what this tab believed).
+        tx.end(check.kind === 'user' ? { switchedTo: check.id } : 'signed-out');
+        return { kind: 'FAILED', message };
+      }
       tx.end('unknown');
-      return { kind: 'FAILED', message: SIGN_IN_OFFLINE_MESSAGE };
+      return { kind: 'FAILED', message };
     }
     let session: Awaited<ReturnType<typeof readSessionAnswer>> | typeof DEADLINE = null;
     try {

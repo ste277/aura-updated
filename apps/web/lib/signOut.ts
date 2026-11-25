@@ -45,7 +45,7 @@ import {
   settleActivityOperations,
   withAuthLock,
 } from './accountSession';
-import { clearLegacyQueue, legacyQueueCount, readOwnedQueue, removeKeys } from './offlineHabitQueue';
+import { discardLegacySnapshot, readLegacySnapshot, readOwnedQueue, removeRecords } from './offlineHabitQueue';
 
 export type SignOutOutcome =
   | 'signed-out'
@@ -60,6 +60,10 @@ export interface SignOutResult {
   outcome: SignOutOutcome;
   /** Confirmed-discard entries that could not be removed from this device (still queued for the signed-out account). */
   discardFailed: number;
+  /** The owned queue could not be read, so nothing could be confirmed or discarded: whatever is stored stays for that account. */
+  discardUnknown?: boolean;
+  /** Legacy (unowned) entries added by an old tab after the confirmation: kept, not discarded. */
+  legacyKeptAddedLater?: number;
 }
 
 export interface SignOutDeps {
@@ -75,6 +79,14 @@ export const RECONCILE_TIMEOUT_MS = 10_000;
 export const SIGN_OUT_FAILED_MESSAGE = "Couldn't sign out. Check your connection and try again.";
 export const SIGN_OUT_BUSY_MESSAGE = 'Something is still being saved, or another window is signing in or out. Try again in a moment.';
 export const SIGN_OUT_UNVERIFIED_MESSAGE = "Aura couldn't confirm whether you're signed out. Your unsynced activity is kept. Check your connection and tap Retry.";
+export function discardOutcomeMessage(r: SignOutResult): string | null {
+  if (r.outcome !== 'signed-out') return null;
+  if (r.discardUnknown) return "You're signed out, but Aura couldn't read this device's unsynced activity, so nothing was removed. Anything stored stays on this device and will only sync if you sign in to the same account again.";
+  if (r.discardFailed > 0) return discardFailedMessage(r.discardFailed);
+  if (r.legacyKeptAddedLater && r.legacyKeptAddedLater > 0) return `You're signed out. ${r.legacyKeptAddedLater === 1 ? '1 older unsynced log was' : `${r.legacyKeptAddedLater} older unsynced logs were`} added after you confirmed, so ${r.legacyKeptAddedLater === 1 ? 'it was' : 'they were'} kept.`;
+  return null;
+}
+
 export function discardFailedMessage(n: number): string {
   return `You're signed out, but ${n === 1 ? '1 unsynced activity log' : `${n} unsynced activity logs`} couldn't be removed from this device. ${n === 1 ? 'It' : 'They'} will only sync if you sign in to the same account again.`;
 }
@@ -153,19 +165,27 @@ async function run(deps: SignOutDeps): Promise<SignOutResult> {
   const idle = await settleActivityOperations(deps.settleTimeoutMs ?? 8000);
   if (!idle) { transition.end('resumed'); return done('busy'); }
 
+  // The exact snapshot the question is about (owned records + legacy array).
   const snapshot = readOwnedQueue(owner);
-  const legacy = legacyQueueCount();
-  const pending: PendingWork = { owned: snapshot.ok ? snapshot.items.length : null, legacy };
+  const legacySnap = readLegacySnapshot();
+  const pending: PendingWork = { owned: snapshot.ok ? snapshot.records.length + snapshot.corruptKeys.length : null, legacy: legacySnap.ok ? legacySnap.count : null };
   const question = describePendingWork(pending);
   if (question && !deps.confirm(question)) { transition.end('resumed'); return done('cancelled'); }
 
   const ack = await requestLogout(deps.fetch, owner, deps.logoutTimeoutMs ?? LOGOUT_TIMEOUT_MS);
   if (ack === 'acknowledged') {
+    // Only now, after the confirmation and the server's acknowledgement, and
+    // only EXACTLY the confirmed records (never anything added later).
     let failed = 0;
-    if (snapshot.ok) failed += removeKeys(snapshot.keys).failed;
-    if (question && pending.legacy !== 0 && !clearLegacyQueue()) failed += Math.max(1, pending.legacy ?? 1);
+    let legacyKeptAddedLater = 0;
+    if (snapshot.ok) failed += removeRecords([...snapshot.records, ...snapshot.corruptKeys.map((key) => ({ key }))]).failed;
+    if (question && legacySnap.ok && legacySnap.count > 0) {
+      const lr = discardLegacySnapshot(legacySnap);
+      if (lr.failed) failed += legacySnap.count;
+      legacyKeptAddedLater = lr.keptAddedLater;
+    }
     transition.end('signed-out');
-    return done('signed-out', failed);
+    return { outcome: 'signed-out', discardFailed: failed, discardUnknown: !snapshot.ok, legacyKeptAddedLater };
   }
 
   const r = await reconcile(deps.fetch, owner, deps.reconcileTimeoutMs ?? RECONCILE_TIMEOUT_MS);

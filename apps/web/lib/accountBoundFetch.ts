@@ -22,7 +22,8 @@
  *    Auth, guest, public and telemetry endpoints are left untouched, and an
  *    explicit expected-account header set by a caller always wins.
  */
-import { EXPECTED_ACCOUNT_HEADER, captureAccountBinding, getVerifiedAccount, invalidateAccount, runActivityOperation, type AccountBinding } from './accountSession';
+import { AccountUnavailableError, EXPECTED_ACCOUNT_HEADER, captureAccountBinding, ensureVerifiedAccount, getVerifiedAccount, invalidateAccount, isTransitionActiveNow, reportUpgradeRequired, runActivityOperation, type AccountBinding } from './accountSession';
+import { classifyApiRoute, SIGNED_OUT_ACCOUNT } from './accountRoutePolicy';
 
 export class StaleAccountCompletionError extends Error {
   constructor() {
@@ -55,15 +56,11 @@ export async function boundFetch(binding: AccountBinding, input: string, init: R
   }, binding);
 }
 
-// ------------------------------------------------------------------ global wrapper
+// ------------------------------------------------------------------ global wrapper (R3)
 
-// Sign-in/out, guest discovery, telemetry, location lookup, health/internal and MCP
-// endpoints are not account-bound by this wrapper.
-const UNBOUND_PREFIXES = ['/api/auth/', '/api/guest/', '/api/product-events', '/api/location/', '/api/health', '/api/internal/', '/api/mcp'];
-
-export function isAccountScopedApiPath(pathname: string): boolean {
-  if (!pathname.startsWith('/api/')) return false;
-  return !UNBOUND_PREFIXES.some((p) => pathname === p.replace(/\/$/, '') || pathname.startsWith(p));
+/** Same policy as the server (lib/accountRoutePolicy.ts): true for account-scoped or optional routes. */
+export function isAccountScopedApiPath(pathname: string, method = 'GET'): boolean {
+  return classifyApiRoute(pathname, method) !== 'exempt';
 }
 
 function pathOf(input: RequestInfo | URL): string | null {
@@ -80,36 +77,69 @@ function pathOf(input: RequestInfo | URL): string | null {
 
 let installed = false;
 
+/**
+ * Installs the client half of the shared account boundary ONCE per page
+ * (from the root layout, so every surface -- Home, Goals, Captures, Connected
+ * Apps, plan-day, /find -- is covered without depending on which page is
+ * mounted). For every same-origin request to an ACCOUNT-SCOPED route:
+ *   - during an auth transition (this tab or another -- the held Web Lock is
+ *     consulted, not only the storage marker) it is refused
+ *     (AccountUnavailableError 'transition');
+ *   - while the account is unknown, it is held until one shared session
+ *     verification completes; if that fails it is refused ('unverified')
+ *     and NOT forwarded;
+ *   - it states the verified account, or "signed out", so the server refuses
+ *     it if the session belongs to anyone else;
+ *   - mutations are tracked, so sign-out aborts them and waits for them;
+ *   - a 409 account_mismatch invalidates the account (the UI re-verifies);
+ *     a 503 client_upgrade_required raises the reload prompt.
+ * OPTIONAL routes (telemetry) state the account when known and are never held.
+ * EXEMPT routes and other origins pass unchanged. An explicit
+ * X-Aura-Expected-Account set by a bound caller always wins.
+ */
 export function installAccountBoundFetch(): void {
   if (installed || typeof window === 'undefined' || typeof window.fetch !== 'function') return;
   installed = true;
   const original = window.fetch.bind(window);
   const wrapped = async (input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> => {
     const path = pathOf(input);
-    if (!path || !isAccountScopedApiPath(path)) return original(input, init);
     const method = String(init.method ?? (typeof input === 'object' && 'method' in (input as Request) ? (input as Request).method : 'GET')).toUpperCase();
+    const cls = path ? classifyApiRoute(path, method) : 'exempt';
+    if (!path || cls === 'exempt') return original(input, init);
     const headers = new Headers(init.headers ?? (typeof input === 'object' && 'headers' in (input as Request) ? (input as Request).headers : undefined));
     const explicit = headers.has(EXPECTED_ACCOUNT_HEADER);
-    const account = getVerifiedAccount();
 
-    const send = async (signal?: AbortSignal | null, accountForHeader?: string) => {
-      if (accountForHeader && !explicit) headers.set(EXPECTED_ACCOUNT_HEADER, accountForHeader);
-      const res = await original(input, { ...init, headers, signal: signal ?? init.signal });
-      if (res.status === 409) {
+    const after = async (res: Response) => {
+      if (res.status === 409 || res.status === 503) {
         const body = await res.clone().json().catch(() => null);
         if (body?.code === 'account_mismatch') invalidateAccount();
+        if (body?.code === 'client_upgrade_required') reportUpgradeRequired();
       }
       return res;
     };
+    const send = async (account: string | null | undefined, signal?: AbortSignal | null) => {
+      if (!explicit && account !== undefined) headers.set(EXPECTED_ACCOUNT_HEADER, account === null ? SIGNED_OUT_ACCOUNT : account);
+      return after(await original(input, { ...init, headers, signal: signal ?? init.signal }));
+    };
 
-    if (method === 'GET' || method === 'HEAD') {
-      return send(undefined, typeof account === 'string' ? account : undefined);
+    if (explicit) return send(undefined); // a bound caller (boundFetch / activitySync) already tracks it
+
+    if (cls === 'optional') {
+      const a = getVerifiedAccount();
+      return send(a === undefined ? undefined : a);
     }
-    if (explicit) return send(); // a bound caller (boundFetch / activitySync) already tracks it
-    if (typeof account !== 'string') return send(); // signed out / unverified: server decides (401/428/503)
-    // Refused (AccountUnavailableError) during an auth transition.
-    const binding = captureAccountBinding();
-    return runActivityOperation((lease) => send(combine(lease.signal, init.signal), lease.account), binding);
+
+    if (await isTransitionActiveNow()) throw new AccountUnavailableError('transition');
+    const account = await ensureVerifiedAccount((i, n) => original(i, n));
+    if (account === undefined) throw new AccountUnavailableError('unverified');
+    if (await isTransitionActiveNow()) throw new AccountUnavailableError('transition');
+
+    const isMutation = method !== 'GET' && method !== 'HEAD';
+    if (isMutation && typeof account === 'string') {
+      const binding = captureAccountBinding();
+      return runActivityOperation((lease) => send(lease.account, combine(lease.signal, init.signal)), binding);
+    }
+    return send(account);
   };
   window.fetch = wrapped as typeof window.fetch;
   try { (globalThis as { fetch?: typeof fetch }).fetch = wrapped as typeof fetch; } catch { /* read-only global */ }

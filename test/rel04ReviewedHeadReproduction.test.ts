@@ -37,6 +37,7 @@ addUser(B, 'bobsynth@example.invalid');
   const show = (p: string) => execFileSync('git', ['show', `${REVIEWED}:${p}`], { encoding: 'utf8', maxBuffer: 1 << 26 });
   check('fixture habit-logs route == a54daf6 apps/web/app/api/habit-logs/route.ts', show('apps/web/app/api/habit-logs/route.ts') === fx('habit-logs.route.ts.txt'));
   check('fixture signOut == a54daf6 apps/web/lib/signOut.ts', show('apps/web/lib/signOut.ts') === fx('signOut.ts.txt'));
+  check('fixture logout route == a54daf6 apps/web/app/api/auth/logout/route.ts', show('apps/web/app/api/auth/logout/route.ts') === fx('logout.route.ts.txt'));
   const page = show('apps/web/app/page.tsx');
   check('fixture syncOfflineLogs block is verbatim in a54daf6 app/page.tsx', page.includes(fx('page.syncOfflineLogs.txt').trimEnd()));
   check('fixture enqueue block is verbatim in a54daf6 app/page.tsx', page.includes(fx('page.enqueue.txt')));
@@ -53,6 +54,7 @@ function compileModule(source: string, fakeFile: string) {
 }
 const reviewedRoute = compileModule(fx('habit-logs.route.ts.txt'), path.join(WEB, 'app', 'api', 'habit-logs', 'route.reviewed-head.js'));
 const reviewedSignOut = compileModule(fx('signOut.ts.txt'), path.join(WEB, 'lib', 'signOut.reviewed-head.js'));
+const reviewedLogout = compileModule(fx('logout.route.ts.txt'), path.join(WEB, 'app', 'api', 'auth', 'logout', 'route.reviewed-head.js'));
 const { classifyHabitLogSyncOutcome } = require(path.join(WEB, 'lib', 'habitLogSyncPolicy'));
 
 function compileBlock(params: string[], body: string) {
@@ -64,10 +66,12 @@ const reviewedReplay = compileBlock(['localStorage', 'fetch', 'classifyHabitLogS
 const reviewedEnqueue = compileBlock(['localStorage', 'payload', 'tempId'], fx('page.enqueue.txt'));
 
 const currentRoutePost = routes['POST /api/habit-logs'];
+const currentLogout = routes['POST /api/auth/logout'];
 let reviewedServer = false;
 function useReviewedServer(on: boolean) {
   reviewedServer = on;
   routes['POST /api/habit-logs'] = on ? (req) => reviewedRoute.POST(req) : currentRoutePost;
+  routes['POST /api/auth/logout'] = on ? () => reviewedLogout.POST() : currentLogout;
 }
 /** A device for the selected server: the reviewed head had no middleware. */
 function makeDevice() { const d = new Device(); d.useMiddleware = !reviewedServer; return d; }

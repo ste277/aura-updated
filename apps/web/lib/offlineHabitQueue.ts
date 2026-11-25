@@ -44,46 +44,73 @@ function isQueuedHabitLog(value: unknown): value is QueuedHabitLog {
 }
 
 /**
- * AURA-ANDROID-REL-04 IR-01 (R2) -- the queue is partitioned by VERIFIED
- * account and stored ONE ENTRY PER KEY:
+ * AURA-ANDROID-REL-04 IR-01 (R3) -- durable offline activity queue.
  *
- *     aura_q3:<ownerUserId>:<clientRequestId>  ->  JSON entry (with ownerUserId)
+ * Storage: one IMMUTABLE record per key, written exactly once:
+ *     aura_q4:<ownerUserId>:<clientRequestId>:<recordId>  ->  JSON record
+ * A record is never rewritten, so:
+ *   - settlement and discard remove EXACT keys and can never remove a
+ *     different or newer payload (that would have another recordId);
+ *   - every mutation is a single atomic setItem/removeItem -- no shared array,
+ *     no read-modify-write, no dependency on Web Locks for integrity.
+ * Identity: one clientRequestId = one payload. An enqueue whose identity
+ * already exists with a DIFFERENT payload is refused ('conflict'); records
+ * that conflict anyway (e.g. written by different builds) are QUARANTINED
+ * from replay and reported, never sent.
+ * Reads: any storage exception => `ok:false` ("unreadable"), never an empty
+ * queue. A record that cannot be parsed is kept and counted as corrupt.
+ * Migration (owned interim formats only: the unreleased R1 array
+ * `offline_habit_queue_v2:<owner>` and R2 per-entry `aura_q3:<owner>:<crid>`;
+ * both carry ownerUserId under the owner's own key, i.e. trustworthy
+ * ownership): each source entry is copied to a DETERMINISTIC recordId
+ * (m + content hash), so re-running after an interruption is idempotent;
+ * settling or discarding a migrated record first writes a TOMBSTONE
+ * (aura_q4t:<owner>:<recordId>), so a concurrent or repeated migration can
+ * never recreate it; the source is removed only after its copy exists.
  *
- * so every mutation is a single, atomic storage operation:
- *   enqueue  = setItem(one key)         settle/remove = removeItem(one key)
- *   snapshot = the set of keys present  discard       = removeItem of exactly
- *                                                       the snapshot's keys
- * No read-modify-write of a shared array exists, so concurrent tabs (with or
- * without Web Locks) cannot lose an appended entry, resurrect a settled one,
- * or delete work added after a discard was confirmed. Web Locks are used
- * only to keep two tabs from replaying the same account at once; without
- * them a duplicate replay is harmless (the server de-duplicates by
- * clientRequestId).
- *
- * The pre-REL-04 key (`offline_habit_queue`) holds entries with NO owner.
- * Their owner is never inferred: they stay QUARANTINED until the user
- * explicitly discards them or explicitly adds them to the signed-in account.
- * The interim array format of the unreleased R1 head
- * (`offline_habit_queue_v2:<owner>`) is migrated entry by entry.
+ * Why not IndexedDB (evaluated): migration sources live in localStorage, so
+ * IndexedDB transactions could not make migration atomic anyway; every
+ * synchronous presentation path would become asynchronous; jsdom (the test
+ * runtime) has no IndexedDB. Immutable single-key records give the required
+ * guarantees in every supported environment, with or without Web Locks.
+ * If localStorage itself is unavailable, the queue is unavailable (reported
+ * as 'not stored'); there is no fallback to a weaker store.
  */
 export const LEGACY_QUEUE_KEY = 'offline_habit_queue';
 export const QUEUE_V2_PREFIX = 'offline_habit_queue_v2:';
-export const QUEUE_PREFIX = 'aura_q3:';
+export const QUEUE_V3_PREFIX = 'aura_q3:';
+export const QUEUE_PREFIX = 'aura_q4:';
+export const TOMBSTONE_PREFIX = 'aura_q4t:';
+const TOMBSTONE_TTL_MS = 30 * 24 * 3600_000;
 
 export interface OwnedQueuedHabitLog extends QueuedHabitLog {
   ownerUserId: string;
-  /** When it was queued (ordering only). */
+  /** Unique per record; 'm…' for migrated records (deterministic). */
+  recordId?: string;
   queuedAt?: number;
 }
 
-export function queueKeyFor(ownerUserId: string, clientRequestId: string): string {
-  return `${QUEUE_PREFIX}${ownerUserId}:${clientRequestId}`;
-}
-function ownerPrefix(ownerUserId: string) {
-  return `${QUEUE_PREFIX}${ownerUserId}:`;
+export interface QueueRecord {
+  key: string;
+  raw: string;
+  item: OwnedQueuedHabitLog;
 }
 
-export type QueueRead = { ok: true; items: OwnedQueuedHabitLog[]; keys: string[] } | { ok: false };
+export type QueueRead =
+  | {
+      ok: true;
+      /** Presentation: one entry per clientRequestId, excluding conflicts. */
+      items: OwnedQueuedHabitLog[];
+      /** Every readable record (the discard snapshot). */
+      records: QueueRecord[];
+      /** Replay groups: identical-payload records per clientRequestId. */
+      groups: QueueRecord[][];
+      /** clientRequestIds with conflicting payloads (quarantined). */
+      conflicts: string[];
+      /** Keys that could not be parsed (kept, counted). */
+      corruptKeys: string[];
+    }
+  | { ok: false };
 
 function storageOrNull(): Storage | null {
   try {
@@ -93,51 +120,81 @@ function storageOrNull(): Storage | null {
   }
 }
 
-/**
- * The owner's entries (and their keys = the snapshot). `ok:false` when storage
- * is unavailable or throws -- callers must not treat that as "nothing pending".
- * A malformed entry, or one whose ownerUserId differs, is ignored (not removed).
- */
+/** The payload that defines a request identity (no bookkeeping fields). */
+export function canonicalPayload(v: QueuedHabitLog): string {
+  const { tempId: _t, ...rest } = v as QueuedHabitLog & Record<string, unknown>;
+  const r = rest as Record<string, unknown>;
+  delete r.ownerUserId; delete r.recordId; delete r.queuedAt;
+  return JSON.stringify(Object.keys(r).sort().reduce<Record<string, unknown>>((o, k) => { if (r[k] !== undefined) o[k] = r[k]; return o; }, {}));
+}
+
+function hash(text: string): string {
+  let h1 = 0x811c9dc5, h2 = 0x01000193;
+  for (let i = 0; i < text.length; i++) {
+    const c = text.charCodeAt(i);
+    h1 = Math.imul(h1 ^ c, 0x01000193) >>> 0;
+    h2 = Math.imul(h2 ^ c, 0x5bd1e995) >>> 0;
+  }
+  return h1.toString(16).padStart(8, '0') + h2.toString(16).padStart(8, '0');
+}
+
+function randomId(): string {
+  try {
+    const a = new Uint32Array(2);
+    (globalThis.crypto as Crypto).getRandomValues(a);
+    return a[0].toString(16).padStart(8, '0') + a[1].toString(16).padStart(8, '0');
+  } catch {
+    return Math.random().toString(16).slice(2, 10) + Date.now().toString(16);
+  }
+}
+
+export function recordKey(ownerUserId: string, clientRequestId: string, recordId: string): string {
+  return `${QUEUE_PREFIX}${ownerUserId}:${clientRequestId}:${recordId}`;
+}
+const ownerPrefix = (owner: string) => `${QUEUE_PREFIX}${owner}:`;
+const tombstoneKey = (owner: string, recordId: string) => `${TOMBSTONE_PREFIX}${owner}:${recordId}`;
+
+function keysWithPrefix(s: Storage, prefix: string): string[] {
+  const out: string[] = [];
+  const n = s.length;
+  for (let i = 0; i < n; i++) {
+    const k = s.key(i);
+    if (k && k.startsWith(prefix)) out.push(k);
+  }
+  return out;
+}
+
+/** The owner's queue. `ok:false` when storage is unavailable or ANY read throws. */
 export function readOwnedQueue(ownerUserId: string): QueueRead {
   const s = storageOrNull();
   if (!s) return { ok: false };
   try {
-    migrateV2(s, ownerUserId);
-    const prefix = ownerPrefix(ownerUserId);
-    const keys: string[] = [];
-    for (let i = 0; i < s.length; i++) {
-      const k = s.key(i);
-      if (k && k.startsWith(prefix)) keys.push(k);
-    }
-    const found: Array<{ it: OwnedQueuedHabitLog; k: string }> = [];
-    for (const k of keys) {
+    migrateOwnedSources(s, ownerUserId);
+    const records: QueueRecord[] = [];
+    const corruptKeys: string[] = [];
+    for (const key of keysWithPrefix(s, ownerPrefix(ownerUserId))) {
+      const raw = s.getItem(key); // a throw here => unreadable (outer catch)
+      if (raw === null) continue; // removed meanwhile
       let v: unknown;
-      try { v = JSON.parse(s.getItem(k) ?? 'null'); } catch { continue; }
-      if (isQueuedHabitLog(v) && (v as { ownerUserId?: unknown }).ownerUserId === ownerUserId && k === queueKeyFor(ownerUserId, (v as QueuedHabitLog).clientRequestId)) {
-        found.push({ it: v as OwnedQueuedHabitLog, k });
-      }
+      try { v = JSON.parse(raw); } catch { corruptKeys.push(key); continue; }
+      const item = v as OwnedQueuedHabitLog;
+      if (!isQueuedHabitLog(v) || item.ownerUserId !== ownerUserId || !key.startsWith(`${ownerPrefix(ownerUserId)}${item.clientRequestId}:`)) { corruptKeys.push(key); continue; }
+      records.push({ key, raw, item });
     }
-    found.sort((a, b) => (a.it.queuedAt ?? 0) - (b.it.queuedAt ?? 0) || a.it.logTimestamp.localeCompare(b.it.logTimestamp));
-    return { ok: true, items: found.map((o) => o.it), keys: found.map((o) => o.k) };
+    records.sort((a, b) => (a.item.queuedAt ?? 0) - (b.item.queuedAt ?? 0) || a.item.logTimestamp.localeCompare(b.item.logTimestamp) || a.key.localeCompare(b.key));
+    const byCrid = new Map<string, QueueRecord[]>();
+    for (const r of records) byCrid.set(r.item.clientRequestId, [...(byCrid.get(r.item.clientRequestId) ?? []), r]);
+    const groups: QueueRecord[][] = [];
+    const conflicts: string[] = [];
+    for (const [crid, rs] of byCrid) {
+      const payloads = new Set(rs.map((r) => canonicalPayload(r.item)));
+      if (payloads.size > 1) conflicts.push(crid);
+      else groups.push(rs);
+    }
+    return { ok: true, items: groups.map((g) => g[0].item), records, groups, conflicts, corruptKeys };
   } catch {
     return { ok: false };
   }
-}
-
-/** One-time move of the unreleased R1 array format into per-entry keys (idempotent by clientRequestId). */
-function migrateV2(s: Storage, ownerUserId: string) {
-  const raw = s.getItem(QUEUE_V2_PREFIX + ownerUserId);
-  if (!raw) return;
-  let parsed: unknown;
-  try { parsed = JSON.parse(raw); } catch { return; }
-  if (!Array.isArray(parsed)) return;
-  for (const v of parsed) {
-    if (isQueuedHabitLog(v) && (v as { ownerUserId?: unknown }).ownerUserId === ownerUserId) {
-      const key = queueKeyFor(ownerUserId, (v as QueuedHabitLog).clientRequestId);
-      if (s.getItem(key) === null) s.setItem(key, JSON.stringify(v));
-    }
-  }
-  s.removeItem(QUEUE_V2_PREFIX + ownerUserId);
 }
 
 /** Presentation read: the owner's entries, or [] if unreadable. */
@@ -147,91 +204,171 @@ export function readOfflineHabitQueue(ownerUserId: string | null | undefined): O
   return r.ok ? r.items : [];
 }
 
-/** Stores one entry for its owner (one atomic setItem). false = not stored. */
-export function enqueueOwned(item: OwnedQueuedHabitLog): boolean {
-  const s = storageOrNull();
-  if (!s || !item.ownerUserId || !item.clientRequestId) return false;
-  try {
-    s.setItem(queueKeyFor(item.ownerUserId, item.clientRequestId), JSON.stringify({ queuedAt: Date.now(), ...item }));
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-export interface RemovalResult { removed: number; failed: number }
-
-/** Removes exactly these entries (one atomic removeItem each). Reports failures truthfully. */
-export function removeOwnedEntries(ownerUserId: string, clientRequestIds: Iterable<string>): RemovalResult {
-  return removeKeys([...clientRequestIds].map((id) => queueKeyFor(ownerUserId, id)));
-}
-
-/** Removes exactly these keys (a discard snapshot); never touches keys added later. */
-export function removeKeys(keys: Iterable<string>): RemovalResult {
-  const s = storageOrNull();
-  const result: RemovalResult = { removed: 0, failed: 0 };
-  for (const k of keys) {
-    try {
-      if (!s) throw new Error('no storage');
-      s.removeItem(k);
-      if (s.getItem(k) !== null) throw new Error('still present');
-      result.removed++;
-    } catch {
-      result.failed++;
-    }
-  }
-  return result;
-}
-
-/** Quarantined legacy (unowned) entries; null if unreadable. */
-export function readLegacyQueue(): unknown[] | null {
-  const s = storageOrNull();
-  if (!s) return null;
-  try {
-    const raw = s.getItem(LEGACY_QUEUE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : null;
-  } catch {
-    return null;
-  }
-}
-
-/** Number of quarantined legacy (unowned) entries; null if unreadable. */
-export function legacyQueueCount(): number | null {
-  const l = readLegacyQueue();
-  return l === null ? null : l.length;
-}
-
-/** Explicit discard of the quarantined legacy entries (a user decision). */
-export function clearLegacyQueue(): boolean {
-  const s = storageOrNull();
-  if (!s) return false;
-  try {
-    s.removeItem(LEGACY_QUEUE_KEY);
-    return s.getItem(LEGACY_QUEUE_KEY) === null;
-  } catch {
-    return false;
-  }
-}
+export type EnqueueResult = { status: 'stored'; key: string } | { status: 'conflict' } | { status: 'failed' };
 
 /**
- * EXPLICIT user decision only ("these are mine -- add them to this account"):
- * copies each valid legacy entry into the account's queue (its original
- * clientRequestId kept, so a copy the server already has is de-duplicated),
- * then removes the legacy key. Never called automatically.
+ * Stores one record for its owner (one atomic setItem of a NEW key). An
+ * identical payload already queued under the same identity is reused
+ * ('stored', its key); a different payload under the same identity is
+ * refused ('conflict').
  */
-export function adoptLegacyQueue(ownerUserId: string): { adopted: number; skipped: number; ok: boolean } {
-  const legacy = readLegacyQueue();
-  if (legacy === null) return { adopted: 0, skipped: 0, ok: false };
-  let adopted = 0, skipped = 0;
-  for (const v of legacy) {
-    if (isQueuedHabitLog(v)) {
-      if (enqueueOwned({ ...(v as QueuedHabitLog), ownerUserId })) adopted++;
-      else return { adopted, skipped, ok: false };
-    } else skipped++;
+export function enqueueOwned(item: OwnedQueuedHabitLog): EnqueueResult {
+  const s = storageOrNull();
+  if (!s || !item.ownerUserId || !item.clientRequestId) return { status: 'failed' };
+  try {
+    const mine = canonicalPayload(item);
+    for (const k of keysWithPrefix(s, `${ownerPrefix(item.ownerUserId)}${item.clientRequestId}:`)) {
+      const raw = s.getItem(k);
+      if (raw === null) continue;
+      let other: QueuedHabitLog | null = null;
+      try { other = JSON.parse(raw); } catch { return { status: 'conflict' }; }
+      if (!other || canonicalPayload(other) !== mine) return { status: 'conflict' };
+      return { status: 'stored', key: k };
+    }
+    const recordId = item.recordId ?? randomId();
+    const key = recordKey(item.ownerUserId, item.clientRequestId, recordId);
+    const raw = JSON.stringify({ queuedAt: Date.now(), ...item, recordId });
+    s.setItem(key, raw);
+    return s.getItem(key) === raw ? { status: 'stored', key } : { status: 'failed' };
+  } catch {
+    return { status: 'failed' };
   }
-  return { adopted, skipped, ok: clearLegacyQueue() };
+}
+
+export interface RemovalResult { removed: number; alreadyGone: number; failed: number }
+
+/**
+ * Removes EXACTLY these records (settlement or a confirmed discard). Each key
+ * is immutable, so this can never remove a different or newer payload. A
+ * migrated record gets its tombstone first, so no migration can recreate it.
+ * Every removal is verified; failures are counted, never hidden.
+ */
+export function removeRecords(records: Iterable<{ key: string; raw?: string }>): RemovalResult {
+  const s = storageOrNull();
+  const out: RemovalResult = { removed: 0, alreadyGone: 0, failed: 0 };
+  for (const r of records) {
+    try {
+      if (!s) throw new Error('no storage');
+      const current = s.getItem(r.key);
+      if (current === null) { out.alreadyGone++; continue; }
+      if (r.raw !== undefined && current !== r.raw) throw new Error('record changed'); // immutable: should not happen
+      let parsed: OwnedQueuedHabitLog | null = null;
+      try { parsed = JSON.parse(current) as OwnedQueuedHabitLog; } catch { parsed = null; } // corrupt: no tombstone needed
+      if (parsed?.recordId?.startsWith('m')) {
+        const t = tombstoneKey(parsed.ownerUserId, parsed.recordId);
+        s.setItem(t, String(Date.now()));
+        if (s.getItem(t) === null) throw new Error('tombstone not written');
+      }
+      s.removeItem(r.key);
+      if (s.getItem(r.key) !== null) throw new Error('still present');
+      out.removed++;
+    } catch {
+      out.failed++;
+    }
+  }
+  return out;
+}
+
+/** Interruption-safe, idempotent migration of the owner's interim-format entries. */
+function migrateOwnedSources(s: Storage, ownerUserId: string) {
+  const copy = (v: unknown): boolean => {
+    if (!isQueuedHabitLog(v) || (v as OwnedQueuedHabitLog).ownerUserId !== ownerUserId) return true; // not ours / invalid: nothing to copy
+    const item = v as OwnedQueuedHabitLog;
+    const recordId = 'm' + hash(`${item.clientRequestId}|${canonicalPayload(item)}`);
+    if (s.getItem(tombstoneKey(ownerUserId, recordId)) !== null) return true; // settled before
+    const key = recordKey(ownerUserId, item.clientRequestId, recordId);
+    if (s.getItem(key) !== null) return true; // already copied
+    const raw = JSON.stringify({ queuedAt: item.queuedAt ?? 0, ...item, recordId });
+    s.setItem(key, raw);
+    return s.getItem(key) === raw;
+  };
+  // R2 per-entry interim records: copy, then remove that source key.
+  for (const k of keysWithPrefix(s, `${QUEUE_V3_PREFIX}${ownerUserId}:`)) {
+    const raw = s.getItem(k);
+    if (raw === null) continue;
+    let v: unknown;
+    try { v = JSON.parse(raw); } catch { continue; }
+    if (copy(v)) s.removeItem(k);
+  }
+  // R1 array interim record: copy every entry, then remove the source.
+  const v2 = s.getItem(QUEUE_V2_PREFIX + ownerUserId);
+  if (v2 !== null) {
+    let arr: unknown;
+    try { arr = JSON.parse(v2); } catch { arr = null; }
+    if (Array.isArray(arr) && arr.every((v) => copy(v))) s.removeItem(QUEUE_V2_PREFIX + ownerUserId);
+  }
+  // Tombstones are only needed while a source could still exist.
+  if (keysWithPrefix(s, `${QUEUE_V3_PREFIX}${ownerUserId}:`).length === 0 && s.getItem(QUEUE_V2_PREFIX + ownerUserId) === null) {
+    for (const t of keysWithPrefix(s, `${TOMBSTONE_PREFIX}${ownerUserId}:`)) {
+      const at = Number(s.getItem(t));
+      if (!Number.isFinite(at) || Date.now() - at > TOMBSTONE_TTL_MS) s.removeItem(t);
+    }
+  }
+}
+
+// ------------------------------------------------------------------ legacy quarantine
+
+export type LegacySnapshot = { ok: true; raw: string | null; count: number } | { ok: false };
+
+/**
+ * Pre-REL-04 entries (`offline_habit_queue`, written by old bundles) have NO
+ * owner. They are QUARANTINED: never replayed, never assigned to any account,
+ * never shown (their contents are private to whoever logged them). The only
+ * action is an explicit, confirmed DISCARD of the exact snapshot the user
+ * confirmed.
+ */
+export function readLegacySnapshot(): LegacySnapshot {
+  const s = storageOrNull();
+  if (!s) return { ok: false };
+  try {
+    const raw = s.getItem(LEGACY_QUEUE_KEY);
+    if (raw === null) return { ok: true, raw: null, count: 0 };
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? { ok: true, raw, count: parsed.length } : { ok: false };
+  } catch {
+    return { ok: false };
+  }
+}
+
+/** Number of quarantined legacy entries; null if unreadable. */
+export function legacyQueueCount(): number | null {
+  const r = readLegacySnapshot();
+  return r.ok ? r.count : null;
+}
+
+export interface LegacyDiscardResult { removed: number; keptAddedLater: number; failed: boolean }
+
+/**
+ * Discards exactly the confirmed legacy snapshot. If an old tab added entries
+ * after the confirmation, only the confirmed ones are removed and the later
+ * ones are kept (and reported). Failures are reported, never hidden.
+ */
+export function discardLegacySnapshot(snapshot: { raw: string | null }): LegacyDiscardResult {
+  const s = storageOrNull();
+  if (!s) return { removed: 0, keptAddedLater: 0, failed: true };
+  if (snapshot.raw === null) return { removed: 0, keptAddedLater: 0, failed: false };
+  try {
+    const confirmed: unknown[] = JSON.parse(snapshot.raw);
+    const current = s.getItem(LEGACY_QUEUE_KEY);
+    if (current === null) return { removed: 0, keptAddedLater: 0, failed: false };
+    if (current === snapshot.raw) {
+      s.removeItem(LEGACY_QUEUE_KEY);
+      return s.getItem(LEGACY_QUEUE_KEY) === null ? { removed: confirmed.length, keptAddedLater: 0, failed: false } : { removed: 0, keptAddedLater: 0, failed: true };
+    }
+    const now: unknown[] = JSON.parse(current);
+    const pool = confirmed.map((v) => JSON.stringify(v));
+    const kept = now.filter((v) => {
+      const i = pool.indexOf(JSON.stringify(v));
+      if (i >= 0) { pool.splice(i, 1); return false; }
+      return true;
+    });
+    const removed = now.length - kept.length;
+    if (kept.length === 0) s.removeItem(LEGACY_QUEUE_KEY);
+    else s.setItem(LEGACY_QUEUE_KEY, JSON.stringify(kept));
+    return { removed, keptAddedLater: kept.length, failed: false };
+  } catch {
+    return { removed: 0, keptAddedLater: 0, failed: true };
+  }
 }
 
 /**

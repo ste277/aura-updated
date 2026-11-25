@@ -175,12 +175,15 @@ const PROVIDER_MSG = "Our email provider isn't responding right now. Please try 
   // B8. Existing code sign-in: a wrong code shows the server error; the right one signs in.
   f.resolve(6, res(401, { error: 'That code is not valid. Check the email or request a new one.' }));
   await flush();
-  check('B8. wrong code: server error shown, not signed in', /That code is not valid/.test(text()) && loggedIn === 0);
+  // AURA-ANDROID-REL-04 (R3): any sign-in error is reconciled with a fresh session read first.
+  f.resolve(7, res(200, { user: null }));
+  await flush(); await flush();
+  check('B8. wrong code: server error shown, not signed in (reconciled: still signed out)', /That code is not valid/.test(text()) && loggedIn === 0 && f.calls[7]?.url === '/api/auth/session');
   await click(btn(/^Sign in$/)!);
-  f.resolve(7, res(200, { ok: true, userId: 'u-second' }));
+  f.resolve(8, res(200, { ok: true, userId: 'u-second' }));
   await flush();
   // AURA-ANDROID-REL-04 (R2): the sign-in is confirmed with a fresh session read for that account.
-  f.resolve(8, res(200, { user: { id: 'u-second' } }));
+  f.resolve(9, res(200, { user: { id: 'u-second' } }));
   await flush(); await flush();
   check('B8. correct code: onLoggedInCheck fires once', loggedIn === 1);
 

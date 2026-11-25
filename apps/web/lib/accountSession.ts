@@ -85,15 +85,22 @@ function safeStorage(): Storage | null {
     return null;
   }
 }
-function writeKey(key: string, value: object | null) {
+/** Writes (or removes) a coordination key and reads it back; false when storage failed. */
+function writeKey(key: string, value: object | null): boolean {
   const s = safeStorage();
-  if (!s) return;
+  if (!s) return false;
   try {
-    if (value) s.setItem(key, JSON.stringify(value));
-    else s.removeItem(key);
+    if (value) {
+      const v = JSON.stringify(value);
+      s.setItem(key, v);
+      return s.getItem(key) === v;
+    }
+    s.removeItem(key);
+    return s.getItem(key) === null;
   } catch {
-    // Storage failing: this tab still enforces its own state; the server
-    // checks cover other tabs.
+    // Storage failing: this tab still enforces its own state; with Web Locks
+    // other tabs still see the held auth lock; the server checks cover the rest.
+    return false;
   }
 }
 function readKey<T>(key: string): T | null {
@@ -178,10 +185,40 @@ function foreignMarkerActive(now = Date.now()): boolean {
   return Boolean(m && (m.kind === 'signing-out' || m.kind === 'signing-in') && m.tab !== tabId && typeof m.at === 'number' && now - m.at < TRANSITION_MARKER_TTL_MS);
 }
 
-/** True while this tab, or (fresh marker) another tab, is signing in or out. */
+/** True while this tab, or (fresh marker) another tab, is signing in or out. Synchronous best view. */
 export function isTransitionActive(now = Date.now()): boolean {
   return Boolean(state.transition) || foreignMarkerActive(now);
 }
+
+/**
+ * AURA-ANDROID-REL-04 IR-03 (R3) -- the authoritative cross-tab check used
+ * before any account-bound request is sent. With Web Locks the held auth lock
+ * itself is consulted (independent of the storage marker, which may be
+ * unwritable or stale); without them, the heart-beaten marker is the signal.
+ */
+export async function isTransitionActiveNow(): Promise<boolean> {
+  if (isTransitionActive()) return true;
+  const locks = lockManager() as (LockManagerLike & { query?: () => Promise<{ held?: Array<{ name?: string }> }> }) | null;
+  if (locks && typeof locks.query === 'function') {
+    try {
+      const snapshot = await locks.query();
+      if ((snapshot.held ?? []).some((l) => l.name === AUTH_LOCK_NAME)) return true;
+    } catch {
+      // Query unavailable: fall back to the marker (already checked).
+    }
+  }
+  return false;
+}
+
+// ------------------------------------------------------------------ upgrade signal
+let upgradeRequired = false;
+/** A request was refused with client_upgrade_required: the UI should offer a reload. */
+export function reportUpgradeRequired() {
+  if (upgradeRequired) return;
+  upgradeRequired = true;
+  notify();
+}
+export function isUpgradeRequired(): boolean { return upgradeRequired; }
 
 /**
  * Records a verified session answer. Any change advances `gen` (so older
@@ -315,6 +352,21 @@ function sessionRequest(fetchImpl: typeof fetch, duringOwnTransition: boolean): 
   return latestSession;
 }
 
+let ensureInFlight: Promise<VerifiedAccount> | null = null;
+/**
+ * AURA-ANDROID-REL-04 (R3) -- for a request that needs the verified account
+ * while it is unknown: one shared verification (deduplicated), then the
+ * account (string, null = signed out) or undefined when it still can't be
+ * verified. Never forwards on a guess.
+ */
+export async function ensureVerifiedAccount(fetchImpl?: typeof fetch): Promise<VerifiedAccount> {
+  if (state.account !== undefined) return state.account;
+  if (!ensureInFlight) {
+    ensureInFlight = fetchVerifiedSession(fetchImpl).then(() => state.account).finally(() => { ensureInFlight = null; });
+  }
+  return ensureInFlight;
+}
+
 /**
  * Re-verifies when the page returns to the foreground (Capacitor's resume
  * fires visibilitychange in the WebView). Returns the cleanup.
@@ -368,6 +420,9 @@ export async function runActivityOperation<T>(op: (lease: AccountLease) => Promi
     if (isTransitionActive()) throw new AccountUnavailableError('transition');
     throw new AccountUnavailableError('stale');
   }
+  // Cross-tab: also consult the held auth lock (not only the storage marker).
+  if (await isTransitionActiveNow()) throw new AccountUnavailableError('transition');
+  if (!isBindingCurrent(b)) throw new AccountUnavailableError('stale');
   const controller = new AbortController();
   controllers.add(controller);
   const lease: AccountLease = {
@@ -425,6 +480,10 @@ export async function withAuthLock<T>(fn: () => Promise<T>): Promise<T | null> {
   return fn();
 }
 
+let coordination: { markerWritten: boolean; webLocks: boolean } = { markerWritten: true, webLocks: false };
+/** How the current/last transition could coordinate with other tabs. */
+export function getTransitionCoordination() { return coordination; }
+
 export type TransitionOutcome = 'signed-out' | 'resumed' | 'resumed-verified' | 'unknown' | { switchedTo: string };
 
 export interface TransitionHandle {
@@ -447,7 +506,10 @@ export function beginTransition(kind: 'signing-out' | 'signing-in' = 'signing-ou
   state.gen += 1;
   abortAll();
   const mark = () => writeKey(TRANSITION_STORAGE_KEY, { kind, tx: id, tab: tabId, at: Date.now() } satisfies TransitionMarker);
-  mark();
+  // Coordination health: without Web Locks the marker is the only cross-tab
+  // signal; if it can't be written, other tabs can't be suspended and rely on
+  // the server's account checks (documented limitation).
+  coordination = { markerWritten: mark(), webLocks: Boolean(lockManager()) };
   const heartbeat = setInterval(mark, TRANSITION_HEARTBEAT_MS);
   notify();
   let ended = false;
@@ -488,6 +550,8 @@ export function __resetAccountSessionForTests(newTabId?: string) {
   storageListenerInstalled = false;
   sessionReqSeq = 0;
   latestSession = null;
+  ensureInFlight = null;
+  upgradeRequired = false;
   if (newTabId) tabId = newTabId;
 }
 /** Test-only: deliver a cross-tab storage event. */

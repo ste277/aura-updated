@@ -117,6 +117,16 @@ export function GuestFindClient({ initialSource, initialRestoreToken }: { initia
   // completing.
   const flowGenRef = useRef(0);
   const ownSignInRef = useRef(false);
+  // R3 -- account changes observed while this page's own sign-in runs. Its own
+  // confirmed sign-in causes exactly one; any other is a competing change.
+  const ownSignInChangesRef = useRef(0);
+  // R3 -- aborts every in-flight request of the current flow when it is retired.
+  const flowAbortRef = useRef<AbortController>(new AbortController());
+  const retireFlow = () => {
+    flowGenRef.current++;
+    flowAbortRef.current.abort();
+    flowAbortRef.current = new AbortController();
+  };
 
   const [activityQuery, setActivityQuery] = useState('');
   const [activityId, setActivityId] = useState<string | null>(null);
@@ -212,8 +222,8 @@ export function GuestFindClient({ initialSource, initialRestoreToken }: { initia
       const epoch = getAccountEpoch();
       if (epoch === seenEpoch) return;
       seenEpoch = epoch;
-      if (ownSignInRef.current) return;
-      flowGenRef.current++;
+      if (ownSignInRef.current) { ownSignInChangesRef.current++; return; }
+      retireFlow();
       setPhase((p) => (p === 'SAVING' || p === 'SAVED' || p === 'SAVE_ERROR' || p === 'SIGNUP' ? 'ACTIVITY' : p));
       setGuestStateToken(null);
       setSignupStep('EMAIL');
@@ -234,13 +244,18 @@ export function GuestFindClient({ initialSource, initialRestoreToken }: { initia
   }, []);
 
   async function restoreGuestState(token: string, authed: boolean) {
+    const flowGen = flowGenRef.current;
+    const signal = flowAbortRef.current.signal;
+    const live = () => flowGen === flowGenRef.current;
     try {
-      const res = await fetch(`/api/guest/state?token=${encodeURIComponent(token)}`);
+      const res = await fetch(`/api/guest/state?token=${encodeURIComponent(token)}`, { signal });
+      if (!live()) return;
       if (!res.ok) {
         setPhase('EXPIRED');
         return;
       }
       const restored = await res.json();
+      if (!live()) return;
       setActivityId(restored.activityId);
       setHorizon(restored.horizon);
       setTimePreference(restored.timePreference);
@@ -263,7 +278,8 @@ export function GuestFindClient({ initialSource, initialRestoreToken }: { initia
         timePreference: restored.timePreference,
         durationMinutes: restored.durationMinutes,
         cityName: restored.cityName,
-      });
+      }, signal);
+      if (!live()) return;
       if (!searchRes || searchRes.candidates.length === 0) {
         setPhase('EXPIRED');
         return;
@@ -279,7 +295,7 @@ export function GuestFindClient({ initialSource, initialRestoreToken }: { initia
       trackEvent('GUEST_RESULT_RESTORED', { metadata: { activityId: restored.activityId, source: restored.source } });
       setPhase('RESULT');
     } catch {
-      setPhase('EXPIRED');
+      if (live()) setPhase('EXPIRED');
     }
   }
 
@@ -289,11 +305,12 @@ export function GuestFindClient({ initialSource, initialRestoreToken }: { initia
     timePreference: TimingTimePreference;
     durationMinutes: number;
     cityName: string;
-  }): Promise<{ candidates: TimingCandidate[] } | null> {
+  }, signal?: AbortSignal): Promise<{ candidates: TimingCandidate[] } | null> {
     const res = await fetch('/api/guest/timing-search', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(params),
+      signal,
     });
     if (!res.ok) return null;
     return res.json();
@@ -320,8 +337,10 @@ export function GuestFindClient({ initialSource, initialRestoreToken }: { initia
     setPhase('SEARCHING');
     setError('');
     trackEvent('GUEST_TIMING_SEARCH_STARTED', { metadata: { activityId, horizon, timePreference, source: initialSource } });
+    const flowGen = flowGenRef.current;
     try {
-      const result = await runGuestSearch({ activityId, horizon, timePreference, durationMinutes, cityName });
+      const result = await runGuestSearch({ activityId, horizon, timePreference, durationMinutes, cityName }, flowAbortRef.current.signal);
+      if (flowGen !== flowGenRef.current) return;
       if (!result) {
         setPhase('SEARCH_ERROR');
         return;
@@ -336,7 +355,7 @@ export function GuestFindClient({ initialSource, initialRestoreToken }: { initia
       trackEvent('GUEST_TIMING_RESULT_VIEWED', { metadata: { activityId, resultCount: result.candidates.length, source: initialSource } });
       setPhase('RESULT');
     } catch {
-      setPhase('SEARCH_ERROR');
+      if (flowGen === flowGenRef.current) setPhase('SEARCH_ERROR');
     }
   };
 
@@ -406,6 +425,9 @@ export function GuestFindClient({ initialSource, initialRestoreToken }: { initia
     setSignupBusy(true);
     setError('');
     trackEvent('GUEST_SIGNUP_STARTED', { metadata: { source: initialSource } });
+    const flowGen = flowGenRef.current;
+    const signal = flowAbortRef.current.signal;
+    const live = () => flowGen === flowGenRef.current;
     try {
       // ONE token, minted once, reused for both the magic-link-click path
       // (embedded in the email) and the same-tab code-entry path below
@@ -425,12 +447,15 @@ export function GuestFindClient({ initialSource, initialRestoreToken }: { initia
           candidateEnd: selectedCandidate?.end,
           source: initialSource,
         }),
+        signal,
       });
       const guestStateData = await guestStateRes.json().catch(() => ({}));
+      if (!live()) return;
       if (guestStateData?.token) setGuestStateToken(guestStateData.token);
 
       const target = email.trim();
-      const result = await requestSignInCode({ email: target, guestStateToken: guestStateData?.token });
+      const result = await requestSignInCode({ email: target, guestStateToken: guestStateData?.token }, (i, n) => fetch(i, { ...n, signal }));
+      if (!live()) return;
       if (result.kind !== 'SENT') {
         setError(result.message);
         return;
@@ -441,7 +466,7 @@ export function GuestFindClient({ initialSource, initialRestoreToken }: { initia
       setDevLoginCode(result.devLoginCode);
       setSignupStep('CODE');
     } catch {
-      setError("Couldn't reach the server. Check your connection and try again.");
+      if (live()) setError("Couldn't reach the server. Check your connection and try again.");
     } finally {
       setSignupBusy(false);
     }
@@ -464,6 +489,7 @@ export function GuestFindClient({ initialSource, initialRestoreToken }: { initia
     setError('');
     const flowGen = flowGenRef.current;
     ownSignInRef.current = true;
+    ownSignInChangesRef.current = 0;
     try {
       // AURA-ANDROID-REL-04 IR-01 / IR-03 (R2) -- coordinated sign-in that
       // names the account THIS code signed in and confirms it with a fresh
@@ -482,7 +508,10 @@ export function GuestFindClient({ initialSource, initialRestoreToken }: { initia
         setError("Signed in, but Aura couldn't confirm your account. Try again.");
         return;
       }
-      if (binding.account !== result.userId) {
+      // Exactly one account change (this sign-in's own) may have happened.
+      if (binding.account !== result.userId || ownSignInChangesRef.current !== 1) {
+        ownSignInRef.current = false;
+        retireFlow();
         setError('Another sign-in happened on this device. Nothing was saved. Try again.');
         return;
       }

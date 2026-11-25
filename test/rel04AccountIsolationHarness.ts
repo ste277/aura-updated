@@ -153,7 +153,8 @@ export const locks = {
 };
 function installLocks() {
   const nav: any = (globalThis as any).navigator ?? {};
-  Object.defineProperty(nav, 'locks', { configurable: true, get: () => (locks.enabled ? { request: locks.request } : undefined) });
+  const query = async () => ({ held: [...held].map((name) => ({ name })) });
+  Object.defineProperty(nav, 'locks', { configurable: true, get: () => (locks.enabled ? { request: locks.request, query } : undefined) });
   if (!(globalThis as any).navigator) Object.defineProperty(globalThis, 'navigator', { value: nav, configurable: true });
 }
 installLocks();
@@ -236,7 +237,7 @@ export class Device {
     const mw: Response = this.useMiddleware ? await middlewareMod.middleware(req) : new Response(null, { headers: { 'x-middleware-next': '1' } });
     if (mw.headers.get('x-middleware-next') !== '1') {
       res = mw; // the real middleware answered (409 account_mismatch)
-    } else if (key === 'POST /api/auth/verify-code') {
+    } else if (key === 'POST /api/auth/verify-code' && !routes[key]) {
       const body = JSON.parse(String(init.body ?? '{}'));
       const uid = this.verifyAs[body.email];
       if (!uid) res = Response.json({ error: 'That code is not valid.' }, { status: 401 });
@@ -323,7 +324,11 @@ export function registerCurrentModulesAsTab(id: string) {
 }
 /** Queue entry keys of an owner (per-entry layout). */
 export function queueKeys(owner: string) {
-  return [...storage.data.keys()].filter((k) => k.startsWith(`aura_q3:${owner}:`));
+  return [...storage.data.keys()].filter((k) => k.startsWith(`aura_q4:${owner}:`));
+}
+/** clientRequestIds queued for an owner (R3 record keys: aura_q4:<owner>:<crid>:<recordId>). */
+export function queuedCrids(owner: string) {
+  return queueKeys(owner).map((k) => k.slice(`aura_q4:${owner}:`.length).split(':')[0]);
 }
 
 // ---------------------------------------------------------------- misc

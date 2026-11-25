@@ -68,15 +68,15 @@ import { LoggedEntryItem } from '../apps/web/components/CalendarViewSection';
 
 // AURA-ANDROID-REL-04 IR-01: the queue is per verified account; entries carry ownerUserId.
 const OWNER = 'synthetic-user-a';
-// AURA-ANDROID-REL-04 (R2): one storage key per entry (aura_q3:<owner>:<clientRequestId>).
-const OWNED_KEY = 'aura_q3:' + OWNER + ':corrupt-entry';
+// AURA-ANDROID-REL-04 (R3): immutable records, one per key (aura_q4:<owner>:<clientRequestId>:<recordId>).
+const OWNED_KEY = 'aura_q4:' + OWNER + ':corrupt-entry:r0';
 function setQueue(items: unknown[]) {
   const ls = (global as any).localStorage;
-  for (const k of Object.keys((ls as any).store ?? {})) if (k.startsWith('aura_q3:')) ls.removeItem(k);
+  for (const k of Object.keys((ls as any).store ?? {})) if (k.startsWith('aura_q')) ls.removeItem(k);
   items.forEach((i, n) => {
-    const it = i && typeof i === 'object' ? { ownerUserId: OWNER, queuedAt: n, ...(i as object) } : i;
+    const it = i && typeof i === 'object' ? { ownerUserId: OWNER, queuedAt: n, recordId: `r${n}`, ...(i as object) } : i;
     const crid = (it as { clientRequestId?: string })?.clientRequestId ?? `malformed-${n}`;
-    ls.setItem('aura_q3:' + OWNER + ':' + crid, JSON.stringify(it));
+    ls.setItem('aura_q4:' + OWNER + ':' + crid + ':r' + n, JSON.stringify(it));
   });
 }
 
@@ -151,10 +151,10 @@ check('the remaining still-queued item is still read back', afterRemoval.some((i
 (global as any).localStorage.clear();
 check('no queue key at all -> empty array, no throw', (() => { try { return readOfflineHabitQueue(OWNER).length === 0; } catch { return false; } })());
 
-(global as any).localStorage.setItem(OWNED_KEY, 'not valid json{{{');
+setQueue([]); (global as any).localStorage.setItem(OWNED_KEY, 'not valid json{{{');
 check('corrupt JSON -> empty array, no throw', (() => { try { return readOfflineHabitQueue(OWNER).length === 0; } catch { return false; } })());
 
-(global as any).localStorage.setItem(OWNED_KEY, JSON.stringify({ not: 'an array' }));
+setQueue([]); (global as any).localStorage.setItem(OWNED_KEY, JSON.stringify({ not: 'an array' }));
 check('a non-array value -> empty array, no throw', (() => { try { return readOfflineHabitQueue(OWNER).length === 0; } catch { return false; } })());
 
 setQueue([queuedA, { activityTitle: 'Missing required fields' }]);

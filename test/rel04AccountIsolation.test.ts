@@ -11,7 +11,7 @@
  * DETERMINISTIC SIMULATIONS (held/failed requests, one process); they are not
  * a real multi-process browser race.
  */
-import { Device, addUser, check, finish, locks, logsOf, openTab, closeAllTabs, payload, queueKeys, realPlansPost, resetStore, routes, storage, store, tick, WEB } from './rel04AccountIsolationHarness';
+import { Device, addUser, check, finish, locks, logsOf, openTab, closeAllTabs, payload, queueKeys, queuedCrids, realPlansPost, resetStore, routes, storage, store, tick, WEB } from './rel04AccountIsolationHarness';
 import * as path from 'path';
 
 const { NextRequest } = require(require.resolve('next/server', { paths: [path.join(WEB, 'app', 'api', 'habit-logs')] }));
@@ -78,7 +78,7 @@ async function main() {
     const lo = await routes['POST /api/auth/logout'](routeReq('POST', '/api/auth/logout', B, { 'X-Aura-Expected-Account': A }));
     check('SB6 logout bound to A while the session is B -> 409, cookie untouched (no Set-Cookie)', lo.status === 409 && !lo.headers.get('set-cookie'));
     const loOld = await routes['POST /api/auth/logout'](routeReq('POST', '/api/auth/logout', A));
-    check('SB7 logout without header (old client) still signs out', loOld.status === 200 && /Max-Age=0/i.test(loOld.headers.get('set-cookie') ?? ''));
+    check('SB7 (R3) unbound legacy logout is refused (503 upgrade, no-store) and never clears a cookie', loOld.status === 503 && (await loOld.json()).code === 'client_upgrade_required' && !loOld.headers.get('set-cookie'));
 
     const dev = new Device();
     dev.signIn(B);
@@ -175,7 +175,7 @@ async function main() {
     check('C5b a second tab\'s replay while one runs is excluded by the shared lock', rep2.stoppedBecause === 'busy');
     gate.release();
     const r1 = await rep1;
-    const left = queueKeys(A).map((k) => k.split(':').pop());
+    const left = queuedCrids(A);
     check('C5c tab1 settled and removed only the entries it read; tab2\'s new entry survived', r1.confirmed === 2 && JSON.stringify(left) === '["crid-m3"]');
     // Discard snapshot: an entry that appears AFTER confirmation survives the discard.
     let injected = false;
@@ -183,12 +183,12 @@ async function main() {
       fetch: dev.fetch as any,
       confirm: () => {
         // Simulates a tab that did not observe the transition (no Web Locks, missed marker) adding work after the question.
-        storage.setItem(`aura_q3:${A}:crid-late`, JSON.stringify({ ...payload('late', 'crid-late'), ownerUserId: A, tempId: 't', queuedAt: Date.now() }));
+        storage.setItem(`aura_q4:${A}:crid-late:rlate`, JSON.stringify({ ...payload('late', 'crid-late'), ownerUserId: A, tempId: 't', recordId: 'rlate', queuedAt: Date.now() }));
         injected = true;
         return true;
       },
     });
-    check('C5d confirmed discard removes exactly the confirmed snapshot; work added afterwards is kept for A', out.outcome === 'signed-out' && injected && JSON.stringify(queueKeys(A).map((k) => k.split(':').pop())) === '["crid-late"]');
+    check('C5d confirmed discard removes exactly the confirmed snapshot; work added afterwards is kept for A', out.outcome === 'signed-out' && injected && JSON.stringify(queuedCrids(A)) === '["crid-late"]');
   }
   {
     fresh();

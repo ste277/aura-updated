@@ -2,265 +2,279 @@
 
 **Date:** 2026-11-25 · **PR:** #392 · **Branch:** `aura-android-rel04-app-readiness`, cut from `main` `ad49e6a`
 
-**Revision history**
+**Revision:** **R3** (ticket 39209). It remediates the final independent disposition of `091e3ce90b62440bc0dc6fb25dc5666385d0ca65` (`~/Documents/ChatGPT/AURA_ANDROID_REL_04_FINAL_INDEPENDENT_DISPOSITION_091e3ce.md`, sha256 `232eec9f17c14b76…`).
 
-| Revision | Head | What it did |
-|---|---|---|
-| Original | `a54daf6` | Initial application-readiness PR |
-| R1 | `d09449b` | Remediated the first independent review |
-| **R2 (this document)** | see §R7 | Remediates the **independent delta review of `d09449b`** (`~/Documents/ChatGPT/Product Onboarding/AURA_ANDROID_REL_04_DELTA_INDEPENDENT_REVIEW_REPORT.md`, sha256 `11becd10ac19c304…`) |
+**Earlier independent reviews (kept unchanged as historical evidence):**
+- `AURA_ANDROID_REL_04_INDEPENDENT_REVIEW_REPORT.md` (of `a54daf6`);
+- `AURA_ANDROID_REL_04_DELTA_INDEPENDENT_REVIEW_REPORT.md` (of `d09449b`, sha256 `11becd10…`).
 
-**Mode:** code, offline tests, a local Gradle compile and an isolated generated-Prisma-client type check. **Not done:** emulator, ADB, device, signing, packaging, Play Console, infrastructure, live database or Production action.
+**Mode:** code, offline tests, real Chromium multi-tab tests, an isolated throwaway Postgres for the DB suites, and a generated-Prisma-client type check.
+
+**Not done:** no merge, deployment, live database, real application credentials, ADB, emulator, device, signing, packaging or Play Console activity.
 
 ## 1. Verdict
 
-**ALL REMAINING REL-04 FINDINGS CORRECTED — READY FOR FOCUSED INDEPENDENT VERIFICATION.**
+**COMPLETE SHARED ACCOUNT AND QUEUE INTEGRITY — READY FOR INDEPENDENT VERIFICATION.**
 
-- IR-01, IR-03 and IR-06 are **corrected but not CLOSED**. Closure requires the focused Codex verification.
-- Android release and REL-03 acceptance stay on **HOLD**.
-- AURA-AUTH-01 (server-side per-session revocation) remains a separate workstream and a public-release blocker.
-- **No merge without owner approval.** Merging also must not automatically activate this change before the owner confirms the deployment plan (§R5).
+| Gate | State |
+|---|---|
+| IR-01 (account isolation) | **Corrected, OPEN** until independent verification |
+| IR-03 (sign-in/out transitions) | **Corrected, OPEN** until independent verification |
+| IR-06 (location search) | **CLOSED at code level** (unchanged since `091e3ce`) |
+| Controlled merge | **NO-GO** until independent verification and owner approval |
+| Shared-web activation | **NO-GO**: activation blockers A-1…A-4 (§R6) need an owner decision on the rollout plan (§R6.2) |
+| Android public release, REL-03 acceptance | **HOLD** |
 
-Nothing here claims device or real multi-process browser behaviour:
-- interleavings are **deterministic simulations** in one Node process;
-- mounted tests use jsdom.
+Chromium results are not WKWebView, Android WebView or device acceptance.
 
 ---
 
-## R1. Delta-review findings and corrections
+## R1. Finding-by-finding remediation (disposition of `091e3ce`)
 
-### IR-01 Account-bound writes
+### IR-01 Account isolation
 
-| Delta finding | Correction | Evidence |
-|---|---|---|
-| Ordinary `POST /api/plans` accepted unbound plan creation | Plan creation now **requires** `X-Aura-Expected-Account`:<br>• missing → 503 `client_upgrade_required` (§R5), decided before authentication;<br>• another account's session → 409;<br>• both refusals happen before any read or write.<br>The session stays the only authorization. | SB5 (real route, zero db calls); D2 reproduces R1 acceptance |
-| Binding taken at dispatch, not at the user's action | `captureAccountBinding()` is called when the user acts and travels with the action: `saveUpcomingPlanFromCandidate({ binding })` and `boundFetch(binding, …)`. A binding that is no longer current is refused before sending, and the request states the bound account. | P1, P2 |
-| Callers: Home (quick plan + overlap override), Forward Planner, Muhurtham Finder, My Day Story, Day Builder, PlanWithAura, Ask Aura (both branches), `/find` | All bind at the tap.<br>• **CHECK-then-save flows** (Home, Forward Planner, Ask Aura forward plan) bind **before** the CHECK request.<br>• **PlanWithAura's own save and Ask Aura PLAN_THIS** now use `boundFetch`.<br>• **Overlap overrides** (Home, Day Builder) store the original binding in their pending options and re-send with it. `PlanOverlapSaveError` carries the binding. | P3, P4 |
-| Delayed confirmations, overrides and retries lose the binding | Same mechanism: the binding is reused verbatim. A recognized account switch → the client refuses. An unrecognized switch → the server refuses (409) and the tab re-verifies. | P2, P4, P5 |
-| Existing plan/activity mutations bypass transition suspension and settling | `installAccountBoundFetch()` wraps `window.fetch` once (Home and `/find`). Every same-origin account-scoped **mutation**:<br>• states the account;<br>• is refused during an auth transition (this tab or another);<br>• is tracked, so sign-out aborts it and waits for it to settle.<br>Auth, guest, telemetry, location lookup, health/internal and MCP endpoints are untouched. | P7–P9 |
-| Account-sensitive **reads** after an unrecognized cookie change | Reads also state the account. `middleware.ts` (edge, Web Crypto HMAC check of `as_session`) refuses any `/api` request whose stated account differs from the session: 409 `account_mismatch`. The wrapper then invalidates the account and the UI re-verifies. It never authorizes anything. | SB8, P10 |
-| `/find`: verification not correlated with the account the save binds to; competing sign-in can rebind | `verify-code` now returns `userId`. `verifySignInCode` runs under the auth lock and requires a **fresh, strictly parsed** session answer for that same id; otherwise UNCONFIRMED. The save binds to the verified account and checks `binding.account === userId`. | F4, F4b (mounted) |
-| `/find`: no signal to the save request; stale completion shown; account-sensitive state kept | • The save uses `boundFetch`, so the lease's abort reaches the real request.<br>• A `flowGen` check rejects completions for a retired flow.<br>• An account change elsewhere resets phase, guest token, code step and error.<br>• This page's own sign-in is excluded from that reset. | F5 (mounted) |
-| Day Constructor acceptance, guest discovery | Unchanged:<br>• Day Constructor keeps its own token check (the wrapper only adds the stated account);<br>• guest `/api/guest/*` routes are not bound;<br>• `disc01` passes. | existing suites |
+| Finding | Correction | Reproduced on `091e3ce` | Corrected evidence |
+|---|---|---|---|
+| Boundary installed only from Home and `/find`; standalone Goals, Captures and Connected Apps use ambient cookies | The client boundary is installed for **every page** from the root layout (`app/AccountBoundaryRoot.tsx`, at module evaluation, before any page effect). Standalone surfaces are wrapped in `AccountScoped` ('reload' for server-rendered Goals, Goal detail, Captures and plan-day; 'remount' for Connected Apps). | E10 | B5 (Goals, Captures, Connected Apps mounted) |
+| Wrapper forwards while the account is unknown | One shared verification (`ensureVerifiedAccount`) runs before any account-scoped request. If it fails, the request is **refused and never forwarded**. A tab that believes it is signed out states `~signed-out`. | E10 | B3, B4 |
+| Middleware passes absent headers and edge-verification failures | `middleware.ts` plus one shared policy (`lib/accountRoutePolicy.ts`, used by both server and client):<br>• headerless account-scoped request **with a session** → 503 `client_upgrade_required`;<br>• `~signed-out` or another account → 409;<br>• cookie present but unverifiable at the edge → 503 `account_check_unavailable` (**fail closed**). | E7, E8 | B2, SB8 |
+| Connected Apps excluded by the MCP prefix | Only the MCP **protocol** endpoint `/api/mcp` is exempt (bearer/OAuth; disabled status preserved). `/api/mcp/connections` (cookie management) is account-scoped. | E7b | B1 |
+| Report over-claimed "all app reads state the account" | Replaced by the inventory below. Every exemption is listed with its reason; the client and middleware share one table. | — | B1 |
+| My Day and PlanWithAura re-capture the binding at **Save anyway** | The original binding travels in the overlap refusal (`PlanOverlapSaveError.binding`, `PlanOverlapActionError.binding`) and pending state. The override re-sends with it. | Mounted, R2 components fail 2/5 | `rel04R3OverrideBindingJsdom` 5/0 |
+| `/find`: restore, request-code and listener lack generation and cancellation protection | A per-flow `AbortController` plus generation check covers restore, search, request-code, verify and save continuations; a retired flow's requests are aborted. During its own sign-in the listener **counts** account changes: anything beyond its own is treated as competing (error, flow retired). | F7 (restore) | F6, F7, F4, F5 |
+| Existing route and ownership protections | Unchanged:<br>• habit-log and plan 503/409 before database access;<br>• bound 401;<br>• session-user ownership on move, skip, log and delete;<br>• Day Constructor token check;<br>• guest discovery. | — | SB1–SB9, DB suites |
 
-### Queue atomicity
+### Offline queue durability
 
-| Delta finding | Correction | Evidence |
-|---|---|---|
-| Cross-tab read-modify-write of one array: lost appends, resurrected entries, discard removing later work | **One storage key per entry:** `aura_q3:<owner>:<clientRequestId>`.<br>• enqueue = one `setItem`<br>• settle/remove = one `removeItem`<br>• snapshot = the keys present<br>• discard = remove exactly the snapshot's keys (each verified)<br>No shared array is ever rewritten. | C5a–C5d; D4 reproduces the R1 loss |
-| No safe path without Web Locks | Data integrity does not depend on locks: every mutation is a single atomic storage operation. Web Locks only de-duplicate replays. Without them, concurrent replays may send an entry twice, and the server de-duplicates by `clientRequestId`. | C6 (`locks.enabled = false`) |
-| Unresolved direct writes lost on abort | **Outbox:** a direct write is stored in its account's queue **before** it is sent, under its `clientRequestId`.<br>• A definitive answer removes it.<br>• An abort, a lost answer, or an account change mid-flight keeps it; it is replayed later with the **same id**.<br>Aborting is never treated as proof that no commit happened. | C3 (server committed or not: exactly one row) |
-| Discard reported as successful when removal failed | Each removal is verified. A confirmed discard that could not remove N entries returns `discardFailed: N`, and Home tells the user the entries will only sync if they sign in to the same account again. | C7c, C7d |
+| Finding | Correction | Reproduced on `091e3ce` | Corrected evidence |
+|---|---|---|---|
+| A direct 502 deletes the outbox entry | Any 5xx (incl. 502) or no response is **ambiguous**: the entry is kept and replayed with the same `clientRequestId` (server de-duplicates). Only 2xx or a definitive 4xx settles it. | E1 | Q1 |
+| A per-entry read exception looks like an empty queue | Any storage exception (enumeration or per-record read) makes the read return `ok:false`, **unreadable**. Unparseable records are kept and counted. | E2 | Q2 |
+| A later payload can overwrite or share an identity | Records are **immutable**, one per key `aura_q4:<owner>:<crid>:<recordId>`. Enqueueing a different payload under an existing identity is refused (`conflict`). Conflicting records written by other builds are **quarantined** (never sent, never removed, reported). | E3 | Q3 |
+| Settlement or discard can remove a different or newer payload | Removal targets exact immutable keys only. A record written later has a different key. | — | Q4, C5d |
+| Replay can send from a stale snapshot | Before each send, the exact record must still exist and no auth transition may be active (the held lock is consulted). | (in-process) | Q5, **CH2 (Chromium)** |
+| Migration not interruption-safe; concurrent migration recreates settled entries | Owned interim formats (R1 `offline_habit_queue_v2:<owner>`, R2 `aura_q3:<owner>:<crid>`) copy to a **deterministic** record id, so a re-run is idempotent. A source is removed only after its copy exists. Settling or discarding a migrated record writes a **tombstone** first, so no migration can recreate it. | E4 | Q6, Q7 |
+| An unreadable snapshot gives a "successful" logout with zero failures | Sign-out reports `discardUnknown: true` with an explicit message. Nothing is claimed removed. | E5 | Q2 |
+| Discard of exact confirmed records; incomplete discard reporting | Discard removes exactly the snapshot (owned records, plus the legacy array via `discardLegacySnapshot`). Every removal is verified, and failures and kept-later entries are reported. | — | C5d, C7c, Q8 |
+| An already-dispatched request may commit | The outbox keeps unresolved entries under their account with the original id. Replay with that id reconciles (exactly one row). Aborting is never treated as "not committed". | — | C3 |
 
-### IR-03 Account transitions and logout
+IndexedDB was evaluated and not adopted (§R3).
 
-| Delta finding | Correction | Evidence |
-|---|---|---|
-| Concurrent same-epoch session answers; late old answer accepted | Every account change (including the first verification) advances `gen`. An answer applies only if it belongs to the **newest** session request and `gen` is unchanged. A caller whose answer went stale follows the newest answer, or re-checks at most twice; it is never stuck. | C12a; D5 reproduces the R1 acceptance |
-| Stale answer after invalidation or cancellation | Cross-tab news and transition begin/end advance `gen` and abort in-flight session reads. | C12b, C12c |
-| Cross-tab transition ownership; one overwritten marker slot | Sign-in and sign-out run under **one auth lock** (`withAuthLock`: Web Locks `aura-auth-transition`).<br>• **Without Web Locks:** a refusal while another tab's **fresh, heart-beaten** marker exists (TTL 15 s, heartbeat 4 s).<br>• **Separate keys** for the transition marker (`aura_auth_transition_v2`, with `tx` id) and account announcements (`aura_account_announce_v2`). | C10 (both modes) |
-| Concurrent sign-in and sign-out | Sign-in while a logout is pending (any tab) → BUSY, no verify-code sent. A concurrent logout in another tab → busy, one logout request. | C10 |
-| Cookie-response ordering | **Server side:** logout is account-bound; a logout carrying another account's session gets 409 and the cookie is untouched.<br>**Client side:** coordinated flows serialize sign-in after logout (lock).<br>**Limitation:** see §R6. | C11, SB6; D3 reproduces the R1 clear |
-| Indefinitely pending logout / acknowledgement / reconciliation | Every stage is bounded (request plus body: 10 s; reconciliation: 10 s; verify-code: 15 s) with real aborts. | C8a–C8c |
-| HTTP failure restored A without verification | **Every** non-acknowledgement is ambiguous, including any 4xx/5xx. It is reconciled with a fresh, strictly parsed session answer.<br>• same account → `failed` (resumed only on that answer);<br>• signed out → `signed-out-unconfirmed`, queue kept;<br>• another account → switch;<br>• unavailable → `unverified`: bound work refused, queue kept, Home shows **Retry**. | C9a–C9c, C8c, C8d |
-| Acknowledgement MIME was a substring match | `isJsonMediaType`: the media type itself must be `application/json` (parameters allowed), and the body must be an object with `loggedOut === true`. The session answer is also strict: `{ user: null \| { id: non-empty string } }`. | signOutRel04 (19/0), C9c |
+### Legacy records
 
-### Other findings
+| Finding | Correction | Reproduced on `091e3ce` | Corrected evidence |
+|---|---|---|---|
+| **Add to this account** reassigns unowned records | **Removed.** Unowned legacy records stay quarantined: never replayed, never assigned, contents never shown. The only action is **Remove from this device**, applied to the confirmed snapshot only. Entries added later by an old tab are kept and reported. | E11 | Q8, D1 |
+
+### IR-03 Sign-in / sign-out transitions
+
+| Finding | Correction | Reproduced on `091e3ce` | Corrected evidence |
+|---|---|---|---|
+| Cross-tab suspension depends on the storage marker even with Web Locks | `isTransitionActiveNow()` consults the **held** auth lock (`navigator.locks.query`) as well as the marker. It is used by the wrapper, by `runActivityOperation`, and before each replay send. Marker writes are read back; coordination health is recorded. | E12 | A2, **CH3 (Chromium, marker blocked)** |
+| Sign-in treats a 4xx as definitive | Any non-success is reconciled with a fresh, strictly parsed session answer. The prior state resumes only if that answer confirms it; otherwise the account switches or becomes unverified. | E6 | A1 |
+| Unverified forwarding; failed verification | Covered by the IR-01 wrapper change; unverifiable state refuses all account-scoped work. | E10 | B3 |
+| Marker failure without Web Locks; simultaneous transitions; suspended contexts | Defined behaviour (§R5): the transition proceeds in its own tab, coordination is recorded as unavailable, and other tabs rely on the server's account checks (409/503). | — | A3 |
+
+### Mixed-version compatibility
+
+| Finding | Correction | Reproduced on `091e3ce` | Corrected evidence |
+|---|---|---|---|
+| Headerless legacy logout clears the cookie, erasing a replacement account's session (confirmed in Chromium by the reviewer) | Headerless logout → 503 `client_upgrade_required`, **no Set-Cookie**. Bound logout remains 409 under another account's session. | E9; **CH4a (Chromium)** | SB7, **CH4b (Chromium)** |
+| Upgrade results not surfaced from automatic replay | Any request, including automatic replay, that receives `client_upgrade_required` raises the reload prompt (`AccountBoundaryRoot`). The entry is kept. | — | Q9 |
+
+### Tests and documentation
 
 | Finding | Correction | Evidence |
 |---|---|---|
-| **Deployment compatibility**: old clients lost 3 entries on 428 (and on 401 when expired) | §R5 | D1 (actual pre-REL-04 client against both routes) |
-| **IR-06**: repeated query text revived a retired, selectable row | Results, error and loading are stamped with an **input generation** that advances in the same render as each edit; only the current generation displays. | R9, R10 (R1 component fails R9 ×2) |
-| **IR-04** wording | Corrected (§3 F2, `MainActivity` comment): `CookieManager.flush()` **blocks** and persists the cookies visible at flush time; best-effort. The unsupported "asynchronous on some WebViews" claim is removed. | — |
-| **IR-05** wording | Corrected (§7): the actual host filters are listed; RC requirements expanded. | — |
-| **D-S4** | Rewritten (§11): automatic replay is controlled before counting; multi-tab, unresolved-write, storage-failure and unavailable-verification cases added. | — |
+| `pendingReplayReconciliation` stale structural assertion, and not in CI | The assertion now matches the per-identity settlement contract (classify, keep retry-worthy items, remove exactly the settled records; no batched rewrite). It is added to CI. | passes; CI step added |
+| Five changed DB suites outside CI | Identified from the diff against the workflow:<br>• `planGoalActivityArchivedLifecycleDb`<br>• `planGoalActivityCompletionIntegrityDb`<br>• `planGoalActivityLinkDb`<br>• `planStatusPreservationDb`<br>• `plannedActivitySchedulingModeDb`<br>Verified in an isolated Postgres 16 and added to the CI DB job. | §R4 |
 
-## R2. Account-transition invariants
+## R2. Shared account boundary
+
+### R2.1 Route coverage (`lib/accountRoutePolicy.ts`)
+
+**Account-scoped** (default for every `/api` route): everything not listed below. That covers the remaining route files among the 88 under `app/api`, including:
+- the habit, habit-log, plan, goal, capture, people and Aura Moment owner routes;
+- my-day, day, day-constructor, daily-assistant, insights, panchang, timing-search, forward-planner, muhurtham-search, ask-aura, reminders and push-subscriptions;
+- users/*, cities/custom and `/api/mcp/connections`.
+
+**Exemptions, each with its reason:**
+
+| Route | Class | Reason |
+|---|---|---|
+| `/api/auth/*` | exempt | Sign-in/out protocol. Logout enforces its own binding. |
+| `/api/guest/*` | exempt | Guest discovery; no account |
+| `/api/health`, `/api/push/public-key` | exempt | No account data |
+| `/api/internal/*` | exempt | Server-to-server, shared secret |
+| `/api/mcp` | exempt | MCP protocol: its own bearer/OAuth auth. Disabled (404) in production; status preserved. |
+| `/api/location/*` | exempt | Requires a session but returns only public place data |
+| `/api/aura-moments/<token>/response` | exempt | Public recipient link (bearer-link token) |
+| `GET /api/calendar/feed`, `GET /api/users/export` | exempt | Link-navigation downloads (cannot carry a header). The response is a file for the current cookie holder, never rendered into an account-scoped screen. |
+| `/api/product-events` | optional | Telemetry from guest and signed-in pages; a stated account is enforced |
+
+**Surfaces:**
+
+| Surface | Protection |
+|---|---|
+| Home | Account boundary; epoch-keyed remount |
+| `/find` | Boundary; flow generation and abort; bound save |
+| Goals, Goal detail, Captures, plan-day | Boundary; `AccountScoped` reload |
+| Connected Apps | Boundary; `AccountScoped` remount |
+| `/connect/sign-in` and LoginScreen | Shared `verifySignInCode` |
+| `/moment/<token>` | Public; exempt response route |
+
+### R2.2 Invariants
 
 | # | Invariant |
 |---|---|
-| **I1** | The verified account is set only from the newest session answer, arriving with `gen` unchanged (no account change, transition or cross-tab event in between). |
-| **I2** | `epoch` changes on every change between known accounts or invalidation. Home is keyed on it, so no account-scoped UI state survives. |
-| **I3** | Bound work runs only with a verified account, outside any transition, bound to the account of the user's action. It is aborted on change. Aborting never proves that nothing was committed. |
-| **I4** | The server is the guarantee: bound writes require the stated account and refuse a mismatch before any read or write. Reads with a stated account are refused on mismatch (middleware). The session is the sole authority. |
-| **I5** | Sign-in and sign-out are one auth transition per browser (lock; marker fallback). |
-| **I6** | Unverifiable state = unverified: writes refused, pending work kept, Retry offered. Never shown as signed out, never trusted as the old account. |
+| I1 | The verified account is set only from the newest session answer, with no intervening account change. |
+| I2 | Account changes advance the epoch. Account-scoped UI remounts or reloads. |
+| I3 | No account-scoped request is forwarded while the account is unknown, during any auth transition (local, marker, or held Web Lock), or after a failed verification. |
+| I4 | Every account-scoped request states the account (or `~signed-out`). The server refuses a mismatch (409) and a headerless request carrying a session (503). An unverifiable cookie fails closed (503). The session cookie remains the **only authorization**. |
+| I5 | Delayed actions (overlap overrides, CHECK-then-save, `/find` save) keep the binding of the user's original action. |
+| I6 | One auth transition per browser (Web Locks; marker fallback). An unverifiable outcome leaves the account unverified, with work kept and Retry offered. |
 
-## R3. Queue synchronization and fallback
+## R3. Queue storage design and migration
 
 | Topic | Behaviour |
 |---|---|
-| Layout | `aura_q3:<ownerUserId>:<clientRequestId>` → entry JSON (with `ownerUserId`, `queuedAt`) |
-| Mutations | All single-key `setItem`/`removeItem`, so they are atomic per entry in every supported environment. There is no read-modify-write. |
-| Replay | One flight per tab and account. A Web Lock (`aura-habit-replay:<owner>`) keeps tabs from replaying the same account at once. It skips entries this tab is still sending, stops when the binding stops being current, and removes only settled entries. |
-| Without Web Locks | Integrity is unchanged. Duplicate replays are possible and harmless (server idempotency by `clientRequestId`). Auth transitions fall back to the heart-beaten marker. |
-| Discard | Removes exactly the confirmed snapshot. Later entries survive. Each removal is verified, and failures are reported. |
-| Legacy (`offline_habit_queue`, unowned) | Quarantined: never replayed or assigned. Home shows a notice offering two explicit choices:<br>• **Add to <account>**, with a confirmation naming the account; the original ids are kept, so the server de-duplicates;<br>• **Discard**. |
-| R1 interim format (`offline_habit_queue_v2:<owner>`, never released) | Migrated entry by entry on first read. |
+| Layout | `aura_q4:<owner>:<clientRequestId>:<recordId>` → immutable JSON record (ownerUserId, recordId, queuedAt) |
+| Atomicity | Every mutation is one `setItem` of a new key or one `removeItem` of an exact key. There is no shared array and no rewrite, so integrity needs no lock. Web Locks only keep tabs from replaying the same account at once. |
+| Identity | One `clientRequestId` maps to one payload: a conflicting enqueue is refused; conflicting records are quarantined. Identical-payload duplicates replay once and settle together. |
+| Unreadable | Any storage exception means unreadable: replay stops and the logout discard is reported as unknown. |
+| Ambiguity | No response, abort, or any 5xx keeps the entry. Only 2xx or a definitive 4xx settles it. Account holds (401/403/409/428) keep it for its owner. |
+| Migration | Applies only to **owned** interim formats (ownership is evident from the owner key plus `ownerUserId`). It uses a deterministic recordId, copies before removing the source, writes a tombstone on settle or discard, and prunes tombstones after 30 days once no source remains. |
+| Legacy (`offline_habit_queue`) | Unowned: quarantined, never migrated, assigned or shown. Discard works on the exact confirmed snapshot only. |
+| No storage | Reported as not stored. No fallback to a weaker store. |
 
-## R4. Original-defect reproductions
+**IndexedDB was evaluated and not adopted:**
+1. The migration sources are in localStorage, so IndexedDB transactions could not make migration atomic.
+2. Every synchronous presentation path would become asynchronous.
+3. jsdom has no IndexedDB, so a new test dependency would be needed.
 
-**`a54daf6` (first review)** — `rel04ReviewedHeadReproduction`: 12/0 locally; 8/0 in CI, where the 4 provenance checks skip on the shallow clone.
-- Reproduced on `a54daf6`: R1 (expiry or switch → A's logs under B), R2 (replay spanning logout), R3 (A-expected write under B).
-- All three are prevented on the corrected head.
+The immutable-record design meets the whole contract in every supported environment, with or without Web Locks.
 
-**`d09449b` (delta review)** — `rel04R1HeadReproduction`: 21/0 locally; 14/0 in CI (7 provenance checks skip). Code is vendored verbatim from `d09449b` and byte-checked locally.
+## R4. Reproductions, regressions and browser tests
 
-| # | Scenario | `d09449b` | Corrected |
-|---|---|---|---|
-| D1 | Pre-REL-04 client replays 3 entries, **session valid** | 428 ×3 → **key deleted** | 503 ×3 → entries kept **byte for byte**, nothing written |
-| D1 | Same, **session expired** | 401 ×3 → **key deleted** | 503 ×3 → kept byte for byte |
-| D1 | New client meets legacy entries | — | Quarantined; explicit "Add to account" syncs them once |
-| D2 | Unbound plan creation | Passes the boundary (reaches body validation) | 503, zero db calls |
-| D3 | A's logout carrying B's session | **Clears B's cookie** | 409, cookie untouched |
-| D4 | Interleaved cross-context enqueues | **Loses one entry** | Both kept |
-| D5 | Late older session answer | **Overrides the newer B → A** | B stands |
-| IR-06 | `Kol` → `Kot` → `Kol` (local component swap) | R1 `LocationPicker` **fails R9 ×2** | Passes |
+| Suite | Result | What it covers |
+|---|---|---|
+| `rel04R2HeadReproduction` | **31/0** | 10 provenance checks plus E1–E12. Each finding reproduces with `091e3ce` code and is prevented on R3. |
+| `rel04R3QueueAuth` | **26/0** | Q1–Q9, A1–A3 |
+| `rel04R3BoundaryJsdom` | **24/0** | Route inventory (all 88 route files), middleware policy, unknown/failed verification, signed-out statement, mounted Goals, Captures and Connected Apps |
+| `rel04R3OverrideBindingJsdom` | **5/0** | Mounted PlanWithAura and My Day **Save anyway**. The R2 components fail 2/5 (local swap). |
+| `rel04BoundWritesJsdom` | **22/0** | P1–P10, F4–F7. F7 fails on the R2 `/find`. F6 does not discriminate on R2 (its own reset masks it), so the request-code finding rests on code review plus F6. |
+| `rel04Chromium` | **12/0** | Real Chromium 151, two tabs in one context: concurrent enqueue; replay versus discard; Web Locks auth exclusion with the marker blocked; delayed Set-Cookie ordering (R2 defect reproduced, corrected, coordinated case, documented residual); pre-REL-04 replay with valid and expired sessions |
+| Preserved REL-04 suites | all pass | isolation 50/0, Home/`/find` 13/0, R1-head reproduction 22/0, a54daf6 reproduction 13/0, sign-out 19/0, search 22/0, RV-1 8/0, static 48/0 |
+| `pendingReplayReconciliation` | passes | Assertion corrected; now in CI |
 
-## R5. Mixed-version compatibility
+**Fixture provenance:**
+- `rel04-reviewed-head` (a54daf6): 5 files, including the newly vendored logout route;
+- `rel04-r1-head` (d09449b): 7 files;
+- `rel04-r2-head` (091e3ce): 10 files.
 
-**Behaviour:**
-- **Refusal:** `POST /api/habit-logs` and `POST /api/plans` refuse a request **without** the stated account before authentication. The answer is HTTP **503** with `{ code: "client_upgrade_required" }`, `Cache-Control: no-store` and `Retry-After: 3600`.
-- **Why 503:** the pre-REL-04 client classifies 5xx as "retry later" and keeps its queue. Its 4xx handling (including 401 when expired) would discard entries. Checking before authentication gives expired old tabs the same answer.
-- **No retry loop:** old replay runs only on page load and on the browser `online` event.
-- **Nothing is weakened:** nothing is written for unbound requests, and authentication is not relaxed: a bound request still needs a valid session.
+All are byte-checked locally. CI's shallow clone skips the provenance checks.
 
-**New client:**
-- treats `client_upgrade_required` as "Aura was updated. Reload the app…";
-- keeps legacy entries quarantined, with the explicit choice above;
-- never assigns them automatically.
+**Database (isolated):** a throwaway Postgres 16 cluster in the scratchpad (own data directory and port; no existing database touched), `prisma migrate deploy` (54 migrations). Results:
+- the five outside-CI suites pass on `091e3ce` (baseline) and on R3;
+- **all 84 distinct DB suites** in the workflow (the DB job, now including the five, plus the DB suites in other jobs) pass on R3 when run with CI's exact commands and environment.
 
-**Verified with the actual previous client code** (vendored a54daf6 enqueue/replay) against the corrected route: D1, both session states.
+**Type check:** `apps/web` `tsc --noEmit` passes with a generated Prisma Client 5.22.0.
 
-**Unavoidable limitations of already-loaded legacy bundles:**
-1. **Direct log:** an old bundle's *direct* (online) activity log receives 503 and shows its normal failure. It is not queued, so the user re-logs after reloading.
-2. **Plan save:** an old bundle's plan save receives 503 and shows "Unable to save plan" until reload.
-3. **Persistence:** legacy entries keep being retried by old tabs until those tabs reload. They then stay quarantined until the user decides.
-4. **Deploy coupling:** the refusal is permanent in code; there is no switch to remove. Whether a merge activates this change depends on the hosting configuration: Production git builds were last recorded as skipped by a preview-only ignore step, which this review did not re-verify. **Owner confirmation of the activation plan is required.**
+**Full offline sweep:** every non-DB test command in the workflow (270, including multi-line `run:` blocks) passes. The sweep found 1 regression: `signInResendChangeEmailJsdom` B8 needed to answer the new reconciling session read after a wrong code. It is fixed without weakening the test, and the reconciliation is now asserted.
 
-## R6. Remaining limitations
+## R5. Authentication coordination: guarantees and limits
 
-1. **Uncoordinated cookie-response ordering.** Suppose a logout is *sent* with A's cookie and an uncoordinated sign-in (no lock) gets its response before that logout's response. The browser then applies the logout's `Set-Cookie` last. All app sign-in paths are coordinated; this needs an out-of-band sign-in (e.g. a second browser profile sharing cookies) or a client without Web Locks racing within the same instant.
-2. **No-Web-Locks environments** (iOS WKWebView before 15.4): auth exclusion is marker-based (best-effort at the same instant). Queue integrity is unaffected (R3). Server checks still prevent wrong-account writes.
-3. **Simulation, not processes.** Multi-tab and storage races are deterministic simulations. A real multi-process browser race has not run.
-4. **Already-committed requests.** A request already sent with A's cookie commits for A, which is correct, even if the user switches meanwhile; Home shows it only under A.
-5. **Unchanged from before:** copied-token residual (AURA-AUTH-01), device-only behaviour (§11).
+| Concern | Guarantee | Limit |
+|---|---|---|
+| Request-time account validation | Every account-scoped request is checked against the session. Wrong-account reads and writes are refused. | — |
+| Server-side session revocation | Not in this PR. It is **AUTH-01**, shared with the auth files touched here (logout, verify-code, session, `middleware.ts`, `lib/edgeSession.ts`). AUTH-01 should add revocation to `getSessionFromRequest` and `readEdgeSession`, so both enforcement points follow one contract. | A copied token stays valid until `exp` (RV-1) |
+| Browser cookie-response ordering | Coordinated new-bundle flows serialize sign-in after logout (CH4c). Unbound legacy logouts can no longer clear any cookie (CH4b). | An **uncoordinated** sign-in (old bundle, out-of-band) whose response lands before a bound logout's delayed response is cleared by it (CH4d). Neither request binding nor AUTH-01 resolves response ordering. |
+| Already-loaded legacy clients | Their writes and reads are refused without data loss (queues kept, valid and expired). Their logout is refused without clearing. | Their UI cannot be corrected (§R6) |
+| Older supported WebViews (no Web Locks) | Marker-based exclusion. Queue integrity is unaffected. | Simultaneous starts, suspended heartbeats or unavailable storage can defeat exclusion. Coordination is then recorded as unavailable and the server checks remain. Needs WKWebView acceptance. |
 
-## R7. Exact corrected head and CI
+## R6. Merge and activation readiness
 
-The exact head SHA and its CI results are recorded in the PR #392 description, since this file cannot contain its own commit hash.
+### R6.1 Separate readiness
 
----
+| | Status | Remaining |
+|---|---|---|
+| **Controlled merge** | Ready for independent verification | Verification, then owner approval. Merge must not activate the change automatically (A-4). |
+| **Shared-web activation** | **NO-GO** | A-1…A-4 below, plus an owner decision on the rollout plan |
+
+**Activation blockers:**
+- **A-1 Old bundles degrade until reload.** After activation, every headerless account-scoped request from a page loaded earlier gets 503. Those pages show their own generic errors; the old code cannot show the reload prompt. No data is lost: old queues stay intact (CH5, D1).
+- **A-2 Old-bundle sign-out is refused.** The old code ignores the result and shows a local signed-out screen while the session remains. On a shared device the user may wrongly believe they signed out, until a reload shows the real state. The new bundle cannot correct this.
+- **A-3 Uncoordinated cookie ordering (CH4d).** This is bounded to old bundles and out-of-band sign-ins during the drain window.
+- **A-4 Merge-to-deploy coupling** was not verified. Production git builds were last recorded as skipped by a preview-only ignore step; this must be re-confirmed.
+
+### R6.2 Proposed activation plan (owner decision)
+
+1. Confirm and keep Production promotion manual (A-4).
+2. Deploy the merged head to a preview. Run the Chromium suite and a manual smoke test against it, with synthetic accounts.
+3. Promote at a low-traffic time. Old pages fail closed with no data loss (A-1). Android: a cold start loads the new bundle, and resumed WebViews show errors until reloaded.
+4. Treat a **drain window** (for example 72 h) as the exposure window for A-2 and A-3. The owner either accepts it in writing or defers activation.
+5. From this release on, `client_upgrade_required` shows **Reload** in-app, so future version skews self-heal.
 
 ## 2. Sources and restrictions
 
 **Sources:**
-- S5-A package (`~/Desktop/Claude/AuraEvidence/AURA_ANDROID_REL_02_S5_A_TEST_PLAN_CORRECTIONS_AND_SESSION_SAFETY/`, unchanged);
-- the first independent review;
-- the delta review (above);
+- the S5-A package;
+- the three independent reviews above;
 - current source.
 
 **Restrictions honoured:**
 - The REL-03 deferral and sealed archive were not touched.
-- P-1 and SAS-0 were not started.
-- No emulator, ADB, device, signing, packaging, Play Console, infrastructure, live database, real credential or Production action.
-- No merge. Auto-fix and Auto-merge are off.
+- No merge, deployment, live database, real credentials, ADB, emulator, device, signing, packaging or Play Console activity.
+- Auto-fix and Auto-merge are off.
 
-## 3. Fixes (original REL-04 set, as amended)
+## 3. Original REL-04 fixes
 
-| ID | State |
+| Fix | State |
 |---|---|
-| **F1** backup Option A (O-1 selected) | Unchanged. BK-1 device verification mandatory. |
-| **F2** cookie flush in `onPause` | Best-effort. `CookieManager.flush()` **blocks** while it writes the cookies the WebView holds at that moment, and may do I/O. It does not cover a kill before or during `onPause`, or a `Set-Cookie` arriving after the flush, and it does not confirm the write. Session safety does not depend on it. Device rows D-S2/D-S6 cover delayed responses, interrupted transitions, cold launches and pause latency. |
-| F3/F4 | Superseded by IR-03/IR-01 (R1, R2) |
-| F5 | Logout cookie attributes. Logout is now also account-bound (R2). |
-| F6 | Completed by IR-06 (R1, R2) |
-| **F7** release gate | **Partial**; see §7 |
+| F1 backup Option A (O-1) | BK-1 device check mandatory |
+| F2 cookie flush | Best-effort. `CookieManager.flush()` blocks while writing the cookies visible at flush time; device acceptance D-S2/D-S6 required (IR-04). |
+| F5 logout cookie attributes | Logout is now account-bound, and headerless logout is refused |
+| F7 release gate | Partial; see §7 |
 
 ## 4. Authentication and session security
 
 | Question | State |
 |---|---|
-| Authorization | Signed `as_session` cookie only. Stated accounts are constraints, never credentials. |
-| Writes under the wrong account | Refused at the bound write routes (required binding) and by the middleware. |
-| Reads under the wrong account | Refused by the middleware when the client states its account (all app reads do). |
-| Logout | Account-bound, bounded, strict acknowledgement, reconciled. Coordinated with sign-in across tabs. |
-| Sign-in | Coordinated. The server names the account and the client confirms it with a fresh session answer before binding anything. |
-| Revocation | **None** (RV-1 residual). Unacceptable for public release (O-2) → AURA-AUTH-01. Not implemented here; the shared auth files touched by R2 are `logout`, `verify-code`, `session` and `middleware.ts`. |
-| Backup / transfer | Closed (F1); D-S1 mandatory |
+| Authorization | The session cookie only. Stated accounts are constraints. |
+| Wrong-account reads and writes | Refused (§R2) |
+| Logout | Bound; bounded; strict acknowledgement; every non-acknowledgement reconciled; coordinated with sign-in |
+| Sign-in | Coordinated; the server names the account and the client confirms it with a fresh session answer; any error reconciled |
+| Revocation | AUTH-01 (public-release blocker, O-2) |
 
-## 5. Outstanding Android findings: disposition
+## 5. Outstanding Android findings
 
-| ID | State |
+| Finding | State |
 |---|---|
-| FP-0/R-07/E-1 | Not applicable (S4 retired, O-5). The relevant guarantees are covered by R2's transitions, AURA-AUTH-01 and the D-S rows. |
-| BK-1 | Implemented; device verification mandatory |
-| RV-1 | Residual confirmed (in-process); public-release blocker |
-| S5A-F4 | Infrastructure item (recorded) |
-| REL-03 A5 | Device rows |
+| FP-0, R-07, E-1 | Not applicable (S4 retired, O-5). Its guarantees are preserved by R2/R3 transitions, AUTH-01 and the device rows. |
+| BK-1 | Mandatory on device |
+| RV-1 | AUTH-01 |
 
-## 6. Native application experience
+## 6. Native experience
 
-As before, plus:
-- Home shows a **Retry** state when the session can't be verified (I6);
-- Home shows a **legacy-entries notice**;
-- `/find` resets account-sensitive state on account changes;
-- the location search uses input generations.
+Unchanged from R2, plus:
+- the reload prompt for out-of-date bundles;
+- account-scoped standalone pages;
+- the legacy notice with discard only.
 
-## 7. Release configuration
+## 7. Release configuration (IR-05, partial gate)
 
-**The release gate is partial (IR-05).** `verifyReleaseServerConfig` (release builds only) reads the generated `capacitor.config.json` and fails when any of the following holds:
+`verifyReleaseServerConfig` (release builds only) fails when:
+- `server.url` is not HTTPS with a non-empty host;
+- the host is `localhost`, ends with `.localhost` or `.local`, or matches `127.x`, `10.x`, `192.168.x` or `172.16–31.x` (these patterns only);
+- cleartext is enabled;
+- `errorPath` is not set;
+- the WebView floor is not 91.
 
-| Field | Fails when |
-|---|---|
-| `server.url` | does not parse as a URL with scheme `https` and a non-empty host |
-| host | is `localhost`, ends with `.localhost` or `.local`, or matches `127.x.x.x`, `10.x.x.x`, `192.168.x.x` or `172.16–31.x.x` (these exact patterns only: no IPv6 literals, no other reserved ranges, no DNS resolution) |
-| `server.cleartext` | is `true` |
-| `server.errorPath` | is not `unsupported-webview.html` |
-| `android.minWebViewVersion` | is not `91` |
+The release-candidate requirements stay: RC-7a…RC-7h (final origin, effective built configuration, packaged assets, explicit release version, cleartext and mixed-content policy, 16 KB alignment, debuggability, Huawei acceptance). minSdk 29 and targetSdk 36 are kept (O-7).
 
-**It does not establish:**
-- the **final release origin** (O-4);
-- the **effective configuration inside the built artefact**;
-- the **merged/packaged assets**;
-- an **explicit release version**;
-- effective **cleartext and mixed-content** policy in the built app;
-- **16 KB** page alignment;
-- that the artefact is **not debuggable**;
-- **Huawei/no-Google-WebView** acceptance.
+## 8. Validation summary
 
-These are release-candidate requirements RC-7a…RC-7h (§12). minSdk 29 and targetSdk 36 are preserved (O-7).
-
-## 8. Validation results (R2 working tree)
-
-**REL-04 suites:**
-
-| Suite | Local | Notes |
-|---|---|---|
-| `rel04AccountIsolation` | **50/0** | Real middleware and routes; simulated interleavings |
-| `rel04HomeFindTransitionJsdom` | **13/0** | Real Home and `/find` mounted |
-| `rel04BoundWritesJsdom` | **19/0** | Real plan helper and overrides; mounted `/find` competing sign-in and late completion |
-| `rel04R1HeadReproduction` | **21/0** | 14 in CI |
-| `rel04ReviewedHeadReproduction` | **12/0** | 8 in CI |
-| `signOutRel04` | **19/0** | |
-| `locationPickerRel04SearchRace` | **22/0** | |
-| `rel04Rv1TokenReplay` | **8/0** | |
-| `androidRel04AppReadiness` | **48/0** | |
-
-**Existing suites updated for the new design (not weakened):**
-- `pendingActivityReloadVisibility`: per-entry storage;
-- `pendingReplayReconciliation` and `pendingActivityVisualConsistency`: replay in `lib/activitySync.ts`.
-
-**Type check:** `apps/web` `tsc --noEmit` passes with a **generated Prisma client** (`prisma generate`, client 5.22.0) in the isolated worktree. No tracked file changed.
-
-**Full offline sweep:** every CI test command (343, including multi-line `run:` blocks) was run locally without a database.
-- **Database suites:** 78 `*Db.test.ts` suites stopped at their database precondition (no `DATABASE_URL`, connection refused, or "local disposable database only"). CI's DB jobs run them.
-- **Everything else:** passes.
-- **Regressions:** the sweep found 7 in existing suites, all caused by the intended stricter behaviour, and all fixed in the tests without weakening their intent:
-  - `landingGuestEntryJsdom` and `signInResendChangeEmailJsdom`: sign-in now confirms the account via `verifySignInCode` plus a session read;
-  - `findATimeConflictJsdom`, `findATimeErrorStatesJsdom`, `hpg5I2ConflictPanelJsdom` and `hpg5I3HomeSaveJsdom`: standalone component mounts now establish the verified account Home always provides;
-  - `homeIntent1AskAuraHandoff`: the `/api/plans` call site is now `boundFetch(`.
-- **Pre-existing failures:** `insightsHistoryWiring` and `plannedActivityCanonicalIdentity` are not in CI and fail on `main`.
+§R4; exact-head CI in the PR description.
 
 ## 9. Remaining release blockers
 
@@ -269,94 +283,72 @@ These are release-candidate requirements RC-7a…RC-7h (§12). minSdk 29 and tar
 | B-1 | In-app account deletion (O-8) |
 | B-2 | Privacy policy (O-8) |
 | B-3 | Final release origin (O-4) |
-| B-4 | Device acceptance (§11), incl. BK-1 |
-| B-5 | Upload key, Play App Signing, Play Console (owner) |
-| B-6 | AURA-AUTH-01 server-side per-session revocation (O-2) |
-| B-7 | Focused independent verification of R2, then owner approval to merge |
-| B-8 | Activation plan for the shared web change (merge vs deploy, §R5) confirmed by the owner |
-| B-9 | Release-gate completion RC-7a…RC-7h |
+| B-4 | Device acceptance (§11), incl. BK-1, D-S rows and WKWebView |
+| B-5 | Play setup |
+| B-6 | AUTH-01 |
+| B-7 | Independent verification of R3, then owner approval |
+| B-8 | Activation blockers A-1…A-4 and the rollout decision (§R6) |
+| B-9 | RC-7a…RC-7h |
 
-## 10. Owner decisions (recorded 2026-11-24)
+## 10. Owner decisions
 
-| # | Decision |
-|---|---|
-| O-1 | Backup Option A; BK-1 device verification mandatory |
-| O-2 | 30-day copied-session residual unacceptable for public release → AURA-AUTH-01 |
-| O-3 | Explicit discard after confirmed logout: implemented as "confirmed **and** acknowledged, exactly the confirmed snapshot" |
-| O-5 | S4 retired. Guarantees preserved through R2 transitions, AURA-AUTH-01 and device acceptance; **not yet independently verified** |
-| O-6 | No location caching |
-| O-7 | minSdk 29 / targetSdk 36 |
+Recorded: O-1, O-2, O-3, O-5, O-6, O-7.
 
-**Open:** O-4, O-8; approval to merge; activation plan.
+Open:
+- O-4, O-8;
+- approval to merge;
+- the activation plan, including acceptance of the A-2/A-3 drain-window exposure.
 
 ## 11. Final device acceptance checklist
 
 **Rules:**
-- one build SHA; synthetic accounts A and B; a non-production backend;
-- no coordinates recorded;
-- 0 FATAL / 0 ANR; no spinner over 31 s.
-
-**Device coverage:** API 29/30, API 34 and API 36 (P = physical preferred).
+- synthetic accounts A and B, a non-production backend, one build SHA;
+- no coordinates;
+- 0 FATAL / 0 ANR.
 
 | # | Area | Steps | Pass |
 |---|---|---|---|
-| R1–R10 | REL-03 rows 1–10 | `AURA_ANDROID_REL_03_DEVICE_ACCEPTANCE_CHECKLIST.md` | As written |
-| **D-S1 (BK-1, mandatory)** | Backup/transfer | `bmgr` local transport (34/36), `adb backup` (29/30), device-transfer emulation; list archives | No `app_webview/` or app data; opens signed out after restore or transfer |
-| **D-S2** | Cookie persistence (best-effort flush) | Sign in / sign out → background within 3 s → swipe → cold launch, 5× each; repeat with the logout response delayed and with the swipe mid-sign-out | Signed-in/out as expected, or reconciled to the server's real state at cold launch; never "signed out" while the server still has A; record pause-to-kill latency |
-| **D-S3** | Honest sign-out | Airplane mode → Sign out; captive-portal Wi-Fi if available | Still A with "Couldn't sign out…"; **or**, if the session endpoint is unreachable afterwards, the **unverified** state (Retry, pending work kept); after reconnect Retry reconciles before A's work resumes |
-| **D-S4** | Pending activity at sign-out | **Control automatic replay first:** go offline before logging and stay offline (or block the habit-logs host) until the count step, so replay cannot change the count. Then log 2 activities as A. | |
-| | (a) Cancel | Sign out → the question names 2 logs → Cancel | Still A; both pending; they sync once when online |
-| | (b) Confirm, server reachable | Restore the network only for auth (or online with habit-logs blocked) → Sign out → OK | Signed out; logs removed; B never sees them |
-| | (c) Server unavailable | Server down → Sign out → OK | Still A ("Couldn't sign out…") **or** unverified with Retry; logs kept; nothing resumes until reconciled |
-| | (d) Lost acknowledgement | Proxy drops the logout response | After reconnect the app shows the server's real state; if signed out, A's logs are **kept** (not discarded) and never appear for B |
-| | (e) Unresolved write | Log with a slow network, Sign out while it is sending | The question counts it ("may already have been saved"); after Cancel and reconnect it syncs exactly once |
-| | (f) Two windows | Web build in two tabs (or two WebView windows if available): A in both; sign out in one while the other logs | The other window refuses the log during the sign-out; no A entry appears for B in either |
-| | (g) Storage failure | Not device-feasible; covered by C7 | — |
-| **D-S5** | Account switch | Sign out A → sign in B → cold launch; background/foreground | B only; no A data on any screen |
-| **D-S6** | Interrupted transition / pause latency | Start sign-out, press Home mid-request; return after 10 s; cold launch | Fully signed out, fully A, or unverified with Retry; never a mix; no stuck spinner |
-| **D-S7** | Session expiry | Short-lived synthetic token (test backend); foreground after expiry | Signed-out screen; no A data |
-| **D-S8** | Mixed versions | Keep an old-build page open, deploy, log offline in it, return online | Old page keeps its entries (no loss); new page shows the legacy notice; Add/Discard work |
-| D-L1…L6 | Location (incl. `Kol` → `Kot` → `Kol` on a throttled network: no retired row selectable) | — | As specified |
-| D-U1…U4, D-N1/N2, D-R1/R2 | Unchanged | — | — |
+| R1–R10 | REL-03 rows | As written | As written |
+| **D-S1 (BK-1)** | Backup and transfer | `bmgr` (34/36), `adb backup` (29/30), transfer emulation | No `app_webview/` or app data; opens signed out |
+| **D-S2** | Cookie persistence (best-effort) | Sign in/out → background → swipe → cold launch, 5× each; also with a delayed logout response and a mid-sign-out swipe | The expected state, or reconciled to the server state; pause-to-kill latency recorded |
+| **D-S3** | Honest sign-out | Airplane mode, captive portal | Still A, or unverified with Retry; reconciliation before A's work resumes |
+| **D-S4** | Pending activity at sign-out | **Control replay first:** log offline and stay offline (or block habit-logs) until the count step | |
+| | (a) Cancel | Sign out → Cancel | Kept; syncs once later |
+| | (b) Confirm, reachable | Sign out → OK | Exactly the confirmed logs removed; B never sees them |
+| | (c) Server unavailable | Sign out → OK | Still A or unverified; kept |
+| | (d) Lost acknowledgement | Proxy drops the logout response | Server state shown; logs kept for A |
+| | (e) Unresolved write | Sign out while a log is sending | Counted ("may already be saved"); syncs exactly once after Cancel |
+| | (f) Two windows | Sign out in one while the other logs | The other refuses during the transition, and is still suspended with the marker blocked (Web Locks devices) |
+| | (g) Storage unavailable | Not device-feasible | Covered by Q2 and C7 |
+| | (h) Session verification unavailable | Session endpoint blocked after sign-out | Unverified state, Retry, pending work kept |
+| D-S5 / D-S6 / D-S7 | Switch, interruption, expiry | As in R2 | As in R2 |
+| **D-S8** | Mixed versions | An old-build page open, deploy, then use it | Writes and reads refused without loss; old sign-out refused (A-2 observed and recorded); new page shows the legacy notice (Remove only) |
+| **D-S9** | Account-scoped pages | Goals, Captures and Connected Apps open in one tab; switch the account in another | Page reloads or remounts; no previous-account data |
+| **D-W1** | WKWebView without Web Locks (older iOS) | Two windows, simultaneous sign-out and sign-in; background one mid-transition | Exclusion holds, or the server refuses mismatched writes; record any coordination gap |
+| D-L, D-U, D-N, D-R | Unchanged | — | — |
 
 ## 12. Release-candidate requirements
 
-| # | Requirement |
-|---|---|
-| RC-1 | Focused verification (B-7) → owner approval → merge **with a confirmed activation plan** (B-8) |
-| RC-2 | B-1, B-2, B-3, B-6 |
-| RC-3 | RC commit; debug RC for §11 |
-| RC-4…RC-6 | Play account (closed-test rule), Play App Signing + upload key, listing, Data safety, privacy URL, testers |
-| **RC-7a** | Final release origin (O-4) in the synced config |
-| **RC-7b** | Effective configuration in the built AAB (`assets/capacitor.config.json`) |
-| **RC-7c** | Merged/packaged assets (connection and WebView-floor pages, plugin config) |
-| **RC-7d** | Explicit, increasing release version (`auraVersionCode`/`auraVersionName`); no defaults |
-| **RC-7e** | Effective cleartext and mixed-content policy in the built app |
-| **RC-7f** | 16 KB page alignment |
-| **RC-7g** | Not debuggable |
-| **RC-7h** | Huawei/no-Google-WebView acceptance decision |
-| RC-8 | Internal testing upload; D-R1, D-R2 |
+RC-1…RC-8 as in R2, and RC-1 now also requires the activation plan (§R6.2).
 
-## 13. Focused independent verification request
+## 13. Independent verification request
 
-**Scope:** `d09449b..<R2 head>`.
+**Scope:** `091e3ce..<R3 head>`.
 
 **Questions:**
-1. Is every listed plan caller bound at the user's action, and preserved through delayed confirmations, overrides and retries?
-2. Do `refuseUnboundWrite` and `refuseAccountMismatch` precede every read and write in both routes?
-3. Does the middleware refuse mismatched reads without ever authorizing anything?
-4. Can any queue mutation lose, resurrect or over-remove entries across contexts, with or without Web Locks?
-5. Are unresolved writes preserved under their account?
-6. Is every logout stage bounded? Is every non-acknowledgement reconciled before resumption?
-7. Can an old logout clear a newer *coordinated* sign-in?
-8. Is the stale-session handling correct under concurrency?
-9. Does the mixed-version refusal preserve legacy entries in both session states?
-10. Is IR-06 closed for repeated queries?
+1. Is every surface and account-scoped route covered by the shared policy, and is each exemption justified?
+2. Can any account-scoped request be forwarded while the account is unknown, during a transition, or after a failed verification?
+3. Does any path still re-capture a binding for a delayed action?
+4. Does the queue meet the full durability contract, with and without Web Locks?
+5. Is legacy quarantine safe (no reassignment, exact-snapshot discard, accurate reporting)?
+6. Is the sign-in error reconciliation correct?
+7. Is the mixed-version behaviour as stated, and are A-1…A-4 complete?
+8. Do the Chromium tests exercise what they claim?
 
-**Not in scope:** AURA-AUTH-01, device behaviour, release preparation.
+**Not in scope:** AUTH-01, device behaviour, release preparation.
 
 ## 14. Observations
 
-- **iOS Podfile drift:** a combined `cap sync` changes the Podfile (reverted; needs an iOS ticket).
-- **Pre-existing failures:** `insightsHistoryWiring` and `plannedActivityCanonicalIdentity` fail on `main` (not in CI).
-- **Unused fallback writers:** `useHabitLogs` and the `PastActivityModal` fallback are unused and unbound. They receive 503 and fail closed.
+- iOS Podfile drift from a combined `cap sync` (needs an iOS ticket).
+- `insightsHistoryWiring` and `plannedActivityCanonicalIdentity` fail on `main` and are not in CI.
+- `useHabitLogs` and the `PastActivityModal` fallback are unused; they fail closed.

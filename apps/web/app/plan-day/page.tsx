@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import { AccountScoped } from '../../components/AccountScoped';
 import { cookies } from 'next/headers';
 import { verifySessionToken, SESSION_COOKIE_NAME } from '../../lib/auth';
 import { getUserById, listGoalActivitiesWithLinkedPlanStatus, listCapturesWithLinkedPlanStatus, loadGoalActivityRhythmFacts } from '../../lib/db';
@@ -119,7 +120,9 @@ export default async function PlanDayPage({
   // inclusion). On LOAD_FAILED nothing is marked: legacy manual rows.
   const handoffGoalActivities = markCanonicalGoalDemandHandoff(goalActivities, automaticGoalDemand.status === 'OK' ? automaticGoalDemand.manualCanonicalGoalActivityIds : []);
 
+  // AURA-ANDROID-REL-04 (R3): server-rendered from the cookie's account -> reload on account change.
   return (
+    <AccountScoped onChange="reload">
     <PlanDayClient
       timezone={bootstrap?.timezone ?? null}
       planningDate={bootstrap?.planningDate ?? null}
@@ -131,5 +134,6 @@ export default async function PlanDayPage({
       captures={captures}
       autoGoalSuggestions={autoGoalSuggestions}
     />
+    </AccountScoped>
   );
 }

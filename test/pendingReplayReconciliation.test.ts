@@ -247,9 +247,14 @@ check(
 );
 
 check(
-  'replay still classifies each item via classifyHabitLogSyncOutcome and keeps only what remains retry-worthy (AURA-ANDROID-REL-04: removes only settled ids from the owner\'s queue)',
-  /const outcome = classifyHabitLogSyncOutcome\(status\);/.test(fs.readFileSync('apps/web/lib/activitySync.ts', 'utf8')) &&
-    /removeOwnedEntries\(lease\.account, settled\)/.test(fs.readFileSync('apps/web/lib/activitySync.ts', 'utf8'))
+  'replay still classifies each item via classifyHabitLogSyncOutcome, keeps retry-worthy items, and removes exactly the settled records of that identity (AURA-ANDROID-REL-04 R3: immutable per-record keys, removed per identity after settlement -- never a batched rewrite)',
+  (() => {
+    const src = fs.readFileSync('apps/web/lib/activitySync.ts', 'utf8');
+    const classify = src.indexOf('const outcome = classifyHabitLogSyncOutcome(status);');
+    const keepRetry = src.indexOf("if (outcome === 'retry') continue;", classify);
+    const removeSettled = src.indexOf('const r = removeRecords(group);', keepRetry);
+    return classify > 0 && keepRetry > classify && removeSettled > keepRetry && !/removeOwnedEntries|setItem\(/.test(src);
+  })()
 );
 
 // ============================================================

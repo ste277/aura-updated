@@ -114,9 +114,10 @@ async function main() {
     await tab.acct.fetchVerifiedSession(dev.fetch as any);
     const r = await tab.sync.replayOfflineQueue(dev.fetch as any);
     check('D1 CORRECTED new client: legacy entries are not replayed or assigned automatically (quarantined)', r.attempted === 0 && store.logs.length === 0 && storage.data.has('offline_habit_queue'));
-    const adopted = tab.q.adoptLegacyQueue(A); // the explicit user choice ("Add to <account>")
-    await tab.sync.replayOfflineQueue(dev.fetch as any);
-    check('D1 CORRECTED explicit "Add to this account" moves them to A and they sync once', adopted.ok && adopted.adopted === 2 && logsOf(A).length === 2 && !storage.data.has('offline_habit_queue'));
+    check('D1 CORRECTED (R3): there is no way to assign unowned legacy entries to an account (no adopt API)', !('adoptLegacyQueue' in tab.q));
+    const snap = tab.q.readLegacySnapshot();
+    const discard = snap.ok ? tab.q.discardLegacySnapshot(snap) : null;
+    check('D1 CORRECTED (R3): only an explicit discard of the confirmed snapshot removes them; nothing is stored for any account', !!discard && discard.removed === 2 && !discard.failed && !storage.data.has('offline_habit_queue') && store.logs.length === 0);
   }
 
   // ================= D2 ordinary plan creation without account binding
@@ -170,11 +171,11 @@ async function main() {
     let injected = false;
     const realSet = storage.setItem.bind(storage);
     (storage as any).setItem = (k: string, v: string) => {
-      if (!injected && k.startsWith(`aura_q3:${A}:`)) { injected = true; currentQueue.enqueueOwned({ ...payload('context 2', 'crid-ctx2'), tempId: 't2', ownerUserId: A }); }
+      if (!injected && k.startsWith(`aura_q4:${A}:`)) { injected = true; currentQueue.enqueueOwned({ ...payload('context 2', 'crid-ctx2'), tempId: 't2', ownerUserId: A }); }
       return realSet(k, v);
     };
     try { currentQueue.enqueueOwned({ ...payload('context 1', 'crid-ctx1'), tempId: 't1', ownerUserId: A }); } finally { (storage as any).setItem = realSet; }
-    check('D4 CORRECTED: per-entry keys -- both interleaved enqueues kept', currentQueue.readOfflineHabitQueue(A).length === 2);
+    check('D4 CORRECTED: immutable per-record keys -- both interleaved enqueues kept', currentQueue.readOfflineHabitQueue(A).length === 2);
   }
 
   // ================= D5 concurrent same-epoch session answers

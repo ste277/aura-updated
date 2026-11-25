@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import { AccountScoped } from '../../../components/AccountScoped';
 import { cookies } from 'next/headers';
 import { verifySessionToken, SESSION_COOKIE_NAME } from '../../../lib/auth';
 import { getUserById } from '../../../lib/db';
@@ -29,5 +30,6 @@ async function resolveAuthenticated(): Promise<boolean> {
 
 export default async function GoalDetailPage({ params }: { params: { goalId: string } }) {
   const authenticated = await resolveAuthenticated();
-  return <GoalDetailClient goalId={params.goalId} authenticated={authenticated} />;
+  // AURA-ANDROID-REL-04 (R3): server-rendered from the cookie's account -> reload on account change.
+  return <AccountScoped onChange="reload"><GoalDetailClient goalId={params.goalId} authenticated={authenticated} /></AccountScoped>;
 }

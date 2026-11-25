@@ -28,7 +28,7 @@ import { shouldRefreshMyDayForDateChange } from '../lib/myDayRefreshPolicy';
 import { readOfflineHabitQueue, toPendingLoggedEntry, mergeConfirmedLogEntries, selectQueueItemsToReconstruct } from '../lib/offlineHabitQueue';
 import { fetchVerifiedSession, subscribeAccount, getAccountEpoch, getVerifiedAccount, AccountUnavailableError, startForegroundReverification, captureAccountBinding } from '../lib/accountSession';
 import { installAccountBoundFetch } from '../lib/accountBoundFetch';
-import { readLegacyQueue, adoptLegacyQueue, clearLegacyQueue } from '../lib/offlineHabitQueue';
+import { readLegacySnapshot, discardLegacySnapshot } from '../lib/offlineHabitQueue';
 import { UPGRADE_MESSAGE } from '../lib/activitySync';
 import { submitActivityLog, replayOfflineQueue } from '../lib/activitySync';
 import { refreshAfterHomeCompletion } from '../lib/homeRefresh';
@@ -64,7 +64,7 @@ import { formatDisplayName } from '../lib/displayName';
 import { trackEvent } from '../lib/trackEvent';
 import { generateClientRequestId } from '../lib/clientId';
 import { useAndroidBackButton } from '../lib/useAndroidBackButton';
-import { performSignOut, SIGN_OUT_FAILED_MESSAGE, SIGN_OUT_BUSY_MESSAGE, SIGN_OUT_UNVERIFIED_MESSAGE, discardFailedMessage } from '../lib/signOut';
+import { performSignOut, SIGN_OUT_FAILED_MESSAGE, SIGN_OUT_BUSY_MESSAGE, SIGN_OUT_UNVERIFIED_MESSAGE, discardOutcomeMessage } from '../lib/signOut';
 import {
   loadNotificationPrefs,
   saveNotificationPrefs,
@@ -452,8 +452,8 @@ function DashboardPageInner() {
 
       accountIdRef.current = check.user.id;
       setUser(sessionData.user);
-      const legacy = readLegacyQueue();
-      setLegacyCount(legacy ? legacy.length : 0);
+      const legacy = readLegacySnapshot();
+      setLegacyCount(legacy.ok ? legacy.count : 0);
 
       // Pending Activity Reload Visibility V1, now account-scoped: only the
       // verified account's own queued entries are reconstructed.
@@ -1589,7 +1589,10 @@ function DashboardPageInner() {
     if (result.outcome === 'failed') window.alert(SIGN_OUT_FAILED_MESSAGE);
     else if (result.outcome === 'busy') window.alert(SIGN_OUT_BUSY_MESSAGE);
     else if (result.outcome === 'unverified') window.alert(SIGN_OUT_UNVERIFIED_MESSAGE);
-    else if (result.outcome === 'signed-out' && result.discardFailed > 0) window.alert(discardFailedMessage(result.discardFailed));
+    else {
+      const note = discardOutcomeMessage(result);
+      if (note) window.alert(note);
+    }
   }, []);
 
   // My Day Timing Location Change Refresh V1 -- LocationPicker only ever
@@ -1879,40 +1882,32 @@ function DashboardPageInner() {
       }}
     >
       {legacyCount > 0 && (
-        // AURA-ANDROID-REL-04 (R2) -- pre-update offline logs have no recorded
-        // account. They are never synced or assigned automatically: the user
-        // decides, explicitly, for THIS signed-in account, or discards them.
+        // AURA-ANDROID-REL-04 (R3) -- pre-update offline logs have NO recorded
+        // account. They stay quarantined: never synced, never assigned to any
+        // account (no "add to this account"), and their contents are never
+        // shown. The only action is an explicit discard of exactly the entries
+        // counted here.
         <div role="status" style={{ width: '100%', maxWidth: 560, marginBottom: 12, padding: 12, borderRadius: 10, border: '1px solid var(--as-border)', background: 'var(--as-surface)', fontSize: 13 }}>
           <p style={{ margin: '0 0 8px' }}>
-            {legacyCount === 1 ? '1 activity log' : `${legacyCount} activity logs`} from an earlier version of Aura {legacyCount === 1 ? 'is' : 'are'} saved on this device but {legacyCount === 1 ? "isn't" : "aren't"} linked to any account, so {legacyCount === 1 ? 'it' : 'they'} won&apos;t sync automatically.
+            This device holds {legacyCount === 1 ? '1 activity log' : `${legacyCount} activity logs`} from an earlier version of Aura that {legacyCount === 1 ? "isn't" : "aren't"} linked to any account, so {legacyCount === 1 ? 'it' : 'they'} can&apos;t be synced. {legacyCount === 1 ? 'It stays' : 'They stay'} on this device until removed.
           </p>
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            <button
-              type="button"
-              onClick={() => {
-                if (!user || getVerifiedAccount() !== user.id) return;
-                if (!window.confirm(`Add ${legacyCount === 1 ? 'this log' : `these ${legacyCount} logs`} to ${user.email}? Only do this if you logged ${legacyCount === 1 ? 'it' : 'them'} yourself.`)) return;
-                const r = adoptLegacyQueue(user.id);
-                if (!r.ok) window.alert("Couldn't move them on this device. Nothing was changed on the server.");
-                setLegacyCount(readLegacyQueue()?.length ?? 0);
-                loadUserDataAndLogs();
-              }}
-              style={{ padding: '6px 12px', borderRadius: 8, border: '1px solid var(--as-border)', background: 'transparent', color: 'var(--as-text)' }}
-            >
-              Add to {formatDisplayName(user.email)}
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                if (!window.confirm(`Remove ${legacyCount === 1 ? 'this unsynced log' : `these ${legacyCount} unsynced logs`} from this device? This can't be undone.`)) return;
-                if (!clearLegacyQueue()) window.alert("Couldn't remove them from this device's storage.");
-                setLegacyCount(readLegacyQueue()?.length ?? 0);
-              }}
-              style={{ padding: '6px 12px', borderRadius: 8, border: '1px solid var(--as-border)', background: 'transparent', color: 'var(--as-text-muted)' }}
-            >
-              Discard
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={() => {
+              const snap = readLegacySnapshot();
+              if (!snap.ok) { window.alert("Couldn't read this device's storage. Nothing was removed."); return; }
+              if (snap.count === 0) { setLegacyCount(0); return; }
+              if (!window.confirm(`Remove ${snap.count === 1 ? 'this unsynced log' : `these ${snap.count} unsynced logs`} from this device? This can't be undone.`)) return;
+              const r = discardLegacySnapshot(snap);
+              if (r.failed) window.alert("Couldn't remove them from this device's storage. Nothing was removed.");
+              else if (r.keptAddedLater > 0) window.alert(`Removed ${r.removed}. ${r.keptAddedLater === 1 ? '1 log was' : `${r.keptAddedLater} logs were`} added after you confirmed and ${r.keptAddedLater === 1 ? 'was' : 'were'} kept.`);
+              const after = readLegacySnapshot();
+              setLegacyCount(after.ok ? after.count : legacyCount);
+            }}
+            style={{ padding: '6px 12px', borderRadius: 8, border: '1px solid var(--as-border)', background: 'transparent', color: 'var(--as-text-muted)' }}
+          >
+            Remove from this device
+          </button>
         </div>
       )}
       {/* Real-Time Solar Phase Shift Toast Banner */}

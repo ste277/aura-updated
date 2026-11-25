@@ -98,8 +98,9 @@ async function main() {
   let blocked = '';
   try { await window.fetch('/api/habits/h-1/complete', { method: 'POST' }); } catch (e: any) { blocked = e?.reason; }
   check('P9 during another tab\'s sign-out, existing mutations are refused client-side', blocked === 'transition' && postsTo('/api/habits/h-1/complete').length === 0);
-  storage.removeItem('aura_auth_transition_v2');
-  dev.signIn(B); // unrecognized cookie change
+  storage.removeItem('aura_auth_transition_v2'); // the other tab's transition ended -> this tab re-verifies
+  await verifyAs(A);
+  dev.signIn(B); // unrecognized cookie change: this tab still believes A
   const read = await window.fetch('/api/habit-logs');
   await settle(2);
   check('P10 an account-sensitive read after an unrecognized cookie change is refused (409, no B data) and the tab re-verifies', read.status === 409 && acct.getVerifiedAccount() === undefined);
@@ -178,6 +179,56 @@ async function main() {
     check('F5 the late completion is not shown in the new context (no "is saved", flow reset)', !/is saved/.test(text(c)));
     check('F5 the plan exists for A only (the server bound it to A), never B', plansOf(B).length === 0 && plansOf(A).some((p) => p.title));
     await (driveToCode as any).unmount();
+  }
+
+  // ---------------------------------------------------------------- F6 request-code continuation retired by an account change
+  {
+    dev.cookie = null;
+    await act(async () => { await acct.fetchVerifiedSession(); });
+    const h = await mount(React.createElement(GuestFindClient, { initialSource: 'DIRECT', initialRestoreToken: null }));
+    await settle();
+    const c = h.container as HTMLElement;
+    await click(btn(c, /Workout/)!); await settle(3);
+    await click(btn(c, /^Continue$/)!); await settle(3);
+    await click(btn(c, /Find my moment/)!); await settle(6);
+    await click(btn(c, /Save this moment/)!); await settle(3);
+    await typeInto(c.querySelector('input[type=email]') as HTMLInputElement, 'alicesynth@example.invalid');
+    const gateRL = dev.hold('POST', '/api/auth/request-link', 'after');
+    const submit = act(async () => { (c.querySelector('form') as HTMLFormElement).dispatchEvent(new (window as any).Event('submit', { bubbles: true, cancelable: true })); });
+    await gateRL.arrived;
+    dev.signIn(B);
+    await act(async () => { acct.__deliverStorageEventForTests({ key: 'aura_account_announce_v2', newValue: JSON.stringify({ account: B, tab: 'other-tab', at: Date.now() }) }); });
+    await settle(4);
+    gateRL.release();
+    await submit; await settle(6);
+    check('F6 a request-code that completes after an account change does not revive the retired flow (no code step)', !c.querySelector('input[placeholder="123456"]'));
+    // Back to sign-up for the new state: the retired request's result must not reappear.
+    dev.cookie = null;
+    await act(async () => { await acct.fetchVerifiedSession(); });
+    const chip = btn(c, /Workout/);
+    if (chip) { await click(chip); await settle(3); await click(btn(c, /^Continue$/)!); await settle(3); await click(btn(c, /Find my moment/)!); await settle(6); }
+    const save = btn(c, /Save this moment/);
+    if (save) { await click(save); await settle(3); }
+    check('F6 re-entering sign-up shows the EMAIL step, not the retired flow\'s code step', !!c.querySelector('input[type=email]') && !c.querySelector('input[placeholder="123456"]'));
+    await h.unmount();
+  }
+
+  // ---------------------------------------------------------------- F7 restore continuation retired by an account change
+  {
+    dev.cookie = null;
+    await act(async () => { await acct.fetchVerifiedSession(); });
+    dev.extra['/api/guest/state'] = () => ({ token: 'guest-token-1', activityId: 'workout', horizon: 'TODAY', timePreference: 'ANY', durationMinutes: 60, cityName: 'Chennai', candidateStart: candidate.start, source: 'DIRECT' });
+    const gateGS = dev.hold('GET', '/api/guest/state', 'after');
+    const h = await mount(React.createElement(GuestFindClient, { initialSource: 'DIRECT', initialRestoreToken: 'restore-token-1' }));
+    await gateGS.arrived;
+    dev.signIn(B);
+    await act(async () => { acct.__deliverStorageEventForTests({ key: 'aura_account_announce_v2', newValue: JSON.stringify({ account: B, tab: 'other-tab', at: Date.now() }) }); });
+    await settle(4);
+    gateGS.release();
+    await settle(8);
+    const c = h.container as HTMLElement;
+    check('F7 a restore that completes after an account change does not show the restored result', !/Save this moment/.test(text(c)));
+    await h.unmount();
   }
 
   void bf;

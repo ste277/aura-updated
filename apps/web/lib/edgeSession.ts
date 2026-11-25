@@ -25,6 +25,21 @@ function b64urlToBytes(s: string): Uint8Array<ArrayBuffer> {
 let keyPromise: Promise<CryptoKey> | null = null;
 let keyFor: string | null = null;
 
+export type EdgeSession = { status: 'none' } | { status: 'invalid' } | { status: 'unverifiable' } | { status: 'valid'; userId: string };
+
+/**
+ * AURA-ANDROID-REL-04 (R3) -- distinguishes "no cookie", "cookie present but
+ * invalid/expired" (the route will answer 401), and "cookie present but the
+ * edge cannot verify it" (secret unavailable): callers must fail CLOSED on
+ * 'unverifiable', never treat it as "no session".
+ */
+export async function readEdgeSession(token: string | undefined | null): Promise<EdgeSession> {
+  if (!token) return { status: 'none' };
+  if (!secret()) return { status: 'unverifiable' };
+  const userId = await sessionUserIdFromToken(token);
+  return userId ? { status: 'valid', userId } : { status: 'invalid' };
+}
+
 /** The session's userId, or null when absent/invalid/expired/unverifiable. */
 export async function sessionUserIdFromToken(token: string | undefined | null): Promise<string | null> {
   if (!token) return null;
