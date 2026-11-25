@@ -1,7 +1,7 @@
 # AURA-MCP-CI-01: stabilize the S8, S10 and S12 regression tests
 
 - **Base:** main `1605355f2bd289cb8f42e50ecd28f7522f3977da` (PR #390). **PR:** #394, branch `test/aura-mcp-ci-01-stabilize-s8-s12`.
-- **Scope:** **test-only.** Changed: `test/mcpOAuthStagingBlockersDb.test.ts`, `test/mcpOAuthS8.test.ts` and `test/mcpOAuthS10.test.ts`.
+- **Scope:** **test-only.** Changed: `test/mcpOAuthStagingBlockersDb.test.ts`, `test/mcpOAuthS8.test.ts`, `test/mcpOAuthS10.test.ts` and (this round) `test/mcpOAuthS12.test.ts`.
   - No change to the limiter, HMAC, authentication, secret policy, deadlines, migrations, dependencies or configuration.
   - MCP stays disabled.
   - The post-merge evidence bundle (`AURA_MCP_02_I2B_S12_FINAL_INDEPENDENT_REVIEW/post-merge-ci/`) is unchanged.
@@ -18,8 +18,9 @@ No single timing ratio decides correctness.
 **A. Safety and production-deadline enforcement.** 2,000 decisions; production deadline 1,250 ms, unchanged; application pool bounds. Timing-free invariants only:
 - 0 unexpected causes (checkout, driver, internal, `commit_failed`, `commit_lost`);
 - admitted ≤ counted ≤ G, with any over-count explained by ambiguous or late COMMITs;
-- **exact per-shard accounting:** decision i goes to shard i mod 16; for every shard, admitted = min(30, completed), and a 429 only on a full shard;
-- **the deadline is enforced:** every decision is answered within 1,250 ms + 500 ms of scheduling slack, and no admission lands later than 1,250 ms + 250 ms;
+- **exact per-shard accounting** (corrected in round 3, §1a): decision i goes to shard i mod 16; for every shard, admitted ≤ counted ≤ 30, any over-count is explained by that shard's ambiguous / late COMMITs, and a 429 is allowed only when that shard is counted at exactly 30; in aggregate, admitted ≤ counted ≤ 480;
+- **the production deadline itself** is proven by a deterministic monotonic-clock test (§1a): COMMIT acknowledged at 1,249 ms admits; at 1,250 ms and 1,300 ms it is refused (`commit_late`). The live flood no longer infers admission timing from the outer clock;
+- **response completion:** every decision is answered within 1,250 ms + 500 ms (event-loop allowance for response completion only; it never permits a late admission);
 - **liveness:** at least one admission.
 
 Shedding under load is legitimate here, so A has **no availability floor**.
@@ -32,8 +33,8 @@ Shedding under load is legitimate here, so A has **no availability floor**.
 
 **C. Performance regression** (extended budget):
 - **Measurement:** the limiter flood is compared with a **control flood** of the same shape (3 × 5 connections, 2,000 units of 4 round trips, 16 hot advisory keys; no limiter code, no table), run immediately **before and after** it.
-- **Ratio:** limiterMs / max(control before, control after).
-- **Pass condition:** the **best of 3 paired trials** must be **≤ R_MAX = 5**, and every trial must **decide all 2,000** requests.
+- **Ratio** (corrected in round 3, §1a): limiterMs / **median of all six controls** (before and after each of the 3 trials).
+- **Pass condition:** the **best of 3 trials** must be **≤ R_MAX = 5**; **every** trial must be exactly correct (all 2,000 decided, exactly 480 admitted, all 16 shards at 30, exact per-shard accounting); and **every** control, including the bracketing controls, must pass the 5 s ENV guard.
 - **Why best of 3:** persistent (genuine) degradation fails every trial; a transient environmental slowdown cannot.
 - **Why R_MAX = 5:**
   - It is at least 2× the worst healthy **best-of-3** ratio observed (2.67 locally, 1.80 on CI), and above the worst healthy **single** trial anywhere (4.4).
@@ -43,14 +44,49 @@ Shedding under load is legitimate here, so A has **no availability floor**.
 
 **ENV. Environment check:** a control flood slower than **5,000 ms** (4× the deadline) means the environment is unusably slow, and the run **fails**. It never passes vacuously.
 
+### 1a. Round 3: final assertion corrections (independent review of `535822ea`)
+The review found that the production limiter is correct (1,250 ms deadline independently verified) and that the remaining defects were in the **test checker**. Each defect is reproduced against a **frozen copy of the previous checker** (`prevAccounting` / `prevCheckA` / `prevC`, kept in the test file) and the corrected checker rejects it. All fixtures are deterministic (no DB, no timing).
+
+| Defect (previous checker) | Deterministic fixture | Previous | Corrected |
+|---|---|---|---|
+| Admission charged to the wrong shard | decision 0 (shard 0) admitted, shard 0 counts 0, shard 1 counts 1 | accepted | **rejected** ("admission charged to another shard") |
+| Shard over its limit | shard 0 counted at 31, with 429s | accepted | **rejected** ("counted 31 > limit 30") |
+| 429 on a shard that is not exactly full | covered by the two fixtures above and the all-429 negative control | accepted | **rejected** ("a 429 only on an exactly full shard") |
+| Admission timing inferred from the outer clock with 250 ms slack | an admission observed at 1,300 ms | accepted | outer-clock admission check **removed**; deadline proven by the clock test below |
+| C: an all-429 trial among healthy trials | trials [all-429, healthy, healthy] | accepted (best trial healthy) | **rejected** (every trial must be exact) |
+| C: env guard only on the pre-run control | bracketing controls at 5,001 ms | accepted | **rejected** ("control i took 5001 ms > 5000 ms") |
+| C: one undecided request in a non-best trial | trial 2 with 1,999 decided | accepted | **rejected** |
+| C: one slow control masks a sustained slowdown (review's case) | controls [142,120] [405,130] [102,110]; limiter 1,690 / 1,550 / 1,419 | best **3.83 → pass** | median 125 → best **11.35 → fail** |
+
+**Preserved legitimate ambiguity:** shard 0 counted 30 with 29 admitted and 1 `commit_timeout`, then 429s, **passes** (the over-count is explained by the ambiguous COMMIT on that shard).
+
+**Exact admission deadline (deterministic clock, no runtime change).** A synthetic monotonic clock (`setDeadlineClockForTests`) and a fake pool drive the production limiter with its **default 1,250 ms** deadline:
+
+| Phase where time runs out | Elapsed at acknowledgement | Result |
+|---|---|---|
+| COMMIT | 1,249 ms | **admitted** |
+| COMMIT | 1,250 ms | refused, `commit_late` |
+| COMMIT | 1,300 ms | refused, `commit_late` |
+| decision statement | 1,300 ms | refused, `deadline`; no COMMIT sent |
+| ROLLBACK path | 1,300 ms | refused, `deadline`; no COMMIT sent |
+
+**Sensitivity (+2 ms sustained).** The review's +2 ms sustained limiter slowdown passed at 3.83× because the old denominator was max(before, after) and one 405 ms control inflated it. The correction is the **median of all six controls**: a single outlier control cannot move it, and nothing is tuned to a CI measurement (R_MAX = 5 and ENV = 5 s are unchanged). The review's exact inputs now fail (fixture above).
+- A **live** +2 ms scenario (4b) was added. Locally it measures **13.0–22.2×** (6 runs) and fails C.
+- Its live assertion is **environment-independent**: the sustained slowdown's best ratio must rank above both healthy bests from the same run, with exact accounting. Whether it also crosses R_MAX is logged as informational, because that depends on the runner (see Remaining limitations). Asserting a live R_MAX crossing would repeat the environment-dependent mistake fixed in round 2.
+
+**B unchanged:** 480 admissions, 16 full shards, exact accounting, 1,520 quota refusals.
+
+**S12 offline: same flake class as S10, fixed in this round.** The full serial regression failed `mcpOAuthS12` offline once: `P3-corr no false refusal: untagged retained hex 16 B (10,000 CSPRNG samples) -- 1`. This is the S10 class: a fresh CSPRNG 16-byte value with no a–f letter (≈2.9e-7 per sample, ≈0.29% per 10,000) is refused **by policy**. The six "no false refusal" rows now use a **fixed seed** with policy-aware verdicts (digits-only untagged hex must be refused). Added a reproduction (the recorded digits-only value is refused untagged, so the old assertion fails on it) and its `hex:`-declared acceptance. S12 offline: **86/86** (was 84; +2 fixtures), 3/3 repeats. The refused value was not logged by the old test; its class is inferred from the S10 4,000,000-sample probe, where the only refusal of untagged random hex was digits-only.
+
 ### Separation of assertions
 
 | Concern | Where | Timing-dependent? |
 |---|---|---|
 | Fail-closed, cause classification, ambiguous-COMMIT accounting, admitted ≤ counted ≤ G, shard-specific 429 validation | A (and B) | No |
-| Production-deadline enforcement (answers bounded, no late admission) | A | Only through a fixed scheduling slack, not a throughput ratio |
+| Production-deadline enforcement (1,249 admits; 1,250 / 1,300 refused) | deterministic clock test | No |
+| Response completion bounded | A | Only through a fixed 500 ms allowance, not a throughput ratio |
 | Availability (exactly G, all shards full) | B | No (extended budget) |
-| Limiter performance regression | C | Yes: a ratio, best of 3, with large separation |
+| Limiter performance regression | C | Yes: limiterMs / median of six controls, best of 3, every trial exact |
 | Environment usability | ENV | Yes: an absolute bound |
 
 ### Residual: reproduction and correction
@@ -81,20 +117,32 @@ The deterministic scenario **"fast controls, then a healthy limiter flood under 
 | **Limiter-only degradation** (+10 ms) | pass (safe, exact) | 44.8–84.5 (81–145, 6,419–6,655) | **44.8–65.9** | **fail** (detected) |
 | Unusably slow environment (control +12 ms) | — | control above 5,000 ms | — | **fail** |
 
+**Local, round 3** (corrected checker; 6 StagingBlockersDb runs, 68/68 each; ratios use the six-control median):
+
+| Scenario | A | C best (control median ms) | Verdict |
+|---|---|---|---|
+| Healthy #1 / #2 | pass | 2.40–2.57 (69–80); worst single trial 5.68, absorbed by best of 3 | pass |
+| Shared +2 ms | pass | 1.08–1.19 (1,257–1,323) | pass |
+| Residual | pass | 2.33–2.72; contended trial 22.3–32.5 | pass |
+| Degradation +10 ms | safe, exact | 69.4–83.0 | **fail** (detected) |
+| Sustained +2 ms (4b) | safe, exact | 13.0–22.2 | **fail** (detected locally); ranks above healthy |
+
 **Negative controls**, all failing A as required:
 - injected pre-COMMIT driver faults (`driver`);
 - post-send connection loss (`commit_lost`; counted ≤ G);
 - explicit COMMIT refusal (`commit_failed`; nothing counted);
 - "0 admitted, 2,000 unavailable";
 - all shed by the deadline (liveness);
-- a limiter answering 429 to everything (refusals on shards that are not full);
-- decisions answered long after the deadline (deadline not enforced).
+- a limiter answering 429 to everything (refusals on shards that are not exactly full);
+- decisions answered long after the deadline (response completion not bounded).
 
 B's exactness and per-shard accounting pass.
 
 ### Remaining limitations
-- **C is a timing comparison.** On CI the separation is about 2× on each side of R_MAX = 5 (healthy best 1.80, degradation 11.2); locally it is much wider. Best-of-3 absorbs one transient. A contention burst covering all three trials while sparing both bracketing controls each time would be needed to fail a healthy limiter.
-- **A's deadline check uses 500 ms of scheduling slack** for event-loop lag with 2,000 pending promises. Observed maximum latencies were 1,252–1,268 ms.
+- **C is a timing comparison.** On CI the separation is about 2× on each side of R_MAX = 5 (healthy best 1.80, degradation +10 ms 11.2); locally it is much wider. Best-of-3 absorbs one transient. With the median denominator, failing a healthy limiter needs a contention burst covering all three limiter trials while sparing at least four of the six controls.
+- **Remaining sensitivity: the smallest detectable sustained slowdown depends on the runner.** C detects a sustained slowdown once it adds roughly (R_MAX − healthy ratio) × control-flood time. Locally (controls about 70 ms) +2 ms/statement is detected at 13–22×. On CI-class runners (controls about 530 ms), scaling the +10 ms measurement (11.2×) suggests +2 ms would land near 4× and **pass C**; only about +3.5 ms/statement or more would be caught. The live 4b check therefore asserts ranking, not an R_MAX crossing, and the exact-head CI value is recorded in the PR. Closing this fully would need a non-timing performance signal (e.g. statement counts), which is out of scope for a test-only change.
+- **The response-completion bound uses a 500 ms allowance** for event-loop lag with 2,000 pending promises (observed maximum latencies 1,252–1,268 ms). It no longer has any role in admission timing.
+- **S11 offline has the same random-sample pattern** (`mcpOAuthS11.test.ts`, two 10,000-sample untagged hex rows, about 0.58% per run combined). It is outside this ticket's S8/S10/S12 scope and was **not changed**; recorded for a follow-up.
 - **ENV and R_MAX are absolute constants.** They are justified from measured ranges, not fitted to one CI run.
 
 ## 2. S8 address-bucket HMAC assertion (unchanged since the previous head)
@@ -122,9 +170,10 @@ B's exactness and per-shard accounting pass.
 
 ## 4. Verification
 - **All MCP suites** (`max_connections = 100`) passed:
-  - offline: transport, Local 119, SecurityRegression 34, I2b 116, StagingBlockers 52, S8 60, S10 135, S11 31, S12 84;
-  - DB: Postgres 36, StorageProtection 42, StagingBlockersDb 53, StoreS4 13, CodeS6 14, S8Db 11, S10Db 21, S11Db 19, S12Db 15;
+  - offline: transport, Local 119, SecurityRegression 34, I2b 116, StagingBlockers 52, S8 60, S10 135, S11 31, S12 **86**;
+  - DB: Postgres 36, StorageProtection 42, StagingBlockersDb **68**, StoreS4 13, CodeS6 14, S8Db 11, S10Db 21, S11Db 19, S12Db 15;
   - dbIdentityGuard.
-- **Repeats:** StagingBlockersDb 5/5 on this design (3 runs with R_MAX = 8, 2 runs with the final R_MAX = 5 and the replay); S10 and S8 offline 3/3.
+- **Repeats:** round 3 StagingBlockersDb 6/6 (68/68 each); S12 offline 3/3 after the fixed-seed correction; earlier rounds StagingBlockersDb 5/5, S10 and S8 offline 3/3.
+- **Serial, isolated:** every suite ran one at a time against a disposable local PG16 (socket only, `max_connections = 100`); no live database, no credentials.
 - **No retries** were used to hide failures.
 - **Exact-head CI:** recorded in the PR description.

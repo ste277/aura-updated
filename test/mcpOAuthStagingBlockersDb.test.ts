@@ -17,7 +17,8 @@ import * as net from 'net';
 import { Pool, type PoolConfig } from 'pg';
 import { createPostgresAdapterStore } from '../packages/mcp-tools/src/auth/postgresAdapter';
 import { createPostgresRateLimiter, type PostgresRateLimiter } from '../packages/mcp-tools/src/security/postgresRateLimit';
-import { isStoreUnavailableError, MCP_PG_POOL_BOUNDS } from '../packages/mcp-tools/src/security/deadline';
+import { isStoreUnavailableError, MCP_PG_POOL_BOUNDS, setDeadlineClockForTests } from '../packages/mcp-tools/src/security/deadline';
+import { EventEmitter } from 'events';
 import { buildPreAuthRules } from '../packages/mcp-tools/src/security/preAuthRules';
 import { handleRemoteMcpRequest } from '../packages/mcp-tools/src/http/remoteMcpHandler';
 import type { McpAuditEvent } from '../packages/mcp-tools/src/security/audit';
@@ -275,55 +276,110 @@ async function main() {
       const EXPECTED = new Set(['deadline', 'commit_timeout', 'commit_late']);
       const AMBIGUOUS = new Set(['commit_timeout', 'commit_late', 'commit_lost']);
       /** Shared, timing-free accounting (A and B). */
+      /**
+       * Shared, timing-free accounting (A, B and every C trial). AURA-MCP-CI-01 r3: per-shard and EXACT.
+       * Decision i is charged to shard i mod 16 (deterministic pickShard). For every shard:
+       *   - its stored count is at most its limit (30), and there is no row outside shards 0..15;
+       *   - admitted <= counted (every admission is charged to ITS shard);
+       *   - counted - admitted <= the ambiguous / late COMMITs on that shard (an unconfirmed COMMIT may
+       *     have landed: conservative over-count, never an unexplained one);
+       *   - a quota 429 only on a shard that is EXACTLY full (counted == 30).
+       * Aggregate: admitted <= counted <= G (480); 0 unexpected causes.
+       */
+      const PER_SHARD = G / SHARDS;
       const accounting = (r: FloodResult) => {
         const reasons: string[] = [];
         const unexpected = r.out.filter((d) => !d.allowed && (d.limitedBy !== 'unavailable' ? d.limitedBy !== 'preauth-mcp' : !EXPECTED.has(String(d.cause ?? 'none')))).length;
-        const ambiguous = r.out.filter((d) => AMBIGUOUS.has(String(d.cause))).length;
-        const shardCount = new Map(r.shardRows.map((row) => [Number(String(row.key).split(':').pop()), Number(row.count)]));
-        let illegit429 = 0;
-        let shortAdmit = 0;
+        const counted = new Map<number, number>();
+        for (const row of r.shardRows) {
+          const m = /^preauth-mcp:global:g480n16:(\d+)$/.exec(String(row.key));
+          const sh = m ? Number(m[1]) : NaN;
+          if (!m || sh < 0 || sh >= SHARDS) {
+            reasons.push(`unexpected limiter row ${String(row.key)}`);
+            continue;
+          }
+          counted.set(sh, Number(row.count));
+        }
+        const total = [...counted.values()].reduce((x, y) => x + y, 0);
+        let admittedTotal = 0;
         for (let sh = 0; sh < SHARDS; sh += 1) {
           const mine = r.out.filter((_, i) => i % SHARDS === sh);
           const adm = mine.filter((d) => d.allowed).length;
           const lim = mine.filter((d) => !d.allowed && d.limitedBy === 'preauth-mcp').length;
-          if (lim > 0 && (shardCount.get(sh) ?? 0) < G / SHARDS) illegit429 += lim;
-          if (adm !== Math.min(G / SHARDS, adm + lim)) shortAdmit += 1;
+          const amb = mine.filter((d) => AMBIGUOUS.has(String(d.cause))).length;
+          const cnt = counted.get(sh) ?? 0;
+          admittedTotal += adm;
+          if (cnt > PER_SHARD) reasons.push(`shard ${sh} counted ${cnt} > limit ${PER_SHARD}`);
+          if (adm > cnt) reasons.push(`shard ${sh}: ${adm} admitted but only ${cnt} counted (admission charged to another shard)`);
+          if (cnt - adm > amb) reasons.push(`shard ${sh}: over-count ${cnt - adm} not explained by ${amb} ambiguous / late COMMITs`);
+          if (lim > 0 && cnt !== PER_SHARD) reasons.push(`shard ${sh}: ${lim} quota refusals while counted ${cnt} (a 429 only on an exactly full shard)`);
         }
         if (unexpected > 0) reasons.push(`${unexpected} unexpected failures`);
-        if (!(r.admitted <= r.shardSum && r.shardSum <= G)) reasons.push('admitted <= counted <= G violated');
-        if (r.shardSum - r.admitted > ambiguous) reasons.push('over-count not explained by ambiguous / late COMMITs');
-        if (illegit429 > 0) reasons.push(`${illegit429} rate-limit refusals on shards that were not full`);
-        if (shortAdmit > 0) reasons.push(`${shortAdmit} shards admitted fewer than min(30, completed)`);
+        if (!(admittedTotal <= total && total <= G)) reasons.push(`admitted ${admittedTotal} <= counted ${total} <= ${G} violated`);
         return reasons;
       };
-      /** A: safety + production-deadline enforcement. */
+      /**
+       * A: safety + production-deadline enforcement on the live flood. The EXACT admission boundary
+       * (1,250 ms on the limiter's monotonic clock) is verified separately and deterministically (synthetic
+       * clock, below): the outer response clock is NOT used to judge admission timing. The outer clock only
+       * bounds response completion (deadline + 500 ms scheduling allowance).
+       */
       const checkA = (r: FloodResult) => {
         const reasons = accounting(r);
         const maxLatency = Math.max(...r.latencies);
-        const lateAdmit = r.out.filter((d, i) => d.allowed && r.latencies[i] > DEADLINE + 250).length;
-        if (r.latencies.length === N && maxLatency > DEADLINE + 500) reasons.push(`deadline not enforced: a decision took ${maxLatency} ms`);
-        if (lateAdmit > 0) reasons.push(`${lateAdmit} admissions after the deadline`);
+        if (r.latencies.length === N && maxLatency > DEADLINE + 500) reasons.push(`response completion not bounded: a decision took ${maxLatency} ms`);
         if (r.admitted < 1) reasons.push('no admission at all (liveness)');
         return { ok: reasons.length === 0, reasons, maxLatencyMs: maxLatency };
       };
-      /** C: performance regression -- best of 3 bracketed trials under the extended budget. */
-      const checkC = async (inj: { control: number; limiter: number[] }) => {
-        const trials: { controlMs: number; limiterMs: number; ratio: number; decided: number }[] = [];
-        for (let t = 0; t < 3; t += 1) {
-          const before = await controlFlood(inj.control);
-          const m = pools.length;
-          const r = await flood(extLimiters(inj.limiter[t]));
-          await endSince(m);
-          const after = await controlFlood(inj.control);
-          const controlMs = Math.max(before, after);
-          const decided = r.out.filter((d) => d.allowed || d.limitedBy === 'preauth-mcp').length;
-          trials.push({ controlMs, limiterMs: r.ms, ratio: Math.round((r.ms / Math.max(1, controlMs)) * 100) / 100, decided });
-        }
-        const best = Math.min(...trials.map((x) => x.ratio));
-        // Every trial must DECIDE all 2000 requests (admitted or 429) under the extended budget.
-        return { ok: best <= R_MAX && trials.every((x) => x.decided === N), best, trials };
+      /** Exactness of one extended-budget flood (B, and every C trial): all decided, exactly G, 16 full shards, exact accounting. */
+      const exactness = (r: FloodResult) => {
+        const reasons = accounting(r);
+        const decided = r.out.filter((d) => d.allowed || d.limitedBy === 'preauth-mcp').length;
+        if (decided !== N) reasons.push(`${N - decided} requests not decided`);
+        if (r.admitted !== G) reasons.push(`admitted ${r.admitted} != ${G}`);
+        if (!(r.shardRows.length === SHARDS && r.shardRows.every((row) => Number(row.count) === PER_SHARD))) reasons.push('not all 16 shards exactly full');
+        return reasons;
       };
       const envOk = (controlMs: number) => controlMs <= ENV_MAX_MS;
+      const median = (xs: number[]) => {
+        const s2 = [...xs].sort((x, y) => x - y);
+        const m = s2.length >> 1;
+        return s2.length % 2 ? s2[m] : (s2[m - 1] + s2[m]) / 2;
+      };
+      /**
+       * C: performance regression (extended budget), injectable for deterministic fixtures. Three predefined
+       * trials, each bracketed by control floods. EVERY trial must be correct (exactness, incl. all 2000
+       * decided), EVERY control must pass the 5 s environment guard, and the BEST trial ratio must be
+       * <= R_MAX, where ratio = limiterMs / MEDIAN of all six control floods of this check (one isolated
+       * slow control can no longer inflate the denominator; a shared slowdown raises the median).
+       */
+      const makeCheckC = (deps: { control: (ms: number) => Promise<number>; trial: (ms: number) => Promise<FloodResult> }) => async (inj: { control: number; limiter: number[] }) => {
+        const raw: { before: number; after: number; r: FloodResult }[] = [];
+        for (let t = 0; t < 3; t += 1) {
+          const before = await deps.control(inj.control);
+          const r = await deps.trial(inj.limiter[t]);
+          const after = await deps.control(inj.control);
+          raw.push({ before, after, r });
+        }
+        const controls = raw.flatMap((x) => [x.before, x.after]);
+        const controlMedian = median(controls);
+        const trials = raw.map((x) => ({ before: x.before, after: x.after, limiterMs: x.r.ms, ratio: Math.round((x.r.ms / Math.max(1, controlMedian)) * 100) / 100, problems: exactness(x.r) }));
+        const reasons: string[] = [];
+        trials.forEach((t, i) => t.problems.length && reasons.push(`trial ${i + 1} incorrect: ${t.problems.slice(0, 3).join('; ')}`));
+        controls.forEach((c, i) => !envOk(c) && reasons.push(`control ${i + 1} took ${c} ms > ${ENV_MAX_MS} ms (environment unusable)`));
+        const best = Math.min(...trials.map((t) => t.ratio));
+        if (best > R_MAX) reasons.push(`performance: best ratio ${best} > ${R_MAX}`);
+        return { ok: reasons.length === 0, reasons, best, controlMedian, trials: trials.map(({ problems, ...t }) => ({ ...t, correct: problems.length === 0 })) };
+      };
+      const checkC = makeCheckC({
+        control: (ms) => controlFlood(ms),
+        trial: async (ms) => {
+          const m = pools.length;
+          const r = await flood(extLimiters(ms));
+          await endSince(m);
+          return r;
+        },
+      });
       const runs: Record<string, unknown>[] = [];
       const scenario = async (label: string, inj: { env: number; prod: number; cControl: number; cLimiter: number[] }) => {
         const envMs = await controlFlood(inj.env);
@@ -340,9 +396,11 @@ async function main() {
       let mark = 0;
 
       // 1. Healthy (twice).
+      const healthyBests: number[] = [];
       for (let k = 1; k <= 2; k += 1) {
         const h = await scenario(`healthy #${k}`, { env: 0, prod: 0, cControl: 0, cLimiter: [0, 0, 0] });
         check(`I2b-1 healthy #${k}: environment usable, A (safety + deadline) passes, C (performance) passes`, h.row.env && h.A.ok && h.C.ok, h.row);
+        healthyBests.push(h.C.best);
       }
       // 2. Shared slowdown everywhere (+2 ms per statement in controls AND limiter).
       const shared = await scenario('shared slowdown +2 ms/statement', { env: 2, prod: 2, cControl: 2, cLimiter: [2, 2, 2] });
@@ -371,6 +429,16 @@ async function main() {
       //    too close to R_MAX for CI's slower controls -- so the injected degradation is sized to stay well clear.)
       const degraded = await scenario('limiter-only degradation (+10 ms/statement in every limiter flood)', { env: 0, prod: 10, cControl: 0, cLimiter: [10, 10, 10] });
       check('I2b-1 limiter-only degradation is DETECTED: C fails (best of 3 above R_MAX), while A stays safe', !degraded.C.ok && degraded.C.best > R_MAX && accounting(degraded.r).length === 0, degraded.row);
+      // 4b. A SMALLER sustained limiter-only slowdown (+2 ms/statement; the independent review's case).
+      const degraded2 = await scenario('limiter-only degradation (+2 ms/statement in every limiter flood)', { env: 0, prod: 2, cControl: 0, cLimiter: [2, 2, 2] });
+      // Environment-independent assertion: the sustained slowdown raises EVERY trial, so its best ratio
+      // ranks above both healthy bests from the same run, and accounting stays exact. Whether it also
+      // crosses R_MAX depends on how large +2 ms/statement is relative to this runner's control flood
+      // (locally 13-21x: detected; on slower CI controls it can fall below R_MAX). That threshold is a
+      // documented limitation; the reviewer's masking case (one slow control) is asserted
+      // deterministically in section 10.
+      check('I2b-1 sustained limiter-only +2 ms ranks above both healthy runs (every trial slowed), A stays safe', degraded2.C.best > Math.max(...healthyBests) && accounting(degraded2.r).length === 0, { best: degraded2.C.best, healthyBests });
+      console.log(`  I2b-1 sustained +2 ms vs R_MAX (informational): ${JSON.stringify({ best: degraded2.C.best, controlMedian: degraded2.C.controlMedian, R_MAX, detectedByRMax: !degraded2.C.ok })}`);
       check('I2b-1 the residual and genuine degradation are DISTINGUISHED (residual passes C, degradation fails C)', residual.C.ok && !degraded.C.ok, { residualBest: residual.C.best, degradedBest: degraded.C.best });
       // 5. An unusably slow environment is rejected (control flood +12 ms/statement).
       const slowEnvMs = await controlFlood(12);
@@ -419,9 +487,116 @@ async function main() {
       check('I2b-1 negative control: "0 admitted, 2000 unavailable (checkout)" FAILS A', !checkA(synth({ allowed: false, retryAfterSeconds: 1, limitedBy: 'unavailable', cause: 'checkout' })).ok);
       check('I2b-1 negative control: all shed by the deadline (0 admitted) FAILS A (liveness)', !checkA(synth({ allowed: false, retryAfterSeconds: 1, limitedBy: 'unavailable', cause: 'deadline' })).ok);
       const all429 = checkA(synth({ allowed: false, retryAfterSeconds: 5, limitedBy: 'preauth-mcp' }));
-      check('I2b-1 negative control: a limiter that answers 429 to everything FAILS A (429 on shards that are not full, no admission)', !all429.ok && all429.reasons.some((x) => x.includes('not full')), all429.reasons);
+      check('I2b-1 negative control: a limiter that answers 429 to everything FAILS A (429 on shards that are not exactly full, no admission)', !all429.ok && all429.reasons.some((x) => x.includes('exactly full')), all429.reasons);
       const slowAnswer: FloodResult = { ...synth({ allowed: true, retryAfterSeconds: 0 }), latencies: new Array(N).fill(DEADLINE + 900) };
-      check('I2b-1 negative control: decisions answered long after the deadline FAIL A (deadline not enforced)', !checkA(slowAnswer).ok && checkA(slowAnswer).reasons.some((x) => x.startsWith('deadline not enforced')));
+      check('I2b-1 negative control: responses completed long after the deadline FAIL A (response completion not bounded)', !checkA(slowAnswer).ok && checkA(slowAnswer).reasons.some((x) => x.startsWith('response completion not bounded')));
+      // 8. AURA-MCP-CI-01 r3: independent-review fixtures (synthetic, deterministic).
+      //    Each is shown ACCEPTED by the previous checker (frozen copy below, from head 535822ea) and
+      //    REJECTED by the corrected one.
+      const prevAccounting = (r: FloodResult) => {
+        const reasons: string[] = [];
+        const ambiguous = r.out.filter((d) => AMBIGUOUS.has(String(d.cause))).length;
+        const shardCount = new Map(r.shardRows.map((row) => [Number(String(row.key).split(':').pop()), Number(row.count)]));
+        let illegit429 = 0;
+        let shortAdmit = 0;
+        for (let sh = 0; sh < SHARDS; sh += 1) {
+          const mine = r.out.filter((_, i) => i % SHARDS === sh);
+          const adm = mine.filter((d) => d.allowed).length;
+          const lim = mine.filter((d) => !d.allowed && d.limitedBy === 'preauth-mcp').length;
+          if (lim > 0 && (shardCount.get(sh) ?? 0) < G / SHARDS) illegit429 += lim;
+          if (adm !== Math.min(G / SHARDS, adm + lim)) shortAdmit += 1;
+        }
+        if (!(r.admitted <= r.shardSum && r.shardSum <= G)) reasons.push('agg');
+        if (r.shardSum - r.admitted > ambiguous) reasons.push('over');
+        if (illegit429 > 0) reasons.push('429');
+        if (shortAdmit > 0) reasons.push('short');
+        return reasons;
+      };
+      const prevCheckA = (r: FloodResult) => {
+        const reasons = prevAccounting(r);
+        const maxLatency = Math.max(...r.latencies);
+        if (maxLatency > DEADLINE + 500) reasons.push('resp');
+        if (r.out.filter((d, i) => d.allowed && r.latencies[i] > DEADLINE + 250).length > 0) reasons.push('late');
+        if (r.admitted < 1) reasons.push('live');
+        return reasons.length === 0;
+      };
+      const allow: RateLimitDecision = { allowed: true, retryAfterSeconds: 0 };
+      const shedD: RateLimitDecision = { allowed: false, retryAfterSeconds: 1, limitedBy: 'unavailable', cause: 'deadline' };
+      const quota: RateLimitDecision = { allowed: false, retryAfterSeconds: 1, limitedBy: 'preauth-mcp' };
+      const fx = (out: RateLimitDecision[], latencies: number[], rows: [number, number][]): FloodResult => ({
+        out, latencies, admitted: out.filter((d) => d.allowed).length, by: {}, ms: 0,
+        shardRows: rows.map(([sh, count]) => ({ key: `preauth-mcp:global:g480n16:${sh}`, count })),
+        shardSum: rows.reduce((t, [, c]) => t + c, 0),
+      });
+      const fixtures: [string, FloodResult][] = [
+        ['admission charged to the WRONG shard (decision 0 admitted, shard 1 counted 1)', fx([allow, ...Array(N - 1).fill(shedD)], new Array(N).fill(10), [[1, 1]])],
+        ['a shard counted at 31 with 429s on that over-limit shard', fx(Array.from({ length: N }, (_, i) => (i % 16 === 0 ? (i < 480 ? allow : quota) : i === 1 ? allow : shedD)), new Array(N).fill(10), [[0, 31]])],
+      ];
+      for (const [label, r] of fixtures) {
+        check(`I2b-1 review fixture (A accounting) -- previous checker ACCEPTED it, corrected checker REJECTS: ${label}`, prevCheckA(r) && !checkA(r).ok, { prev: prevCheckA(r), now: checkA(r).reasons });
+      }
+      check('I2b-1 legitimate ambiguity still passes: shard 0 full with 29 admitted + 1 commit_timeout and 429s afterwards', checkA(fx(Array.from({ length: N }, (_, i) => (i % 16 === 0 ? (i < 29 * 16 ? allow : i === 29 * 16 ? { allowed: false, retryAfterSeconds: 1, limitedBy: 'unavailable', cause: 'commit_timeout' } : quota) : i === 1 ? allow : shedD)), new Array(N).fill(10), [[0, 30], [1, 1]])).ok, checkA(fx(Array.from({ length: N }, (_, i) => (i % 16 === 0 ? (i < 29 * 16 ? allow : i === 29 * 16 ? { allowed: false, retryAfterSeconds: 1, limitedBy: 'unavailable', cause: 'commit_timeout' } : quota) : i === 1 ? allow : shedD)), new Array(N).fill(10), [[0, 30], [1, 1]])).reasons);
+      check('I2b-1 previous checker shortcoming: it accepted an admission observed at 1,300 ms on the outer clock (250 ms admission slack)', prevCheckA(fx([allow, ...Array(N - 1).fill(shedD)], [1300, ...Array(N - 1).fill(1255)], [[0, 1]])));
+
+      // 9. EXACT admission deadline on the production limiter (default 1,250 ms), synthetic monotonic clock:
+      //    the COMMIT acknowledgement instant decides; the outer response clock is not involved.
+      const deadlineCases: [string, number, boolean, string | undefined][] = [
+        ['COMMIT', 1249, true, undefined],
+        ['COMMIT', 1250, false, 'commit_late'],
+        ['COMMIT', 1300, false, 'commit_late'],
+        ['DECIDE', 1300, false, 'deadline'],
+        ['ROLLBACK', 1300, false, 'deadline'],
+      ];
+      try {
+        for (const [phase, elapsed, allowed, cause] of deadlineCases) {
+          let now = 10_000;
+          const statements: string[] = [];
+          setDeadlineClockForTests(() => now);
+          const fake = { connect: async () => Object.assign(new EventEmitter(), {
+            query: async (text: string) => {
+              const verb = text.startsWith('WITH want') ? 'DECIDE' : text.split(/[\s;]/)[0];
+              statements.push(verb);
+              if (verb === phase) now += elapsed;
+              if (verb === 'DECIDE') return { rows: [{ key: 'user:x', cnt: phase === 'ROLLBACK' ? 5 : 0, retry: 5, ok: phase !== 'ROLLBACK', bumped: phase === 'ROLLBACK' ? 0 : 1 }], rowCount: 1 };
+              return { rows: [], rowCount: 1, command: verb };
+            },
+            release() {},
+          }) };
+          const d = await createPostgresRateLimiter({ pool: fake as never, windowMs: 60_000 }).check([{ key: 'user:x', limit: 5 }]);
+          check(`I2b-1 exact admission deadline: ${phase} acknowledged at ${elapsed} ms -> ${allowed ? 'ADMITTED' : `refused (${cause})`}${phase !== 'COMMIT' ? ', COMMIT never sent' : ''}`, d.allowed === allowed && (allowed || d.cause === cause) && (phase === 'COMMIT' || !statements.includes('COMMIT')), { d, statements });
+        }
+      } finally {
+        setDeadlineClockForTests(null);
+      }
+
+      // 10. C fixtures (injected trials / controls; deterministic).
+      const healthyTrial = (): FloodResult => fx(Array.from({ length: N }, (_, i) => (i < G ? allow : quota)), new Array(N).fill(10), Array.from({ length: SHARDS }, (_, sh) => [sh, PER_SHARD] as [number, number]));
+      const all429Trial = (): FloodResult => fx(new Array(N).fill(quota), new Array(N).fill(10), []);
+      const oneUndecided = (): FloodResult => { const t = healthyTrial(); t.out[1999] = shedD; return t; };
+      const cFixture = async (trials: (() => FloodResult)[], durations: number[], control: number) => {
+        let k = 0;
+        const c = makeCheckC({ control: async () => control, trial: async () => ({ ...trials[k](), ms: durations[k++] }) });
+        return c({ control: 0, limiter: [0, 0, 0] });
+      };
+      // The previous C judged only the best ratio + "decided": an all-429 trial (2000 "decided") passed.
+      const prevC = (trials: FloodResult[], durations: number[], control: number) => Math.min(...durations.map((d) => d / control)) <= R_MAX && trials.every((t) => t.out.filter((d) => d.allowed || d.limitedBy === 'preauth-mcp').length === N);
+      const c1 = await cFixture([healthyTrial, all429Trial, healthyTrial], [180, 650, 900], 100);
+      check('I2b-1 C fixture: an all-429 trial FAILS C even though another trial is healthy and supplies the best ratio (previous C accepted it)', prevC([healthyTrial(), all429Trial(), healthyTrial()], [180, 650, 900], 100) && !c1.ok && c1.reasons.some((x) => x.startsWith('trial 2 incorrect')), c1.reasons);
+      const c2 = await cFixture([healthyTrial, healthyTrial, healthyTrial], [15_000, 15_000, 15_000], 5001);
+      check('I2b-1 C fixture: bracketing controls above the 5 s environment guard FAIL C (previous C accepted ratio 3.0)', prevC([healthyTrial(), healthyTrial(), healthyTrial()], [15_000, 15_000, 15_000], 5001) && !c2.ok && c2.reasons.some((x) => x.includes('environment unusable')), c2.reasons);
+      const c3 = await cFixture([healthyTrial, healthyTrial, oneUndecided], [180, 250, 900], 100);
+      check('I2b-1 C fixture: one undecided request in a non-best trial FAILS C', !c3.ok && c3.reasons.some((x) => x.startsWith('trial 3 incorrect')), c3.reasons);
+      // The review's +2 ms limiter-only case: trial ratios vs max(before, after) were 11.9 / 3.83 / 13.91 because
+      // ONE control rose to 405 ms. With the median of all six controls, that isolated outlier no longer masks it.
+      const reviewControls = [[142, 120], [405, 130], [102, 110]];
+      const reviewLimiter = [1690, 1550, 1419];
+      const prevBest = Math.min(...reviewLimiter.map((ms, i) => ms / Math.max(...reviewControls[i])));
+      let kc = 0;
+      const controlsSeq = reviewControls.flat();
+      let kt = 0;
+      const c4 = await makeCheckC({ control: async () => controlsSeq[kc++], trial: async () => ({ ...healthyTrial(), ms: reviewLimiter[kt++] }) })({ control: 0, limiter: [0, 0, 0] });
+      check('I2b-1 C fixture: one isolated slow control (405 ms) no longer masks a sustained slowdown (previous best 3.83 passed; median-based C FAILS it)', prevBest < R_MAX && !c4.ok && c4.best > R_MAX, { prevBest: Math.round(prevBest * 100) / 100, now: c4.best, median: c4.controlMedian });
+
       console.log(`  I2b-1 scenarios summary: ${JSON.stringify(runs.map((r) => ({ case: r.case, envControlMs: r.envControlMs, A: { ok: (r.A as { ok: boolean }).ok, floodMs: (r.A as { floodMs: number }).floodMs, maxLatencyMs: (r.A as { maxLatencyMs: number }).maxLatencyMs, admitted: (r.A as { admitted: number }).admitted, counted: (r.A as { counted: number }).counted }, C: r.C })))}`);
 
       mark = pools.length;
