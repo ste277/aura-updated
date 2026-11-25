@@ -18,6 +18,7 @@ import { Pool, type PoolConfig } from 'pg';
 import { createPostgresAdapterStore } from '../packages/mcp-tools/src/auth/postgresAdapter';
 import { createPostgresRateLimiter, type PostgresRateLimiter } from '../packages/mcp-tools/src/security/postgresRateLimit';
 import { isStoreUnavailableError, MCP_PG_POOL_BOUNDS, setDeadlineClockForTests } from '../packages/mcp-tools/src/security/deadline';
+import { AsyncLocalStorage } from 'async_hooks';
 import { EventEmitter } from 'events';
 import { buildPreAuthRules } from '../packages/mcp-tools/src/security/preAuthRules';
 import { handleRemoteMcpRequest } from '../packages/mcp-tools/src/http/remoteMcpHandler';
@@ -212,18 +213,47 @@ async function main() {
       const DEADLINE = 1250;
       const R_MAX = 5;
       const ENV_MAX_MS = 5000;
-      type FloodResult = { out: RateLimitDecision[]; latencies: number[]; admitted: number; by: Record<string, number>; ms: number; shardRows: Record<string, unknown>[]; shardSum: number };
+      /**
+       * AURA-MCP-CI-01 r5: decision-time evidence (test harness only; no runtime change). The limiter's
+       * DECIDE statement reads every key's count UNDER ITS ROW LOCK (SELECT ... FOR UPDATE, sorted keys)
+       * and returns it (`cnt`) with the verdict (`ok`). `observed(pool)` records, per request, the LAST
+       * complete DECIDE result it ran (a missing-row retry re-runs DECIDE). Requests are identified by an
+       * AsyncLocalStorage index set in flood(). This is the database's own serialization order -- the
+       * capacity each transaction actually saw when it decided -- not response-completion order.
+       */
+      type DecideObs = { ok: boolean; complete: boolean; rows: { key: string; cnt: number; lim: number }[] };
+      type FloodResult = { out: RateLimitDecision[]; latencies: number[]; admitted: number; by: Record<string, number>; ms: number; shardRows: Record<string, unknown>[]; shardSum: number; decide?: (DecideObs | undefined)[] };
+      const decideAls = new AsyncLocalStorage<{ i: number; sink: (DecideObs | undefined)[] }>();
+      type PoolLike = { connect: () => Promise<{ on: (...a: never[]) => unknown; off: (...a: never[]) => unknown; query: (t: string, p?: unknown[]) => Promise<{ rows: Record<string, unknown>[] }>; release: (e?: Error) => void }>; query?: (...a: never[]) => unknown };
+      const observed = (p: PoolLike) => ({
+        ...(typeof p.query === 'function' ? { query: (p.query as (...a: unknown[]) => unknown).bind(p) } : {}),
+        connect: async () => {
+          const c = await p.connect();
+          return { on: c.on.bind(c), off: c.off.bind(c), release: (e?: unknown) => c.release(e as Error | undefined), query: async (t: string, p2?: unknown[]) => {
+            const res = await c.query(t, p2 as unknown[]);
+            const st = decideAls.getStore();
+            if (st && typeof t === 'string' && /^WITH want/.test(t) && Array.isArray(p2)) {
+              const keys = (p2[0] as string[]).map(String);
+              const lims = (p2[1] as number[]).map(Number);
+              const limOf = new Map(keys.map((k, j) => [k, lims[j]]));
+              st.sink[st.i] = { ok: res.rows[0]?.ok === true, complete: res.rows.length === keys.length, rows: res.rows.map((row) => ({ key: String(row.key), cnt: Number(row.cnt), lim: limOf.get(String(row.key)) ?? NaN })) };
+            }
+            return res;
+          } };
+        },
+      });
       const flood = async (limiters: PostgresRateLimiter[]): Promise<FloodResult> => {
         await admin.query('TRUNCATE "McpRateLimitWindow"');
         const latencies: number[] = new Array(N).fill(0);
+        const decide: (DecideObs | undefined)[] = new Array(N).fill(undefined);
         const t0 = Date.now();
         const out = await Promise.all(
-          Array.from({ length: N }, async (_, i) => {
+          Array.from({ length: N }, (_, i) => decideAls.run({ i, sink: decide }, async () => {
             const s0 = Date.now();
             const d = await limiters[i % 3].check(buildPreAuthRules('preauth-mcp', `2001:db8:${(i % 500).toString(16)}::${i}`, { perAddress: 480, global: G, globalShards: SHARDS }, (n) => i % n));
             latencies[i] = Date.now() - s0;
             return d;
-          }),
+          })),
         );
         const by: Record<string, number> = {};
         for (const d of out) {
@@ -231,7 +261,7 @@ async function main() {
           by[k] = (by[k] ?? 0) + 1;
         }
         const shardRows = await q(`SELECT "key", "count" FROM "McpRateLimitWindow" WHERE "key" LIKE 'preauth-mcp:global:%'`);
-        return { out, latencies, admitted: by.admitted ?? 0, by, ms: Date.now() - t0, shardRows, shardSum: await counts('preauth-mcp:global:%') };
+        return { out, latencies, admitted: by.admitted ?? 0, by, ms: Date.now() - t0, shardRows, shardSum: await counts('preauth-mcp:global:%'), decide };
       };
       /** A pg-like pool whose statements each take +ms (deterministic contention injection). */
       const slowed = (ms: number, extra: PoolConfig = {}) => {
@@ -268,7 +298,7 @@ async function main() {
         await endSince(m);
         return ms2;
       };
-      const prodLimiters = (ms: number) => [0, 1, 2].map(() => createPostgresRateLimiter({ pool: (ms ? slowed(ms) : pool()) as never, windowMs: 60_000 }));
+      const prodLimiters = (ms: number) => [0, 1, 2].map(() => createPostgresRateLimiter({ pool: observed((ms ? slowed(ms) : pool()) as never) as never, windowMs: 60_000 }));
       // C's limiter floods: the extended decision budget AND a long pool-checkout timeout (as the control floods
       // use), so they measure throughput -- with the application's 2 s checkout timeout a slow flood would end in
       // "checkout" failures at ~2 s and cap the ratio.
@@ -324,12 +354,55 @@ async function main() {
        * clock, below): the outer response clock is NOT used to judge admission timing. The outer clock only
        * bounds response completion (deadline + 500 ms scheduling allowance).
        */
-      const checkA = (r: FloodResult) => {
+      /** A as reviewed at head 54e323d6 (unchanged; kept as the reference for the r5 reproductions). */
+      const checkABase = (r: FloodResult) => {
         const reasons = accounting(r);
         const maxLatency = Math.max(...r.latencies);
         if (r.latencies.length === N && maxLatency > DEADLINE + 500) reasons.push(`response completion not bounded: a decision took ${maxLatency} ms`);
         if (r.admitted < 1) reasons.push('no admission at all (liveness)');
         return { ok: reasons.length === 0, reasons, maxLatencyMs: maxLatency };
+      };
+      /**
+       * AURA-MCP-CI-01 r5: quota-refusal validity at DECISION time (the final shard count alone cannot show
+       * when a 429 was decided). For every decided request (admitted or 429):
+       *   - its DECIDE evidence exists and is complete, and includes ITS OWN shard key (attribution);
+       *   - no decision-time count exceeds that shard's final count (counts only grow inside the window);
+       *   - an admission saw every key below its limit and ok = true;
+       *   - a 429 saw ok = false with at least one key AT its limit (cnt >= lim) when it decided.
+       * Ambiguous / late COMMITs: a transaction that bumped and whose COMMIT outcome is unknown is NOT
+       * assumed to have landed; a later 429 is valid only if ITS OWN locked read saw the key full, which
+       * already includes that COMMIT iff it landed first. Final over-count stays bounded by the ambiguous
+       * COMMITs (accounting, unchanged).
+       */
+      const decisionTime = (r: FloodResult) => {
+        const reasons: string[] = [];
+        const finalCount = new Map(r.shardRows.map((row) => [String(row.key), Number(row.count)]));
+        const bad: Record<string, string[]> = { missing: [], attribution: [], beyondFinal: [], admission: [], early: [] };
+        r.out.forEach((d, i) => {
+          if (!(d.allowed || d.limitedBy === 'preauth-mcp')) return;
+          const o = r.decide?.[i];
+          const own = `preauth-mcp:global:g480n16:${i % SHARDS}`;
+          if (!o || !o.complete) return void bad.missing.push(`#${i}`);
+          const ownRow = o.rows.find((x) => x.key === own);
+          if (!ownRow) return void bad.attribution.push(`#${i}`);
+          if (ownRow.cnt > (finalCount.get(own) ?? 0)) bad.beyondFinal.push(`#${i} saw ${ownRow.cnt} > final ${finalCount.get(own) ?? 0}`);
+          if (d.allowed) {
+            if (!(o.ok && o.rows.every((x) => x.cnt < x.lim))) bad.admission.push(`#${i}`);
+          } else if (o.ok || !o.rows.some((x) => x.cnt >= x.lim)) {
+            bad.early.push(`#${i} (shard ${i % SHARDS}) at decision-time count ${ownRow.cnt}/${ownRow.lim}`);
+          }
+        });
+        if (bad.missing.length) reasons.push(`decision-time evidence missing for ${bad.missing.length} decided requests (${bad.missing.slice(0, 3).join(', ')})`);
+        if (bad.attribution.length) reasons.push(`decision-time evidence not for the request's own shard: ${bad.attribution.slice(0, 3).join(', ')}`);
+        if (bad.beyondFinal.length) reasons.push(`decision-time count above the final count: ${bad.beyondFinal.slice(0, 3).join(', ')}`);
+        if (bad.admission.length) reasons.push(`admission decided without capacity: ${bad.admission.slice(0, 3).join(', ')}`);
+        if (bad.early.length) reasons.push(`${bad.early.length} quota refusals decided below capacity: ${bad.early.slice(0, 3).join(', ')}`);
+        return reasons;
+      };
+      const checkA = (r: FloodResult) => {
+        const base = checkABase(r);
+        const reasons = [...base.reasons, ...decisionTime(r)];
+        return { ok: reasons.length === 0, reasons, maxLatencyMs: base.maxLatencyMs };
       };
       /** Exactness of one extended-budget flood (B, and every C trial): all decided, exactly G, 16 full shards, exact accounting. */
       const exactness = (r: FloodResult) => {
@@ -367,10 +440,18 @@ async function main() {
         const reasons: string[] = [];
         trials.forEach((t, i) => t.problems.length && reasons.push(`trial ${i + 1} incorrect: ${t.problems.slice(0, 3).join('; ')}`));
         controls.forEach((c, i) => !envOk(c) && reasons.push(`control ${i + 1} took ${c} ms > ${ENV_MAX_MS} ms (environment unusable)`));
+        // AURA-MCP-CI-01 r5: measurement VALIDITY is decided first and separately from the threshold.
+        const valid = reasons.length === 0;
         const best = Math.min(...trials.map((t) => t.ratio));
         if (best > R_MAX) reasons.push(`performance: best ratio ${best} > ${R_MAX}`);
-        return { ok: reasons.length === 0, reasons, best, controlMedian, trials: trials.map(({ problems, ...t }) => ({ ...t, correct: problems.length === 0 })) };
+        const verdict: 'pass' | 'exceeds' | 'invalid' = !valid ? 'invalid' : best <= R_MAX ? 'pass' : 'exceeds';
+        return { ok: verdict === 'pass', valid, verdict, reasons, best, controlMedian, trials: trials.map(({ problems, ...t }) => ({ ...t, correct: problems.length === 0 })) };
       };
+      type CResult = { ok: boolean; valid: boolean; verdict: 'pass' | 'exceeds' | 'invalid'; best: number };
+      /** Only a VALID measurement above R_MAX establishes degradation detection (an invalid one fails the test). */
+      const degradationDetected = (c: CResult) => c.valid && c.verdict === 'exceeds';
+      /** Sustained-slowdown ranking: only on a VALID measurement. */
+      const sustainedRanked = (c: CResult, healthy: number[]) => c.valid && c.best > Math.max(...healthy);
       const checkC = makeCheckC({
         control: (ms) => controlFlood(ms),
         trial: async (ms) => {
@@ -401,6 +482,14 @@ async function main() {
         const h = await scenario(`healthy #${k}`, { env: 0, prod: 0, cControl: 0, cLimiter: [0, 0, 0] });
         check(`I2b-1 healthy #${k}: environment usable, A (safety + deadline) passes, C (performance) passes`, h.row.env && h.A.ok && h.C.ok, h.row);
         healthyBests.push(h.C.best);
+        // r5: live decision-time evidence (DB-observed, under row locks) covers every decided request, and
+        // every live 429 saw its own shard at exactly 30 when it decided.
+        const decidedIdx = h.r.out.map((d, i) => (d.allowed || d.limitedBy === 'preauth-mcp' ? i : -1)).filter((i) => i >= 0);
+        const ownCnt = (i: number) => h.r.decide?.[i]?.rows.find((x) => x.key === `preauth-mcp:global:g480n16:${i % SHARDS}`)?.cnt;
+        const quotaIdx = decidedIdx.filter((i) => !h.r.out[i].allowed);
+        const evidence = { decided: decidedIdx.length, withEvidence: decidedIdx.filter((i) => h.r.decide?.[i]?.complete).length, quota: quotaIdx.length, quotaSawFull: quotaIdx.filter((i) => ownCnt(i) === PER_SHARD).length, admittedSawBelow: decidedIdx.filter((i) => h.r.out[i].allowed && (ownCnt(i) ?? 99) < PER_SHARD).length };
+        console.log(`  I2b-1 healthy #${k} decision-time evidence: ${JSON.stringify(evidence)}`);
+        check(`I2b-1 healthy #${k}: live decision-time evidence for every decided request; every 429 saw its shard full (30), every admission saw it below 30`, evidence.decided > 0 && evidence.withEvidence === evidence.decided && evidence.quotaSawFull === evidence.quota && evidence.admittedSawBelow === h.r.admitted, evidence);
       }
       // 2. Shared slowdown everywhere (+2 ms per statement in controls AND limiter).
       const shared = await scenario('shared slowdown +2 ms/statement', { env: 2, prod: 2, cControl: 2, cLimiter: [2, 2, 2] });
@@ -428,7 +517,7 @@ async function main() {
       //    flood, ~5 s per 2000 decisions); controls are not. (+5 ms gave a best ratio as low as 10.5 locally --
       //    too close to R_MAX for CI's slower controls -- so the injected degradation is sized to stay well clear.)
       const degraded = await scenario('limiter-only degradation (+10 ms/statement in every limiter flood)', { env: 0, prod: 10, cControl: 0, cLimiter: [10, 10, 10] });
-      check('I2b-1 limiter-only degradation is DETECTED: C fails (best of 3 above R_MAX), while A stays safe', !degraded.C.ok && degraded.C.best > R_MAX && accounting(degraded.r).length === 0, degraded.row);
+      check('I2b-1 limiter-only degradation is DETECTED: a VALID C measurement exceeds R_MAX (best of 3), while A stays safe', degradationDetected(degraded.C) && accounting(degraded.r).length === 0, degraded.row);
       // 4b. A SMALLER sustained limiter-only slowdown (+2 ms/statement; the independent review's case).
       const degraded2 = await scenario('limiter-only degradation (+2 ms/statement in every limiter flood)', { env: 0, prod: 2, cControl: 0, cLimiter: [2, 2, 2] });
       // Environment-independent assertion: the sustained slowdown raises EVERY trial, so its best ratio
@@ -437,9 +526,9 @@ async function main() {
       // (locally 13-21x: detected; on slower CI controls it can fall below R_MAX). That threshold is a
       // documented limitation; the reviewer's masking case (one slow control) is asserted
       // deterministically in section 10.
-      check('I2b-1 sustained limiter-only +2 ms ranks above both healthy runs (every trial slowed), A stays safe', degraded2.C.best > Math.max(...healthyBests) && accounting(degraded2.r).length === 0, { best: degraded2.C.best, healthyBests });
-      console.log(`  I2b-1 sustained +2 ms vs R_MAX (informational): ${JSON.stringify({ best: degraded2.C.best, controlMedian: degraded2.C.controlMedian, R_MAX, detectedByRMax: !degraded2.C.ok })}`);
-      check('I2b-1 the residual and genuine degradation are DISTINGUISHED (residual passes C, degradation fails C)', residual.C.ok && !degraded.C.ok, { residualBest: residual.C.best, degradedBest: degraded.C.best });
+      check('I2b-1 sustained limiter-only +2 ms: a VALID C measurement ranks above both healthy runs (every trial slowed), A stays safe', sustainedRanked(degraded2.C, healthyBests) && accounting(degraded2.r).length === 0, { best: degraded2.C.best, valid: degraded2.C.valid, healthyBests });
+      console.log(`  I2b-1 sustained +2 ms vs R_MAX (informational): ${JSON.stringify({ best: degraded2.C.best, controlMedian: degraded2.C.controlMedian, R_MAX, detectedByRMax: degradationDetected(degraded2.C) })}`);
+      check('I2b-1 the residual and genuine degradation are DISTINGUISHED (residual passes C, degradation exceeds R_MAX on a valid measurement)', residual.C.ok && degradationDetected(degraded.C), { residualBest: residual.C.best, degradedBest: degraded.C.best, degradedVerdict: degraded.C.verdict });
       // 5. An unusably slow environment is rejected (control flood +12 ms/statement).
       const slowEnvMs = await controlFlood(12);
       check('I2b-1 an unusably slow environment FAILS (control flood above 4x the deadline)', !envOk(slowEnvMs), { slowEnvMs, ENV_MAX_MS });
@@ -463,7 +552,7 @@ async function main() {
           }, release: (e?: unknown) => c.release(e as Error | undefined) };
         } };
       };
-      const appLimiter = (p: unknown) => createPostgresRateLimiter({ pool: p as never, windowMs: 60_000 });
+      const appLimiter = (p: unknown) => createPostgresRateLimiter({ pool: observed(p as never) as never, windowMs: 60_000 });
       mark = pools.length;
       const faulty = await flood([0, 1, 2].map(() => appLimiter(faultyPool('decide'))));
       await endSince(mark);
@@ -523,11 +612,31 @@ async function main() {
       const allow: RateLimitDecision = { allowed: true, retryAfterSeconds: 0 };
       const shedD: RateLimitDecision = { allowed: false, retryAfterSeconds: 1, limitedBy: 'unavailable', cause: 'deadline' };
       const quota: RateLimitDecision = { allowed: false, retryAfterSeconds: 1, limitedBy: 'preauth-mcp' };
-      const fx = (out: RateLimitDecision[], latencies: number[], rows: [number, number][]): FloodResult => ({
+      const fx = (out: RateLimitDecision[], latencies: number[], rows: [number, number][], decide?: (DecideObs | undefined)[]): FloodResult => ({
         out, latencies, admitted: out.filter((d) => d.allowed).length, by: {}, ms: 0,
         shardRows: rows.map(([sh, count]) => ({ key: `preauth-mcp:global:g480n16:${sh}`, count })),
         shardSum: rows.reduce((t, [, c]) => t + c, 0),
+        ...(decide ? { decide } : {}),
       });
+      /** Decision-time evidence for request i: its own shard key read at `cnt` (limit 30) and its address key well below 480. */
+      const ev = (i: number, cnt: number, ok = cnt < PER_SHARD, shard = i % SHARDS): DecideObs => ({ ok, complete: true, rows: [{ key: `preauth-mcp:addr:fixture:${i}`, cnt: 0, lim: 480 }, { key: `preauth-mcp:global:g480n16:${shard}`, cnt, lim: PER_SHARD }] });
+      const timeoutD: RateLimitDecision = { allowed: false, retryAfterSeconds: 1, limitedBy: 'unavailable', cause: 'commit_timeout' };
+      /**
+       * Shard-0 scenario builder: step k is request 16k (shard 0) with its decision and the count its DECIDE
+       * saw (undefined = no evidence). Every other request is shed by the deadline (an expected cause).
+       */
+      const shard0 = (steps: [RateLimitDecision, number | undefined, number?][], final: number, latency?: (k: number) => number): FloodResult => {
+        const out: RateLimitDecision[] = new Array(N).fill(shedD);
+        const lat: number[] = new Array(N).fill(10);
+        const dec: (DecideObs | undefined)[] = new Array(N).fill(undefined);
+        steps.forEach(([d, cnt, shard], k) => {
+          out[16 * k] = d;
+          if (latency) lat[16 * k] = latency(k);
+          if (cnt !== undefined) dec[16 * k] = ev(16 * k, cnt, d.allowed || d.cause === 'commit_timeout' ? cnt < PER_SHARD : false, shard);
+        });
+        return fx(out, lat, [[0, final]], dec);
+      };
+      const admits = (from: number, to: number): [RateLimitDecision, number][] => Array.from({ length: to - from }, (_, k) => [allow, from + k]);
       const fixtures: [string, FloodResult][] = [
         ['admission charged to the WRONG shard (decision 0 admitted, shard 1 counted 1)', fx([allow, ...Array(N - 1).fill(shedD)], new Array(N).fill(10), [[1, 1]])],
         ['a shard counted at 31 with 429s on that over-limit shard', fx(Array.from({ length: N }, (_, i) => (i % 16 === 0 ? (i < 480 ? allow : quota) : i === 1 ? allow : shedD)), new Array(N).fill(10), [[0, 31]])],
@@ -535,8 +644,34 @@ async function main() {
       for (const [label, r] of fixtures) {
         check(`I2b-1 review fixture (A accounting) -- previous checker ACCEPTED it, corrected checker REJECTS: ${label}`, prevCheckA(r) && !checkA(r).ok, { prev: prevCheckA(r), now: checkA(r).reasons });
       }
-      check('I2b-1 legitimate ambiguity still passes: shard 0 full with 29 admitted + 1 commit_timeout and 429s afterwards', checkA(fx(Array.from({ length: N }, (_, i) => (i % 16 === 0 ? (i < 29 * 16 ? allow : i === 29 * 16 ? { allowed: false, retryAfterSeconds: 1, limitedBy: 'unavailable', cause: 'commit_timeout' } : quota) : i === 1 ? allow : shedD)), new Array(N).fill(10), [[0, 30], [1, 1]])).ok, checkA(fx(Array.from({ length: N }, (_, i) => (i % 16 === 0 ? (i < 29 * 16 ? allow : i === 29 * 16 ? { allowed: false, retryAfterSeconds: 1, limitedBy: 'unavailable', cause: 'commit_timeout' } : quota) : i === 1 ? allow : shedD)), new Array(N).fill(10), [[0, 30], [1, 1]])).reasons);
+      // (r5: now with decision-time evidence: 29 admissions saw 0..28, the ambiguous COMMIT saw 29, the 429s saw 30;
+      //  decision 1 is the shard-1 admission, which saw 0.)
+      const legitAmb = fx(Array.from({ length: N }, (_, i) => (i % 16 === 0 ? (i < 29 * 16 ? allow : i === 29 * 16 ? timeoutD : quota) : i === 1 ? allow : shedD)), new Array(N).fill(10), [[0, 30], [1, 1]],
+        Array.from({ length: N }, (_, i) => (i % 16 === 0 ? ev(i, Math.min(i / 16, 30), i / 16 < 30) : i === 1 ? ev(1, 0) : undefined)));
+      check('I2b-1 legitimate ambiguity still passes: shard 0 full with 29 admitted + 1 commit_timeout and 429s afterwards', checkA(legitAmb).ok, checkA(legitAmb).reasons);
       check('I2b-1 previous checker shortcoming: it accepted an admission observed at 1,300 ms on the outer clock (250 ms admission slack)', prevCheckA(fx([allow, ...Array(N - 1).fill(shedD)], [1300, ...Array(N - 1).fill(1255)], [[0, 1]])));
+
+      // 8b. AURA-MCP-CI-01 r5: quota-refusal validity at DECISION time (independent review of 54e323d6).
+      //     `checkABase` is A exactly as reviewed (final-count rule only); `checkA` adds decisionTime().
+      const decisionCases: [string, FloodResult, boolean, boolean][] = [
+        // label, fixture, reviewed-head A accepts?, corrected A accepts?
+        ['premature 429 at decision-time count 0, then the shard fills to 30 (the review\'s case)', shard0([[quota, 0], ...admits(0, 30)], 30), true, false],
+        ['premature 429 below capacity (count 29) on a shard that ends full', shard0([...admits(0, 29), [quota, 29], [allow, 29]], 30), true, false],
+        ['429 on a shard that never fills (count 29 final)', shard0([...admits(0, 29), [quota, 29]], 29), false, false],
+        ['an ambiguous COMMIT cannot excuse an early 429: 429 decided at 29 before the commit_timeout landed (final 30)', shard0([...admits(0, 29), [quota, 29], [timeoutD, 29]], 30), true, false],
+        ['a 429 with NO decision-time evidence', shard0([...admits(0, 30), [quota, undefined]], 30), true, false],
+        ['a 429 whose evidence is for another shard (attribution)', shard0([...admits(0, 30), [quota, 30, 1]], 30), true, false],
+        ['legitimate 429 at capacity (count 30)', shard0([...admits(0, 30), [quota, 30], [quota, 30]], 30), true, true],
+        ['legitimate 429s that COMPLETE FIRST: the 429 response (1 ms) precedes every admission response (200-229 ms) and is first in request order', shard0([[quota, 30], ...admits(0, 30).reverse(), [quota, 30]], 30, (k) => (k === 0 ? 1 : 200 + k)), true, true],
+        ['ambiguous COMMIT that landed: 29 admitted + 1 commit_timeout (saw 29) counted, then 429s at 30', shard0([...admits(0, 29), [timeoutD, 29], [quota, 30], [quota, 30]], 30), true, true],
+        ['ambiguous COMMIT, no 429s: over-count 1 (30 counted, 29 admitted) explained by the commit_timeout', shard0([...admits(0, 29), [timeoutD, 29]], 30), true, true],
+        ['unexplained over-count (30 counted, 29 admitted, no ambiguous COMMIT) stays rejected', shard0(admits(0, 29), 30), false, false],
+      ];
+      for (const [label, r, prevOk, nowOk] of decisionCases) {
+        const prev = checkABase(r);
+        const now = checkA(r);
+        check(`I2b-1 r5 decision-time fixture: ${label} -> reviewed A ${prevOk ? 'accepts' : 'rejects'}, corrected A ${nowOk ? 'ACCEPTS' : 'REJECTS'}`, prev.ok === prevOk && now.ok === nowOk, { prev: prev.reasons, now: now.reasons });
+      }
 
       // 9. EXACT admission deadline on the production limiter (default 1,250 ms), synthetic monotonic clock:
       //    the COMMIT acknowledgement instant decides; the outer response clock is not involved.
@@ -596,6 +731,28 @@ async function main() {
       let kt = 0;
       const c4 = await makeCheckC({ control: async () => controlsSeq[kc++], trial: async () => ({ ...healthyTrial(), ms: reviewLimiter[kt++] }) })({ control: 0, limiter: [0, 0, 0] });
       check('I2b-1 C fixture: one isolated slow control (405 ms) no longer masks a sustained slowdown (previous best 3.83 passed; median-based C FAILS it)', prevBest < R_MAX && !c4.ok && c4.best > R_MAX, { prevBest: Math.round(prevBest * 100) / 100, now: c4.best, median: c4.controlMedian });
+
+      // 10b. AURA-MCP-CI-01 r5: measurement validity vs threshold (independent review of 54e323d6). Both LIVE
+      //      degradation assertions use degradationDetected / sustainedRanked; the reviewed head used
+      //      "!C.ok && best > R_MAX" and "best > max(healthy)", which an INVALID measurement could satisfy.
+      const prevDegradationDetected = (c: CResult) => !c.ok && c.best > R_MAX;
+      const prevSustainedRanked = (c: CResult, healthy: number[]) => c.best > Math.max(...healthy);
+      const fxHealthyBests = [2.5, 2.6];
+      const cSeq = async (trials: (() => FloodResult)[], durations: number[], controls: number[]) => {
+        let k = 0;
+        let kc2 = 0;
+        return makeCheckC({ control: async () => controls[kc2++], trial: async () => ({ ...trials[k](), ms: durations[k++] }) })({ control: 0, limiter: [0, 0, 0] });
+      };
+      const cv1 = await cSeq([healthyTrial, all429Trial, healthyTrial], [800, 800, 800], [100, 100, 100, 100, 100, 100]);
+      const cv2 = await cSeq([healthyTrial, healthyTrial, healthyTrial], [800, 800, 800], [100, 100, 100, 5001, 100, 100]);
+      const cv3 = await cSeq([healthyTrial, healthyTrial, healthyTrial], [800, 800, 800], [100, 100, 100, 100, 100, 100]);
+      const cv4 = await cSeq([healthyTrial, healthyTrial, healthyTrial], [250, 260, 270], [100, 100, 100, 100, 100, 100]);
+      for (const [label, c] of [['an all-429 MEASURED trial (ratio 8)', cv1], ['a 5,001 ms AFTER-control (ratio 8; median 100)', cv2]] as [string, CResult & { reasons: string[] }][]) {
+        check(`I2b-1 r5 C validity: ${label} -> verdict INVALID; the reviewed head's degradation assertion ACCEPTED it, the corrected one REJECTS it`, c.verdict === 'invalid' && !c.valid && prevDegradationDetected(c) && !degradationDetected(c), { verdict: c.verdict, best: c.best, reasons: c.reasons });
+        check(`I2b-1 r5 C validity: ${label} -> the reviewed head's sustained-slowdown assertion ACCEPTED it, the corrected one REJECTS it`, prevSustainedRanked(c, fxHealthyBests) && !sustainedRanked(c, fxHealthyBests), { verdict: c.verdict, best: c.best });
+      }
+      check('I2b-1 r5 C validity: a VALID measurement above R_MAX (ratio 8) -> verdict EXCEEDS; both degradation assertions accept it', cv3.valid && cv3.verdict === 'exceeds' && degradationDetected(cv3) && sustainedRanked(cv3, fxHealthyBests), { verdict: cv3.verdict, best: cv3.best });
+      check('I2b-1 r5 C validity: a VALID measurement within R_MAX (ratio 2.5) -> verdict PASS (C ok); degradation is NOT detected', cv4.valid && cv4.verdict === 'pass' && cv4.ok && !degradationDetected(cv4) && !sustainedRanked(cv4, [3, 3]), { verdict: cv4.verdict, best: cv4.best });
 
       console.log(`  I2b-1 scenarios summary: ${JSON.stringify(runs.map((r) => ({ case: r.case, envControlMs: r.envControlMs, A: { ok: (r.A as { ok: boolean }).ok, floodMs: (r.A as { floodMs: number }).floodMs, maxLatencyMs: (r.A as { maxLatencyMs: number }).maxLatencyMs, admitted: (r.A as { admitted: number }).admitted, counted: (r.A as { counted: number }).counted }, C: r.C })))}`);
 

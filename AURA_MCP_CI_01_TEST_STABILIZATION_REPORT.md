@@ -19,6 +19,7 @@ No single timing ratio decides correctness.
 - 0 unexpected causes (checkout, driver, internal, `commit_failed`, `commit_lost`);
 - admitted ≤ counted ≤ G, with any over-count explained by ambiguous or late COMMITs;
 - **exact per-shard accounting** (corrected in round 3, §1a): decision i goes to shard i mod 16; for every shard, admitted ≤ counted ≤ 30, any over-count is explained by that shard's ambiguous / late COMMITs, and a 429 is allowed only when that shard is counted at exactly 30; in aggregate, admitted ≤ counted ≤ 480;
+- **quota refusal at decision time** (round 5, §1b): every 429 must have seen a key at its limit in the limiter's own locked read when it decided, and every admission must have seen capacity. Evidence is the `DECIDE` result, recorded in the test harness;
 - **the production deadline itself** is proven by a deterministic monotonic-clock test (§1a): COMMIT acknowledged at 1,249 ms admits; at 1,250 ms and 1,300 ms it is refused (`commit_late`). The live flood no longer infers admission timing from the outer clock;
 - **response completion:** every decision is answered within 1,250 ms + 500 ms (event-loop allowance for response completion only; it never permits a late admission);
 - **liveness:** at least one admission.
@@ -35,6 +36,7 @@ Shedding under load is legitimate here, so A has **no availability floor**.
 - **Measurement:** the limiter flood is compared with a **control flood** of the same shape (3 × 5 connections, 2,000 units of 4 round trips, 16 hot advisory keys; no limiter code, no table), run immediately **before and after** it.
 - **Ratio** (corrected in round 3, §1a): limiterMs / **median of all six controls** (before and after each of the 3 trials).
 - **Pass condition:** the **best of 3 trials** must be **≤ R_MAX = 5**; **every** trial must be exactly correct (all 2,000 decided, exactly 480 admitted, all 16 shards at 30, exact per-shard accounting); and **every** control, including the bracketing controls, must pass the 5 s ENV guard.
+- **Verdict** (round 5, §1b): `invalid` if any trial is incorrect or any control fails ENV; otherwise `pass` (best ≤ R_MAX) or `exceeds` (best > R_MAX). Only a **valid** `exceeds` establishes degradation detection.
 - **Why best of 3:** persistent (genuine) degradation fails every trial; a transient environmental slowdown cannot.
 - **Why R_MAX = 5:**
   - It is at least 2× the worst healthy **best-of-3** ratio observed (2.67 locally, 1.80 on CI), and above the worst healthy **single** trial anywhere (4.4).
@@ -78,12 +80,65 @@ The review found that the production limiter is correct (1,250 ms deadline indep
 
 **S12 offline: same flake class as S10, fixed in this round.** The full serial regression failed `mcpOAuthS12` offline once: `P3-corr no false refusal: untagged retained hex 16 B (10,000 CSPRNG samples) -- 1`. This is the S10 class: a fresh CSPRNG 16-byte value with no a–f letter (≈2.9e-7 per sample, ≈0.29% per 10,000) is refused **by policy**. The six "no false refusal" rows now use a **fixed seed** with policy-aware verdicts (digits-only untagged hex must be refused). Added a reproduction (the recorded digits-only value is refused untagged, so the old assertion fails on it) and its `hex:`-declared acceptance. S12 offline: **86/86** (was 84; +2 fixtures), 3/3 repeats. The refused value was not logged by the old test; its class is inferred from the S10 4,000,000-sample probe, where the only refusal of untagged random hex was digits-only.
 
+### 1b. Round 5: the two remaining S12 assertion gaps (independent review of `54e323d6`)
+The reviewer's probe (`independent-assertions.log`) showed two gaps; S12-B was closed by that review and is unchanged. Each gap is reproduced against the **reviewed head's own logic**, kept in the test file as frozen references:
+- `checkABase` is byte-identical to the reviewed `checkA`; `accounting` and `exactness` are unchanged. This was verified with a script against `git show 54e323d6`.
+- `prevDegradationDetected` / `prevSustainedRanked` are the two live expressions at `54e323d6`.
+
+**S12-A: quota-refusal timing.**
+- **Defect:** the shard check used only the **final** count. A 429 decided when the shard held 0 passed if the shard later filled to 30. The reviewer reproduced it: `early refusal on an eventually full shard`, with `checkA ok: true`.
+- **Evidence used:** the limiter's `DECIDE` statement locks the rows (`FOR UPDATE`, sorted keys) and returns each key's count as read under that lock, with the verdict. A **test-only** pool wrapper (`observed`) records each request's last complete `DECIDE` result, keyed by an `AsyncLocalStorage` request index. This is the capacity each transaction actually saw, in the database's lock order. It does **not** use response-completion order. No runtime change was needed.
+- **New rule** (`decisionTime`, added to A only):
+  - every decided request has complete evidence that includes **its own** shard key;
+  - no decision-time count exceeds the shard's final count;
+  - an admission saw `ok` and every key below its limit;
+  - a 429 saw `ok = false` with a key **at** its limit.
+- **Ambiguous COMMITs:** an ambiguous COMMIT is never assumed to have landed. A later 429 is valid only if its own locked read saw the key full. The final over-count bound (≤ ambiguous COMMITs per shard) is unchanged.
+
+| Deterministic fixture (shard 0) | Reviewed A | Corrected A |
+|---|---|---|
+| 429 at decision-time count 0, then the shard fills to 30 (review's case) | accepts | **rejects** |
+| 429 at count 29 on a shard that ends full | accepts | **rejects** |
+| 429 decided at 29 **before** an ambiguous `commit_timeout` landed (final 30) | accepts | **rejects** |
+| 429 with no decision-time evidence | accepts | **rejects** |
+| 429 whose evidence is for another shard | accepts | **rejects** |
+| 429 on a shard that never fills (final 29) | rejects | rejects |
+| Unexplained over-count (30 counted, 29 admitted, no ambiguous COMMIT) | rejects | rejects |
+| Legitimate 429s at count 30 | accepts | **accepts** |
+| **Concurrent ordering:** the 429 response completes first (1 ms) and is first in request order; admissions complete later (200–229 ms) | accepts | **accepts** |
+| Ambiguous COMMIT that landed (saw 29), then 429s at 30 | accepts | **accepts** |
+| Ambiguous COMMIT, no 429s: over-count 1 explained | accepts | **accepts** |
+
+The existing legitimate-ambiguity fixture from round 3 now carries decision-time evidence and still passes.
+
+**Live evidence** (each healthy flood, every run): evidence for **2,000 of 2,000** decided requests. All **1,520** live 429s saw their shard at exactly 30, and all **480** admissions saw it below 30. The fault-injection floods are recorded the same way and still fail A for their own causes.
+
+**S12-C: invalid degradation measurements.**
+- **Defect:** both live degradation assertions read C's failure as detection, `!C.ok && best > R_MAX` and `best > max(healthy)`. A C run that failed because the measurement was **invalid** also satisfied them. The reviewer reproduced it with an all-429 measured trial, and with a 5,001 ms after-control, each at ratio 8.
+- **Fix:** C first decides **validity** (every trial exact, every control within ENV), then evaluates the threshold. It returns `verdict ∈ {pass, exceeds, invalid}`.
+- **Live assertions now:**
+  - `degradationDetected` requires a **valid** `exceeds`;
+  - `sustainedRanked` requires a **valid** measurement ranked above both healthy bests;
+  - the residual-vs-degradation distinction uses `degradationDetected`.
+- **Unchanged:** the median of six controls, R_MAX = 5, ENV = 5 s, healthy, shared, residual and degradation scenarios; no new timing requirement.
+
+| Deterministic C fixture | Verdict | Reviewed head's two assertions | Corrected assertions |
+|---|---|---|---|
+| All-429 measured trial (ratio 8) | invalid | both **accept** | both **reject** |
+| 5,001 ms after-control (ratio 8, median 100) | invalid | both **accept** | both **reject** |
+| Valid, ratio 8 | exceeds | accept | **accept** |
+| Valid, ratio 2.5 | pass (C ok) | — | degradation **not** detected |
+
+**Sampling estimate corrected.** The remaining S12 tagged-format random draws (6 × 10,000) fail by policy with about **0.0143% per run** (independent assessment), not "≤ about 2e-4" as round 4 stated. They are unchanged.
+
 ### Separation of assertions
 
 | Concern | Where | Timing-dependent? |
 |---|---|---|
 | Fail-closed, cause classification, ambiguous-COMMIT accounting, admitted ≤ counted ≤ G, shard-specific 429 validation | A (and B) | No |
 | Production-deadline enforcement (1,249 admits; 1,250 / 1,300 refused) | deterministic clock test | No |
+| Quota refusal valid at decision time (locked-read evidence) | A | No |
+| Measurement validity before the threshold (pass / exceeds / invalid) | C | Validity: no; threshold: yes |
 | Response completion bounded | A | Only through a fixed 500 ms allowance, not a throughput ratio |
 | Availability (exactly G, all shards full) | B | No (extended budget) |
 | Limiter performance regression | C | Yes: limiterMs / median of six controls, best of 3, every trial exact |
@@ -153,7 +208,9 @@ B's exactness and per-shard accounting pass.
 - **Healthy margin narrowed on CI (a cost of the median denominator).** The median of six controls is smaller than the old max(before, after), so every ratio rises. Healthy CI bests went from about 1.8 (previous head) to **3.12–3.20** (run 45606688808), leaving about **1.56×** headroom below R_MAX = 5; locally healthy bests are 2.40–2.57. Best of 3 still absorbs one transient (the worst single healthy trial seen locally was 5.68). R_MAX was **not** raised: raising it would weaken detection and would be tuning to one CI run. If healthy CI ratios approach 5 in future runs, the right fix is a better-matched control (not a larger R_MAX), and that needs a separate decision.
 - **Remaining sensitivity: the smallest detectable sustained slowdown depends on the runner.** C detects a sustained slowdown once it adds roughly (R_MAX − healthy ratio) × control-flood time. Locally (controls about 70 ms) +2 ms/statement is detected at 13–22×; on CI run 45606688808 (controls about 230 ms) at **7.15×**. A pre-CI estimate in this report, extrapolated from older 530 ms controls, predicted about 4× on CI; that estimate was **wrong for this run**. On a runner with markedly slower controls +2 ms could still fall below R_MAX, so the live 4b check asserts ranking above healthy, not an R_MAX crossing (the crossing is logged as informational). Closing this fully would need a non-timing performance signal (e.g. statement counts), which is out of scope for a test-only change.
 - **The response-completion bound uses a 500 ms allowance** for event-loop lag with 2,000 pending promises (observed maximum latencies 1,252–1,268 ms). It no longer has any role in admission timing.
-- **Secret-policy sampling:** after round 4 (§4) no MCP test asserts a policy verdict on a fresh random secret where the policy refuses a legitimate draw with non-negligible probability. The remaining fresh random-sample loops (tagged `hex:` / `base64:` / `base64url:` acceptance in `mcpOAuthS12`, 6 × 10,000) are bounded by the policy's own documented false-refusal rates (≤ 3e-9 per sample, so ≤ about 2e-4 per run in total). That is the policy's design budget, not a confirmed instance of this defect, so they were left unchanged (no general hardening).
+- **Secret-policy sampling:** after round 4 (§4) no MCP test asserts a policy verdict on a fresh random secret where the policy refuses a legitimate draw with non-negligible probability. The remaining fresh random-sample loops (tagged `hex:` / `base64:` / `base64url:` acceptance in `mcpOAuthS12`, 6 × 10,000) fail by policy with about **0.0143% per run** across the 60,000 draws (independent assessment; corrected from round 4's "≤ about 2e-4"). That is within the policy's documented false-refusal budget, not a confirmed instance of this defect, so they were left unchanged (no general hardening).
+- **Decision-time evidence depends on the `DECIDE` statement shape.** The harness recognises it by its `WITH want` prefix and its key / limit parameters. If the runtime statement changes, the evidence is missing, and A **fails** (it does not pass vacuously).
+- **`assessSecret` compatibility comment** ("nothing S8 accepted is newly refused") remains a documented discrepancy: the vetoes run first by design. No runtime change is authorised.
 - **ENV and R_MAX are absolute constants.** They are justified from measured ranges, not fitted to one CI run.
 
 ## 2. S8 address-bucket HMAC assertion (unchanged since the previous head)
@@ -205,7 +262,7 @@ B's exactness and per-shard accounting pass.
 
 **Narrow sweep, not corrected:**
 - **Other random values in the MCP suites:** PKCE verifiers, HMAC and bucket keys, forged-token keys, ephemeral keys and IPv6 fuzz inputs. None of them goes through the secret policy.
-- **Tagged-format acceptance loops in S12:** left unchanged; they are within the policy's documented bound (see Remaining limitations).
+- **Tagged-format acceptance loops in S12:** left unchanged. They fail at about 0.0143% per run, per the independent assessment; see Remaining limitations.
 - **S8:** CLOSED, and it uses tagged values only.
 
 **Results:**
@@ -216,9 +273,9 @@ B's exactness and per-shard accounting pass.
 ## 5. Verification
 - **All MCP suites** (`max_connections = 100`) passed:
   - offline: transport, Local 119, SecurityRegression 34, I2b 116, StagingBlockers 52, S8 60, S10 **137**, S11 **33**, S12 **86**;
-  - DB: Postgres 36, StorageProtection 42, StagingBlockersDb **68**, StoreS4 13, CodeS6 14, S8Db 11, S10Db 21, S11Db 19, S12Db 15;
+  - DB: Postgres 36, StorageProtection 42, StagingBlockersDb **87**, StoreS4 13, CodeS6 14, S8Db 11, S10Db 21, S11Db 19, S12Db 15;
   - dbIdentityGuard.
-- **Repeats:** round 4 full serial regression 19/19 suites, plus S10 and S11 3/3 each; round 3 StagingBlockersDb 6/6 (68/68 each); S12 offline 3/3 after the fixed-seed correction; earlier rounds StagingBlockersDb 5/5, S10 and S8 offline 3/3.
+- **Repeats:** round 5 full serial regression 19/19 suites, plus StagingBlockersDb 5/5 runs (87/87 each); healthy C bests 2.39–2.69, +2 ms 19.6–21.1, +10 ms 71–87, all valid; round 4 full serial regression 19/19 suites, plus S10 and S11 3/3 each; round 3 StagingBlockersDb 6/6 (68/68 each); S12 offline 3/3 after the fixed-seed correction; earlier rounds StagingBlockersDb 5/5, S10 and S8 offline 3/3.
 - **Serial, isolated:** every suite ran one at a time against a disposable local PG16 (socket only, `max_connections = 100`); no live database, no credentials.
 - **No retries** were used to hide failures.
-- **Exact-head CI:** round 3 code head `882a04f0` run 45606688808, 7/7. The final-head run for round 4 is recorded in the PR description.
+- **Exact-head CI:** round 3 `882a04f0` run 45606688808, 7/7; round 4 `54e323d6` run 45610989652, 7/7. The round 5 final-head run is recorded in the PR description.
