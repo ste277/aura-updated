@@ -12,6 +12,7 @@
  * rules themselves; this file does not re-test them.
  */
 import { PATCH as rhythmRoute } from '../apps/web/app/api/goals/[goalId]/activities/[goalActivityId]/rhythm/route';
+import { boundHeaders } from './rel04BoundTestHeaders';
 import { GET as goalDetailRoute } from '../apps/web/app/api/goals/[goalId]/route';
 import { POST as proposalRoute } from '../apps/web/app/api/daily-assistant/goal-rhythm/weekly-proposal/route';
 import { POST as plansRoute } from '../apps/web/app/api/plans/route';
@@ -31,7 +32,7 @@ const IST = 'Asia/Kolkata';
 const EMAIL = 'mr3-ui-db@example.com';
 
 function req(token: string, body?: unknown): any {
-  return { cookies: { get: (n: string) => (n === 'as_session' ? { value: token } : undefined) }, headers: new Headers(), nextUrl: new URL('http://localhost/x'), json: async () => body };
+  return { cookies: { get: (n: string) => (n === 'as_session' ? { value: token } : undefined) }, headers: boundHeaders(token), nextUrl: new URL('http://localhost/x'), json: async () => body };
 }
 async function sql(text: string, params: unknown[] = []): Promise<any[]> {
   const c = await beginTransaction();

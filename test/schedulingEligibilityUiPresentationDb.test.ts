@@ -10,6 +10,7 @@
 // convention as that file and goalActivityDailyOccurrenceEligibilityDb.test.ts.
 // Run with: npx ts-node test/schedulingEligibilityUiPresentationDb.test.ts
 import { POST as plansRoute } from '../apps/web/app/api/plans/route';
+import { boundHeaders } from './rel04BoundTestHeaders';
 import {
   upsertUserByEmail,
   createGoalWithActivities,
@@ -36,7 +37,7 @@ const TZ = 'Asia/Kolkata';
 function req(tok: string | null, body: Record<string, unknown>): any {
   return {
     cookies: { get: (n: string) => (tok && n === 'as_session' ? { value: tok } : undefined) },
-    headers: new Headers(),
+    headers: boundHeaders(tok),
     nextUrl: new URL('http://localhost/api/plans'),
     json: async () => body,
   };

@@ -8,6 +8,7 @@ import {
   listGoalActivitiesWithLinkedPlanStatus, listPlannedActivities, listPlannedActivitiesForDay, getPlannedActivityForOwner, beginTransaction, cancelPlannedActivity,
 } from '../apps/web/lib/db';
 import { createSessionToken } from '../apps/web/lib/auth';
+import { boundHeaders } from './rel04BoundTestHeaders';
 import { persistAcceptedConstructedDay } from '../apps/web/lib/dayConstructorAcceptancePersistence';
 import type { AcceptConstructedDayRequest, AcceptedProposedItem } from '../apps/web/lib/dayConstructorAcceptance';
 import { movePlannedActivity } from '../apps/web/lib/planMove';
@@ -29,7 +30,7 @@ function check(label: string, condition: boolean) {
 const TZ = 'Asia/Kolkata';
 const MIN = 60000; const HOUR = 3600000; const DAY = 86400000;
 const minute = (ms: number) => Math.floor(ms / MIN) * MIN;
-const fakeReq = (cookie: string | undefined, body: unknown): any => ({ cookies: { get: (n: string) => (cookie !== undefined && n === 'as_session' ? { value: cookie } : undefined) }, json: async () => body, headers: new Headers() });
+const fakeReq = (cookie: string | undefined, body: unknown): any => ({ cookies: { get: (n: string) => (cookie !== undefined && n === 'as_session' ? { value: cookie } : undefined) }, json: async () => body, headers: boundHeaders(cookie) });
 async function sql(t: string, p: unknown[] = []): Promise<any[]> {
   const c = await beginTransaction();
   try { const r = await c.query(t, p); await c.query('COMMIT'); return r.rows; } catch (e) { await c.query('ROLLBACK').catch(() => {}); throw e; } finally { c.release(); }

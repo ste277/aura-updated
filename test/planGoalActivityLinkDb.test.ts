@@ -4,6 +4,7 @@
 // DATABASE_URL pointed at a disposable local Postgres with migrations
 // applied).
 import { POST as plansRoute } from '../apps/web/app/api/plans/route';
+import { boundHeaders } from './rel04BoundTestHeaders';
 import { upsertUserByEmail, createGoalWithActivities, beginTransaction } from '../apps/web/lib/db';
 import { createSessionToken } from '../apps/web/lib/auth';
 
@@ -16,7 +17,7 @@ function check(label: string, condition: boolean) {
 function req(tok: string, body: Record<string, unknown>): any {
   return {
     cookies: { get: (n: string) => (n === 'as_session' ? { value: tok } : undefined) },
-    headers: new Headers(),
+    headers: boundHeaders(tok),
     nextUrl: new URL('http://localhost/api/plans'),
     json: async () => body,
   };

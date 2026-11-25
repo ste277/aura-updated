@@ -6,6 +6,7 @@
 // already do for the existing /plan-day entry point.
 // Run with: npx ts-node test/planGoalActivityCompletionIntegrityDb.test.ts
 import { POST as plansRoute } from '../apps/web/app/api/plans/route';
+import { boundHeaders } from './rel04BoundTestHeaders';
 import { upsertUserByEmail, createGoalWithActivities, logPlannedActivity, beginTransaction } from '../apps/web/lib/db';
 import { createSessionToken } from '../apps/web/lib/auth';
 import { movePlannedActivity } from '../apps/web/lib/planMove';
@@ -20,7 +21,7 @@ function check(label: string, condition: boolean) {
 function req(tok: string, body: Record<string, unknown>): any {
   return {
     cookies: { get: (n: string) => (n === 'as_session' ? { value: tok } : undefined) },
-    headers: new Headers(),
+    headers: boundHeaders(tok),
     nextUrl: new URL('http://localhost/api/plans'),
     json: async () => body,
   };

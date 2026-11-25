@@ -10,6 +10,7 @@
  *   DATABASE_URL="postgresql://..." TS_NODE_COMPILER_OPTIONS='{"jsx":"react"}' npx ts-node test/hpg5I3HomeSaveDb.test.ts
  */
 import { upsertUserByEmail, beginTransaction } from '../apps/web/lib/db';
+import { boundHeaders, bindTestAccount } from './rel04BoundTestHeaders';
 import { createSessionToken } from '../apps/web/lib/auth';
 import { localDateTimeToUTC, getDatePartsInTimezone, addDaysToDateStr } from '../apps/web/lib/timezone';
 import { POST as plansRoute } from '../apps/web/app/api/plans/route';
@@ -46,13 +47,13 @@ const routes: Record<string, (r: any) => Promise<Response>> = { '/api/plans': pl
   if (!route || (opts?.method ?? 'GET').toUpperCase() !== 'POST') throw new Error(`unrouted ${url}`);
   const body = JSON.parse(opts.body);
   const token = currentToken;
-  return route({ cookies: { get: (n: string) => (token !== undefined && n === 'as_session' ? { value: token } : undefined) }, json: async () => body, headers: new Headers() });
+  return route({ cookies: { get: (n: string) => (token !== undefined && n === 'as_session' ? { value: token } : undefined) }, json: async () => body, headers: boundHeaders(token) });
 };
 const D1 = addDaysToDateStr(getDatePartsInTimezone(TZ, new Date()).dateStr, 1);
 const at = (hhmm: string) => localDateTimeToUTC(D1, hhmm, TZ).toISOString();
 
 async function checkCandidate(token: string, activityId: string, start: string, durationMinutes: number) {
-  currentToken = token;
+  currentToken = token; bindTestAccount(currentToken);
   const r = await (global as any).fetch('/api/timing-search', { method: 'POST', body: JSON.stringify({ mode: 'CHECK', activityId, durationMinutes, candidateStart: start }) });
   const b = await r.json();
   return b.requestedCandidate ?? b.candidates[0];
@@ -75,7 +76,7 @@ async function main() {
   const rows = async (id: string) => sql(`SELECT id, title, "plannedStartAt", "activityId", status FROM "PlannedActivity" WHERE "userId" = $1 ORDER BY "createdAt"`, [id]);
   const claim = async (id: string, key: string) => (await sql(`SELECT "plannedActivityId" FROM "PlanCreationIdempotency" WHERE "userId" = $1 AND "clientRequestId" = $2`, [id, key]))[0];
   const legacy = async (token: string, title: string, s: string, e: string) => {
-    currentToken = token;
+    currentToken = token; bindTestAccount(currentToken);
     const r = await (global as any).fetch('/api/plans', { method: 'POST', body: JSON.stringify({ title, activityType: title, plannedStartAt: s, plannedEndAt: e, durationMinutes: Math.round((new Date(e).getTime() - new Date(s).getTime()) / 60000), windowType: 'NEUTRAL' }) });
     return r.status;
   };
@@ -87,7 +88,7 @@ async function main() {
     check('HOME setup: CHECK returns the exact opportunity instant', opp?.start === at('10:00'));
     check('HOME recommendation valid when made (no plans yet)', (await rows(A.id)).length === 0);
     check('HOME a competing plan is created after the recommendation (second tab)', (await legacy(A.token, 'Dentist', at('10:15'), at('11:00'))) === 200);
-    currentToken = A.token;
+    currentToken = A.token; bindTestAccount(currentToken);
     const r1 = await tryOverlap(() => saveUpcomingPlanFromCandidate(opp, 45, { ...homeOpts, overlapPolicy: 'REJECT_ACTIVE_OVERLAP' }));
     check('HOME stale save refused with typed PLAN_OVERLAP naming the competing plan', r1.err instanceof PlanOverlapSaveError && r1.err.conflict?.title === 'Dentist');
     check('HOME refusal keeps the exact proposal', r1.err?.proposed?.plannedStartAt === opp.start && r1.err?.proposed?.plannedEndAt === opp.end);
@@ -108,7 +109,7 @@ async function main() {
     const chipA = await checkCandidate(A.token, 'workout', at('15:00'), 45);
     const chipB = await checkCandidate(A.token, 'workout', at('17:00'), 45);
     await legacy(A.token, 'Team call', at('15:30'), at('16:00'));
-    currentToken = A.token;
+    currentToken = A.token; bindTestAccount(currentToken);
     const before = (await rows(A.id)).length;
     const d1 = await tryOverlap(() => saveUpcomingPlanFromCandidate(chipA, 45, { clientRequestId: dbKey, activityId: 'workout', overlapPolicy: 'REJECT_ACTIVE_OVERLAP' }));
     check('DB stale chip A refused with PLAN_OVERLAP, nothing written', d1.err instanceof PlanOverlapSaveError && d1.err.conflict?.title === 'Team call' && (await rows(A.id)).length === before);
@@ -120,14 +121,14 @@ async function main() {
 
     // ================= concurrency =================
     const raceOpp = await checkCandidate(B.token, 'meditation', at('08:00'), 45);
-    currentToken = B.token;
+    currentToken = B.token; bindTestAccount(currentToken);
     const sameKey = await Promise.allSettled([
       saveUpcomingPlanFromCandidate(raceOpp, 45, { activityId: 'meditation', clientRequestId: 'home-opportunity:guidance:race', overlapPolicy: 'REJECT_ACTIVE_OVERLAP' }),
       saveUpcomingPlanFromCandidate(raceOpp, 45, { activityId: 'meditation', clientRequestId: 'home-opportunity:guidance:race', overlapPolicy: 'REJECT_ACTIVE_OVERLAP' }),
     ]);
     check('RACE two tabs, same opportunity, same key -> exactly one plan row', (await rows(B.id)).length === 1 && sameKey.some((r) => r.status === 'fulfilled'));
     const raceB = await checkCandidate(B.token, 'workout', at('12:00'), 45);
-    currentToken = B.token;
+    currentToken = B.token; bindTestAccount(currentToken);
     const diffKey = await Promise.allSettled([
       saveUpcomingPlanFromCandidate(raceB, 45, { activityId: 'workout', clientRequestId: 'home-opportunity:guidance:x1', overlapPolicy: 'REJECT_ACTIVE_OVERLAP' }),
       saveUpcomingPlanFromCandidate(raceB, 45, { activityId: 'workout', clientRequestId: `daybuilder:sugg-9:${D1}`, overlapPolicy: 'REJECT_ACTIVE_OVERLAP' }),
@@ -141,16 +142,16 @@ async function main() {
     await legacy(C.token, 'Will cancel', at('09:00'), at('09:45'));
     const toCancel = (await rows(C.id))[0];
     await sql(`UPDATE "PlannedActivity" SET status = 'CANCELLED' WHERE id = $1`, [toCancel.id]);
-    currentToken = C.token;
+    currentToken = C.token; bindTestAccount(currentToken);
     const intoFreed = await tryOverlap(() => saveUpcomingPlanFromCandidate(freed, 45, { activityId: 'meditation', clientRequestId: 'home-opportunity:guidance:c1', overlapPolicy: 'REJECT_ACTIVE_OVERLAP' }));
     check('STALE blocker cancelled after the recommendation -> the Home save succeeds', intoFreed.err === null);
     // A's plans at 10:00-11:00 must never block or leak into C's save at the same time
     const cSame = await checkCandidate(C.token, 'meditation', at('10:00'), 45);
-    currentToken = C.token;
+    currentToken = C.token; bindTestAccount(currentToken);
     const cRes = await tryOverlap(() => saveUpcomingPlanFromCandidate(cSame, 45, { activityId: 'meditation', clientRequestId: 'home-opportunity:guidance:c2', overlapPolicy: 'REJECT_ACTIVE_OVERLAP' }));
     check("PRIVACY another user's overlapping plans never block or appear in this user's Home save", cRes.err === null && !!cRes.ok?.id);
     // legacy callers without the option are unchanged
-    currentToken = C.token;
+    currentToken = C.token; bindTestAccount(currentToken);
     const leg = await tryOverlap(() => saveUpcomingPlanFromCandidate(cSame, 45, { activityId: 'meditation' }));
     check('LEGACY a caller without overlapPolicy is unchanged (soft-dedupe returns the existing identical plan)', leg.err === null && leg.ok?.id === cRes.ok.id);
   } finally {

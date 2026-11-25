@@ -5,6 +5,7 @@
 // date), same convention as test/goalActivityDailyOccurrenceEligibilityDb.test.ts.
 // Run with: npx ts-node test/schedulingEligibilityErrorContractDb.test.ts
 import { POST as plansRoute } from '../apps/web/app/api/plans/route';
+import { boundHeaders } from './rel04BoundTestHeaders';
 import { POST as acceptRoute } from '../apps/web/app/api/day-constructor/accept/route';
 import {
   upsertUserByEmail,
@@ -34,7 +35,7 @@ const TZ = 'Asia/Kolkata';
 function req(tok: string | null, body: Record<string, unknown>): any {
   return {
     cookies: { get: (n: string) => (tok && n === 'as_session' ? { value: tok } : undefined) },
-    headers: new Headers(),
+    headers: boundHeaders(tok),
     nextUrl: new URL('http://localhost/api/plans'),
     json: async () => body,
   };
@@ -258,7 +259,7 @@ async function main() {
         goalActivityLinks: [{ intentId, goalActivityId: ga.id }],
       };
     };
-    const fakeReq = (body: unknown): any => ({ cookies: { get: () => ({ value: createSessionToken(user.id, user.email) }) }, json: async () => body, headers: new Headers() });
+    const fakeReq = (body: unknown): any => ({ cookies: { get: () => ({ value: createSessionToken(user.id, user.email) }) }, json: async () => body, headers: boundHeaders(createSessionToken(user.id, user.email)) });
     const res1 = await acceptRoute(fakeReq(mkBody(0, 'i1')));
     const body1 = await res1.json();
     check('3a. route success unchanged: 200, SAVED, no code field', res1.status === 200 && body1.status === 'SAVED' && body1.code === undefined);

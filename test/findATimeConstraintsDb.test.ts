@@ -13,6 +13,7 @@
  * today-clipping never interferes.
  */
 import { upsertUserByEmail, beginTransaction, createGoalWithActivities, createUserAvailabilityPeriod, setDailyWorkPreferences } from '../apps/web/lib/db';
+import { boundHeaders } from './rel04BoundTestHeaders';
 import { createSessionToken } from '../apps/web/lib/auth';
 import { localDateTimeToUTC, getDatePartsInTimezone, addDaysToDateStr } from '../apps/web/lib/timezone';
 import { getWeekdayForDateStr } from '../apps/web/lib/availabilityContext';
@@ -43,7 +44,7 @@ async function sql(text: string, params: unknown[] = []): Promise<any[]> {
     c.release();
   }
 }
-const fakeReq = (cookie: string | undefined, body: unknown): any => ({ cookies: { get: (n: string) => (cookie !== undefined && n === 'as_session' ? { value: cookie } : undefined) }, json: async () => body, headers: new Headers() });
+const fakeReq = (cookie: string | undefined, body: unknown): any => ({ cookies: { get: (n: string) => (cookie !== undefined && n === 'as_session' ? { value: cookie } : undefined) }, json: async () => body, headers: boundHeaders(cookie) });
 async function call(route: (req: any) => Promise<Response>, token: string, body: unknown): Promise<{ status: number; body: any }> {
   const res = await route(fakeReq(token, body));
   return { status: res.status, body: await res.json() };
