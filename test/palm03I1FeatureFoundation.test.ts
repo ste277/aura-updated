@@ -472,7 +472,7 @@ check('M3F-6. frame palmFacing false + measured measurements -> contradictory-qu
 const availMismatch = clone(build(featureInput(POSE, { landmarks: null }))); availMismatch.measurements = clone(build(POS[0][1]).measurements); availMismatch.provenance = clone(build(POS[0][1]).provenance); availMismatch.provenance['user-confirmed'] = []; availMismatch.provenance.unassessed = [...availMismatch.provenance.unassessed, 'line:heart', 'line:head', 'line:life'];
 availMismatch.lines = clone(build(featureInput(POSE, { landmarks: null })).lines); reprov(availMismatch); check('M3F-7. frame unavailable + measured measurements -> contradictory-quality', adaptErr(availMismatch) === 'contradictory-quality', adaptErr(availMismatch));
 const setInconsistent = clone(build(POS[0][1])); setInconsistent.measurements.status = 'measured'; setInconsistent.measurements.reasons = ['blurry'];
-check('M3F-8. measurement set status/reasons inconsistent (measured with reasons) -> invalid-measurement', adaptErr(setInconsistent) === 'invalid-measurement', adaptErr(setInconsistent));
+check('M3F-8. measurement set status/reasons inconsistent (measured with reasons) -> typed error (reason list is checked against the frame first)', ['invalid-measurement', 'contradictory-quality'].includes(adaptErr(setInconsistent)), adaptErr(setInconsistent));
 // Record invariants
 const staleMark = clone(fsFull); staleMark.marks.vedi.approximatePalmLocation = { x: 0.4, y: 0.4 };
 check('M3F-9. unassessed mark carrying a stale placement -> invalid-mark', adaptErr(staleMark) === 'invalid-mark', adaptErr(staleMark));
@@ -499,5 +499,191 @@ check('M3F-15. unexpected extra fields (top-level, or geometry on an unassessed 
 check('M3F-16. the adapter identity table equals the feature-set identity table (no drift)', JSON.stringify(featureSetAdapter.EXPECTED_IDENTITY) === JSON.stringify(PALM_LINE_IDENTITY), featureSetAdapter.EXPECTED_IDENTITY);
 const rejectedBeforeEngine = (() => { const calls: any[] = []; const orig = engine.generateReading; try { [cleanBlocked, cleanUnknown, staleMark, idPartial, inherit2].forEach((f) => { try { const r = featureSetAdapter.adaptFeatureSet(f, SYN); calls.push(r); } catch { /* rejected */ } }); } finally { void orig; } return calls.length === 0; })();
 check('M3F-17. malformed records are rejected by the adapter itself: no engine payload is produced for any of them', rejectedBeforeEngine);
+
+// ============================================================ M3C. complete-contract probes (reviewed head 193c16d)
+// One probe per remaining finding class; each mutates a VALID builder record in exactly one respect (provenance index
+// rebuilt where needed) and must be rejected with a typed AdapterError.
+const VALID = { clean: build(POS[0][1]), blurry: build(featureInput(POSE, { qualityIssues: ['blurry'] })), folded: build(POS.find(([l]) => l.startsWith('accepted + folded'))![1]), noFrame: build(featureInput(POSE, { landmarks: null, marks: [{ mark: 'yava', action: 'reported' }] })) };
+const typedReject = (f: unknown) => { const c = adaptErr(f); return c !== 'accepted' && !c.startsWith('RAW:'); };
+const probe = (label: string, f: any) => check(`M3C ${label}`, typedReject(f), adaptErr(f));
+let q: any;
+q = clone(VALID.clean); q.measurements.measurements.palmLength.status = 'uncertain'; q.measurements.measurements.palmLength.reasons = ['blurry'];
+probe('1. item cites a quality issue (blurry) that is absent from an accepted frame and a measured set', q);
+q = clone(VALID.blurry); q.measurements.measurements.indexLength.reasons = ['depends-on-uncertain'];
+probe('2. item omits the applicable degrading reason (blurry frame, uncertain set, item reasons lack blurry)', q);
+q = clone(VALID.blurry); q.measurements.measurements.thumbLength.reasons = ['too-dark'];
+probe('3. item cites a different degrading reason than the frame/set (too-dark vs blurry)', q);
+q = clone(VALID.folded); q.measurements.measurements.indexToRingRatio = { id: 'indexToRingRatio', value: 1.1, unit: 'ratio', status: 'measured', reasons: [] }; reprov(q);
+probe('4. usable ratio whose operand (ringLength) is unavailable', q);
+q = clone(VALID.folded); q.measurements.measurements.ringLength = { id: 'ringLength', value: null, unit: 'palm-width', status: 'unavailable', reasons: ['depends-on-unavailable'] }; reprov(q);
+probe('5. a finger length unavailable with a derived-only reason (depends-on-unavailable)', q);
+q = clone(VALID.noFrame); q.marks.yava.approximatePalmLocation = { x: 0.5, y: 0.5 };
+probe('6. mark placement present although no frame is available', q);
+q = clone(VALID.clean); q.lines.upward = { line: 'upward', provenance: 'unassessed', confirmation: 'confirmed', identity: q.lines.upward.identity, reason: 'frame-unavailable' }; reprov(q);
+probe('7. false frame-unavailable line reason while the frame IS available', q);
+q = clone(VALID.noFrame); q.lines.heart = { line: 'heart', provenance: 'unassessed', confirmation: 'confirmed', identity: q.lines.heart.identity, reason: 'trace-too-short' }; reprov(q);
+probe('8. trace-geometry reason although no frame was available to place a trace', q);
+q = clone(VALID.clean); q.lines.upward.reason = ['not-requested'];
+probe('9. array accepted as a diagnostic reason (line reason ["not-requested"])', q);
+q = clone(VALID.clean); q.marks.vedi.reason = ['not-requested'];
+probe('10. array as a mark reason', q);
+q = clone(VALID.clean); (q.frame.qualityIssues as any).extra = 1;
+probe('11. unexpected named property on an array (frame.qualityIssues.extra)', q);
+q = clone(VALID.clean); (q.lines.heart.palmPoints as any).note = 'x';
+probe('12. unexpected named property on geometry array (palmPoints.note)', q);
+q = clone(VALID.clean); q.measurements.measurements.handLength.value = 99;
+probe('13. derived value inconsistent with its operands (handLength != palm + middle)', q);
+q = clone(VALID.clean); q.measurements.reasons = []; q.measurements.measurements.palmLength.reasons = ['implausible-proportions']; q.measurements.measurements.palmLength.status = 'uncertain';
+probe('14. item reason (implausible-proportions) not present in the set reasons', q);
+q = clone(VALID.clean); q.frame.rotationDeg = '0';
+probe('15. invalid field type (rotationDeg as string)', q);
+
+// ============================================================ MUT. systematic contract-mutation suite (deterministic)
+// Base: the 21 builder-produced positive-control records (POS). Every mutation below is invalid BY CONSTRUCTION (its
+// expected outcome is decided in this test, independently of the adapter): each must be rejected with a typed
+// AdapterError (never accepted, never a raw exception, never an engine payload).
+{
+  const BASES = POS.map(([label, inp]) => [label, JSON.parse(JSON.stringify(build(inp)))] as [string, any]);
+  const stats: Record<string, { n: number; accepted: any[]; raw: any[] }> = {};
+  const expectReject = (cat: string, label: string, f: any) => {
+    const st = (stats[cat] ??= { n: 0, accepted: [], raw: [] }); st.n++;
+    const c = adaptErr(f);
+    if (c === 'accepted') st.accepted.push(label); else if (c.startsWith('RAW:')) st.raw.push(`${label}: ${c}`);
+  };
+  type Node = { path: (string | number)[]; value: any };
+  const nodes = (v: any, path: (string | number)[] = [], out: Node[] = []): Node[] => {
+    out.push({ path, value: v });
+    if (v !== null && typeof v === 'object') for (const k of Object.keys(v)) nodes(v[k], [...path, Array.isArray(v) ? Number(k) : k], out);
+    return out;
+  };
+  const at = (root: any, path: (string | number)[]) => path.reduce((o, k) => o[k], root);
+  const mutate = (base: any, path: (string | number)[], fn: (parent: any, key: string | number) => void) => {
+    const c = clone(base);
+    if (path.length === 0) return c;
+    fn(at(c, path.slice(0, -1)), path[path.length - 1]);
+    return c;
+  };
+  const keyOf = (path: (string | number)[]) => String(path[path.length - 1]);
+  // Fields where null / a number / a boolean CAN be legitimate somewhere in the contract are excluded from those
+  // particular type substitutions (they are still covered by the always-invalid ones).
+  const NULL_OK = ['palmFacing', 'approximatePalmLocation', 'value'];
+  const NUM_OK = ['rotationDeg', 'x', 'y', 'value'];
+  const BOOL_OK = ['available', 'palmFacing'];
+  for (const [label, base] of BASES) {
+    for (const { path, value } of nodes(base)) {
+      if (path.length === 0) continue;
+      const where = `${label} @ ${path.join('.')}`;
+      const parentIsArray = Array.isArray(at(base, path.slice(0, -1)));
+      // A. missing required fields (object members only; array elements are covered by D)
+      if (!parentIsArray) expectReject('A missing field', where, mutate(base, path, (o, k) => { delete o[k]; }));
+      // B. unexpected fields on every object and array
+      if (value !== null && typeof value === 'object') {
+        expectReject('B unexpected field', where, mutate(base, path, (o, k) => { o[k].zzUnexpected = 1; }));
+      }
+      // C. invalid field types: always-invalid substitutions, plus type-specific ones where never legitimate
+      const k = keyOf(path);
+      if (!parentIsArray || typeof value !== 'object') {
+        expectReject('C invalid type', `${where} -> [v]`, mutate(base, path, (o, kk) => { o[kk] = [o[kk]]; }));
+        expectReject('C invalid type', `${where} -> {}`, mutate(base, path, (o, kk) => { o[kk] = {}; }));
+        expectReject('C invalid type', `${where} -> "zz-not-a-value"`, mutate(base, path, (o, kk) => { o[kk] = 'zz-not-a-value'; }));
+        if (!NULL_OK.includes(k) && value !== null) expectReject('C invalid type', `${where} -> null`, mutate(base, path, (o, kk) => { o[kk] = null; }));
+        if (!NUM_OK.includes(k) && typeof value !== 'number') expectReject('C invalid type', `${where} -> 7`, mutate(base, path, (o, kk) => { o[kk] = 7; }));
+        if (!BOOL_OK.includes(k) && typeof value !== 'boolean') expectReject('C invalid type', `${where} -> true`, mutate(base, path, (o, kk) => { o[kk] = true; }));
+      }
+      // D. sparse arrays and named array properties
+      if (Array.isArray(value)) {
+        expectReject('D sparse/array props', `${where} hole`, mutate(base, path, (o, kk) => { o[kk].length += 1; }));
+        expectReject('D sparse/array props', `${where} named prop`, mutate(base, path, (o, kk) => { (o[kk] as any).zz = 1; }));
+        if (value.length) expectReject('D sparse/array props', `${where} hole@0`, mutate(base, path, (o, kk) => { delete o[kk][0]; }));
+      }
+    }
+    // E. contradictory status / reason combinations (status is a function of reasons; confirmation of reason)
+    for (const id of MEASUREMENT_IDS as any) {
+      for (const st of ['measured', 'uncertain', 'unavailable']) {
+        if (base.measurements.measurements[id].status === st) continue;
+        expectReject('E status/reason', `${label} ${id}.status=${st}`, (() => { const c = clone(base); c.measurements.measurements[id].status = st; return c; })());
+      }
+    }
+    for (const st of ['measured', 'uncertain', 'unavailable']) {
+      if (base.measurements.status !== st) expectReject('E status/reason', `${label} set.status=${st}`, (() => { const c = clone(base); c.measurements.status = st; return c; })());
+    }
+    for (const id of ALL_LINES) for (const cf of ['none', 'pending', 'confirmed']) {
+      if (base.lines[id].confirmation !== cf) expectReject('E status/reason', `${label} ${id}.confirmation=${cf}`, (() => { const c = clone(base); c.lines[id].confirmation = cf; return c; })());
+    }
+    if (base.measurements.status !== 'unavailable') {
+      for (const extra of ['blurry', 'quality-unknown', 'palm-facing-unknown', 'finger-not-extended', 'depends-on-uncertain']) {
+        if (base.measurements.reasons.includes(extra)) continue;
+        expectReject('E status/reason', `${label} set.reasons+${extra}`, (() => { const c = clone(base); c.measurements.reasons = [...c.measurements.reasons, extra]; c.measurements.status = 'uncertain'; for (const id of MEASUREMENT_IDS as any) { const m = c.measurements.measurements[id]; if (m.status !== 'unavailable') { m.reasons = [...c.measurements.reasons]; m.status = 'uncertain'; } } return c; })());
+      }
+      for (const id of MEASUREMENT_IDS as any) {
+        const m = base.measurements.measurements[id];
+        if (m.status === 'unavailable') continue;
+        expectReject('E status/reason', `${label} ${id} item reasons drop/alter`, (() => { const c = clone(base); const mm = c.measurements.measurements[id]; mm.reasons = mm.reasons.length ? mm.reasons.slice(1) : ['too-dark']; mm.status = mm.reasons.length ? 'uncertain' : 'measured'; return reprov(c); })());
+      }
+    }
+    // H. measurement dependencies
+    if (base.measurements.status !== 'unavailable') {
+      for (const [d, [a, b]] of Object.entries({ handLength: ['palmLength', 'middleLength'], middleToPalmRatio: ['middleLength', 'palmLength'], indexToRingRatio: ['indexLength', 'ringLength'] })) {
+        const ms = base.measurements.measurements;
+        if (ms[d].status !== 'unavailable') {
+          if (a !== 'palmLength') expectReject('H dependency', `${label} ${a} unavailable under usable ${d}`, (() => { const c = clone(base); c.measurements.measurements[a] = { id: a, value: null, unit: 'palm-width', status: 'unavailable', reasons: ['finger-not-extended'] }; return reprov(c); })());
+          expectReject('H dependency', `${label} ${d} value off by 0.05`, (() => { const c = clone(base); c.measurements.measurements[d].value = Math.round((ms[d].value + 0.05) * 1000) / 1000; return c; })());
+          expectReject('H dependency', `${label} ${d} depends-on-unavailable with usable operands`, (() => { const c = clone(base); c.measurements.measurements[d] = { id: d, value: null, unit: d.endsWith('Ratio') ? 'ratio' : 'palm-width', status: 'unavailable', reasons: ['depends-on-unavailable'] }; return reprov(c); })());
+        } else {
+          expectReject('H dependency', `${label} usable ${d} with an unavailable operand`, (() => { const c = clone(base); c.measurements.measurements[d] = { id: d, value: 1, unit: d.endsWith('Ratio') ? 'ratio' : 'palm-width', status: c.measurements.reasons.length ? 'uncertain' : 'measured', reasons: [...c.measurements.reasons] }; return reprov(c); })());
+        }
+        void b;
+      }
+    }
+    // J. provenance contradictions: every id moved to every other group; duplicated; removed
+    const groups = ['automatic-measured', 'user-confirmed', 'user-reported', 'unassessed'];
+    for (const g of groups) for (const id of base.provenance[g]) {
+      for (const g2 of groups) if (g2 !== g) expectReject('J provenance', `${label} ${id} ${g}->${g2}`, (() => { const c = clone(base); c.provenance[g] = c.provenance[g].filter((x: string) => x !== id); c.provenance[g2] = [...c.provenance[g2], id]; return c; })());
+      expectReject('J provenance', `${label} ${id} duplicated`, (() => { const c = clone(base); c.provenance[g] = [...c.provenance[g], id]; return c; })());
+      expectReject('J provenance', `${label} ${id} removed`, (() => { const c = clone(base); c.provenance[g] = c.provenance[g].filter((x: string) => x !== id); return c; })());
+    }
+  }
+  // F. cross-record quality substitutions: transplant the measurement set of record B into record A whenever B's set
+  // REQUIRES quality evidence that A's frame does not have (decided here from the frames alone).
+  const DEG = ['hand-too-small', 'hand-rotated', 'too-dark', 'too-bright', 'low-contrast', 'blurry'], BLK = ['palm-not-visible', 'hand-cut-off'];
+  const qualityNeed = (f: any): string | null => {
+    const r = f.measurements.reasons;
+    if (f.measurements.status === 'unavailable') return r.every((x: string) => BLK.includes(x)) ? `B:${r.join(',')}` : null; // non-quality unavailability: geometry-dependent, not asserted
+    return `U:${r.filter((x: string) => DEG.includes(x) || x === 'quality-unknown').join(',')}`;
+  };
+  const qualityHave = (f: any, usable: boolean): string => {
+    const iss = f.frame.qualityIssues;
+    if (!usable) return `B:${BLK.filter((x) => iss.includes(x)).join(',')}`;
+    return BLK.some((x) => iss.includes(x)) ? 'U:<blocked>' : `U:${[...DEG.filter((x) => iss.includes(x)), ...(f.frame.qualityStatus === 'unknown' ? ['quality-unknown'] : [])].join(',')}`;
+  };
+  for (const [la, A] of BASES) for (const [lb, B] of BASES) {
+    if (la === lb) continue;
+    const need = qualityNeed(B);
+    if (need === null) continue;
+    const usable = need.startsWith('U:');
+    if (need === qualityHave(A, usable)) continue; // quality-compatible: outcome depends on geometry, not asserted
+    if (usable && (!A.frame.available || A.frame.palmFacing === false)) { /* also invalid, but for availability; still asserted */ }
+    expectReject('F cross-record quality', `${lb} measurements -> ${la}`, (() => { const c = clone(A); c.measurements = clone(B.measurements); return reprov(c); })());
+  }
+  // G. geometry / frame inconsistencies via substitutions
+  const noFrame = BASES.filter(([, b]) => !b.frame.available), withFrame = BASES.filter(([, b]) => b.frame.available);
+  for (const [la, A] of noFrame) for (const [lb, B] of withFrame) {
+    for (const id of ALL_LINES) if (B.lines[id].provenance === 'user-confirmed' || (B.lines[id].reason ?? '').startsWith('trace-')) expectReject('G geometry/frame', `${lb} line ${id} -> ${la}`, (() => { const c = clone(A); c.lines[id] = clone(B.lines[id]); return reprov(c); })());
+    for (const id of ALL_MARKS) if (B.marks[id].provenance === 'user-reported' && B.marks[id].approximatePalmLocation) expectReject('G geometry/frame', `${lb} mark ${id} -> ${la}`, (() => { const c = clone(A); c.marks[id] = clone(B.marks[id]); return reprov(c); })());
+  }
+  for (const [lb, B] of noFrame) for (const id of ALL_LINES) if (B.lines[id].reason === 'frame-unavailable') for (const [la, A] of withFrame) expectReject('G geometry/frame', `${lb} line ${id} (frame-unavailable) -> ${la}`, (() => { const c = clone(A); c.lines[id] = clone(B.lines[id]); return reprov(c); })());
+  for (const [la, A] of withFrame) for (const id of ALL_LINES) if (A.lines[id].provenance === 'user-confirmed') {
+    for (const [tag, pts] of [['crossing', [{ x: 0.3, y: 0.3 }, { x: 0.8, y: 0.45 }, { x: 0.8, y: 0.3 }, { x: 0.3, y: 0.45 }]], ['out of bounds', [{ x: 0.3, y: 0.3 }, { x: 1.5, y: 0.4 }]], ['single point', [{ x: 0.3, y: 0.3 }]], ['65 points', Array.from({ length: 65 }, (_, i) => ({ x: 0.1 + i * 0.01, y: 0.5 }))]] as Array<[string, P[]]>) {
+      expectReject('G geometry/frame', `${la} ${id} ${tag}`, (() => { const c = clone(A); c.lines[id].palmPoints = pts; return c; })());
+    }
+  }
+  const total = Object.values(stats).reduce((a, s) => a + s.n, 0);
+  const acc = Object.values(stats).reduce((a, s) => a + s.accepted.length, 0), raw = Object.values(stats).reduce((a, s) => a + s.raw.length, 0);
+  console.log(`MUT summary: ${total} mutations; ${acc} accepted; ${raw} raw exceptions; ` + Object.entries(stats).map(([k, v]) => `${k}=${v.n} (accepted ${v.accepted.length})`).join('; '));
+  for (const [cat, st] of Object.entries(stats)) check(`MUT ${cat}: ${st.n} mutations, all rejected with typed AdapterErrors`, st.n > 0 && st.accepted.length === 0 && st.raw.length === 0, { accepted: st.accepted.slice(0, 5), raw: st.raw.slice(0, 3) });
+}
+// Interpretation boundaries
+check('IB1. all 21 builder positive controls: every genuine degrading, blocked or unknown-quality record keeps its evidence in the payload and produces no interpretation', POS.every(([l, inp]) => { const f = build(inp); if (f.frame.qualityStatus === 'accepted') return true; const pay = adaptF(f, SYN); return JSON.stringify(pay.capture.quality.issues) === JSON.stringify(f.frame.qualityIssues) && pay.capture.quality.status === f.frame.qualityStatus && engine.generateReading(pay).status !== 'interpreted'; }));
+check('IB2. maximum declared confidence (scan 1) never exceeds the tentative ceiling, for every accepted positive control', POS.every(([, inp]) => { const f = build(inp); const pay = adaptF(f, { synthetic: true, scanConfidence: 1 }); const r = engine.generateReading(pay); return pay.creases.items.every((c: any) => c.detection.confidence <= 0.74) && r.sections.flatMap((sec: any) => sec.items ?? []).filter((it: any) => it.kind === 'interpreted').every((it: any) => it.tier === 'tentative'); }));
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed > 0 ? 1 : 0);
