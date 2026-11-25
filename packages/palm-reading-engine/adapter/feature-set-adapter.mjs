@@ -8,7 +8,7 @@
 // The FULL result { features, declined, notMapped } is the integration and audit contract (review L1).
 //
 // ---------------------------------------------------------------------------------------------------------------
-// VALIDATION CONTRACT (v0.5.0). Authoritative basis: measureHand() (measurements.ts) and buildPalmFeatureSet()
+// VALIDATION CONTRACT (v0.5.1). Authoritative basis: measureHand() (measurements.ts) and buildPalmFeatureSet()
 // (features.ts). Every rule below is something those builders always produce; anything else is a malformed or
 // contradictory record and is rejected with a typed AdapterError BEFORE any engine payload is built. Nothing is repaired.
 //
@@ -42,7 +42,9 @@
 //        ['computation-nonfinite'] ONLY when ringLength is usable with serialized value 0 (a ring length below the
 //        rounding step makes index / ring overflow; every other value is a bounded finite quotient or sum);
 //        a usable derived value must agree with its rounded operands within the rounding bound.
-//    Every usable value is on the serialization grid: exactly 3 decimals (round3(v) === v).
+//    Every usable value is on the builder's serialization grid: v === N / 1000 for some integer-valued finite double N
+//    (the builder writes Math.round(raw * 1000) / 1000). Checked by membership, not by re-rounding: re-rounding is not
+//    idempotent once v * 1000 exceeds 2^52 (e.g. 4497934825200.695 re-rounds to ...696).
 //    Reasons R ⇒ status from R (measured iff empty, else uncertain), finite value ≥ 0; any other reason ⇒
 //    unavailable, value null. Under an unavailable S every item is unavailable with ['depends-on-unavailable'].
 //    Unit is 'ratio' for *Ratio ids, else 'palm-width'.
@@ -64,7 +66,7 @@
 import { FEATURE_SCHEMA_ID, FEATURE_SCHEMA_VERSION, COORDINATE_FRAME, FRAME_BOUNDS, MAX_POINTS, QUALITY_ISSUES, polylineProblem } from '../prototype/src/schema.mjs';
 import { TENTATIVE_CAP } from '../prototype/src/policy.mjs';
 
-export const FEATURE_SET_ADAPTER_VERSION = 'palm-03-i1-feature-set-adapter@0.5.0';
+export const FEATURE_SET_ADAPTER_VERSION = 'palm-03-i1-feature-set-adapter@0.5.1';
 export const ACCEPTED_FEATURE_SET_VERSIONS = Object.freeze(['palm-03-i1-feature-set@0.1.0']);
 export const ACCEPTED_MEASUREMENT_VERSIONS = Object.freeze(['palm-03-i1-hand-measurements@0.1.0']);
 export const LINE_TO_CLASS = Object.freeze({ heart: 'DTC', head: 'PTC', life: 'TC', upward: 'MINOR' });
@@ -121,6 +123,23 @@ const inBounds = (p) => p.x >= FRAME_BOUNDS.xMin && p.x <= FRAME_BOUNDS.xMax && 
 const sameKeys = (o, keys) => { const k = Object.getOwnPropertyNames(o); return k.length === keys.length && keys.every((x) => own(o, x)); };
 const hasKeys = (o, keys, code, where) => { if (!isObj(o) || !sameKeys(o, keys)) fail(code, `${where} must have exactly the own fields ${keys.join(', ')}`); };
 const strings = (a, code, where) => { if (!Array.isArray(a) || !a.every((x) => typeof x === 'string')) fail(code, `${where} must be an array of strings`); return a; };
+const nextDouble = (x, dir) => { // adjacent finite double towards +Infinity (dir 1) or -Infinity (dir -1)
+  if (x === 0) return dir * Number.MIN_VALUE;
+  const b = new DataView(new ArrayBuffer(8)); b.setFloat64(0, x);
+  const bits = b.getBigUint64(0); b.setBigUint64(0, (x > 0) === (dir > 0) ? bits + 1n : bits - 1n);
+  return b.getFloat64(0);
+};
+/** Serialization-grid membership: is v exactly N / 1000 for an integer-valued finite double N? No tolerance, no cap. */
+export function onSerializationGrid(v) {
+  if (!isNum(v)) return false;
+  const n0 = Math.round(v * 1000);
+  if (!Number.isFinite(n0)) return false;
+  const cands = [n0];
+  // N is within a few units of v * 1000: integer neighbours where doubles are finer than 1, double neighbours above 2^53.
+  if (Math.abs(n0) < 2 ** 53) cands.push(n0 - 2, n0 - 1, n0 + 1, n0 + 2);
+  else { let a = n0, b = n0; for (let i = 0; i < 2; i++) { a = nextDouble(a, -1); b = nextDouble(b, 1); cands.push(a, b); } }
+  return cands.some((N) => Number.isInteger(N) && N / 1000 === v);
+}
 const isPoint = (p) => isObj(p) && sameKeys(p, KEYS.point) && isNum(p.x) && isNum(p.y) && inBounds(p);
 
 /** C1: deep plain-data check. Throws AdapterError. */
@@ -206,7 +225,7 @@ function validMeasurements(ms, fr) {
   }
   // C4, items.
   const usableReasons = (m) => eq(m.reasons, R);
-  const onGrid = (v) => Math.round(v * 1000) / 1000 === v;
+  const onGrid = onSerializationGrid;
   const shape = (id, m) => {
     if (usableReasons(m)) {
       if (m.status !== (R.length ? 'uncertain' : 'measured') || !isNum(m.value) || m.value < 0) fail('invalid-measurement', `measurements.${id}: reasons ${JSON.stringify(m.reasons)} require status ${R.length ? 'uncertain' : 'measured'} and a finite value`);

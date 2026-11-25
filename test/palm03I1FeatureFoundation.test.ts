@@ -843,5 +843,66 @@ check('IB2. maximum declared confidence (scan 1) never exceeds the tentative cei
   check('CX-9. replay positives: blocked/unknown reach quality-not-accepted; folded ring interprets (tentative only); each degrader keeps per-item evidence and is declined; confirmed unusable trace + mark variants (with and without frame) + wrong facing all accepted', gate.every((g) => g.decline === 'quality-not-accepted' && (g.interpreted ?? []).length === 0) && fo.status === 'interpreted' && (fo.interpreted ?? []).length > 0 && (fo.interpreted ?? []).every((i: any) => i.tier === 'tentative') && degr.every(Boolean) && obs.lines.heart.provenance === 'unassessed' && obs.lines.heart.confirmation === 'confirmed' && outcome(obs).code === 'accepted' && featureSetAdapter.adaptFeatureSet(obs, SYN1).notMapped.filter((m: any) => m.feature.startsWith('mark:')).map((m: any) => m.feature).join() === 'mark:yava,mark:matsya' && misc.frame.palmFacing === false && JSON.stringify(misc.measurements.reasons) === '["palm-not-facing"]' && outcome(misc).code === 'accepted' && markVariants.every((c) => c === 'accepted'), { gate, fo: fo.status, degr, mv: markVariants });
   check('CX-9b. synthetic-only enforcement intact: synthetic:false is refused', (() => { try { featureSetAdapter.adaptFeatureSet(fold, { synthetic: false, scanConfidence: 1 }); return false; } catch (e: any) { return e.code === 'synthetic-required'; } })());
 }
+
+// ============================================================ NP. serialized-precision correction (reviewed head 18939cb)
+// Codex witness /private/tmp/palm391-review.VKw3Hbyp/corrected/exact-rounded-zero-witness.cjs (fixture copied).
+{
+  const g = featureSetAdapter.onSerializationGrid as (v: number) => boolean;
+  const SYN1 = { synthetic: true, scanConfidence: 1 };
+  const code = (f: any) => { try { featureSetAdapter.adaptFeatureSet(f, SYN1); return 'accepted'; } catch (e: any) { return e instanceof featureSetAdapter.AdapterError ? e.code : `RAW:${e?.message}`; } };
+  const both = (f: any) => [code(f), code(JSON.parse(JSON.stringify(f)))];
+  const npPoint = ([x, y]: number[]) => ({ x: (24 + x) / 64, y: (32 + y) / 128 });
+  const npBase = (L: any[]): PalmFeatureSetInput => ({ landmarks: L, imageWidth: 64, imageHeight: 128, hand: 'left', dominantHand: 'unknown', handednessLabel: 'Left', qualityIssues: [], rotationDeg: 0, lines: [], marks: [] });
+  const witL = RV_OFF.map(npPoint); for (const i of [13, 14, 15]) witL[i] = { ...witL[0] }; witL[16] = { x: 0.406250000000043, y: witL[0].y };
+  const wf = build(npBase(witL));
+  const wm = wf.measurements.measurements;
+  check('NP-1. exact Codex witness: available frame, accepted quality, ringLength 0, indexToRingRatio 4497934825200.695 (builder output)', wf.frame.available && wf.frame.qualityStatus === 'accepted' && wf.measurements.status === 'measured' && wm.ringLength.value === 0 && wm.indexToRingRatio.value === 4497934825200.695, [wm.ringLength, wm.indexToRingRatio]);
+  check('NP-1b. the old re-rounding check fails on it (4497934825200.695 re-rounds to ...696) but grid membership holds', Math.round(4497934825200.695 * 1000) / 1000 === 4497934825200.696 && g(4497934825200.695));
+  check('NP-1c. the witness is accepted directly and after a JSON round trip', JSON.stringify(both(wf)) === '["accepted","accepted"]', both(wf));
+  // Grid membership on its own: ordinary, short, zero, off-grid, large, transitions, scientific notation.
+  check('NP-2. ordinary 3-decimal and shorter values are on the grid (0.837, 0.83, 0.8, 1, 0, 12384.403)', [0.837, 0.83, 0.8, 1, 0, 12384.403].every(g));
+  check('NP-2b. genuinely off-grid values are rejected (0.8371, 0.0005, 1.2345, 12384.4035, 999999.9999)', [0.8371, 0.0005, 1.2345, 12384.4035, 999999.9999].every((v) => !g(v)));
+  check('NP-2c. non-finite / non-number values are rejected', [NaN, Infinity, -Infinity, '0.837' as any, null as any].every((v) => !g(v)));
+  {
+    // Every builder serialization Math.round(r * 1000) / 1000 across 1e-3 .. 1e300 is on the grid (incl. the 2^52-2^53
+    // transition around 4.5e12-9e12 and scientific notation from 1e21); where the double spacing is finer than half a
+    // grid step (< ~2e12) a +0.0004 shift is detected as off-grid. Deterministic magnitudes.
+    const bad: any[] = []; let n = 0, offChecked = 0;
+    for (let e = -3; e <= 300; e += 0.37) for (const m of [1, 1.234567891, 4.497934825200695, 9.87654321]) {
+      const r = m * 10 ** e, v = Math.round(r * 1000) / 1000;
+      if (!Number.isFinite(v)) continue;
+      n++;
+      if (!g(v)) bad.push({ r, v });
+      if (Math.abs(v) < 2e12) { const off = v + 0.0004; if (off !== v) { offChecked++; if (g(off)) bad.push({ off }); } }
+      const j = JSON.parse(JSON.stringify(v)); if (j !== v || !g(j)) bad.push({ json: v });
+    }
+    check(`NP-3. ${n} builder serializations from 1e-3 to 1e300 (incl. 2^52-2^53 and scientific notation) are on the grid and survive JSON; ${offChecked} off-grid shifts below 2e12 are rejected`, bad.length === 0 && n > 3000 && offChecked > 150, bad.slice(0, 4));
+  }
+  check('NP-3b. scientific-notation values serialize as such in JSON and stay on the grid (1.234e+21, 4.5e+300)', JSON.stringify(1.234e21) === '1.234e+21' && g(JSON.parse('1.234e+21')) && g(JSON.parse('4.5e+300')));
+  // Genuine builder outputs across progressively smaller positive ring lengths: finite large ratios, rounded-zero ring,
+  // then the transition to computation-nonfinite (wrist at the origin so the ring length can underflow).
+  {
+    const rows: any[] = []; const bad: any[] = [];
+    for (let k = 2; k <= 17; k += 0.25) {
+      const L = RV_OFF.map(npPoint); for (const i of [13, 14, 15]) L[i] = { ...L[0] }; L[16] = { x: L[0].x + 10 ** -k, y: L[0].y };
+      const f = build(npBase(L)); const m = f.measurements.measurements;
+      const c = both(f); rows.push([k, m.ringLength.value, m.indexToRingRatio.value, m.indexToRingRatio.reasons.join()]);
+      if (c[0] !== 'accepted' || c[1] !== 'accepted') bad.push({ k, ring: m.ringLength, ratio: m.indexToRingRatio, c });
+    }
+    for (const x of [1e-200, 1e-300, 1e-310, 1e-320, 5e-324]) {
+      const L = RV_OFF.map((p, i) => (i === 0 || (i >= 13 && i <= 15) ? { x: 0, y: 0 } : i === 16 ? { x, y: 0 } : i === 8 ? { x: 1, y: 1 } : npPoint(p)));
+      const f = build({ ...npBase(L), handednessLabel: undefined }); const m = f.measurements.measurements;
+      const c = both(f); rows.push([`x=${x}`, m.ringLength.value, m.indexToRingRatio.value, m.indexToRingRatio.reasons.join()]);
+      if (c[0] !== 'accepted' || c[1] !== 'accepted') bad.push({ x, ring: m.ringLength, ratio: m.indexToRingRatio, c });
+    }
+    const finiteLarge = rows.filter((r) => typeof r[2] === 'number' && r[2] > 1e6).length, nonfinite = rows.filter((r) => r[3] === 'computation-nonfinite').length, zeroRing = rows.filter((r) => r[1] === 0).length;
+    check(`NP-4. ${rows.length} genuine builder outputs over shrinking ring lengths (${finiteLarge} finite ratios > 1e6, ${zeroRing} with ring 0.000, ${nonfinite} computation-nonfinite) are all accepted directly and after JSON`, bad.length === 0 && finiteLarge > 10 && nonfinite >= 1 && zeroRing > 5, { bad: bad.slice(0, 3), sample: rows.filter((_, i) => i % 8 === 0) });
+  }
+  // Off-grid at large magnitude where the grid is still resolvable, and other invariants untouched.
+  const offLarge = clone(build(npBase(RV_OFF.map(npPoint)))); offLarge.measurements.measurements.palmLength.value = 1.2345;
+  check('NP-5. off-grid palmLength 1.2345 still rejected; precision fix does not relax other invariants (CX-5 family re-checked)', code(offLarge) === 'invalid-measurement');
+  const wNF = clone(wf); wNF.measurements.measurements.handLength = { id: 'handLength', unit: 'palm-width', status: 'unavailable', value: null, reasons: ['computation-nonfinite'] }; reprov(wNF);
+  check('NP-5b. on the witness record, a computation-nonfinite handLength (finite operands) is still rejected', code(wNF) === 'invalid-measurement');
+}
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed > 0 ? 1 : 0);
