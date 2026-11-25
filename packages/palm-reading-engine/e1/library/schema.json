@@ -1,0 +1,1216 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "aura.palm.interpretation-library/0.4.0-draft",
+  "title": "AURA-PALM-03-C1 personalised palmistry interpretation library (DRAFT, unreviewed research content)",
+  "description": "Proposed content schema for PALM-03-E1. One library = one catalogue of interpretation records. Observation quality, feature confirmation and interpretation wording are three separate blocks: a record says what must be OBSERVED (and how well), what PROVENANCE the observation may have (user-confirmed, automatic-measured, user-reported), and only then what may be SAID. Confirmation establishes feature identity only, never accuracy or validity. Nothing here is release-approved. v0.2 (2026-11-24) applies owner decisions C1-D1..D4: Indian-first multi-tradition composition with reading modes; self-reported inputs distinct from palm observations; tentative ceiling for every record; four uncertainty axes kept separate. v0.3 (2026-11-24, final content direction): source support is necessary but not sufficient; every record carries a six-criterion suitability assessment and an eligibility status; selection applies eligibility, relevance, observation quality, source support and suitability BEFORE tradition preference.",
+  "type": "object",
+  "required": [
+    "libraryVersion",
+    "status",
+    "generatedBy",
+    "featureSetVersion",
+    "globalPolicy",
+    "sources",
+    "interpretations",
+    "readingModes",
+    "e1Planning"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "libraryVersion": {
+      "const": "palm-03-c1-library@0.4.0-draft"
+    },
+    "status": {
+      "const": "UNREVIEWED_RESEARCH_CONTENT"
+    },
+    "generatedBy": {
+      "type": "object",
+      "required": [
+        "ticket",
+        "author",
+        "date",
+        "aiGenerated"
+      ],
+      "properties": {
+        "ticket": {
+          "const": "AURA-PALM-03-C1"
+        },
+        "author": {
+          "type": "string"
+        },
+        "date": {
+          "type": "string",
+          "format": "date"
+        },
+        "aiGenerated": {
+          "type": "boolean"
+        }
+      }
+    },
+    "featureSetVersion": {
+      "const": "palm-03-i1-feature-set@0.1.0",
+      "description": "The PALM-03-I1 representation this library was keyed to."
+    },
+    "globalPolicy": {
+      "$ref": "#/$defs/globalPolicy"
+    },
+    "sources": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/sourceRecord"
+      },
+      "minItems": 1
+    },
+    "interpretations": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/interpretation"
+      }
+    },
+    "readingModes": {
+      "$ref": "#/$defs/readingModes"
+    },
+    "e1Planning": {
+      "type": "object",
+      "required": [
+        "capabilities",
+        "tiers",
+        "originGapDecision",
+        "notPlanned",
+        "carriedForwardFromI1"
+      ],
+      "properties": {
+        "capabilities": {
+          "type": "object"
+        },
+        "tiers": {
+          "type": "object",
+          "required": [
+            "essential",
+            "optionalAssisted",
+            "futureResearch"
+          ]
+        },
+        "originGapDecision": {
+          "type": "string"
+        },
+        "notPlanned": {
+          "type": "array"
+        },
+        "carriedForwardFromI1": {
+          "type": "object",
+          "required": [
+            "M4",
+            "E1-A1",
+            "E1-A2",
+            "E1-A3",
+            "E1-A4",
+            "E1-A5"
+          ]
+        }
+      }
+    }
+  },
+  "$defs": {
+    "tradition": {
+      "enum": [
+        "indian-classical",
+        "indian-later-treatise",
+        "indian-diagram-tradition",
+        "western-19c-chirognomy",
+        "western-19c-chiromancy"
+      ],
+      "description": "Kept distinct. No record may carry two traditions; cross-tradition notes go in 'traditionNotes' only."
+    },
+    "category": {
+      "enum": [
+        "overview",
+        "personality",
+        "strengths",
+        "emotional-relational",
+        "career-working-style",
+        "growth",
+        "life-direction",
+        "historical-context-only"
+      ],
+      "description": "'historical-context-only' = may be shown as 'what the texts said' but never phrased as about the user."
+    },
+    "supportLevel": {
+      "enum": [
+        "direct",
+        "inferred",
+        "disputed",
+        "unsupported"
+      ],
+      "description": "direct = the cited passage states the association; inferred = Aura's reflective reframing of a directly attested association (must be labelled as Aura's, reviewer must approve the inference); disputed = sources disagree or the text is corrupt/emended; unsupported = no source found (record kept only to document the gap; never emitted)."
+    },
+    "featureRef": {
+      "type": "object",
+      "required": [
+        "feature",
+        "provenanceAllowed"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "feature": {
+          "description": "Ids follow palm-03-i1-feature-set@0.1.0 (lines.*, marks.*, measurements.*) or a PROPOSED id that needs new engine representation (prefix 'proposed.').",
+          "type": "string",
+          "pattern": "^(lines\\.(heart|head|life|upward)|marks\\.(yava|matsya|shankha|chatra|vedi)|measurements\\.[a-zA-Z]+|proposed\\.[a-zA-Z0-9.-]+)$"
+        },
+        "anatomical": {
+          "enum": [
+            "distal-transverse",
+            "proximal-transverse",
+            "thenar",
+            "central-longitudinal",
+            "thumb",
+            "finger",
+            "palm",
+            "mark",
+            "wrist"
+          ]
+        },
+        "provenanceAllowed": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "user-confirmed",
+              "automatic-measured",
+              "user-reported",
+              "user-self-reported"
+            ]
+          },
+          "minItems": 1,
+          "description": "D2. user-confirmed = the user traced and confirmed a line on their own photo; automatic-measured = computed from landmarks; user-reported = the user says they see a traditional mark (position unchecked); user-self-reported = the user's answer to a question about a HAND feature that is not observed in the photo. Self-reports never ask about personality and are never presented as palm-derived discoveries."
+        },
+        "observation": {
+          "type": "object",
+          "description": "The geometric/descriptive predicate the feature must satisfy. Thresholds are placeholders until E1 calibrates them on synthetic data.",
+          "properties": {
+            "descriptor": {
+              "type": "string"
+            },
+            "range": {
+              "type": "object",
+              "properties": {
+                "min": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "max": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                }
+              }
+            },
+            "categorical": {
+              "type": "string"
+            },
+            "thresholdStatus": {
+              "enum": [
+                "placeholder",
+                "source-defined",
+                "calibrated"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "observationQuality": {
+      "type": "object",
+      "required": [
+        "minFrameProperties",
+        "blockingQualityIssues",
+        "maxTier"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "minFrameProperties": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "scale",
+              "axis",
+              "direction"
+            ]
+          }
+        },
+        "blockingQualityIssues": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "G5 feedback codes that decline this record."
+        },
+        "measurementStatusRequired": {
+          "enum": [
+            "measured",
+            "measured-or-uncertain"
+          ],
+          "description": "For measurement-based records. 'uncertain' always forces tier tentative."
+        },
+        "maxTier": {
+          "const": "tentative",
+          "description": "D3: tentative is the ceiling for every record in the initial version, including automatic measurements."
+        },
+        "boundaryMargin": {
+          "type": "number",
+          "description": "Values within this margin of a threshold or zone edge are omitted and listed as not assessed with reason 'boundary' (RC-7). Never shown as both readings, never shown as one side."
+        },
+        "displayRule": {
+          "const": "never-as-confidence",
+          "description": "Quality values gate emission; they are never shown as a confidence score."
+        }
+      }
+    },
+    "sourceRef": {
+      "type": "object",
+      "required": [
+        "sourceId",
+        "locator",
+        "supportLevel"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "sourceId": {
+          "type": "string"
+        },
+        "locator": {
+          "type": "string",
+          "description": "Verse/chapter/page in the edition named in the source record."
+        },
+        "originalTerm": {
+          "type": "string",
+          "description": "IAST or original-language term, only if seen in a source actually read."
+        },
+        "translationOfTerm": {
+          "type": "string"
+        },
+        "supportLevel": {
+          "$ref": "#/$defs/supportLevel"
+        },
+        "verification": {
+          "enum": [
+            "read-directly",
+            "read-via-secondary",
+            "not-read"
+          ]
+        },
+        "note": {
+          "type": "string"
+        }
+      }
+    },
+    "interpretation": {
+      "type": "object",
+      "required": [
+        "id",
+        "tradition",
+        "featureIdentity",
+        "requires",
+        "categories",
+        "sources",
+        "traditionalInterpretation",
+        "userFacing",
+        "observationQuality",
+        "exclusions",
+        "review",
+        "licensing",
+        "uncertainty",
+        "suitability",
+        "eligibility",
+        "e1Capabilities"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^C1-(IN|WE)-[A-Z0-9-]+$"
+        },
+        "tradition": {
+          "$ref": "#/$defs/tradition"
+        },
+        "featureIdentity": {
+          "type": "object",
+          "required": [
+            "anatomicalName",
+            "traditionalTerm"
+          ],
+          "properties": {
+            "anatomicalName": {
+              "type": "string"
+            },
+            "traditionalTerm": {
+              "type": "string",
+              "description": "Term in this record's tradition only (e.g. 'pitṛlekhā' OR 'life line', never both)."
+            },
+            "traditionalTermTranslation": {
+              "type": "string"
+            }
+          }
+        },
+        "requires": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/featureRef"
+          },
+          "minItems": 1,
+          "description": "ALL must be present and satisfied. Absence of a feature never triggers a record."
+        },
+        "categories": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/category"
+          },
+          "minItems": 1
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/sourceRef"
+          },
+          "minItems": 1
+        },
+        "overallSupport": {
+          "$ref": "#/$defs/supportLevel"
+        },
+        "traditionalInterpretation": {
+          "type": "string",
+          "description": "Aura paraphrase of what the source says, in the source's own frame. Internal/reviewer-facing; may be shown under 'What the texts said'."
+        },
+        "userFacing": {
+          "type": "object",
+          "required": [
+            "observation",
+            "reading"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "observation": {
+              "type": "string",
+              "description": "Neutral description of what was observed and how (e.g. 'You traced …'). No meaning."
+            },
+            "reading": {
+              "type": "string",
+              "description": "Tradition-attributed wording. Must begin with an attribution frame; the engine prepends the tier frame."
+            },
+            "reflection": {
+              "type": "string",
+              "description": "Optional open question. Never advice for consequential decisions."
+            },
+            "applicationNote": {
+              "type": "string",
+              "description": "Required when overallSupport = 'inferred': states that the personal framing is Aura's, not the text's."
+            }
+          }
+        },
+        "observationQuality": {
+          "$ref": "#/$defs/observationQuality"
+        },
+        "conflicts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "withId",
+              "kind",
+              "handling"
+            ],
+            "properties": {
+              "withId": {
+                "type": "string"
+              },
+              "kind": {
+                "enum": [
+                  "same-feature-other-tradition",
+                  "within-tradition-disagreement",
+                  "textual-variant",
+                  "contradictory-combination"
+                ]
+              },
+              "handling": {
+                "enum": [
+                  "show-both-attributed",
+                  "show-neither",
+                  "lower-to-tentative",
+                  "prefer-none-note-disagreement"
+                ]
+              },
+              "note": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "traditionNotes": {
+          "type": "string",
+          "description": "Cross-tradition context. May mention the other tradition's NAME for the feature; may not import its meaning."
+        },
+        "exclusions": {
+          "type": "object",
+          "required": [
+            "claimsNeverMade",
+            "doNotEmitWhen"
+          ],
+          "properties": {
+            "claimsNeverMade": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/prohibitedClaim"
+              }
+            },
+            "doNotEmitWhen": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "droppedSourceContent": {
+              "type": "string",
+              "description": "What the source also says that Aura deliberately does not use, and why."
+            }
+          }
+        },
+        "review": {
+          "type": "object",
+          "required": [
+            "status"
+          ],
+          "properties": {
+            "status": {
+              "enum": [
+                "UNREVIEWED_RESEARCH_CONTENT",
+                "IN_SCHOLARLY_REVIEW",
+                "IN_EDITORIAL_REVIEW",
+                "APPROVED_FOR_PERSONALISED_READING",
+                "REJECTED"
+              ]
+            },
+            "scholarlyReviewer": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "editorialReviewer": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "decisionRef": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "notes": {
+              "type": "string"
+            }
+          }
+        },
+        "licensing": {
+          "type": "object",
+          "required": [
+            "status",
+            "basis"
+          ],
+          "properties": {
+            "status": {
+              "enum": [
+                "public-domain-source-original-paraphrase",
+                "cc-by-sa-source-original-paraphrase-pending-adaptation-review",
+                "copyrighted-source-not-usable",
+                "pending"
+              ]
+            },
+            "basis": {
+              "type": "string"
+            },
+            "attributionRequired": {
+              "type": "boolean"
+            },
+            "aiAuthorship": {
+              "type": "boolean"
+            }
+          }
+        },
+        "uncertainty": {
+          "$ref": "#/$defs/uncertainty"
+        },
+        "selfReport": {
+          "$ref": "#/$defs/selfReport"
+        },
+        "readingModes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/readingMode"
+          },
+          "description": "Modes in which this record may appear. Indian records: indian-only + combined. Western: western-only + combined (combined only with complementsIndianGap)."
+        },
+        "complementsIndianGap": {
+          "type": "object",
+          "required": [
+            "feature",
+            "indianStatus",
+            "reason"
+          ],
+          "properties": {
+            "feature": {
+              "type": "string"
+            },
+            "indianStatus": {
+              "enum": [
+                "no-indian-source",
+                "indian-meaning-excluded",
+                "indian-meaning-disputed",
+                "indian-reading-needs-unavailable-observation"
+              ]
+            },
+            "reason": {
+              "type": "string"
+            }
+          },
+          "description": "Required for Western records to be eligible in combined mode (D1)."
+        },
+        "wordingFidelity": {
+          "type": "object",
+          "required": [
+            "status"
+          ],
+          "properties": {
+            "status": {
+              "enum": [
+                "faithful",
+                "faithful-neutral-rewording",
+                "softened-withdrawn"
+              ]
+            },
+            "sourceWording": {
+              "type": "string",
+              "description": "Short paraphrase or short quotation (≤15 words) of the strongest source wording."
+            },
+            "note": {
+              "type": "string"
+            }
+          }
+        },
+        "suitability": {
+          "$ref": "#/$defs/suitability"
+        },
+        "eligibility": {
+          "$ref": "#/$defs/eligibility"
+        },
+        "researchHistory": {
+          "type": "object",
+          "description": "Retained provenance for excluded or reworded records (withdrawn wording notes, retained drafts). Never shown to users.",
+          "properties": {
+            "note": {
+              "type": "string"
+            },
+            "retainedUserFacingDraft": {
+              "type": "object"
+            }
+          }
+        },
+        "e1Capabilities": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "E1-E1",
+              "E1-E2",
+              "E1-E3",
+              "E1-E4",
+              "E1-E5",
+              "E1-L1",
+              "E1-L2",
+              "E1-L3",
+              "E1-L4",
+              "E1-L5",
+              "not-planned"
+            ]
+          },
+          "minItems": 1,
+          "description": "Derived: the E1 capabilities this record needs before it can be emitted."
+        }
+      }
+    },
+    "prohibitedClaim": {
+      "enum": [
+        "lifespan-or-death",
+        "health-or-medical",
+        "wealth-or-financial-outcome",
+        "marriage-partner-or-divorce",
+        "fertility-or-children",
+        "event-dates-or-timing",
+        "accident-disaster-misfortune",
+        "caste-varna-class",
+        "gender-or-sex-characteristics",
+        "skin-colour-or-complexion",
+        "moral-character-judgement",
+        "career-success-or-failure",
+        "scientific-validity",
+        "meaning-from-absence",
+        "consequential-decision-advice"
+      ]
+    },
+    "globalPolicy": {
+      "type": "object",
+      "required": [
+        "traceConfidenceCap",
+        "absentFeaturePolicy",
+        "conflictPolicy",
+        "tierFrames",
+        "markPolicy",
+        "selfReportPolicy",
+        "futureLanguage",
+        "notAssessedReasons"
+      ],
+      "properties": {
+        "traceConfidenceCap": {
+          "const": "tentative"
+        },
+        "absentFeaturePolicy": {
+          "const": "omit-and-list-as-not-assessed"
+        },
+        "conflictPolicy": {
+          "const": "never-resolve-to-certainty"
+        },
+        "maxInterpretationsPerCategory": {
+          "type": "integer"
+        },
+        "tierFrames": {
+          "type": "object"
+        },
+        "markPolicy": {
+          "const": "unreported-is-unknown",
+          "description": "D2: an unreported or skipped mark is unknown, never absent; no record may be triggered by a mark's absence."
+        },
+        "selfReportPolicy": {
+          "const": "distinct-provenance-disclosed",
+          "description": "Self-reported records always carry selfReport.presentation."
+        },
+        "interpretationCeiling": {
+          "const": "tentative"
+        },
+        "futureLanguage": {
+          "const": "questions-only-never-forecasts"
+        },
+        "notAssessedReasons": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "code",
+              "wording",
+              "carries"
+            ],
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "wording": {
+                "type": "string"
+              },
+              "carries": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "sourceRecord": {
+      "type": "object",
+      "required": [
+        "id",
+        "author",
+        "title",
+        "tradition",
+        "edition",
+        "licensing",
+        "verification"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "author": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "tradition": {
+          "$ref": "#/$defs/tradition"
+        },
+        "textDate": {
+          "type": "string"
+        },
+        "edition": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        },
+        "licensing": {
+          "type": "string"
+        },
+        "verification": {
+          "enum": [
+            "read-directly",
+            "read-via-secondary",
+            "not-read"
+          ]
+        },
+        "registerRef": {
+          "type": "string",
+          "description": "Row id in AURA_PALM_03_C1_SOURCE_REGISTER.md"
+        }
+      }
+    },
+    "readingMode": {
+      "enum": [
+        "indian-only",
+        "western-only",
+        "combined"
+      ]
+    },
+    "readingModes": {
+      "type": "object",
+      "required": [
+        "supported",
+        "default",
+        "composition",
+        "modeBehaviour",
+        "domains",
+        "placement"
+      ],
+      "additionalProperties": false,
+      "description": "D1. Schema support for future preferences; no preference UI is implied. 'combined' is the initial default.",
+      "properties": {
+        "supported": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/readingMode"
+          },
+          "minItems": 3,
+          "maxItems": 3
+        },
+        "default": {
+          "const": "combined"
+        },
+        "composition": {
+          "type": "object",
+          "required": [
+            "onePerReading",
+            "selectionOrder",
+            "preferIndianWhenComparablySuitable",
+            "noForcedTraditionSlots",
+            "westernEligibility",
+            "noRatio",
+            "noMerging",
+            "unsupportedCategories",
+            "comparablySuitable"
+          ],
+          "properties": {
+            "onePerReading": {
+              "const": true,
+              "description": "One coherent reading; never two parallel readings."
+            },
+            "westernEligibility": {
+              "const": "suitable-additional-coverage",
+              "description": "A Western record is used where it gives suitable additional coverage. Every Western record must declare complementsIndianGap (why no comparably suitable Indian reading exists for that feature). This is a justification, not a quota."
+            },
+            "noRatio": {
+              "const": true
+            },
+            "noMerging": {
+              "const": true,
+              "description": "Conflicting meanings are shown attributed side by side or not at all."
+            },
+            "unsupportedCategories": {
+              "const": "show-as-not-assessed"
+            },
+            "selectionOrder": {
+              "const": [
+                "eligibility",
+                "relevance",
+                "observation-quality",
+                "source-support",
+                "content-suitability",
+                "tradition-preference"
+              ],
+              "description": "Precedence for choosing items in a category. Tradition preference is the LAST tie-breaker."
+            },
+            "preferIndianWhenComparablySuitable": {
+              "const": true,
+              "description": "Indian is preferred only between comparably suitable candidates."
+            },
+            "noForcedTraditionSlots": {
+              "const": true,
+              "description": "No category slot is reserved for a tradition; an Indian item is never shown at the expense of a more relevant, more suitable item."
+            },
+            "comparablySuitable": {
+              "type": "object",
+              "required": [
+                "definition",
+                "supportRank"
+              ],
+              "properties": {
+                "definition": {
+                  "type": "string"
+                },
+                "supportRank": {
+                  "const": [
+                    "direct",
+                    "inferred",
+                    "disputed"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "modeBehaviour": {
+          "type": "object",
+          "required": [
+            "combined",
+            "indian-only",
+            "western-only"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "combined": {
+              "type": "object",
+              "required": [
+                "traditions",
+                "rule",
+                "emptyResult"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "traditions": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/tradition"
+                  }
+                },
+                "rule": {
+                  "type": "string"
+                },
+                "emptyResult": {
+                  "type": "string"
+                }
+              }
+            },
+            "indian-only": {
+              "type": "object",
+              "required": [
+                "traditions",
+                "rule",
+                "emptyResult"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "traditions": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/tradition"
+                  }
+                },
+                "rule": {
+                  "type": "string"
+                },
+                "emptyResult": {
+                  "type": "string"
+                }
+              }
+            },
+            "western-only": {
+              "type": "object",
+              "required": [
+                "traditions",
+                "rule",
+                "emptyResult"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "traditions": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/tradition"
+                  }
+                },
+                "rule": {
+                  "type": "string"
+                },
+                "emptyResult": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "domains": {
+          "type": "object",
+          "required": [
+            "personality",
+            "relationships",
+            "career",
+            "life-direction"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "personality": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/category"
+              },
+              "minItems": 1
+            },
+            "relationships": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/category"
+              },
+              "minItems": 1
+            },
+            "career": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/category"
+              },
+              "minItems": 1
+            },
+            "life-direction": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/category"
+              },
+              "minItems": 1
+            }
+          },
+          "description": "The four product domains mapped onto catalogue categories."
+        },
+        "placement": {
+          "type": "object",
+          "required": [
+            "sectionOrder",
+            "rule",
+            "description",
+            "overflowSection"
+          ],
+          "properties": {
+            "sectionOrder": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/category"
+              }
+            },
+            "rule": {
+              "const": "first-listed-category-with-room"
+            },
+            "description": {
+              "type": "string"
+            },
+            "overflowSection": {
+              "const": "more-from-your-reading"
+            }
+          }
+        }
+      }
+    },
+    "selfReport": {
+      "type": "object",
+      "required": [
+        "subject",
+        "question",
+        "answers",
+        "presentation"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "subject": {
+          "const": "hand-feature",
+          "description": "Self-report questions concern the hand only, never personality, mood, relationships or life events."
+        },
+        "question": {
+          "type": "string"
+        },
+        "answers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 2,
+          "description": "Must include a 'not sure' answer; 'not sure' produces no reading."
+        },
+        "presentation": {
+          "type": "string",
+          "description": "Mandatory user-facing disclosure that the observation comes from the user's answer, not from the photo."
+        }
+      }
+    },
+    "uncertainty": {
+      "type": "object",
+      "required": [
+        "measurementQuality",
+        "identityConfirmation",
+        "sourceSupport",
+        "traditionalUncertainty"
+      ],
+      "additionalProperties": false,
+      "description": "D3. Four axes kept separate. None of them is, or may be displayed as, scientific confidence in personality or future outcomes.",
+      "properties": {
+        "measurementQuality": {
+          "const": "runtime-from-observationQuality",
+          "description": "Decided at runtime from G5 quality and measurement status; gates emission only."
+        },
+        "identityConfirmation": {
+          "enum": [
+            "user-confirmed-identity",
+            "measured-no-identity-claim",
+            "user-reported-unchecked",
+            "user-self-reported"
+          ]
+        },
+        "sourceSupport": {
+          "$ref": "#/$defs/supportLevel"
+        },
+        "traditionalUncertainty": {
+          "type": "object",
+          "required": [
+            "level",
+            "reasons"
+          ],
+          "properties": {
+            "level": {
+              "enum": [
+                "low",
+                "moderate",
+                "high"
+              ]
+            },
+            "reasons": {
+              "type": "array",
+              "items": {
+                "enum": [
+                  "single-source",
+                  "sources-disagree",
+                  "textual-corruption-or-emendation",
+                  "translation-dependent",
+                  "sanskrit-unchecked",
+                  "ocr-unverified",
+                  "later-tradition-only",
+                  "inferred-application"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "suitability": {
+      "type": "object",
+      "required": [
+        "sourceFidelity",
+        "observationRequirements",
+        "culturalContext",
+        "relevanceToUser",
+        "harmfulAttributionRisk",
+        "constructiveReflection",
+        "rationale"
+      ],
+      "additionalProperties": false,
+      "description": "Final content direction §3. 'fail' on any criterion makes a record ineligible for personalised readings. Assessments are Claude's and unreviewed.",
+      "properties": {
+        "sourceFidelity": {
+          "enum": [
+            "pass",
+            "concern",
+            "fail",
+            "not-applicable"
+          ]
+        },
+        "observationRequirements": {
+          "enum": [
+            "pass",
+            "concern",
+            "fail",
+            "not-applicable"
+          ]
+        },
+        "culturalContext": {
+          "enum": [
+            "pass",
+            "concern",
+            "fail",
+            "not-applicable"
+          ]
+        },
+        "relevanceToUser": {
+          "enum": [
+            "pass",
+            "concern",
+            "fail",
+            "not-applicable"
+          ]
+        },
+        "harmfulAttributionRisk": {
+          "enum": [
+            "pass",
+            "concern",
+            "fail",
+            "not-applicable"
+          ]
+        },
+        "constructiveReflection": {
+          "enum": [
+            "pass",
+            "concern",
+            "fail",
+            "not-applicable"
+          ]
+        },
+        "rationale": {
+          "type": "string"
+        }
+      }
+    },
+    "eligibility": {
+      "type": "object",
+      "required": [
+        "status",
+        "decisionRef"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "enum": [
+            "eligible-initial",
+            "eligible-later",
+            "held",
+            "excluded-initial",
+            "historical-context-only"
+          ],
+          "description": "eligible-initial: emittable once reviewed and E1 essential capabilities exist; eligible-later: needs a later-enhancement capability; held: pending a content decision; excluded-initial: retained research record, never emitted in the initial version; historical-context-only: links to the guide, never about the user."
+        },
+        "decisionRef": {
+          "type": "string"
+        },
+        "conditions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

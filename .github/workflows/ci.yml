@@ -941,6 +941,15 @@ jobs:
       # synthetic engine compatibility. Synthetic landmarks and traces only.
       - name: Run Palm feature foundation tests (PALM-03-I1)
         run: npx ts-node test/palm03I1FeatureFoundation.test.ts
+      # PALM-03-E1: development-only personalised interpretation engine (synthetic
+      # observations only; unreviewed content). The package suite compares the engine
+      # with the unmodified C1 reference oracle (python3, preinstalled on the runner):
+      # 7 examples x 3 modes, 5,760 essential-input derivations, 40 negative cases.
+      - name: Run personalised interpretation engine tests (PALM-03-E1)
+        working-directory: packages/palm-reading-engine/e1
+        run: node --test test/*.test.mjs
+      - name: Run personalised interpretation end-to-end tests (PALM-03-E1)
+        run: npx ts-node test/palm03E1Engine.test.ts
       # G5-R4.4: the reader differential needs libarchive's bsdtar (the reader
       # behind HR2R1-F1/F2); G5-D7-A: real xz/bzip2/zstd/lz4/7z streams and the
       # 7-Zip extraction precondition. Without them those checks report NOT RUN.
@@ -1017,6 +1026,12 @@ jobs:
       - name: Verify the palm reading engine is excluded from the build
         working-directory: apps/web
         run: node scripts/check-palm-engine-bundle.js
+      # AURA-PALM-03-E1 -- the personalised interpretation engine and its unreviewed
+      # catalogue must never be bundled; unconditional, sentinels self-checked by the
+      # E1 package tests.
+      - name: Verify the personalised interpretation engine is excluded from the build
+        working-directory: apps/web
+        run: node scripts/check-palm-e1-bundle.js
       # AURA-MCP-02-I2a-R2 (B1) -- runs the DEPLOYABLE standalone server the
       # way deploy/Dockerfile does (`node server.js` from an isolated copy of
       # .next/standalone, outside any node_modules tree) with Docker defaults,
