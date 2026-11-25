@@ -11,6 +11,7 @@
  *  T5  integration: a delayed send completing after another attempt reclaimed and settled
  *  T6  unavailable queue state is distinct from an empty queue (presentation read)
  *  T7  version-1 database upgrade keeps records and carries dispatch marks over to the request key
+ *  T8  an auth request the service worker did not send (auth_transition_unsettled) is reported as in progress / busy, never as done
  *
  *   TS_NODE_COMPILER_OPTIONS='{"jsx":"react-jsx"}' npx ts-node --project tsconfig.jsdom-tests.json test/rel04R5QueueLifecycle.test.ts
  */
@@ -186,6 +187,24 @@ async function main() {
     const t = openTab('t7b');
     const r = await t.q.readOwnedQueue(A);
     check('T7 a version-1 database upgrades: the record is kept and its dispatch mark is carried over to the request (still reported "may have been sent")', r.ok && r.records.length === 1 && r.records[0].dispatched === true && r.records[0].inFlight === false);
+  }
+
+  // ---------------------------------------------------------------- T8 worker 'unsettled' answers are reported honestly
+  {
+    await fresh();
+    const dev = new Device();
+    const t = await tabAs(dev, 't8');
+    const unsettled = async () => Response.json({ error: 'Signing in or out is still in progress. Try again in a moment.', code: 'auth_transition_unsettled' }, { status: 503, headers: { 'Cache-Control': 'no-store' } });
+    const realLogout = routes['POST /api/auth/logout'];
+    routes['POST /api/auth/logout'] = unsettled;
+    const out = await t.so.performSignOut({ fetch: dev.fetch as any, confirm: () => true });
+    routes['POST /api/auth/logout'] = realLogout;
+    check('T8 a sign-out the worker did not send (unsettled) ends BUSY after reconciling the session (still A), never "signed out" or "failed"', out.outcome === 'busy' && t.acct.getVerifiedAccount() === A && dev.cookie !== null && /Try again/.test(t.so.signOutOutcomeMessage(out) ?? ''));
+    const realVerify = routes['POST /api/auth/verify-code'];
+    routes['POST /api/auth/verify-code'] = unsettled;
+    const si = await t.si.verifySignInCode({ email: 'alicesynth@example.invalid', code: '123456' }, dev.fetch as any);
+    if (realVerify) routes['POST /api/auth/verify-code'] = realVerify; else delete routes['POST /api/auth/verify-code'];
+    check('T8 a sign-in the worker did not send is reported "still in progress ... nothing was changed", not "couldn\'t reach the server", and the account is unchanged', si.kind !== 'VERIFIED' && /still in progress/.test((si as any).message ?? '') && t.acct.getVerifiedAccount() === A);
   }
 
   void queuedCrids;

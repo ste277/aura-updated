@@ -50,7 +50,9 @@ const STATE_CACHE = 'aura-sw-state-v1';
 const STATE_URL = '/__aura-sw-state__';
 const ACCOUNT_HEADER = 'x-aura-expected-account';
 const AUTH_COOKIE_ROUTES = ['/api/auth/logout', '/api/auth/verify-code'];
-const AUTH_SETTLE_TIMEOUT_MS = 15000;
+// Below every client-side auth timeout (sign-out 10 s, sign-in 15 s), so the page receives the
+// explicit "still in progress" answer rather than timing out on its own.
+const AUTH_SETTLE_TIMEOUT_MS = 8000;
 const RELOAD_GUARD_MS = 30000;
 const RELOAD_WINDOW_MS = 10 * 60 * 1000;
 const RELOAD_WINDOW_MAX = 3;

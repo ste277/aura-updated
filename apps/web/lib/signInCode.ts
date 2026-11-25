@@ -68,6 +68,8 @@ export async function requestSignInCode(
 // ---------------------------------------------------------------------------
 
 export const VERIFY_TIMEOUT_MS = 15_000;
+export const AUTH_TRANSITION_UNSETTLED_CODE = 'auth_transition_unsettled';
+export const AUTH_TRANSITION_UNSETTLED_MESSAGE = 'Signing in or out is still in progress on this device. Nothing was changed; try again in a moment.';
 export const SIGN_IN_BUSY_MESSAGE = 'Another window is signing in or out. Try again in a moment.';
 export const SIGN_IN_UNCONFIRMED_MESSAGE = "Signed in, but Aura couldn't confirm which account is active. Check your connection and try again.";
 
@@ -90,6 +92,11 @@ async function readVerifyAnswer(res: Response): Promise<{ ok: true; userId: stri
   if (res.status >= 400 && res.status < 500) {
     const err = (body as { error?: unknown })?.error;
     return { ok: false, status: res.status, error: typeof err === 'string' ? err : null };
+  }
+  // R5: the service worker refused to send this sign-in behind an auth request that has not
+  // settled yet (public/sw.js). It was NOT sent; say so instead of "couldn't reach the server".
+  if (res.status === 503 && (body as { code?: unknown })?.code === AUTH_TRANSITION_UNSETTLED_CODE) {
+    return { ok: false, status: 503, error: AUTH_TRANSITION_UNSETTLED_MESSAGE };
   }
   return null;
 }

@@ -547,7 +547,7 @@ async function main() {
       slow.release();
       await logout;
       const now = await cookieUser();
-      check(`CH14 (R5, real Chromium) behind a sign-out unsettled for >15 s the sign-in is answered "unsettled" (~${Math.round(waited / 1000)} s), NOT sent, and the app does not report it as signed in (${si}: "${siR.message}")`, !sentEarly && si !== 'VERIFIED' && /still in progress/i.test(siR.message ?? '') && waited >= 14000);
+      check(`CH14 (R5, real Chromium) behind a sign-out unsettled beyond the worker bound (8 s, below the client's own timeouts) the sign-in is answered "unsettled" (~${Math.round(waited / 1000)} s), NOT sent, and the app does not report it as signed in (${si}: "${siR.message}")`, !sentEarly && si !== 'VERIFIED' && /still in progress/i.test(siR.message ?? '') && waited >= 7000 && waited < 14000);
       check(`CH14 (R5) the slow sign-out then lands; no replacement session existed for it to clear (cookie now: ${now})`, now === null);
       await context.close();
     }

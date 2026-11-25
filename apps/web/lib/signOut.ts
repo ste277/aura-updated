@@ -171,9 +171,14 @@ export function describePendingWork(p: PendingWork): string | null {
   return `You have ${what}${note}. If you sign out, Aura will remove ${p.owned === 1 ? 'it' : 'them'} from this device where it can and tell you the result; anything another window is still sending is kept. Sign out?`;
 }
 
-type Ack = 'acknowledged' | 'ambiguous';
+type Ack = 'acknowledged' | 'ambiguous' | 'unsettled';
 
-export async function readLogoutAck(res: Response): Promise<boolean> {
+const UNSETTLED = Symbol('unsettled');
+export async function readLogoutAck(res: Response): Promise<boolean | typeof UNSETTLED> {
+  if (res.status === 503 && isJsonMediaType(res.headers?.get?.('content-type'))) {
+    // R5: the service worker did not send this sign-out behind an unsettled auth request.
+    try { if ((await res.clone().json())?.code === 'auth_transition_unsettled') return UNSETTLED; } catch { /* fall through */ }
+  }
   if (res.status !== 200 || res.redirected || res.type === 'opaqueredirect') return false;
   if (!isJsonMediaType(res.headers?.get?.('content-type'))) return false;
   let body: unknown;
@@ -190,6 +195,7 @@ async function requestLogout(fetchImpl: typeof fetch, owner: string, ms: number)
       credentials: 'same-origin',
       headers: { Accept: 'application/json', [EXPECTED_ACCOUNT_HEADER]: owner },
     }, ms, readLogoutAck);
+    if (r === UNSETTLED) return 'unsettled';
     return r === true ? 'acknowledged' : 'ambiguous';
   } catch {
     return 'ambiguous';
@@ -250,8 +256,9 @@ async function run(deps: SignOutDeps): Promise<SignOutResult> {
     return { outcome: 'signed-out', owned, legacyKept: legacy.ok ? legacy.count : null };
   }
 
+  // Not acknowledged (incl. 'unsettled': not even sent): reconcile with a fresh session read.
   const r = await reconcile(deps.fetch, owner, deps.reconcileTimeoutMs ?? RECONCILE_TIMEOUT_MS);
-  if (r === 'same') { transition.end('resumed-verified'); return done('failed'); }
+  if (r === 'same') { transition.end('resumed-verified'); return done(ack === 'unsettled' ? 'busy' : 'failed'); }
   if (r === 'signed-out') { transition.end('signed-out'); return done('signed-out-unconfirmed'); }
   if (r === 'unknown') { transition.end('unknown'); return done('unverified'); }
   transition.end({ switchedTo: r.other });
