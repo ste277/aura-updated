@@ -1,3 +1,7 @@
+# E1-R2 CORRECTION (2026-11-25, independent finding F2). The C1 rev. 4 original is preserved byte-identical in
+# reference/original-c1-rev4/check_catalogue.py. Change: for records E1 can emit (eligible-initial), the prohibited-
+# claim and forecast checks cover EVERY user-facing string field (including applicationNote), not only observation,
+# reading and reflection. Other records keep the original field set (they never reach a reading).
 import json, re, sys
 cat = json.load(open(sys.argv[1], encoding="utf-8"))
 schema = json.load(open(sys.argv[2], encoding="utf-8"))
@@ -62,7 +66,7 @@ for e in cat["interpretations"]:
     emit = not e["userFacing"]["reading"].startswith("NOT FOR EMISSION")
     if e["overallSupport"] in ("disputed", "unsupported") and emit and not any(c["handling"] in ("show-both-attributed",) for c in e.get("conflicts", [])):
         F(f"{i}: disputed record emittable without show-both conflict policy")
-    uf = " ".join(e["userFacing"].get(k, "") for k in ("observation", "reading", "reflection"))
+    uf = " ".join(v for v in e["userFacing"].values() if isinstance(v, str)) if e.get("eligibility", {}).get("status") == "eligible-initial" else " ".join(e["userFacing"].get(k, "") for k in ("observation", "reading", "reflection"))
     m = BANNED.findall(uf)
     if m: F(f"{i}: banned wording in user-facing text: {sorted(set(m))}")
     # reading must be attributed to a tradition/text
@@ -160,7 +164,7 @@ for e in cat["interpretations"]:
     if el in ("eligible-initial", "eligible-later"):
         uf = e["userFacing"]
         if not uf["reflection"].rstrip().endswith("?"): F(f"{i}: reflection is not a question (futureLanguage)")
-        if FUT.search(" ".join(uf.get(k, "") for k in ("observation", "reading", "reflection"))): F(f"{i}: forecast wording")
+        if FUT.search(" ".join(v for v in uf.values() if isinstance(v, str)) if el == "eligible-initial" else " ".join(uf.get(k, "") for k in ("observation", "reading", "reflection"))): F(f"{i}: forecast wording")
     if el in ("eligible-initial", "eligible-later") and e["tradition"].startswith("western"):
         g = e.get("complementsIndianGap", {})
         if not g or not all(g.get(k) for k in g) : F(f"{i}: complementsIndianGap incomplete")

@@ -7,6 +7,7 @@ import crypto from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import { composeFromObservations, MODES, E1_ENGINE } from '../src/index.mjs';
 import { E1, PKG, REPO, oracleDump, tmpdir } from './helpers.mjs';
+const composeSyn = (obs, opts = {}) => composeFromObservations(obs, { synthetic: true, ...opts });
 
 const read = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? (['node_modules', '.next', '.git'].includes(e.name) ? [] : read(path.join(d, e.name))) : [path.join(d, e.name)]));
 const code = (files) => files.filter((f) => /\.(m?[jt]sx?|c?js|json)$/.test(f));
@@ -26,7 +27,7 @@ test('G1 E1 bundle guard: every sentinel occurs in the E1 source/catalogue and n
     assert.deepEqual(scan(tmp), []);
     for (const s of SENTINELS) { fs.writeFileSync(path.join(tmp, '.next', 'static', 'b.js'), `var x=${JSON.stringify(s)}`); assert.equal(scan(tmp).length, 1, s); }
     // a serialised catalogue or a rendered reading would be caught
-    fs.writeFileSync(path.join(tmp, '.next', 'static', 'b.js'), JSON.stringify(composeFromObservations({ 'lines.life': { provenance: 'user-confirmed', value: 'present' } })));
+    fs.writeFileSync(path.join(tmp, '.next', 'static', 'b.js'), JSON.stringify(composeSyn({ 'lines.life': { provenance: 'user-confirmed', value: 'present' } })));
     assert.ok(scan(tmp).length >= 1);
   } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
   assert.match(fs.readFileSync(GUARD, 'utf8'), /UNCONDITIONAL/);
@@ -71,7 +72,7 @@ test('G5 output safety over all 5,760 derivations: no prohibited wording, no for
   const FUT = /\b(you will|you'll|will (be|have|find|meet|become|get)|going to|your future|in the future)\b/i;
   let items = 0;
   for (const s of oracleDump().sweep) for (const mode of MODES) {
-    const r = composeFromObservations(s.inputs, { mode });
+    const r = composeSyn(s.inputs, { mode });
     assert.equal(r.tierCeiling, 'tentative'); assert.equal(r.publicationApproved, false); assert.equal(r.contentStatus, 'UNREVIEWED_RESEARCH_CONTENT');
     for (const n of r.notAssessed) assert.ok(!BANNED.test(n.wording) && !FUT.test(n.wording), n.wording);
     for (const sec of r.sections) for (const it of sec.items) {

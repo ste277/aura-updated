@@ -16,9 +16,22 @@
 // 'observed-absent' cannot arise from I1 (it has no "I don't see it" input) and 'detector-missing' is never produced:
 // every E1 input is user-assisted.
 
+import { createHash } from 'node:crypto';
 import { adaptFeatureSet, AdapterError } from '../../adapter/feature-set-adapter.mjs';
-import { E1_ENGINE, E1Error } from './identity.mjs';
+import { E1_ENGINE, E1Error, OBSERVATION_ENVELOPE } from './identity.mjs';
 import { checkFingerBases, headSlope, upwardEndingZone, heartEndingZone } from './descriptors.mjs';
+
+/** Canonical JSON (sorted keys, undefined omitted). Must match canonicalJson() in apps/web/lib/palm-analysis/fingerBases.ts. */
+export function canonicalJson(v) {
+  if (v === null || typeof v !== 'object') return JSON.stringify(v) ?? 'null';
+  if (Array.isArray(v)) return `[${v.map((x) => canonicalJson(x === undefined ? null : x)).join(',')}]`;
+  return `{${Object.keys(v).filter((k) => v[k] !== undefined).sort().map((k) => `${JSON.stringify(k)}:${canonicalJson(v[k])}`).join(',')}}`;
+}
+const sha256 = (s) => createHash('sha256').update(s, 'utf8').digest('hex');
+/** R2 (finding F6): the seal binds the feature set and the finger bases to one frame id, computed by the I1 helper. */
+export function observationSeal(e) {
+  return sha256(canonicalJson({ kind: e.kind, version: e.version, frameId: e.frameId, featureSet: e.featureSet, fingerBases: e.fingerBases, fingerBasesReason: e.fingerBasesReason }));
+}
 
 const LINE_KEYS = Object.freeze({ heart: 'lines.heart', head: 'lines.head', life: 'lines.life', upward: 'lines.upward' });
 const MEASUREMENT_KEYS = Object.freeze(['middleToPalmRatio', 'indexToRingRatio']);
@@ -43,15 +56,22 @@ function zoneMargin(library, line) {
 }
 
 /**
- * Validate an E1 input envelope and derive observations.
- * input: { featureSet, fingerBases }   options: { synthetic: true }
- * Returns { observations, qualityAccepted, qualityDetail }.
+ * Validate a sealed E1 observation envelope (built by buildPalmE1Observation() in apps/web/lib/palm-analysis/
+ * fingerBases.ts from ONE I1 input) and derive observations. The feature set and the finger bases must come from the
+ * same frame: the envelope's seal is recomputed here and any mismatch (inputs from different hands or frames, or a
+ * modified feature set or finger bases) is refused. The seal protects against accidental or caller-side mispairing;
+ * it is not a secret-keyed signature (development-only, synthetic input).
+ * options: { synthetic: true }.  Returns { observations, qualityAccepted, qualityDetail }.
  */
 export function deriveObservations(library, input, options) {
   if (options === null || typeof options !== 'object' || options.synthetic !== true) throw new E1Error('synthetic-required', 'pass { synthetic: true }; real input is not authorised');
-  if (input === null || typeof input !== 'object' || Array.isArray(input)) throw new E1Error('invalid-input', 'input must be an object { featureSet, fingerBases }');
-  const extra = Object.keys(input).filter((k) => k !== 'featureSet' && k !== 'fingerBases');
-  if (extra.length) throw new E1Error('invalid-input', `unknown input fields: ${extra.join(', ')}`);
+  if (input === null || typeof input !== 'object' || Array.isArray(input)) throw new E1Error('invalid-input', 'input must be a sealed observation envelope');
+  const want = ['kind', 'version', 'frameId', 'featureSet', 'fingerBases', 'fingerBasesReason', 'seal'];
+  const keys = Object.keys(input);
+  if (keys.length !== want.length || !want.every((k) => keys.includes(k))) throw new E1Error('invalid-input', `envelope fields must be exactly ${want.join(', ')}`);
+  if (input.kind !== OBSERVATION_ENVELOPE.kind || input.version !== OBSERVATION_ENVELOPE.version) throw new E1Error('invalid-input', `envelope must be ${OBSERVATION_ENVELOPE.kind}@${OBSERVATION_ENVELOPE.version}`);
+  if (typeof input.frameId !== 'string' || !/^[0-9a-f]{64}$/.test(input.frameId) || typeof input.seal !== 'string') throw new E1Error('invalid-input', 'frameId and seal must be SHA-256 hex strings');
+  if (observationSeal(input) !== input.seal) throw new E1Error('frame-mismatch', 'feature set and finger bases are not the sealed pair from one observation frame');
   const fs = input.featureSet;
   if (fs === null || typeof fs !== 'object' || fs.version !== E1_ENGINE.featureSetVersion) throw new E1Error('invalid-input', `featureSet.version must be ${E1_ENGINE.featureSetVersion}`);
   try {
@@ -60,6 +80,7 @@ export function deriveObservations(library, input, options) {
     if (err instanceof AdapterError) throw new E1Error('invalid-input', `feature set rejected by the I1 contract: ${err.code}: ${err.message}`);
     throw new E1Error('invalid-input', `feature set could not be validated: ${String(err?.message ?? err)}`);
   }
+  if ((input.fingerBases !== null) !== (fs.frame.available === true)) throw new E1Error('frame-mismatch', 'finger bases must exist exactly when the feature set has a palm frame');
   const frame = fs.frame;
   const qualityAccepted = frame.qualityStatus === 'accepted' && frame.palmFacing !== false;
   const qualityDetail = qualityAccepted ? 'accepted' : frame.palmFacing === false ? 'palm-not-facing' : `quality-${frame.qualityStatus}`;
@@ -68,7 +89,7 @@ export function deriveObservations(library, input, options) {
   if (frame.available) {
     const fb = checkFingerBases(input.fingerBases);
     if (fb.ok) bases = fb.bases; else basesDetail = fb.detail;
-  } else basesDetail = 'frame-unavailable';
+  } else basesDetail = input.fingerBasesReason ?? 'frame-unavailable';
 
   const obs = {};
   for (const [id, key] of Object.entries(LINE_KEYS)) {

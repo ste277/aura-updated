@@ -12,7 +12,13 @@
 //   not assessed RC-13 vocabulary, one code per feature, wording from the catalogue.
 // Pure and deterministic: no clock, randomness, I/O or locale dependence; output is deep-frozen.
 
-import { E1_ENGINE, E1Error, MODES, DOMAINS } from './identity.mjs';
+import { E1_ENGINE, E1Error, MODES, DOMAINS, RECORD_MANIFEST } from './identity.mjs';
+import { isValidatedLibrary, allUserText, BANNED_WORDING, FORECAST_WORDING } from './library.mjs';
+import { toGrid } from './grid.mjs';
+
+const INITIAL = new Set(RECORD_MANIFEST['eligible-initial']);
+const BANNED_1 = new RegExp(BANNED_WORDING.source, 'i');
+const FORECAST_1 = new RegExp(FORECAST_WORDING.source, 'i');
 
 const TAG = Object.freeze({
   'indian-classical': 'Indian · classical',
@@ -45,6 +51,7 @@ export function validateObservations(library, observations, { source = 'user-ass
     if (Object.keys(v).some((x) => !OBS_KEYS.has(x))) throw new E1Error('invalid-input', `${k}: unknown fields`);
     if (typeof v.provenance !== 'string') throw new E1Error('invalid-input', `${k}: provenance required`);
     if (!(isNum(v.value) || (typeof v.value === 'string' && v.value.length > 0))) throw new E1Error('invalid-input', `${k}: value must be a finite number or a non-empty string`);
+    if (isNum(v.value) && toGrid(v.value) === null) throw new E1Error('invalid-input', `${k}: numeric value must lie on the 0.0001 serialized grid`);
     if ('nearEdge' in v && typeof v.nearEdge !== 'boolean') throw new E1Error('invalid-input', `${k}: nearEdge must be boolean`);
     if (v.nearEdge === true && 'adjacentZone' in v && v.adjacentZone !== null && typeof v.adjacentZone !== 'string') throw new E1Error('invalid-input', `${k}: adjacentZone must be a string`);
   }
@@ -67,11 +74,17 @@ function matchRecord(rec, obs) {
       else if (x.nearEdge === true && x.adjacentZone != null && String(x.adjacentZone) === want) boundary = true; // RC-7, either side of an edge
       else return { res: 'no', used };
     } else if ('range' in ob) {
-      if (!isNum(x.value)) return { res: 'no', used };
-      const v = x.value, lo = ob.range.min, hi = ob.range.max;
-      if (lo !== null && lo !== undefined && v < lo - m) return { res: 'no', used };
-      if (hi !== null && hi !== undefined && v > hi + m) return { res: 'no', used };
-      if ((lo !== null && lo !== undefined && Math.abs(v - lo) < m) || (hi !== null && hi !== undefined && Math.abs(v - hi) < m)) boundary = true;
+      // R2 (finding F4): exact integer comparison on the serialized grid, CLOSED boundary bands. A value within the
+      // margin of a threshold (distance <= margin, on either side) is a boundary; a clean match must lie inside the
+      // range AND farther than the margin from every finite threshold. At slope 0.0800 (0.03 from both 0.05 and 0.11)
+      // both head-line records are therefore boundary and neither emits.
+      const v = toGrid(x.value), mg = toGrid(m);
+      if (v === null || mg === null) return { res: 'no', used };
+      const lo = ob.range.min === null || ob.range.min === undefined ? null : toGrid(ob.range.min);
+      const hi = ob.range.max === null || ob.range.max === undefined ? null : toGrid(ob.range.max);
+      const near = (lo !== null && Math.abs(v - lo) <= mg) || (hi !== null && Math.abs(v - hi) <= mg);
+      if (near) boundary = true;
+      else if ((lo !== null && v < lo) || (hi !== null && v > hi)) return { res: 'no', used };
     }
   }
   return { res: boundary ? 'boundary' : 'match', used };
@@ -87,6 +100,7 @@ export function composeReading(library, observations, opts = {}) {
   const mode = opts.mode ?? 'combined';
   if (!MODES.includes(mode)) throw new E1Error('invalid-option', `mode must be one of ${MODES.join(', ')}`);
   if (typeof (opts.qualityAccepted ?? true) !== 'boolean') throw new E1Error('invalid-option', 'qualityAccepted must be boolean');
+  if (!isValidatedLibrary(library)) throw new E1Error('invalid-library', 'the library must be one returned by loadLibrary()');
   validateObservations(library, observations);
   const cat = library.catalogue;
   const mb = cat.readingModes.modeBehaviour[mode];
@@ -108,21 +122,26 @@ export function composeReading(library, observations, opts = {}) {
   } else {
     const status = Object.fromEntries(observed.map((k) => [k, null]));
     const cands = [];
+    const boundaryFeatures = {};
     for (const id of library.order) {
-      const rec = library.byId.get(id);
+      const rec = library.byId[id];
       if (!trads.has(rec.tradition)) continue;
       const el = rec.eligibility.status;
       const { res, used } = matchRecord(rec, observations);
       if (res === 'no') continue;
       if (el === 'historical-context-only') { for (const k of used) status[k] = status[k] ?? 'historical'; historical.push(id); continue; }
-      if (el !== 'eligible-initial') {
+      if (el !== 'eligible-initial' || !INITIAL.has(id)) { // R2 (finding F1): eligibility re-enforced at composition
         if ((el === 'excluded-initial' || el === 'held') && res === 'match') for (const k of used) if (status[k] === null || status[k] === 'boundary') status[k] = 'not-read';
         continue; // eligible-later never enters an E1 reading (its capabilities are not implemented)
       }
-      if (res === 'boundary') { for (const k of used) if (status[k] === null) status[k] = 'boundary'; continue; }
+      if (res === 'boundary') { for (const k of used) { boundaryFeatures[k] = true; if (status[k] === null) status[k] = 'boundary'; } continue; }
       cands.push(rec);
       for (const k of used) status[k] = 'matched';
     }
+    // R2 (finding F4 / RC-7): a feature that is ambiguous for any record reading it emits nothing at all, so a boundary
+    // can never sit beside a conflicting interpretation of the same feature.
+    const ambiguous = new Set(Object.keys(boundaryFeatures));
+    for (let i = cands.length - 1; i >= 0; i--) if (cands[i].requires.some((r) => ambiguous.has(r.feature))) { for (const r of cands[i].requires) if (ambiguous.has(r.feature)) status[r.feature] = 'boundary'; cands.splice(i, 1); }
     for (const k of observed) {
       const s = status[k];
       if (s === 'matched' || s === 'historical') continue;
@@ -141,7 +160,7 @@ export function composeReading(library, observations, opts = {}) {
   const domains = DOMAINS.map((d) => {
     const catsOfDomain = cat.readingModes.domains[d];
     const items = orderedSections.filter((s) => catsOfDomain.includes(s.category)).flatMap((s) => s.items.map((i) => i.recordId));
-    const modeHasContent = library.initialIds.some((id) => { const r = library.byId.get(id); return trads.has(r.tradition) && r.categories.some((c) => catsOfDomain.includes(c)); });
+    const modeHasContent = library.initialIds.some((id) => { const r = library.byId[id]; return trads.has(r.tradition) && r.categories.some((c) => catsOfDomain.includes(c)); });
     return { domain: d, categories: catsOfDomain, items, status: items.length ? 'shown' : modeHasContent ? 'not-shown' : 'no-supported-content' };
   });
   return deepFreeze({
@@ -164,6 +183,9 @@ export function composeReading(library, observations, opts = {}) {
 
 function buildItem(library, rec, obs, rank, section) {
   const u = rec.userFacing;
+  // Defence in depth (R2, finding F2): every user-facing field is re-checked at emission, whatever the library says.
+  const text = allUserText(rec);
+  if (BANNED_1.test(text) || FORECAST_1.test(text)) throw new E1Error('content-violation', `${rec.id}: prohibited or forecast wording in user-facing text`);
   const disclosures = [];
   if (rec.overallSupport === 'disputed') disclosures.push('disputed-within-tradition');
   if (rec.requires.some((r) => r.feature === 'lines.heart')) disclosures.push('ayurlekha-meaning-not-used');

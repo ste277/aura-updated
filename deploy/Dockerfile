@@ -24,7 +24,11 @@ RUN cd apps/web && npx prisma generate \
  && NEXT_TELEMETRY_DISABLED=1 \
     DATABASE_URL=postgresql://build:build@localhost:5432/build \
     AUTH_SECRET=build-time-placeholder-never-used-at-runtime \
-    npm run build
+    npm run build \
+ && node scripts/check-palm-e1-bundle.js
+# AURA-PALM-03-E1-R2 -- the line above fails this stage (and so the image build)
+# if the development-only personalised interpretation engine or its unreviewed
+# catalogue reached .next/static, .next/server or .next/standalone. Unconditional.
 
 # ---- runtime: only the standalone server output -----------------------------
 FROM node:24-alpine AS runtime

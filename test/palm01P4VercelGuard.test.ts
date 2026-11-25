@@ -61,6 +61,8 @@ function runVercelBuild(opts: { nextMode: NextMode; vercelEnv?: string; approval
     // Real guard code, copied (never symlinked).
     fs.copyFileSync(path.join(ROOT, VERCEL_BUILD), path.join(web, 'scripts/vercel-build.sh'));
     fs.copyFileSync(path.join(ROOT, 'apps/web/scripts/check-palmistry-bundle.js'), path.join(web, 'scripts/check-palmistry-bundle.js'));
+    // AURA-PALM-03-E1-R2: vercel-build.sh also runs the E1 exclusion guard after `next build`.
+    fs.copyFileSync(path.join(ROOT, 'apps/web/scripts/check-palm-e1-bundle.js'), path.join(web, 'scripts/check-palm-e1-bundle.js'));
     fs.copyFileSync(path.join(ROOT, 'apps/web/palmistry-build-exclusion.js'), path.join(web, 'palmistry-build-exclusion.js'));
     // AURA-MCP-02-I1.5-D: vercel-build.sh runs the DB identity guard before migrating.
     fs.copyFileSync(path.join(ROOT, 'apps/web/scripts/check-db-identity.js'), path.join(web, 'scripts/check-db-identity.js'));

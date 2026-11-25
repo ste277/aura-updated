@@ -13,7 +13,7 @@ test('L1 all 29 research records load with their classifications (12 / 7 / 3 / 2
   const lib = defaultLibrary();
   assert.equal(lib.order.length, 29);
   const count = {};
-  for (const id of lib.order) { const s = lib.byId.get(id).eligibility.status; count[s] = (count[s] ?? 0) + 1; }
+  for (const id of lib.order) { const s = lib.byId[id].eligibility.status; count[s] = (count[s] ?? 0) + 1; }
   assert.deepEqual(count, { 'eligible-initial': 12, 'eligible-later': 7, held: 3, 'excluded-initial': 2, 'historical-context-only': 5 });
   assert.deepEqual([...lib.initialIds].sort(), [
     'C1-IN-PITR-KNOWLEDGE', 'C1-IN-URDHVA-INDEX', 'C1-IN-URDHVA-LITTLE', 'C1-IN-URDHVA-MIDDLE', 'C1-IN-URDHVA-RING',
@@ -25,19 +25,19 @@ test('L2 records are preserved unchanged: sources, tradition, suitability, prove
   const lib = defaultLibrary();
   assert.deepEqual(lib.catalogue, CAT);
   for (const id of lib.order) {
-    const e = lib.byId.get(id);
+    const e = lib.byId[id];
     assert.equal(e.review.status, 'UNREVIEWED_RESEARCH_CONTENT', id);
     assert.ok(e.sources.length > 0 && e.requires.every((r) => r.provenanceAllowed.length > 0), id);
     assert.ok(e.suitability && e.tradition && e.uncertainty, id);
   }
   assert.equal(lib.catalogue.status, 'UNREVIEWED_RESEARCH_CONTENT');
-  assert.ok(Object.isFrozen(lib.catalogue) && Object.isFrozen(lib.byId.get('C1-WE-HEART-JUPITER').userFacing));
+  assert.ok(Object.isFrozen(lib.catalogue) && Object.isFrozen(lib.byId['C1-WE-HEART-JUPITER'].userFacing));
 });
 
 test('L3 every eligible-initial record needs only capabilities this milestone implements; none of the later ones do', () => {
   const lib = defaultLibrary();
   for (const id of lib.order) {
-    const e = lib.byId.get(id);
+    const e = lib.byId[id];
     const ok = e.e1Capabilities.every((c) => IMPLEMENTED_CAPABILITIES.includes(c));
     if (e.eligibility.status === 'eligible-initial') assert.ok(ok, id);
     if (e.eligibility.status === 'eligible-later') assert.ok(!ok, `${id} would be emittable without its later capability`);

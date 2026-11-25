@@ -264,6 +264,11 @@ jobs:
       # the build and that its failure fails the build. No deploy/credentials.
       - name: Run Palmistry Vercel build guard test
         run: npx ts-node test/palm01P4VercelGuard.test.ts
+      # AURA-PALM-03-E1-R2 -- the E1 exclusion guard on every release build path:
+      # CI build job, the real Vercel wrapper (fake next, planted leaks) and the
+      # Docker build stage.
+      - name: Run personalised interpretation release-guard test (PALM-03-E1)
+        run: npx ts-node test/palm03E1ReleaseGuards.test.ts
       # AURA-MCP-02-I1.5-D -- database identity guard run by vercel-build.sh
       # before `prisma migrate deploy`: fail-closed checks of DATABASE_URL and
       # AURA_DATABASE_URL against the approved staging identity, and the real

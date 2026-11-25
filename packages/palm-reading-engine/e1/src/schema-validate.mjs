@@ -7,7 +7,16 @@ const SUPPORTED = new Set([
   '$schema', '$id', '$defs', '$ref', 'title', 'description',
   'type', 'properties', 'required', 'additionalProperties', 'enum', 'const', 'items', 'minItems', 'maxItems', 'pattern', 'format',
 ]);
-const FORMATS = { date: (v) => /^\d{4}-\d{2}-\d{2}$/.test(v) && !Number.isNaN(Date.parse(`${v}T00:00:00Z`)) };
+// R2 (finding F3): a real calendar date (Date.parse rolls 2026-02-30 over to March). Pure arithmetic, no clock.
+function isCalendarDate(v) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v);
+  if (!m) return false;
+  const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  const leap = (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0;
+  const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  return mo >= 1 && mo <= 12 && d >= 1 && d <= days[mo - 1];
+}
+const FORMATS = { date: isCalendarDate };
 
 const own = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
 const isPlain = (v) => v !== null && typeof v === 'object' && !Array.isArray(v) && Object.getPrototypeOf(v) === Object.prototype;

@@ -56,6 +56,15 @@ fi
 
 next build
 
+# AURA-PALM-03-E1-R2 -- the development-only personalised interpretation engine
+# and its UNREVIEWED catalogue must never ship in any Vercel build (Preview or
+# Production). Unconditional: no flag or approval state lets them in. Exits
+# non-zero on any E1 sentinel or when no build output exists; under `set -e`
+# that fails the build, so the deployment is never promoted. Runs before the
+# Palmistry scanner, which stays the last command.
+echo "[vercel-build] verifying the personalised interpretation engine is excluded from the build..."
+node "$SCRIPT_DIR/check-palm-e1-bundle.js"
+
 # AURA-PALM-01-P4 -- Palmistry publication guard for EVERY Vercel build
 # (Preview and Production both run this script: Vercel's project has no custom
 # build command, so it runs this package's `vercel-build` script).

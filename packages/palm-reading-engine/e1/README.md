@@ -14,18 +14,23 @@
 | `src/observations.mjs` | I1 feature set + finger bases → observations. The feature set is validated by the I1 contract (`adapter/feature-set-adapter.mjs`, validation only). |
 | `src/compose.mjs` | Deterministic selection, placement and composition (E1-E2): three modes, RC-1 to RC-14 |
 | `src/index.mjs` | `generateE1Reading(input, { synthetic: true, mode })`, `composeFromObservations(...)`, `loadLibrary(...)` |
-| `reference/` | The unmodified C1 reference oracle and checker (`check_examples.py`, `check_catalogue.py`, `mutation_tests_rev4.py`, `synthetic_reading_examples.json`), plus two harness scripts (`oracle_dump.py`, `run_reference.py`). This is an independent expected-output reference, not the engine. |
+| `reference/` | The C1 reference oracle and checker, corrected in R2 (originals preserved byte-identical in `reference/original-c1-rev4/`; see `reference/README.md`), plus harness scripts. This is an independent expected-output reference, not the engine. |
 | `test/` | `node --test test/*.test.mjs`. Needs `python3` for the reference checks. |
 
 ## Input
 
 ```js
-generateE1Reading({ featureSet, fingerBases }, { synthetic: true, mode: 'combined' | 'indian-only' | 'western-only' })
+generateE1Reading(envelope, { synthetic: true, mode: 'combined' | 'indian-only' | 'western-only' })
 ```
 
-- `featureSet`: from `buildPalmFeatureSet()` (`palm-03-i1-feature-set@0.1.0`).
-- `fingerBases`: from `palmFingerBases()` in `apps/web/lib/palm-analysis/fingerBases.ts`. These are landmarks 5, 9, 13 and 17 in the I1 palm frame.
-- `{ synthetic: true }` is mandatory. Without it the call is refused (`synthetic-required`).
+- **The envelope:** built by `buildPalmE1Observation(input)` in `apps/web/lib/palm-analysis/fingerBases.ts` from **one** I1 input. It contains:
+  - the feature set (`palm-03-i1-feature-set@0.1.0`);
+  - the palm-frame finger bases (landmarks 5, 9, 13 and 17);
+  - a frame id;
+  - a SHA-256 seal.
+- **Frame pairing (R2, finding F6):** E1 recomputes the seal and refuses any mismatch with `frame-mismatch`. That covers finger bases from another hand, a different frame id, or a feature set or finger bases edited after sealing. The seal guards against mispairing; it is not a keyed signature.
+- **Synthetic declaration (R2, finding F7):** `{ synthetic: true }` is mandatory for **every** reading entry point, `generateE1Reading` and `composeFromObservations` alike. Without it the call is refused with `synthetic-required`. The internal `composeReading` and `deriveObservations` are not exported.
+- **Library (R2, finding F1):** a `library` option must be one returned by `loadLibrary()`. The validated library is deep-frozen and exposes no writable map. Eligibility is re-checked against the pinned manifest at composition.
 
 ## Rules (C1 rev. 4)
 
@@ -36,6 +41,10 @@ generateE1Reading({ featureSet, fingerBases }, { synthetic: true, mode: 'combine
 - **Not assessed:** every feature that is not read gets one RC-13 reason code. `user-skipped` and `user-cannot-see` are never "not detected" (M4, E1-A1). Unassessed features are never confused with an observed absence (E1-A2).
 - **Ceiling:** tentative for every item. Quality gates emission and is never displayed as confidence.
 
+### Numerical equality (R2, finding F5)
+
+All comparisons are exact integer steps of 0.0001: the grid I1 serializes to. Ties, gaps, margins and thresholds are **closed**, meaning a distance equal to the tolerance counts as inside it. Values off the grid are refused, never rounded.
+
 ### Descriptor placeholders (C1 checklist C-8)
 
 | Descriptor | Definition |
@@ -44,3 +53,26 @@ generateE1Reading({ featureSet, fingerBases }, { synthetic: true, mode: 'combine
 | Upward ending | The distal end's x, mapped to the nearest finger base |
 | Heart ending | The radial end's x, mapped to one of four zones by anchors:<br>• index base;<br>• the midpoint between the index and middle bases;<br>• middle base;<br>• ring base. |
 | Zone-edge margin | The record's `boundaryMargin` (0.08), capped at 25 % of the narrower adjacent zone. Without the cap, the "between index and middle" heart zone would be unreachable. |
+
+## Provisional synthetic-development policies (pending owner disposition)
+
+None of these is a content or anatomical approval. C-8 and C-12 remain pending.
+
+| ID | Policy |
+|---|---|
+| V-A | The zone-edge margin is capped at 25 % of the narrower adjacent zone |
+| V-B | Adjacent-zone suppression: near an edge, a record on *either* side is suppressed. The diagnostic is `boundary`, where the C1 oracle says `no-supported-content` just inside an unsupported zone. |
+| V-C | Uncertain measurements are withheld with `measurement-unavailable` (detail `uncertain:…`), or `quality-gated` when frame quality is not accepted |
+| V-D | `palmFacing: null` is allowed for synthetic confirmed traces. `false` and unknown quality are gated. To be reassessed before any real input. |
+| V-E | `observed-absent` is a distinct state available only through synthetic observation fixtures; I1 has no such input |
+| V-F | Generated synthetic hands (varied proportions, rotations, mirroring, narrow zones, uncertain measurements) and a sealed frame pairing. Not real-hand validation. |
+| V-G | The unreviewed catalogue is committed for development only and excluded from every release build path |
+
+## Release exclusion
+
+`apps/web/scripts/check-palm-e1-bundle.js` runs:
+- in the CI "Next.js production build" job;
+- in `apps/web/scripts/vercel-build.sh`, for every Vercel Preview and Production build;
+- in the `deploy/Dockerfile` build stage.
+
+It is unconditional and fails closed. `test/palm03E1ReleaseGuards.test.ts` covers all three paths.

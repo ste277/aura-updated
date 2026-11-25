@@ -34,10 +34,10 @@ def match(rec, inputs):
             if str(x["value"]) != str(ob["categorical"]): return "no", used
             if x.get("nearEdge"): boundary = True
         elif "range" in ob:
-            v = x["value"]; lo = ob["range"].get("min"); hi = ob["range"].get("max")
-            if lo is not None and v < lo - m: return "no", used
-            if hi is not None and v > hi + m: return "no", used
-            if (lo is not None and abs(v - lo) < m) or (hi is not None and abs(v - hi) < m): boundary = True
+            g = lambda q: None if q is None else int(round(q * 10000))
+            v = g(x["value"]); lo = g(ob["range"].get("min")); hi = g(ob["range"].get("max")); mg = g(m)
+            if (lo is not None and abs(v - lo) <= mg) or (hi is not None and abs(v - hi) <= mg): boundary = True
+            elif (lo is not None and v < lo) or (hi is not None and v > hi): return "no", used
     return ("boundary" if boundary else "match"), used
 
 def concerns(rec):
@@ -62,7 +62,7 @@ def derive(e, mode):
         for k in observed: out["notAssessed"][k] = "quality-gated"
         out["emptyResult"] = MODES[mode]["emptyResult"]
         return out
-    cands = []; status = {k: None for k in observed}
+    cands = []; status = {k: None for k in observed}; bfeat = set()
     for rec in REC:
         if rec["tradition"] not in trads: continue
         el = rec["eligibility"]["status"]
@@ -79,10 +79,19 @@ def derive(e, mode):
             continue
         if res == "boundary":
             for k in used:
+                bfeat.add(k)
                 if status.get(k) is None: status[k] = "boundary"
             continue
         cands.append(rec)
         for k in used: status[k] = "matched"
+    keep = []
+    for rec in cands:
+        hit = [r["feature"] for r in rec["requires"] if r["feature"] in bfeat]
+        if hit:
+            for f in hit: status[f] = "boundary"
+        else:
+            keep.append(rec)
+    cands = keep
     for k in observed:
         s = status[k]
         if s in ("matched", "historical"): continue

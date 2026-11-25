@@ -24,7 +24,20 @@ const REQUIRED_REASONS = ['user-skipped', 'user-cannot-see', 'not-traced', 'trac
 
 const has = (o, k) => o !== null && typeof o === 'object' && Object.prototype.hasOwnProperty.call(o, k);
 const eqSet = (a, b) => a.size === b.size && [...a].every((x) => b.has(x));
-const userText = (e) => ['observation', 'reading', 'reflection'].map((k) => e.userFacing?.[k] ?? '').join(' ');
+// R2 (finding F2): EVERY user-facing string field is checked (observation, reading, reflection, applicationNote and any
+// other), not a fixed subset. Automated wording checks support, and never replace, editorial and safety review.
+// Records E1 can emit (eligible-initial) are checked on all fields. Other records cannot reach a reading (enforced again at
+// composition) and keep the C1 rev. 4 field set, so the preserved research catalogue loads unchanged; the one later
+// record whose application note fails the stricter check (C1-IN-MATSYA-PAIR-HOSPITALITY, a disclaimer naming 'rich')
+// is reported for editorial review instead of being edited.
+const C1_FIELDS = ['observation', 'reading', 'reflection'];
+const userText = (e) => (e.eligibility?.status === 'eligible-initial'
+  ? Object.values(e.userFacing ?? {}).filter((v) => typeof v === 'string')
+  : C1_FIELDS.map((k) => e.userFacing?.[k] ?? '')).join(' ');
+/** Every user-facing string of a record (used at emission time, whatever the record's status). */
+export const allUserText = (e) => Object.values(e.userFacing ?? {}).filter((v) => typeof v === 'string').join(' ');
+export const BANNED_WORDING = BANNED;
+export const FORECAST_WORDING = FUT;
 const emittable = (e) => !String(e.userFacing?.reading ?? '').startsWith('NOT FOR EMISSION');
 
 /** C1 content policy. Mirrors reference/check_catalogue.py (rev. 4). Returns a list of failure strings. */
@@ -170,7 +183,7 @@ export function lintCatalogue(cat, schema) {
     if (el === 'eligible-later' && [...ec].every((c) => ESS.has(c))) F(`${i}: eligible-later record needs only essential capabilities (should be initial?)`);
     if (['eligible-initial', 'eligible-later'].includes(el) && ec.has('not-planned')) F(`${i}: eligible record depends on a not-planned capability`);
     if (['eligible-initial', 'eligible-later'].includes(el)) {
-      if (!e.userFacing.reflection.trimEnd().endsWith('?')) F(`${i}: reflection is not a question (futureLanguage)`);
+      if (typeof e.userFacing.reflection !== 'string' || !e.userFacing.reflection.trimEnd().endsWith('?')) F(`${i}: reflection is not a question (futureLanguage)`);
       if (FUT.test(userText(e))) F(`${i}: forecast wording`);
       if (e.tradition.startsWith('western')) { const g = e.complementsIndianGap ?? {}; if (!Object.keys(g).length || !Object.values(g).every(Boolean)) F(`${i}: complementsIndianGap incomplete`); }
     }
@@ -191,6 +204,10 @@ export function lintCatalogue(cat, schema) {
   return fails;
 }
 
+/** Libraries produced by loadLibrary(). The composer refuses anything else (R2, finding F1). */
+const VALIDATED = new WeakSet();
+export const isValidatedLibrary = (lib) => typeof lib === 'object' && lib !== null && VALIDATED.has(lib);
+
 const deepFreeze = (o) => { if (o && typeof o === 'object' && !Object.isFrozen(o)) { Object.freeze(o); for (const v of Object.values(o)) deepFreeze(v); } return o; };
 
 /**
@@ -203,7 +220,8 @@ export function loadLibrary(catalogue, schema) {
   const cat = structuredClone(catalogue);
   const schemaErrors = validateAgainstSchema(cat, schema);
   if (schemaErrors.length) throw new E1Error('invalid-catalogue', `schema: ${schemaErrors.slice(0, 8).join('; ')}`);
-  const policy = lintCatalogue(cat, schema);
+  let policy;
+  try { policy = lintCatalogue(cat, schema); } catch (err) { throw new E1Error('invalid-catalogue', `policy check could not complete: ${String(err?.message ?? err)}`); }
   if (policy.length) throw new E1Error('invalid-catalogue', `policy: ${policy.slice(0, 8).join('; ')}`);
   if (cat.libraryVersion !== E1_ENGINE.libraryVersion) throw new E1Error('invalid-catalogue', `library ${cat.libraryVersion} is not ${E1_ENGINE.libraryVersion}`);
   if (cat.featureSetVersion !== E1_ENGINE.featureSetVersion) throw new E1Error('invalid-catalogue', `feature set ${cat.featureSetVersion} is not ${E1_ENGINE.featureSetVersion}`);
@@ -215,8 +233,10 @@ export function loadLibrary(catalogue, schema) {
     const missing = e.e1Capabilities.filter((c) => !IMPLEMENTED_CAPABILITIES.includes(c));
     if (missing.length) throw new E1Error('invalid-catalogue', `${e.id} is eligible-initial but needs unimplemented ${missing.join(',')}`);
   }
-  const byId = new Map(cat.interpretations.map((e) => [e.id, e]));
-  return deepFreeze({
+  deepFreeze(cat);
+  // R2 (finding F1): no writable map is exposed; records are reachable only through frozen, null-prototype objects.
+  const byId = Object.freeze(Object.assign(Object.create(null), Object.fromEntries(cat.interpretations.map((e) => [e.id, e]))));
+  const lib = deepFreeze({
     catalogue: cat,
     byId,
     order: cat.interpretations.map((e) => e.id),
@@ -224,4 +244,6 @@ export function loadLibrary(catalogue, schema) {
     reasons: Object.fromEntries(cat.globalPolicy.notAssessedReasons.map((r) => [r.code, r])),
     sources: Object.fromEntries(cat.sources.map((s) => [s.id, s])),
   });
+  VALIDATED.add(lib);
+  return lib;
 }
