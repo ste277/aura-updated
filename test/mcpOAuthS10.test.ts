@@ -129,7 +129,12 @@ async function main() {
     // I2b-S12: new configuration declares its format (base64url:/base64:/hex:); untagged values only as retained cookie keys.
     const base = () => ({ AURA_MCP_OAUTH_COOKIE_KEYS: `base64url:${strong()}`, AURA_MCP_OAUTH_PAIRWISE_SALT: `base64url:${strong()}`, AURA_MCP_AUDIT_KEY: `base64url:${strong()}` });
     const jwksEnv = () => ({ AURA_MCP_OAUTH_JWKS: JSON.stringify(sharedKeys().jwks) });
-    const hex16 = () => randomBytes(16).toString('hex');
+    // CI-01: fixed-seed value (it contains an a-f letter, so it has hex credit); a fresh
+    // CSPRNG draw is digits-only with P ~= 2.9e-7 and would then be refused by policy
+    // on the untagged retained path below.
+    const hex16Fixed = seeded('loader-hex16', 0, 16).toString('hex');
+    const hex16 = () => hex16Fixed;
+    check('SEC CI-01: the fixed loader hex sample has an a-f letter (hex credit)', /[a-f]/.test(hex16Fixed), hex16Fixed);
     const roles: [string, (v: string) => Record<string, string>][] = [
       ['current cookie key', (v) => ({ AURA_MCP_OAUTH_COOKIE_KEYS: v })],
       ['retained (older) cookie key', (v) => ({ AURA_MCP_OAUTH_COOKIE_KEYS: `base64url:${strong()},${v}` })],
@@ -183,20 +188,45 @@ async function main() {
     const fixtures = ['synthetic-cookie-key-new-0123456789abcdef', 'synthetic-cookie-key-old-0123456789abcdef', 'synthetic-pairwise-salt-0123456789abcdef', 'synthetic-audit-key-x-0123456789abcdefgh', 'Tr0ub4dor&3-horse-battery-staple-2026!'];
     check('SEC compatibility: synthetic / human-made strings the S8 rule accepted are still accepted', fixtures.every((f) => !s8Rule(f) || assessSecret(f).ok), fixtures.map((f) => [s8Rule(f), assessSecret(f)]));
     const ALPH = ['abcdefghijklmnopqrstuvwxyz0123456789-', 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()_+= ', 'abcdef0123456789-_.'];
+    // AURA-MCP-CI-01: fixed-seed corpus. Fresh random draws made "none is
+    // newly refused" fail by chance (~3% of runs; a 3,000,000-sample probe
+    // found 3): an S8-accepted value that is canonical base64url but uses far
+    // fewer symbols than its character groups give (e.g. from the
+    // "abcdef0123456789-_." alphabet) is refused BY the S12 low-variety veto,
+    // which deliberately applies to untagged retained keys. Every newly refused
+    // value must now be explained by that documented veto, checked independently.
+    const groupAlphabet = (v: string) => (/[a-z]/.test(v) ? 26 : 0) + (/[A-Z]/.test(v) ? 26 : 0) + (/[0-9]/.test(v) ? 10 : 0) + (/[-_+/]/.test(v) ? 2 : 0);
+    const lowVarietyVeto = (v: string) => {
+      const core = v.replace(/=+$/, '');
+      const A = groupAlphabet(core);
+      const canonical = (/^[A-Za-z0-9_-]+$/.test(v) && v.length % 4 !== 1 && Buffer.from(v, 'base64url').toString('base64url') === v) || (/^[A-Za-z0-9+/]+={0,2}$/.test(v) && v.length % 4 === 0 && Buffer.from(v, 'base64').toString('base64') === v);
+      return canonical && new Set(core).size < 0.5 * A * (1 - Math.pow(1 - 1 / A, core.length));
+    };
     let s8Accepted = 0;
     let newlyRefused = 0;
+    let unexplained = 0;
     for (let i = 0; i < 30_000; i += 1) {
       const a = ALPH[i % ALPH.length];
       const len = 32 + (i % 17);
-      const bytes = randomBytes(len);
+      const bytes = seeded('compat', i, len);
       const v = Array.from(bytes, (b) => a[b % a.length]).join('');
       if (s8Rule(v)) {
         s8Accepted += 1;
-        if (!assessSecret(v).ok) newlyRefused += 1;
+        const r = assessSecret(v);
+        if (!r.ok) {
+          newlyRefused += 1;
+          if (!(r.reason === 'low_variety' && r.format === 'base64' && lowVarietyVeto(v))) unexplained += 1;
+        }
       }
     }
-    check(`SEC compatibility: of ${s8Accepted} random mixed-alphabet strings the S8 rule accepted, none is newly refused`, s8Accepted > 20_000 && newlyRefused === 0, { s8Accepted, newlyRefused });
-    check('SEC a 15-byte hex secret is refused for length, a 16-byte one is accepted (the floor is exactly 128 bits)', assessSecret(randomBytes(15).toString('hex')).reason === 'short' && assessSecret(randomBytes(16).toString('hex')).ok);
+    check(`SEC compatibility: of ${s8Accepted} fixed-seed mixed-alphabet strings the S8 rule accepted, every refusal is the documented low-variety veto (${newlyRefused} refused, ${unexplained} unexplained)`, s8Accepted > 20_000 && unexplained === 0, { s8Accepted, newlyRefused, unexplained });
+    // CI-01 reproduction (value recorded by the probe): S8-accepted, canonical
+    // base64url, 19-symbol alphabet -> refused low_variety, so the previous
+    // "none is newly refused" assertion failed on it.
+    const lowVarRecorded = '8b55_5f4747b1_a0-10-_156-0e-8e01-6f7e_4_-1-e';
+    const lvR = assessSecret(lowVarRecorded);
+    check('SEC CI-01 reproduction: a recorded S8-accepted value is refused by the documented low-variety veto (the old assertion fails on it)', s8Rule(lowVarRecorded) && !lvR.ok && lvR.reason === 'low_variety' && lowVarietyVeto(lowVarRecorded), lvR);
+    check('SEC a 15-byte hex secret is refused for length, a 16-byte one is accepted (the floor is exactly 128 bits)', assessSecret(seeded('floor', 15, 15).toString('hex')).reason === 'short' && /[a-f]/.test(seeded('floor', 16, 16).toString('hex')) && assessSecret(seeded('floor', 16, 16).toString('hex')).ok);
   }
 
   // ------------------------------------------------------------------ BUD

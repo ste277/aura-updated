@@ -292,6 +292,9 @@ async function main() {
       return out.subarray(0, len);
     };
     const always = () => true;
+    // Untagged hex policy: hex credit needs >= 1 a-f letter; a digits-only value
+    // is legacy text judged by the S8 rule, which ALWAYS refuses 32 digits
+    // (at most 32 * log2(10) ~= 106 bits < 128). Only 16-byte hex is sampled here.
     const hexPolicy = (v: string) => /[a-f]/i.test(v);
     for (const [label, gen, f, expectOk] of [
       ['declared base64: 16 B', (i) => `base64:${seeded('db64-16', i, 16).toString('base64')}`, assessConfiguredSecret, always],

@@ -1,7 +1,7 @@
-# AURA-MCP-CI-01: stabilize the S8, S10 and S12 regression tests
+# AURA-MCP-CI-01: stabilize the S8, S10, S11 and S12 regression tests
 
 - **Base:** main `1605355f2bd289cb8f42e50ecd28f7522f3977da` (PR #390). **PR:** #394, branch `test/aura-mcp-ci-01-stabilize-s8-s12`.
-- **Scope:** **test-only.** Changed: `test/mcpOAuthStagingBlockersDb.test.ts`, `test/mcpOAuthS8.test.ts`, `test/mcpOAuthS10.test.ts` and (this round) `test/mcpOAuthS12.test.ts`.
+- **Scope:** **test-only.** Changed: `test/mcpOAuthStagingBlockersDb.test.ts`, `test/mcpOAuthS8.test.ts`, `test/mcpOAuthS10.test.ts`, `test/mcpOAuthS11.test.ts` and `test/mcpOAuthS12.test.ts`.
   - No change to the limiter, HMAC, authentication, secret policy, deadlines, migrations, dependencies or configuration.
   - MCP stays disabled.
   - The post-merge evidence bundle (`AURA_MCP_02_I2B_S12_FINAL_INDEPENDENT_REVIEW/post-merge-ci/`) is unchanged.
@@ -149,11 +149,11 @@ The deterministic scenario **"fast controls, then a healthy limiter flood under 
 B's exactness and per-shard accounting pass.
 
 ### Remaining limitations
-- **C is a timing comparison.** On CI the separation is about 2× on each side of R_MAX = 5 (healthy best 1.80, degradation +10 ms 11.2); locally it is much wider. Best-of-3 absorbs one transient. With the median denominator, failing a healthy limiter needs a contention burst covering all three limiter trials while sparing at least four of the six controls.
+- **C is a timing comparison.** With the median denominator (CI run 45606688808): healthy best 3.12–3.20, sustained +2 ms 7.15, +10 ms 25.31, against R_MAX = 5. The earlier max(before, after) denominator gave healthy 1.80 and +10 ms 11.2 on a slower-control run. Locally the separation is much wider. Best-of-3 absorbs one transient. With the median denominator, failing a healthy limiter needs a contention burst covering all three limiter trials while sparing at least four of the six controls.
 - **Healthy margin narrowed on CI (a cost of the median denominator).** The median of six controls is smaller than the old max(before, after), so every ratio rises. Healthy CI bests went from about 1.8 (previous head) to **3.12–3.20** (run 45606688808), leaving about **1.56×** headroom below R_MAX = 5; locally healthy bests are 2.40–2.57. Best of 3 still absorbs one transient (the worst single healthy trial seen locally was 5.68). R_MAX was **not** raised: raising it would weaken detection and would be tuning to one CI run. If healthy CI ratios approach 5 in future runs, the right fix is a better-matched control (not a larger R_MAX), and that needs a separate decision.
 - **Remaining sensitivity: the smallest detectable sustained slowdown depends on the runner.** C detects a sustained slowdown once it adds roughly (R_MAX − healthy ratio) × control-flood time. Locally (controls about 70 ms) +2 ms/statement is detected at 13–22×; on CI run 45606688808 (controls about 230 ms) at **7.15×**. A pre-CI estimate in this report, extrapolated from older 530 ms controls, predicted about 4× on CI; that estimate was **wrong for this run**. On a runner with markedly slower controls +2 ms could still fall below R_MAX, so the live 4b check asserts ranking above healthy, not an R_MAX crossing (the crossing is logged as informational). Closing this fully would need a non-timing performance signal (e.g. statement counts), which is out of scope for a test-only change.
 - **The response-completion bound uses a 500 ms allowance** for event-loop lag with 2,000 pending promises (observed maximum latencies 1,252–1,268 ms). It no longer has any role in admission timing.
-- **S11 offline has the same random-sample pattern** (`mcpOAuthS11.test.ts`, two 10,000-sample untagged hex rows, about 0.58% per run combined). It is outside this ticket's S8/S10/S12 scope and was **not changed**; recorded for a follow-up.
+- **Secret-policy sampling:** after round 4 (§4) no MCP test asserts a policy verdict on a fresh random secret where the policy refuses a legitimate draw with non-negligible probability. The remaining fresh random-sample loops (tagged `hex:` / `base64:` / `base64url:` acceptance in `mcpOAuthS12`, 6 × 10,000) are bounded by the policy's own documented false-refusal rates (≤ 3e-9 per sample, so ≤ about 2e-4 per run in total). That is the policy's design budget, not a confirmed instance of this defect, so they were left unchanged (no general hardening).
 - **ENV and R_MAX are absolute constants.** They are justified from measured ranges, not fitted to one CI run.
 
 ## 2. S8 address-bucket HMAC assertion (unchanged since the previous head)
@@ -177,14 +177,48 @@ B's exactness and per-shard accounting pass.
   - **Mistagged:** hex under `base64:` is refused (`ambiguous_encoding`).
   - **Strength:** format-aware bits (128 for hex, 192 for base64url) use fixed inputs.
   - The broader malformed, weak and mistagged coverage in `mcpOAuthS12` is unchanged (84/84).
-- **Result:** S10 offline 135/135 in every run.
+- **Result:** S10 offline 135/135 in every run (137/137 after the round 4 additions in §4).
 
-## 4. Verification
+## 4. Round 4: deterministic secret sampling (S11 and the narrow sweep)
+**Defect class.** A test draws **fresh random** secrets and asserts a policy verdict (for example "all accepted") that the documented policy does not guarantee for every possible draw. The runtime policy is unchanged; only the assertions were wrong.
+
+**Fix, everywhere:** a **fixed-seed corpus** (SHA-256 of a per-suite label, tag, index and block), with every verdict checked against an **independently derived** policy expectation. Each confirmed instance gets a reproduction fixture on which the old assertion fails.
+
+| Suite / check | Defect | Measured | Correction |
+|---|---|---|---|
+| **S11** `P3-2 hex 16 B` / `HEX 16 B` (10,000 each) | digits-only untagged hex → legacy text → refused by policy | 2.9e-7 per sample; ≈0.58% per run | fixed seed; expected verdict **and** canonical format from the policy (hex credit needs an a–f letter; otherwise the S8 legacy rule, derived independently) |
+| S11 `P3-2 base64 / base64url` rows (4 × 10,000) | same pattern | negligible (≤ 3e-9) | seeded for consistency, same check |
+| S11 single samples (`b24`, `odd`, `canon44`, `url43`, `withRun`, 16-byte hex = 128 bits) | one fresh draw each; the 16-byte hex one is the digits-only class | ≈2.9e-7 per run | all seeded; the hex value is asserted to contain a letter |
+| **S10** compatibility loop (30,000 mixed-alphabet strings: "none the S8 rule accepted is newly refused") | an S8-accepted, canonical base64url value from the `abcdef0123456789-_.` alphabet uses too few symbols for its character groups and is refused by the S12 **low-variety veto**, which deliberately covers untagged retained keys | **3 refusals in 3,000,000** samples (≈2.87 M S8-accepted) → ≈**3% of runs** | fixed seed; every refusal must be `low_variety` + format `base64` **and** satisfy an independently computed low-variety predicate (group alphabet, < ½ expected distinct symbols) |
+| S10 single samples (16-byte floor check; the untagged hex retained-key loader check) | digits-only class | ≈2.9e-7 per run each | seeded; letter asserted |
+| S12 offline "no false refusal" | digits-only class (failed once in round 3) | ≈0.29% per run | fixed in round 3 (§1a) |
+
+**Reproduction fixtures** (deterministic):
+- **S11:** the recorded digits-only value `64976964540383724985906370631171` is legacy text and refused, in either case. The old "10,000 samples all canonical and accepted" assertion fails on it.
+- **S10:** the probe-recorded value `8b55_5f4747b1_a0-10-_156-0e-8e01-6f7e_4_-1-e` is accepted by the S8 rule but refused `low_variety`. The old "none is newly refused" assertion fails on it.
+
+**Probe:** a scratch script outside the repo, not committed.
+- 3,000,000 draws of the S10 compatibility population produced 3 `low_variety` refusals, all from alphabet 3.
+- 4,000,000 fresh 16-byte hex draws produced 1 refusal, as expected at 2.9e-7.
+
+**Policy observation, not changed:** the comment in `assessSecret` ("nothing S8 accepted is newly refused") is broader than the code. The run, skewed and low-variety vetoes run first, by design since S12 (the S11 suite already asserts the run veto overrides the S8 rule). This is a documentation inaccuracy in runtime code, not a behavioural defect, and it is out of scope for a test-only change.
+
+**Narrow sweep, not corrected:**
+- **Other random values in the MCP suites:** PKCE verifiers, HMAC and bucket keys, forged-token keys, ephemeral keys and IPv6 fuzz inputs. None of them goes through the secret policy.
+- **Tagged-format acceptance loops in S12:** left unchanged; they are within the policy's documented bound (see Remaining limitations).
+- **S8:** CLOSED, and it uses tagged values only.
+
+**Results:**
+- offline S10 **137/137** (+2) and S11 **33/33** (+2), each 3/3 repeats;
+- S12 offline 86/86;
+- the full serial regression below.
+
+## 5. Verification
 - **All MCP suites** (`max_connections = 100`) passed:
-  - offline: transport, Local 119, SecurityRegression 34, I2b 116, StagingBlockers 52, S8 60, S10 135, S11 31, S12 **86**;
+  - offline: transport, Local 119, SecurityRegression 34, I2b 116, StagingBlockers 52, S8 60, S10 **137**, S11 **33**, S12 **86**;
   - DB: Postgres 36, StorageProtection 42, StagingBlockersDb **68**, StoreS4 13, CodeS6 14, S8Db 11, S10Db 21, S11Db 19, S12Db 15;
   - dbIdentityGuard.
-- **Repeats:** round 3 StagingBlockersDb 6/6 (68/68 each); S12 offline 3/3 after the fixed-seed correction; earlier rounds StagingBlockersDb 5/5, S10 and S8 offline 3/3.
+- **Repeats:** round 4 full serial regression 19/19 suites, plus S10 and S11 3/3 each; round 3 StagingBlockersDb 6/6 (68/68 each); S12 offline 3/3 after the fixed-seed correction; earlier rounds StagingBlockersDb 5/5, S10 and S8 offline 3/3.
 - **Serial, isolated:** every suite ran one at a time against a disposable local PG16 (socket only, `max_connections = 100`); no live database, no credentials.
 - **No retries** were used to hide failures.
-- **Exact-head CI:** run 45606688808 on `882a04f0`, 7/7 (code head; this report-only update follows it). Also recorded in the PR description.
+- **Exact-head CI:** round 3 code head `882a04f0` run 45606688808, 7/7. The final-head run for round 4 is recorded in the PR description.
