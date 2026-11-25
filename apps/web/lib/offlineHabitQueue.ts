@@ -333,7 +333,8 @@ export async function readOwnedQueue(ownerUserId: string): Promise<QueueRead> {
       if (!isQueuedHabitLog(item) || item.ownerUserId !== ownerUserId || item.clientRequestId !== r.clientRequestId) { corruptIds.push(r.recordId); continue; }
       records.push({ recordId: r.recordId, item: { ...item, recordId: r.recordId, queuedAt: r.queuedAt }, inFlight: fresh(claims.get(r.recordId), now), dispatched: dispatches.has(r.recordId) });
     }
-    records.sort((a, b) => (a.item.queuedAt ?? 0) - (b.item.queuedAt ?? 0) || a.item.logTimestamp.localeCompare(b.item.logTimestamp) || a.recordId.localeCompare(b.recordId));
+    // Deterministic order: queued time, then log time, then identity (entries queued in the same millisecond).
+    records.sort((a, b) => (a.item.queuedAt ?? 0) - (b.item.queuedAt ?? 0) || a.item.logTimestamp.localeCompare(b.item.logTimestamp) || a.item.clientRequestId.localeCompare(b.item.clientRequestId) || a.recordId.localeCompare(b.recordId));
     const byCrid = new Map<string, QueueRecord[]>();
     for (const r of records) byCrid.set(r.item.clientRequestId, [...(byCrid.get(r.item.clientRequestId) ?? []), r]);
     const groups: QueueRecord[][] = [];

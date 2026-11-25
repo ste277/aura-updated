@@ -121,16 +121,16 @@ async function main() {
     const t1 = await tabAs(dev, A, 't1');
     const t2 = openTab('t2'); await t2.acct.fetchVerifiedSession(dev.fetch as any);
     for (const n of [1, 2]) { dev.fault('POST', '/api/habit-logs', 'network-before'); await t1.sync.submitActivityLog(payload(`p${n}`, `crid-h2-${n}`), 't', dev.fetch as any); }
-    const snap = await t2.q.readOwnedQueue(A);
-    const second = snap.ok ? snap.records.find((r) => r.item.clientRequestId === 'crid-h2-2')!.recordId : '';
-    // t1's replay has READ both (its snapshot), and is sending the first.
+    // t1's replay has READ both (its snapshot), and is sending one of them (order among same-millisecond entries is not fixed).
     const gate = dev.hold('POST', '/api/habit-logs', 'before');
     const replay = t1.sync.replayOfflineQueue(dev.fetch as any);
     await gate.arrived;
-    const d = await t2.q.discardRecords([second], { tab: 't2' });
+    const snap = await t2.q.readOwnedQueue(A);
+    const other = snap.ok ? snap.records.find((r) => !r.inFlight)! : null;
+    const d = await t2.q.discardRecords(other ? [other.recordId] : [], { tab: 't2' });
     gate.release();
     const rr = await replay;
-    check('H2 a record discarded after the replay read it is never sent (the claim transaction finds it gone)', d.removed === 1 && rr.attempted === 1 && logsOf(A).every((l) => l.clientRequestId !== 'crid-h2-2'));
+    check('H2 a record discarded after the replay read it is never sent (the claim transaction finds it gone)', !!other && d.removed === 1 && rr.attempted === 1 && logsOf(A).every((l) => l.clientRequestId !== other!.item.clientRequestId) && logsOf(A).length === 1);
   }
 
   // ---------------------------------------------------------------- D1 already-dispatched work

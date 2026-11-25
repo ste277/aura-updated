@@ -18,12 +18,12 @@ export type BoundDownloadResult =
   | { status: 'upgrade-required' }
   | { status: 'failed'; httpStatus?: number };
 
-export interface DownloadSink {
+export interface DownloadTarget {
   save(blob: Blob, filename: string): void;
 }
 
-/** Default sink: object URL + temporary <a download>. */
-export const browserDownloadSink: DownloadSink = {
+/** Default target: object URL + temporary <a download>. */
+export const browserDownloadTarget: DownloadTarget = {
   save(blob, filename) {
     const url = URL.createObjectURL(blob);
     try {
@@ -49,7 +49,7 @@ function filenameFrom(res: Response, fallback: string): string {
 export async function downloadBound(
   url: string,
   fallbackName: string,
-  { binding, sink = browserDownloadSink, fetchImpl = (i: string, n?: RequestInit) => fetch(i, n) }: { binding?: AccountBinding; sink?: DownloadSink; fetchImpl?: (i: string, n?: RequestInit) => Promise<Response> } = {}
+  { binding, target = browserDownloadTarget, fetchImpl = (i: string, n?: RequestInit) => fetch(i, n) }: { binding?: AccountBinding; target?: DownloadTarget; fetchImpl?: (i: string, n?: RequestInit) => Promise<Response> } = {}
 ): Promise<BoundDownloadResult> {
   let b: AccountBinding;
   try {
@@ -72,7 +72,7 @@ export async function downloadBound(
       const blob = await res.blob();
       // The body arrived; hand it over only if the account is still the one tapped under.
       if (!lease.isCurrent() || !isBindingCurrent(b)) return { status: 'account-changed' } as const;
-      sink.save(blob, filenameFrom(res, fallbackName));
+      target.save(blob, filenameFrom(res, fallbackName));
       return { status: 'saved' } as const;
     }, b);
   } catch (e) {

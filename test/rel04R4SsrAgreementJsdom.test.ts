@@ -150,9 +150,9 @@ async function main() {
   dev.signIn(A);
   await acct.fetchVerifiedSession();
   const saved: Array<{ name: string; body: string }> = [];
-  const sink = { save: (blob: Blob, name: string) => { saved.push({ name, body: '' }); void blob.text().then((t) => { saved[saved.length - 1].body = t; }); } };
+  const target = { save: (blob: Blob, name: string) => { saved.push({ name, body: '' }); void blob.text().then((t) => { saved[saved.length - 1].body = t; }); } };
   let mark = dev.calls.length;
-  const d1 = await downloadBound('/api/users/export', 'export.json', { sink });
+  const d1 = await downloadBound('/api/users/export', 'export.json', { target });
   await settle(2);
   const exportCall = dev.calls.slice(mark).find((x) => x.key === 'GET /api/users/export');
   check('D1 export download states the tapped account and saves Alice\'s file', d1.status === 'saved' && exportCall?.expected === A && saved.length === 1 && /"id":"synthetic-user-a"/.test(saved[0].body));
@@ -160,7 +160,7 @@ async function main() {
   // D2 the account changes after the tap, before the body arrives
   const binding = acct.captureAccountBinding();
   const g = dev.hold('GET', '/api/users/export', 'after');
-  const p2 = downloadBound('/api/users/export', 'export.json', { sink, binding });
+  const p2 = downloadBound('/api/users/export', 'export.json', { target, binding });
   await g.arrived;
   dev.signIn(B);
   await act(async () => { acct.__deliverStorageEventForTests({ key: 'aura_account_announce_v2', newValue: JSON.stringify({ account: B, tab: 'other', at: Date.now() }) }); });
@@ -170,7 +170,7 @@ async function main() {
 
   // D3 stale binding (ambient cookie is Bob, binding is Alice) -> refused before sending
   mark = dev.calls.length;
-  const d3 = await downloadBound('/api/users/export', 'export.json', { sink, binding });
+  const d3 = await downloadBound('/api/users/export', 'export.json', { target, binding });
   check('D3 a binding from before the change is refused before any request', d3.status === 'account-changed' && dev.calls.slice(mark).every((x) => x.key !== 'GET /api/users/export') && saved.length === 1);
 
   // D4 real middleware: headerless export with a session -> 503; mismatched -> 409 (server never runs the export)
@@ -181,7 +181,7 @@ async function main() {
 
   // D5 calendar: in-app download is bound; the headerless subscription/link contract is preserved
   await acct.fetchVerifiedSession();
-  const d5 = await downloadBound('/api/calendar/feed', 'aura.ics', { sink });
+  const d5 = await downloadBound('/api/calendar/feed', 'aura.ics', { target });
   const linkStyle = await dev.fetch('/api/calendar/feed', {});
   const calMismatch = await dev.fetch('/api/calendar/feed', { headers: { 'X-Aura-Expected-Account': A } });
   check('D5 in-app calendar download states Bob and saves; headerless feed (subscription/link) still answers; a stated mismatch is refused', d5.status === 'saved' && linkStyle.status === 200 && calMismatch.status === 409);
@@ -189,7 +189,7 @@ async function main() {
   // D6 during an auth transition the download is refused before sending
   const t = acct.beginTransition('signing-out');
   mark = dev.calls.length;
-  const d6 = await downloadBound('/api/users/export', 'export.json', { sink });
+  const d6 = await downloadBound('/api/users/export', 'export.json', { target });
   t?.end('resumed');
   check('D6 during a sign-in/out the download is refused (no request)', d6.status === 'unavailable' && dev.calls.slice(mark).every((x) => x.key !== 'GET /api/users/export'));
 
