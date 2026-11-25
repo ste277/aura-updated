@@ -349,17 +349,138 @@ async function main() {
       check('I2b-1 aggregate: every one of the 16 shards stopped at its own limit (30)', exact.shardRows.length === 16 && exact.shardRows.every((r) => r.count === 30), exact.shardRows.map((r) => r.count));
       check('I2b-1 aggregate: rejections were limits (429), not failures', exact.out.every((d) => d.allowed || d.limitedBy === 'preauth-mcp'), exact.by);
 
-      await admin.query('TRUNCATE "McpRateLimitWindow"');
+      // AURA-MCP-CI-02 (runs 45635380561, 45640197925). The deadlock check
+      // used to run its 400 decisions under the PRODUCTION 1250 ms deadline.
+      // All 400 share the rows user:dl-a and client:dl-b, so the row locks
+      // serialize them (by design), and every deadline starts at the same
+      // instant. On a slower runner the tail of that queue was shed as
+      // "unavailable" (cause deadline). That is fail-closed shedding, not a
+      // deadlock: Postgres reported 0 deadlocks both times. It was also a weak
+      // oracle: with lock_timeout (1000 ms) <= deadlock_timeout (1 s), a REAL
+      // deadlock is cancelled as 55P03 lock_timeout before the detector runs,
+      // so pg_stat_database.deadlocks stays 0. Now:
+      //   (a) the deadlock property runs under an explicit budget whose
+      //       lock_timeout exceeds deadlock_timeout, so a real deadlock would
+      //       surface as SQLSTATE 40P01 and in the counter. Every SQLSTATE is
+      //       recorded, and the counter is read as a delta after the backends
+      //       exit (stats flushed);
+      //   (b) negative control: a real opposite-order deadlock under the same
+      //       lock_timeout IS caught (40P01, counter +1);
+      //   (c) regression: the CI failure mode, made deterministic (+6 ms per
+      //       statement => >= 2.4 s of serialized lock holds > 1250 ms). The
+      //       production-deadline shortfall must be expected shedding only.
+      //       The pre-CI-02 "all admitted" assertion FAILS on that result.
+      // Throughput under the production deadline stays covered by the
+      // aggregate gate above.
       const big = 1_000_000;
-      const mixed = await Promise.all(
-        Array.from({ length: 400 }, (_, i) => {
-          const set = [{ key: 'user:dl-a', limit: big }, { key: 'client:dl-b', limit: big }, { key: `preauth-mcp:global:${i % 2}`, limit: big }];
-          return instances[i % 3].check(i % 2 ? set.reverse() : set);
-        }),
-      );
-      check('I2b-1 deadlocks: 400 opposite-order multi-key decisions on 3 instances -> all admitted, none failed', mixed.every((d) => d.allowed), mixed.filter((d) => !d.allowed).map((d) => d.limitedBy).slice(0, 5));
-      const deadlocks = Number((await q(`SELECT deadlocks::int AS n FROM pg_stat_database WHERE datname = current_database()`))[0].n);
-      check('I2b-1 deadlocks: Postgres reports 0 deadlocks', deadlocks === 0, deadlocks);
+      const DL_KEYS = ['client:dl-b', 'preauth-mcp:global:0', 'preauth-mcp:global:1', 'user:dl-a'];
+      const deadlockSet = (i: number) => {
+        const set = [{ key: 'user:dl-a', limit: big }, { key: 'client:dl-b', limit: big }, { key: `preauth-mcp:global:${i % 2}`, limit: big }];
+        return i % 2 ? set.reverse() : set;
+      };
+      const DL_APP = 'aura-ci02-deadlock';
+      /** A pool that records every error (and its SQLSTATE) raised underneath the limiter; optional +ms per statement. */
+      const sqlSpy = (extra: PoolConfig, delayMs = 0) => {
+        const real = pool({ application_name: DL_APP, ...extra });
+        const errors: { code?: string; message: string }[] = [];
+        return { errors, connect: async () => {
+          const c = await real.connect();
+          return { on: c.on.bind(c), off: c.off.bind(c), query: async (t: string, p2?: unknown[]) => {
+            if (delayMs > 0) await sleep(delayMs);
+            try {
+              return await c.query(t, p2 as unknown[]);
+            } catch (e) {
+              errors.push({ code: (e as { code?: string }).code, message: String((e as Error).message).slice(0, 80) });
+              throw e;
+            }
+          }, release: (e?: unknown) => c.release(e as Error | undefined) };
+        } };
+      };
+      /** pg_stat_database.deadlocks once every backend of this scenario has exited (exit flushes its pending stats). */
+      const settledDeadlocks = async () => {
+        for (let i = 0; i < 50 && Number((await q(`SELECT count(*)::int AS n FROM pg_stat_activity WHERE application_name = $1`, [DL_APP]))[0].n) > 0; i += 1) await sleep(100);
+        await sleep(200);
+        await admin.query('SELECT pg_stat_clear_snapshot()');
+        return Number((await q(`SELECT deadlocks::int AS n FROM pg_stat_database WHERE datname = current_database()`))[0].n);
+      };
+      const deadlockTimeoutMs = Number((await q(`SELECT setting::int AS ms FROM pg_settings WHERE name = 'deadlock_timeout'`))[0].ms);
+      const DL_LOCK_TIMEOUT = 5000;
+      check('I2b-1 deadlocks precondition: the explicit lock_timeout exceeds deadlock_timeout (a real deadlock reaches the detector)', DL_LOCK_TIMEOUT >= 2 * deadlockTimeoutMs, { lockTimeoutMs: DL_LOCK_TIMEOUT, deadlockTimeoutMs });
+      const roomyFor = (p: unknown) => createPostgresRateLimiter({ pool: p as never, windowMs: 60_000, decisionDeadlineMs: 30_000, lockTimeoutMs: DL_LOCK_TIMEOUT, statementTimeoutMs: DL_LOCK_TIMEOUT + 1000 });
+      const hotCounts = async () => Object.fromEntries((await q(`SELECT "key", "count" FROM "McpRateLimitWindow" WHERE "key" = ANY($1::text[]) ORDER BY "key"`, [DL_KEYS])).map((r) => [r.key, r.count]));
+
+      // (a) the deadlock property, explicit budget.
+      await admin.query('TRUNCATE "McpRateLimitWindow"');
+      mark = pools.length;
+      let dl0 = await settledDeadlocks();
+      const dlPools = [0, 1, 2].map(() => sqlSpy({ max: 6, connectionTimeoutMillis: 30_000, query_timeout: 30_000 }));
+      const dlLimiters = dlPools.map(roomyFor);
+      const mixed = await Promise.all(Array.from({ length: 400 }, (_, i) => dlLimiters[i % 3].check(deadlockSet(i))));
+      await endSince(mark);
+      const dlDelta = (await settledDeadlocks()) - dl0;
+      const dlErrors = dlPools.flatMap((p) => p.errors);
+      const mixedBy: Record<string, number> = {};
+      for (const d of mixed) {
+        const k = d.allowed ? 'admitted' : `${d.limitedBy}:${d.cause ?? 'none'}`;
+        mixedBy[k] = (mixedBy[k] ?? 0) + 1;
+      }
+      const hot = await hotCounts();
+      check('I2b-1 deadlocks: 400 opposite-order multi-key decisions on 3 instances (explicit budget) -> all admitted, none failed', mixed.every((d) => d.allowed), mixedBy);
+      check('I2b-1 deadlocks: every hot row counted exactly the admitted decisions (400 / 400 / 200 + 200)', hot['user:dl-a'] === 400 && hot['client:dl-b'] === 400 && hot['preauth-mcp:global:0'] === 200 && hot['preauth-mcp:global:1'] === 200, hot);
+      check('I2b-1 deadlocks: no SQLSTATE 40P01 (deadlock) or 55P03 (lock timeout) and no other error underneath the limiter', dlErrors.length === 0, dlErrors.slice(0, 5));
+      check('I2b-1 deadlocks: Postgres reports 0 new deadlocks (counter delta after the backends exited)', dlDelta === 0, dlDelta);
+
+      // (b) negative control: the same oracle DOES see a real deadlock.
+      await admin.query('TRUNCATE "McpRateLimitWindow"');
+      await admin.query(`INSERT INTO "McpRateLimitWindow" ("key","windowStart","count","expiresAt") VALUES ('user:dl-x', now(), 0, now() + interval '1 hour'), ('user:dl-y', now(), 0, now() + interval '1 hour')`);
+      mark = pools.length;
+      dl0 = await settledDeadlocks();
+      const rawPool = pool({ application_name: DL_APP, max: 2, query_timeout: 30_000 });
+      const [ra, rb] = [await rawPool.connect(), await rawPool.connect()];
+      const opposite = async (c: typeof ra, first: string, second: string) => {
+        try {
+          await c.query(`BEGIN; SET LOCAL lock_timeout = '${DL_LOCK_TIMEOUT}ms'; SET LOCAL statement_timeout = '${DL_LOCK_TIMEOUT + 1000}ms'`);
+          await c.query(`SELECT 1 FROM "McpRateLimitWindow" WHERE "key" = $1 FOR UPDATE`, [first]);
+          await sleep(150);
+          await c.query(`SELECT 1 FROM "McpRateLimitWindow" WHERE "key" = $1 FOR UPDATE`, [second]);
+          await c.query('COMMIT');
+          return 'committed';
+        } catch (e) {
+          await c.query('ROLLBACK').catch(() => undefined);
+          return String((e as { code?: string }).code);
+        }
+      };
+      const raw = (await Promise.all([opposite(ra, 'user:dl-x', 'user:dl-y'), opposite(rb, 'user:dl-y', 'user:dl-x')])).sort();
+      ra.release();
+      rb.release();
+      await endSince(mark);
+      const rawDelta = (await settledDeadlocks()) - dl0;
+      check('I2b-1 deadlock oracle (negative control): a real opposite-order deadlock under the same lock_timeout -> one 40P01, the other commits, counter +1', raw[0] === '40P01' && raw[1] === 'committed' && rawDelta >= 1, { outcomes: raw, deadlocksDelta: rawDelta });
+
+      // (c) regression: the CI-02 failure mode, deterministic.
+      await admin.query('TRUNCATE "McpRateLimitWindow"');
+      mark = pools.length;
+      dl0 = await settledDeadlocks();
+      const slowDl = [0, 1, 2].map(() => sqlSpy({ max: 6 }, 6));
+      const slowLimiters = slowDl.map(appLimiter); // production defaults: 1250 ms deadline, 1000 ms lock / statement timeouts
+      const shedOut = await Promise.all(Array.from({ length: 400 }, (_, i) => slowLimiters[i % 3].check(deadlockSet(i))));
+      await endSince(mark);
+      const shedDelta = (await settledDeadlocks()) - dl0;
+      const shedBy: Record<string, number> = {};
+      for (const d of shedOut) {
+        const k = d.allowed ? 'admitted' : `${d.limitedBy}:${d.cause ?? 'none'}`;
+        shedBy[k] = (shedBy[k] ?? 0) + 1;
+      }
+      const shedAdmitted = shedOut.filter((d) => d.allowed).length;
+      const shedAmbiguous = shedOut.filter((d) => AMBIGUOUS.has(String(d.cause))).length;
+      const shedCounted = (await hotCounts())['user:dl-a'] ?? 0;
+      const shedCodes = slowDl.flatMap((p) => p.errors).filter((e) => e.code !== undefined);
+      const shedDiag = { outcomes: shedBy, counted: shedCounted, sqlstates: shedCodes.slice(0, 5), deadlocksDelta: shedDelta };
+      console.log(`  I2b-1 deadlocks regression (production deadline, +6 ms/statement) diagnostics: ${JSON.stringify(shedDiag)}`);
+      check('I2b-1 deadlocks regression: a serialized hot-row queue longer than the 1250 ms production deadline sheds -- the pre-CI-02 "all admitted" assertion FAILS here', !shedOut.every((d) => d.allowed), shedDiag);
+      check('I2b-1 deadlocks regression: every shortfall is expected deadline shedding (deadline / commit_timeout / commit_late), never a driver error or a deadlock', shedOut.every((d) => d.allowed || (d.limitedBy === 'unavailable' && EXPECTED.has(String(d.cause)))), shedDiag);
+      check('I2b-1 deadlocks regression: no server SQLSTATE (no 40P01, no 55P03) and 0 new deadlocks', shedCodes.length === 0 && shedDelta === 0, shedDiag);
+      check('I2b-1 deadlocks regression: admitted <= counted <= admitted + ambiguous COMMITs (shedding never admits extra)', shedAdmitted <= shedCounted && shedCounted <= shedAdmitted + shedAmbiguous, { admitted: shedAdmitted, counted: shedCounted, ambiguous: shedAmbiguous });
 
       // Boundaries and window rollover (1 s windows).
       const short = createPostgresRateLimiter({ pool: pool({ max: 3 }), windowMs: 1000 });
