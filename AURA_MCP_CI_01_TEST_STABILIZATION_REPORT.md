@@ -14,7 +14,11 @@
 
 **Correction.** Nothing is derived from the limiter run being judged. The deadline is unchanged.
 1. **Concurrent baseline.** A control flood with the flood's own shape: 3 pools × 5 connections (application bounds), 2,000 concurrent units of 4 round trips (BEGIN + SET LOCAL; an advisory lock on one of 16 hot keys; an advisory lock on one of 500 network keys; COMMIT). It uses no limiter code and no table, and runs **immediately before and after** the limiter flood. The **slower** of the two is used, so a slowdown that starts during the flood is captured.
-2. **Capacity** = 2,000 × 1,250 / (K × controlMs), with **K = 2.5** fixed. Measured limiter/control duration ratios: 1.8–2.43 on an idle runner, 1.2–1.4 under +1 / +2 ms per-statement contention. K bounds every regime, so capacity is a lower-bound estimate. (K = 4 was tried first; it under-estimated capacity in the contended regime CI resembles and tripped the meaningfulness guard at +2 ms.)
+2. **Capacity** = 2,000 × 1,250 / (K × controlMs), with **K = 2.5** fixed. Measured limiter/control duration ratios:
+   - locally: 1.8–2.43 on an idle runner, 1.2–1.4 under +1 / +2 ms per-statement contention;
+   - **on the CI runner (PR run 45586199356): 1.7–2.7 for healthy floods**, so in the fast regime K can under-state the ratio by about 10% and over-estimate capacity accordingly.
+
+   The ½ margin in step 3 keeps the floor below what the limiter achieves for any ratio up to about 5, and in that regime the floods finish far inside the deadline (CI: 592–644 ms, 2,000 completed). (K = 4 was tried first; it under-estimated capacity in the contended regime, where CI floods also sit, and tripped the meaningfulness guard at +2 ms.)
 3. **Availability on completed decisions** (admitted + 429, i.e. not shed): completed ≥ **floor = min(2000, ⌊capacity / 2⌋)**. The ½ margin absorbs run-to-run variance. The floor no longer saturates at G, so ordinary shedding cannot fail a healthy limiter.
 4. **Meaningfulness.** If the floor is below G / 2 (240), the environment is too slow to certify availability and the gate **fails** rather than passing vacuously.
 5. **Exact, timing-free accounting.** Shard assignment is deterministic (decision i → shard i mod 16). For every shard, admitted = min(30, completed), and a 429 is legitimate only on a **full** shard.
@@ -40,6 +44,16 @@
 - "0 admitted, 2,000 unavailable";
 - pure deadline shedding;
 - **a limiter that answers 429 to everything** (2,000 "completed", rejected by the per-shard accounting).
+
+**First CI run of the corrected gate** (PR #394, run 45586199356, 52/52):
+
+| Scenario | Controls | Floor | Flood | Completed | Gate |
+|---|---|---|---|---|---|
+| Healthy ×3 | 174–381 ms | 1,312 / 1,712 / 2,000 | 592–644 ms | 2,000 | pass |
+| Shared +1 ms | 791–794 ms | 629 | 992 ms | 2,000 | pass |
+| Shared +2 ms | 1,333–1,374 ms | 363 | 1,265 ms | 1,494 | pass |
+| Mid-flood spike | 213 / 1,332 ms | 375 | 1,276 ms | 1,478 | pass |
+| Limiter-only degradation | 173–228 ms | 2,000 | 1,265 ms | 240 | **fail** |
 
 **Remaining timing sensitivity.**
 - When both controls are fast, the floor can reach 2,000 (no shedding allowed). A slowdown confined to the flood that ends before the after-control can still fail the gate.
