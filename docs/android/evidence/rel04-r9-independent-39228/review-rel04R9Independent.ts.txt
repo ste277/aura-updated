@@ -1,0 +1,214 @@
+/**
+ * AURA-ANDROID-REL-04 (R9) -- durable lifecycle enforcement: the three lifecycle blockers of the R8
+ * independent assessment of PR #392 (reviewed head 2e32b91, implementation eab072c).
+ *
+ * The assessment's witnesses (docs/android/evidence/rel04-r8-independent-45804709468/review-independent.log,
+ * preserved byte-for-byte with its SHA256SUMS) are re-run here against the R8 code head eab072c (queue,
+ * replay and sign-out vendored in test/fixtures/rel04-r8-head, checked against git) and against the
+ * current code. The assessor's probe scripts were not part of the evidence directory; the witnesses are
+ * rebuilt from the logged shapes, with historical data written by the ACTUAL producers (R2 db8607e, R3 b323d2a).
+ *
+ *  X1  no single transmission boundary: a discarded request is transmitted when IndexedDB reads fail
+ *      (direct-network fallback), and when a matching retired source is unreadable
+ *  X2  discard of a retired localStorage-only entry removes it WITHOUT a durable decision: the same
+ *      request is then submitted and confirmed (R2 aura_q3, R3 aura_q4)
+ *  X3  cleanup before decision: a failed IndexedDB discard still removes the retired copy, which unpauses
+ *      the active copy and replays it; sign-out counts physical copies
+ *
+ *  E   the current lifecycle: eligibility boundary, durable discard before cleanup, interrupted and
+ *      ambiguous transactions, concurrency, logical counts, healthy submission, other POST paths
+ *
+ *   TS_NODE_COMPILER_OPTIONS='{"jsx":"react-jsx"}' npx ts-node --project tsconfig.jsdom-tests.json test/rel04R9LifecycleEnforcement.test.ts
+ */
+import * as fs from 'fs';
+import * as path from 'path';
+import { execFileSync } from 'child_process';
+import { Device, WEB, addUser, check, clearQueueDb, closeAllTabs, finish, idbFault, logsOf, openTab, payload, queueDump, resetStore, storage } from './rel04AccountIsolationHarness';
+
+const ts = require(require.resolve('typescript', { paths: [WEB] }));
+const Module = require('module');
+const FIX = path.join(__dirname, 'fixtures');
+const fx = (dir: string, n: string) => fs.readFileSync(path.join(FIX, dir, n), 'utf8');
+const gitHas = (c: string) => { try { execFileSync('git', ['cat-file', '-e', `${c}^{commit}`], { stdio: 'ignore' }); return true; } catch { return false; } };
+
+(function provenance() {
+  const HEADS: Array<[string, string, string, string]> = [
+    ['db8607e', 'rel04-r2-head', 'offlineHabitQueue.ts.txt', 'apps/web/lib/offlineHabitQueue.ts'],
+    ['b323d2a', 'rel04-r3-head', 'offlineHabitQueue.ts.txt', 'apps/web/lib/offlineHabitQueue.ts'],
+    ['eab072c', 'rel04-r8-head', 'offlineHabitQueue.ts.txt', 'apps/web/lib/offlineHabitQueue.ts'],
+    ['eab072c', 'rel04-r8-head', 'activitySync.ts.txt', 'apps/web/lib/activitySync.ts'],
+    ['eab072c', 'rel04-r8-head', 'signOut.ts.txt', 'apps/web/lib/signOut.ts'],
+  ];
+  for (const [c, dir, f, src] of HEADS) {
+    if (!gitHas(c)) { console.log(`SKIP fixture re-check: ${c} not in this checkout; ${dir}/${f} used as vendored`); continue; }
+    check(`fixture ${dir}/${f} == ${c} ${src}`, execFileSync('git', ['show', `${c}:${src}`], { encoding: 'utf8', maxBuffer: 1 << 26 }) === fx(dir, f));
+  }
+  const W = path.join(__dirname, '..', 'docs', 'android', 'evidence', 'rel04-r8-independent-45804709468');
+  const sums = fs.readFileSync(path.join(W, 'SHA256SUMS'), 'utf8').trim().split('\n').map((l) => l.split(/\s+/));
+  const crypto = require('crypto');
+  check('the R8 independent witnesses are preserved byte-for-byte (SHA256SUMS of the evidence directory)', sums.length === 4 && sums.every(([h, f]) => crypto.createHash('sha256').update(fs.readFileSync(path.join(W, f))).digest('hex') === h));
+})();
+
+function compile(source: string, fakeFile: string, overrides: Record<string, unknown> = {}) {
+  const js = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, esModuleInterop: true } }).outputText;
+  const m = new Module(fakeFile, module);
+  m.filename = fakeFile;
+  m.paths = Module._nodeModulePaths(path.dirname(fakeFile));
+  const orig = m.require.bind(m);
+  m.require = (id: string) => (id in overrides ? overrides[id] : orig(id));
+  m._compile(js, fakeFile);
+  return m.exports;
+}
+const lib = (n: string) => path.join(WEB, 'lib', n);
+let seq = 0;
+const producer = (dir: string) => compile(fx(dir, 'offlineHabitQueue.ts.txt'), lib(`offlineHabitQueue.${dir}.${seq++}.js`));
+
+const A = 'r9-account-a';
+const B = 'r9-account-b';
+addUser(A, 'r9-a@example.invalid');
+addUser(B, 'r9-b@example.invalid');
+const item = (ownerUserId: string, crid: string, title = 'same-payload') => ({ ...payload(title, crid), ownerUserId, tempId: 'temp' });
+const realNow = Date.now;
+const lsDesc = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+const denyStorage = () => Object.defineProperty(globalThis, 'localStorage', { configurable: true, get() { throw new Error('storage access denied'); } });
+const restoreStorage = () => Object.defineProperty(globalThis, 'localStorage', lsDesc ?? { configurable: true, writable: true, value: storage });
+const lsKeys = (prefix: string) => [...storage.data.keys()].filter((k) => k.startsWith(prefix));
+const rowsOf = (owner: string, crid: string) => logsOf(owner).filter((l: any) => l.clientRequestId === crid).length;
+
+async function fresh() {
+  resetStore(); storage.clear(); storage.fail = { get: false, set: false, remove: false };
+  idbFault.open = false; idbFault.read = false; idbFault.write = false;
+  closeAllTabs(); Date.now = realNow; restoreStorage();
+  await clearQueueDb();
+}
+
+type Stack = { q: any; sync: any; acct: any; so: any };
+type Impl = { name: 'R8' | 'current'; tab: (id: string) => Stack };
+const R8: Impl = {
+  name: 'R8',
+  tab: (id) => {
+    const t = openTab(id);
+    const q = compile(fx('rel04-r8-head', 'offlineHabitQueue.ts.txt'), lib(`offlineHabitQueue.r8.${id}.${seq++}.js`));
+    const sync = compile(fx('rel04-r8-head', 'activitySync.ts.txt'), lib(`activitySync.r8.${id}.${seq++}.js`), { './offlineHabitQueue': q });
+    const so = compile(fx('rel04-r8-head', 'signOut.ts.txt'), lib(`signOut.r8.${id}.${seq++}.js`), { './offlineHabitQueue': q });
+    return { q, sync, acct: t.acct, so };
+  },
+};
+const CUR: Impl = { name: 'current', tab: (id) => { const t = openTab(id); return { q: t.q, sync: t.sync, acct: t.acct, so: t.so }; } };
+
+const dev = new Device();
+let tabSeq = 0;
+async function asAccount(impl: Impl, account: string): Promise<Stack> {
+  dev.signIn(account);
+  const s = impl.tab(`${impl.name}-${account}-${tabSeq++}`);
+  await s.acct.fetchVerifiedSession(dev.fetch as any);
+  return s;
+}
+async function signOut(s: Stack, onConfirm?: () => void) {
+  let asked = '';
+  const out = await s.so.performSignOut({ fetch: dev.fetch as any, confirm: (m: string) => { asked = m; onConfirm?.(); return true; } });
+  return { out, asked, message: (s.so.signOutOutcomeMessage(out) as string | null) ?? '' };
+}
+const decisions = async () => (await queueDump()).tombstones.filter((t: any) => t.fmt === 'r8');
+const offline = async (s: Stack, title: string, crid: string) => { dev.fault('POST', '/api/habit-logs', 'network-before'); return s.sync.submitActivityLog(payload(title, crid), 't', dev.fetch as any); };
+
+// ---------------------------------------------------------------- the assessment's witnesses
+async function wLocalOnly(impl: Impl, format: 'r2' | 'r3') {
+  await fresh();
+  const crid = `lso-${format}`;
+  if (format === 'r2') { if (!producer('rel04-r2-head').enqueueOwned(item(A, crid))) throw new Error('R2 enqueue failed'); }
+  else if (producer('rel04-r3-head').enqueueOwned(item(A, crid)).status !== 'stored') throw new Error('R3 enqueue failed');
+  const s = await asAccount(impl, A);
+  const so = await signOut(s);
+  const markersBeforeRetry = (await decisions()).length;
+  const s2 = await asAccount(impl, A);
+  const sub = await s2.sync.submitActivityLog(payload('same-payload', crid), 't', dev.fetch as any);
+  return { format, removed: so.out.owned?.removed, markersBeforeRetry, submit: sub.kind, serverRows: rowsOf(A, crid) };
+}
+async function wIdbFailureAfterDiscard(impl: Impl) {
+  await fresh();
+  const s = await asAccount(impl, A);
+  await offline(s, 'same-payload', 'idbf-1');
+  const so = await signOut(s);
+  const decision = (await decisions()).find((d: any) => d.clientRequestId === 'idbf-1')?.decision;
+  const s2 = await asAccount(impl, A);
+  idbFault.read = true;
+  const sub = await s2.sync.submitActivityLog(payload('same-payload', 'idbf-1'), 't', dev.fetch as any);
+  const rp = await s2.sync.replayOfflineQueue(dev.fetch as any);
+  idbFault.read = false;
+  return { removed: so.out.owned?.removed, decision, submit: sub.kind, replay: rp.stoppedBecause, serverRows: rowsOf(A, 'idbf-1') };
+}
+async function wInterruptedDiscard(impl: Impl) {
+  await fresh();
+  const s = await asAccount(impl, A);
+  await offline(s, 'same-payload', 'mix-1');
+  if (!producer('rel04-r2-head').enqueueOwned(item(A, 'mix-1'))) throw new Error('R2 enqueue failed'); // the retired copy
+  const before = await s.q.readOwnedQueue(A);
+  const so = await signOut(s, () => { idbFault.write = true; }); // the IndexedDB discard transaction fails
+  idbFault.write = false;
+  const sourceCount = lsKeys(`aura_q3:${A}:`).length;
+  const s2 = await asAccount(impl, A);
+  const after = await s2.q.readOwnedQueue(A);
+  const rp = await s2.sync.replayOfflineQueue(dev.fetch as any);
+  return { initialPaused: before.ok ? before.paused : -1, confirmation: so.asked, removed: so.out.owned?.removed, failed: so.out.owned?.failed, sourceCount, afterPaused: after.ok ? after.paused : -1, afterPending: after.ok ? after.items.length : -1, attempted: rp.attempted, serverRows: rowsOf(A, 'mix-1') };
+}
+async function wUnreadableSource(impl: Impl, how: 'denied' | 'getItem-throws') {
+  await fresh();
+  if (!producer('rel04-r2-head').enqueueOwned(item(A, 'unread-1'))) throw new Error('R2 enqueue failed');
+  const s = await asAccount(impl, A);
+  if (how === 'denied') denyStorage(); else storage.fail.get = true;
+  const sub = await s.sync.submitActivityLog(payload('same-payload', 'unread-1'), 't', dev.fetch as any);
+  restoreStorage(); storage.fail.get = false;
+  const r = await s.q.readOwnedQueue(A);
+  return { direct: sub.kind, stillPaused: r.ok ? r.paused : -1, rows: rowsOf(A, 'unread-1') };
+}
+
+
+async function main() {
+  for (const impl of [R8,CUR]) {
+    for (const fmt of ['r2','r3'] as const) console.log(impl.name,'localStorage-only',JSON.stringify(await wLocalOnly(impl,fmt)));
+    console.log(impl.name,'IDB read failure',JSON.stringify(await wIdbFailureAfterDiscard(impl)));
+    console.log(impl.name,'localStorage denied',JSON.stringify(await wUnreadableSource(impl,'denied')));
+    console.log(impl.name,'localStorage getItem throws',JSON.stringify(await wUnreadableSource(impl,'getItem-throws')));
+    console.log(impl.name,'mixed interrupted discard',JSON.stringify(await wInterruptedDiscard(impl)));
+  }
+  for(const format of ['v2','idb'] as const) {
+    await fresh();
+    const crid='identifiable-damage-'+format;
+    const x=item(A,crid);
+    const a=await asAccount(CUR,A);
+    if(format==='v2'){
+      const q1=producer('rel04-r1-head');
+      if(!q1.enqueueOwned(x))throw Error('Historical v2 setup failed');
+      const key=a.q.QUEUE_V2_PREFIX+A;
+      const prior=JSON.parse(storage.data.get(key)!);
+      prior[0].logTimestamp='corrupt';
+      storage.setItem(key,JSON.stringify(prior));
+    }else{
+      if((await offline(a,'same-payload',crid)).kind!=='queued') throw Error('Active setup failed');
+      const rec=(await queueDump()).records.find((r:any)=>r.clientRequestId===crid);
+      const db:IDBDatabase=await a.q.__openQueueDbForTests();
+      const tx=db.transaction(['records'],'readwrite');
+      tx.objectStore('records').put({...rec,item:{...rec.item,logTimestamp:'corrupt'}});
+      await new Promise<void>((ok,err)=>{tx.oncomplete=()=>ok();tx.onerror=()=>err(tx.error);});
+    }
+    const view=await a.q.readOfflineQueueView(A);
+    const discarded=await signOut(a);
+    const markers=(await decisions()).filter((t:any)=>t.clientRequestId===crid).length;
+    const b=await asAccount(CUR,A);
+    const wrote=await b.sync.submitActivityLog(payload('same-payload',crid),'temp',dev.fetch as any);
+    console.log('Readable request ID, damaged payload, confirmed discard followed by same request:',JSON.stringify({format,paused:view.paused,removed:discarded.out.owned?.removed,markers,submit:wrote.kind,rows:rowsOf(A,crid)}));
+  }
+  await fresh();
+  const a=await asAccount(CUR,A);
+  dev.fault('POST','/api/habit-logs','network-after');
+  const amb=await a.sync.submitActivityLog(payload('same-payload','was-sent'),'temp',dev.fetch as any);
+  if(amb.kind!=='queued'||rowsOf(A,'was-sent')!==1)throw Error('Ambiguous send setup failed');
+  if((await a.q.enqueueOwned(item(A,'never-sent'))).status!=='stored')throw Error('Unsent setup failed');
+  producer('rel04-r2-head').enqueueOwned(item(A,'was-sent'));
+  storage.fail.remove=true;
+  const removed=await signOut(a);
+  storage.fail.remove=false;
+  console.log('One unsent log removed plus one possibly-sent log pending physical cleanup:',JSON.stringify({counts:removed.out.owned,actuallySentRows:rowsOf(A,'was-sent'),unsentRows:rowsOf(A,'never-sent'),message:removed.message}));
+}
+main().then(()=>{closeAllTabs();process.exit(0)},e=>{console.error(e);process.exit(1)});

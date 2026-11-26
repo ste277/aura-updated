@@ -83,7 +83,11 @@ async function main() {
     // R9: the shown request (crid-t2) is durably discarded FIRST; the changed source is then not removed.
     check('T2 (R8/R9) a quarantined source that changed after it was shown is NOT removed (uncertain: preserved); the shown request is durably discarded and reported as not yet cleaned up', d.removed === 0 && d.cleanupPending === 1 && storage.data.get(key) === changed);
     const r = await t.q.readOwnedQueue(A);
-    check('T2 (R8/R9) it stays quarantined: counted as paused (its key request crid-t2 and its new content crid-t2b), never in the active queue', r.ok && r.records.length === 0 && r.items.length === 0 && r.paused === 2);
+    // R10: the changed entry's key names crid-t2 but its value names crid-t2b -- a CONFLICTING identity: one
+    // unidentifiable entry (counted once), preserved, and neither id is ever eligible.
+    const e1 = await t.q.enqueueOwned(owned('first payload', 'crid-t2'));
+    const e2 = await t.q.enqueueOwned(owned('changed payload', 'crid-t2b'));
+    check('T2 (R8/R9/R10) it stays quarantined: one entry with conflicting identity (counted once), never in the active queue; neither of its ids can be queued', r.ok && r.records.length === 0 && r.items.length === 0 && r.paused === 1 && e1.status === 'settled' && e2.status === 'paused');
   }
 
   // ---------------------------------------------------------------- T3 one claim per logical request

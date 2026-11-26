@@ -271,7 +271,9 @@ async function main() {
     const so = await signOut(s2);
     const s3 = await asAccount(CUR, A);
     const after = await s3.sync.submitActivityLog(payload('anything', 'opaque-2'), 't', dev.fetch as any);
-    check('E4 an unidentifiable (unparseable v2) entry blocks every transmission of the account (storage-unavailable, nothing sent) and is shown paused; the account\'s confirmed discard removes it and submission resumes', sub2.kind === 'storage-unavailable' && rowsOf(A, 'opaque-1') === 0 && v?.paused === 1 && so.out.owned?.removed === 1 && after.kind === 'confirmed');
+    // R10: an entry whose identity cannot be established is PRESERVED by the discard (never deleted) and reported
+    // as such; while it remains, eligibility of the account's requests cannot be established.
+    check('E4 an unidentifiable (unparseable v2) entry blocks every transmission of the account (storage-unavailable, nothing sent) and is shown paused; the confirmed discard PRESERVES it (R10: reported as not identifiable, never removed) and transmission stays blocked', sub2.kind === 'storage-unavailable' && rowsOf(A, 'opaque-1') === 0 && v?.paused === 1 && so.out.owned?.removed === 0 && so.out.owned?.unidentified === 1 && /couldn't be identified safely/.test(so.message) && storage.data.get(`offline_habit_queue_v2:${A}`) === '{not json' && after.kind === 'storage-unavailable' && rowsOf(A, 'opaque-2') === 0);
   }
   // E5 concurrent submission and discard
   {

@@ -96,6 +96,10 @@ function isQueuedHabitLog(value: unknown): value is QueuedHabitLog {
  *              is sending right now (kept, reported). Only after that transaction committed are the retired
  *              localStorage entries removed (each only if unchanged). A failed or unknown transaction removes
  *              nothing; a failed removal after the commit leaves an entry that is permanently ineligible.
+ *   identity   (R10) lifecycle identity (account + clientRequestId) is established by activityIdentity from the
+ *              identity fields ALONE: malformed other fields never bypass a durable discard; missing, malformed or
+ *              conflicting identity (incl. a value naming another account) is preserved in quarantine, never
+ *              discarded, never eligible, and reported as such.
  *   boundary   (R9) the ONLY way to transmit is a claim on an eligible active record (enqueueOwned with claimFor,
  *              or claimForDispatch). Eligible = readable IndexedDB and retired sources, no decision, no
  *              quarantined copy (a retired entry's request id is read from its key), no unidentifiable retired
@@ -135,13 +139,15 @@ export interface QueueRecord {
 }
 
 /**
- * R8: one account's retired-format localStorage entry, exactly as read (discard removes it only if
- * unchanged). `crids` = the logical requests it carries (R9: an aura_q3/aura_q4 entry's request id is
- * also read from its KEY, so it is known even when the value cannot be parsed); `unparsed` = entries
- * whose request cannot be identified at all (only an unparseable v2 array; each counted on its own).
- * `payloads` = crid -> canonical payload where the value parses.
+ * R8: one account's retired-format localStorage entry, exactly as read (discard removes it only if unchanged).
+ * R10: classified by IDENTITY ONLY (activityIdentity), never by the validity of its other fields:
+ *   `crids`        the logical requests it IDENTIFIES (account + clientRequestId established);
+ *   `unidentified` entries whose identity cannot be established safely (missing, malformed or conflicting
+ *                  identity fields; an unparseable v2 array) -- preserved, never discarded;
+ *   `blocked`      every request id it may stand for, incl. conflicting candidates: never eligible;
+ *   `payloads`     crid -> canonical payload, only for a COMPLETE valid entry.
  */
-export interface QuarantinedSource { key: string; raw: string; entries: number; crids: string[]; unparsed: number; payloads?: Record<string, string> }
+export interface QuarantinedSource { key: string; raw: string; entries: number; crids: string[]; unidentified: number; blocked: string[]; payloads?: Record<string, string> }
 
 export type QueueRead =
   | {
@@ -156,6 +162,8 @@ export type QueueRead =
       conflicts: string[];
       /** recordIds whose value is not a valid entry (kept, counted, discardable). */
       corruptIds: string[];
+      /** R10: each such record's trustworthy request id (activityIdentity), or null when it cannot be established. */
+      corrupt: Array<{ recordId: string; clientRequestId: string | null }>;
       /** R8: the account's retired-format localStorage entries (kept in place, never migrated). */
       quarantined: QuarantinedSource[];
       /** R8: activity kept on this device that will NOT sync automatically ("sync paused"), per LOGICAL activity. */
@@ -349,7 +357,32 @@ async function writeDecision(st: Stores, owner: string, crid: string, payload: s
  * unparseable v2 array). Eligibility of ANY request of the account then cannot be established: nothing
  * of the account is transmitted until that entry is discarded.
  */
-type Quarantine = { state: 'unavailable' } | { state: 'ok'; sources: QuarantinedSource[]; crids: Set<string>; opaque: boolean };
+/**
+ * R10 -- the trustworthy identity of one stored activity, established from its IDENTITY fields alone (its other
+ * fields may be malformed). `expectedCrid` is an identity the storage location itself carries (an aura_q3/aura_q4
+ * key, an IndexedDB record's indexed clientRequestId). Ownership is never inferred from the signed-in account:
+ * the value must not name another account.
+ *   identified  exactly one non-empty request id, no contradicting field
+ *   conflict    contradicting identity (another account named, two different ids, a malformed id field
+ *               next to a known one): candidates listed, never discarded, never eligible
+ *   unknown     no request id at all
+ */
+export type ActivityIdentity = { kind: 'identified'; crid: string } | { kind: 'conflict'; candidates: string[] } | { kind: 'unknown' };
+const nonEmptyId = (v: unknown): v is string => typeof v === 'string' && v.trim().length > 0;
+export function activityIdentity(value: unknown, owner: string, expectedCrid?: string): ActivityIdentity {
+  const v = value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+  const candidates = new Set<string>();
+  if (nonEmptyId(expectedCrid)) candidates.add(expectedCrid);
+  if (v && nonEmptyId(v.clientRequestId)) candidates.add(v.clientRequestId);
+  const list = [...candidates];
+  if (v && v.ownerUserId !== undefined && v.ownerUserId !== owner) return { kind: 'conflict', candidates: list };
+  if (v && v.clientRequestId !== undefined && !nonEmptyId(v.clientRequestId)) return list.length ? { kind: 'conflict', candidates: list } : { kind: 'unknown' };
+  if (list.length === 1) return { kind: 'identified', crid: list[0] };
+  if (list.length > 1) return { kind: 'conflict', candidates: list };
+  return { kind: 'unknown' };
+}
+
+type Quarantine = { state: 'unavailable' } | { state: 'ok'; sources: QuarantinedSource[]; /** every blocked request id (eligibility) */ crids: Set<string>; /** identified request ids (counting) */ identified: Set<string>; opaque: boolean };
 function inspectQuarantine(owner: string): Quarantine {
   let s: Storage;
   try {
@@ -361,15 +394,23 @@ function inspectQuarantine(owner: string): Quarantine {
   try {
     const sources: QuarantinedSource[] = [];
     const parse = (raw: string): unknown => { try { return JSON.parse(raw); } catch { return undefined; } };
-    const cridOf = (v: unknown) => (isQueuedHabitLog(v) ? v.clientRequestId : null);
+    let opaque = false;
+    const classify = (key: string, raw: string, values: unknown[], expectedCrid?: string): QuarantinedSource => {
+      const crids = new Set<string>(), blocked = new Set<string>(), payloads: Record<string, string> = {};
+      let unidentified = 0;
+      for (const v of values) {
+        const id = activityIdentity(v, owner, expectedCrid);
+        if (id.kind === 'identified') { crids.add(id.crid); blocked.add(id.crid); if (isQueuedHabitLog(v) && v.clientRequestId === id.crid) payloads[id.crid] = canonicalPayload(v); }
+        else { unidentified++; if (id.kind === 'conflict') for (const c of id.candidates) blocked.add(c); }
+      }
+      return { key, raw, entries: values.length, crids: [...crids], unidentified, blocked: [...blocked], payloads };
+    };
     const v2 = s.getItem(QUEUE_V2_PREFIX + owner);
     if (v2 !== null) {
       const a = parse(v2);
-      const list = Array.isArray(a) ? a : [undefined]; // unparseable: one kept entry
-      const crids = list.map(cridOf).filter((c): c is string => c !== null);
-      const payloads: Record<string, string> = {};
-      for (const v of list) if (isQueuedHabitLog(v)) payloads[v.clientRequestId] = canonicalPayload(v);
-      if (list.length > 0) sources.push({ key: QUEUE_V2_PREFIX + owner, raw: v2, entries: list.length, crids: [...new Set(crids)], unparsed: list.length - crids.length, payloads });
+      // An unparseable array may hide any request id: OPAQUE (one unidentified entry; nothing of the account is eligible).
+      if (!Array.isArray(a)) { opaque = true; sources.push({ key: QUEUE_V2_PREFIX + owner, raw: v2, entries: 1, crids: [], unidentified: 1, blocked: [], payloads: {} }); }
+      else if (a.length > 0) sources.push(classify(QUEUE_V2_PREFIX + owner, v2, a));
     }
     for (const prefix of [QUEUE_V3_PREFIX, QUEUE_V4_PREFIX]) {
       const head = `${prefix}${owner}:`;
@@ -381,14 +422,10 @@ function inspectQuarantine(owner: string): Quarantine {
         // R9: the request id is part of the key (aura_q3:<owner>:<crid>, aura_q4:<owner>:<crid>:<recordId>).
         const rest = key.slice(head.length);
         const fromKey = prefix === QUEUE_V4_PREFIX && rest.lastIndexOf(':') > 0 ? rest.slice(0, rest.lastIndexOf(':')) : rest;
-        const c = cridOf(v);
-        const crids = [...new Set([fromKey, ...(c ? [c] : [])].filter((x) => x.length > 0))];
-        const payloads: Record<string, string> = {};
-        if (c && isQueuedHabitLog(v)) payloads[c] = canonicalPayload(v);
-        sources.push({ key, raw, entries: 1, crids, unparsed: crids.length ? 0 : 1, payloads });
+        sources.push(classify(key, raw, [v], fromKey));
       }
     }
-    return { state: 'ok', sources, crids: new Set(sources.flatMap((x) => x.crids)), opaque: sources.some((x) => x.unparsed > 0) };
+    return { state: 'ok', sources, crids: new Set(sources.flatMap((x) => x.blocked)), identified: new Set(sources.flatMap((x) => x.crids)), opaque };
   } catch {
     return { state: 'unavailable' };
   }
@@ -415,9 +452,20 @@ export async function readOwnedQueue(ownerUserId: string): Promise<QueueRead> {
     });
     const records: QueueRecord[] = [];
     const corruptIds: string[] = [];
+    const corrupt: Array<{ recordId: string; clientRequestId: string | null }> = [];
+    const damaged = new Set<string>(); // R10: identified requests with a damaged copy (paused, discardable by identity)
+    const blockedByRecords = new Set<string>(); // conflicting candidates of unidentifiable records (never eligible)
+    let unidentifiedRecords = 0;
     for (const r of stored) {
       const item = r.item;
-      if (!isQueuedHabitLog(item) || item.ownerUserId !== ownerUserId || item.clientRequestId !== r.clientRequestId) { corruptIds.push(r.recordId); continue; }
+      if (!isQueuedHabitLog(item) || item.ownerUserId !== ownerUserId || item.clientRequestId !== r.clientRequestId) {
+        corruptIds.push(r.recordId);
+        const id = activityIdentity(item, ownerUserId, r.clientRequestId);
+        corrupt.push({ recordId: r.recordId, clientRequestId: id.kind === 'identified' ? id.crid : null });
+        if (id.kind === 'identified') damaged.add(id.crid);
+        else { unidentifiedRecords++; if (id.kind === 'conflict') for (const c of id.candidates) blockedByRecords.add(c); }
+        continue;
+      }
       const key = requestKey(r.ownerUserId, r.clientRequestId);
       records.push({ recordId: r.recordId, item: { ...item, recordId: r.recordId, queuedAt: r.queuedAt }, inFlight: fresh(claims.get(key), now), dispatched: dispatches.has(key), paused: !isActive(r) });
     }
@@ -429,17 +477,19 @@ export async function readOwnedQueue(ownerUserId: string): Promise<QueueRead> {
     for (const r of records) byCrid.set(r.item.clientRequestId, [...(byCrid.get(r.item.clientRequestId) ?? []), r]);
     const groups: QueueRecord[][] = [];
     const conflicts: string[] = [];
-    const pausedRequests = new Set<string>(q.crids);
+    const pausedRequests = new Set<string>([...q.identified, ...damaged]);
     for (const [crid, rs] of byCrid) {
       // R9: an opaque retired entry means no request of the account can be shown eligible.
-      if (rs.some((r) => r.paused) || q.crids.has(crid) || q.opaque) { pausedRequests.add(crid); for (const r of rs) r.paused = true; }
+      // R10: neither can a request with a damaged or identity-conflicting copy.
+      if (rs.some((r) => r.paused) || q.crids.has(crid) || q.opaque || damaged.has(crid) || blockedByRecords.has(crid)) { pausedRequests.add(crid); for (const r of rs) r.paused = true; }
       else if (new Set(rs.map((r) => canonicalPayload(r.item))).size > 1) conflicts.push(crid);
       else groups.push(rs);
     }
     // Counted per logical request (an entry with an unreadable request counts on its own).
-    const paused = pausedRequests.size + conflicts.length + corruptIds.length + q.sources.reduce((n, x) => n + x.unparsed, 0);
+    // Counted per LOGICAL request; an entry whose identity cannot be established counts on its own.
+    const paused = pausedRequests.size + conflicts.length + unidentifiedRecords + q.sources.reduce((n, x) => n + x.unidentified, 0);
     const dispatched = new Set(records.filter((r) => r.dispatched).map((r) => r.item.clientRequestId)).size;
-    return { ok: true, items: groups.map((g) => g[0].item), records, groups, conflicts, corruptIds, quarantined: q.sources, paused, pending: groups.length, total: groups.length + paused, dispatched };
+    return { ok: true, items: groups.map((g) => g[0].item), records, groups, conflicts, corruptIds, corrupt, quarantined: q.sources, paused, pending: groups.length, total: groups.length + paused, dispatched };
   } catch {
     return { ok: false };
   }
@@ -505,8 +555,14 @@ export async function enqueueOwned(item: OwnedQueuedHabitLog, { claimFor }: { cl
       const decided = (await asPromise(st.tombstones.get(decisionKey(owner, item.clientRequestId)))) as Decision | undefined;
       if (decided) return decided.payload === null || decided.payload === mine ? ({ status: 'settled' } as const) : ({ status: 'conflict' } as const);
       if (q.crids.has(item.clientRequestId)) return { status: 'paused' } as const; // a quarantined localStorage copy
+      // R10: a stored record whose identity fields name this request under another indexed id (identity conflict).
+      const owned = (await asPromise(st.records.index('owner').getAll(IDBKeyRange.only(owner)))) as Stored[];
+      if (owned.some((r) => r.clientRequestId !== item.clientRequestId && activityIdentity(r.item, owner, r.clientRequestId).kind === 'conflict' && (r.item as { clientRequestId?: unknown } | undefined)?.clientRequestId === item.clientRequestId)) return { status: 'paused' } as const;
       const same = (await asPromise(st.records.index('ownerCrid').getAll(IDBKeyRange.only([owner, item.clientRequestId])))) as Stored[];
       if (same.some((r) => !isActive(r))) return { status: 'paused' } as const;
+      // R10: every stored copy must carry exactly THIS account's identity for this request (a copy naming another
+      // account, or another request id, is an identity conflict: never adopted, never sent).
+      if (same.some((r) => { const id = activityIdentity(r.item, owner, r.clientRequestId); return id.kind !== 'identified' || id.crid !== item.clientRequestId; })) return { status: 'paused' } as const;
       if (same.some((r) => !isQueuedHabitLog(r.item) || canonicalPayload(r.item) !== mine)) return { status: 'conflict' } as const;
       let recordId: string;
       if (same.length > 0) {
@@ -543,6 +599,7 @@ export async function claimForDispatch(recordId: string, tab: string): Promise<C
       if (q.crids.has(rec.clientRequestId) || q.opaque) return { status: 'paused' } as const;
       const siblings = (await asPromise(st.records.index('ownerCrid').getAll(IDBKeyRange.only([rec.ownerUserId, rec.clientRequestId])))) as Stored[];
       if (siblings.some((r) => !isActive(r))) return { status: 'paused' } as const; // a quarantined copy pauses the whole request
+      if (siblings.some((r) => { const id = activityIdentity(r.item, r.ownerUserId, r.clientRequestId); return !isQueuedHabitLog(r.item) || id.kind !== 'identified' || id.crid !== rec.clientRequestId; })) return { status: 'paused' } as const; // R10: a damaged or identity-conflicting copy
       if ((await asPromise(st.tombstones.get(decisionKey(rec.ownerUserId, rec.clientRequestId)))) as Decision | undefined) return { status: 'gone' } as const;
       const claim = await takeClaim(st, rec.ownerUserId, rec.clientRequestId, tab, now);
       return claim ? ({ status: 'claimed', claim } as const) : ({ status: 'in-flight' } as const);
@@ -680,110 +737,116 @@ export async function discardRecords(recordIds: Iterable<string>, { tab, owner }
   }
 }
 
-/** R9: what one logical discard did, per LOGICAL activity (account + clientRequestId; an unidentifiable entry counts on its own). */
+/**
+ * R9/R10: what one logical discard did, per LOGICAL activity (account + clientRequestId). Each activity is in
+ * exactly ONE outcome category; "possibly sent" is attributed WITHIN its category.
+ */
 export interface LogicalDiscardResult {
-  /** Discarded (decision recorded) AND every copy removed from this device. Includes `removedPossiblySent`. */
+  /** Discarded (decision recorded) AND every copy removed from this device. */
   removed: number;
-  /** Of `removed` + `cleanupPending`: already handed to the network -- it may have been sent and saved. */
+  /** Of `removed`: already handed to the network -- it may have been sent and saved. */
   removedPossiblySent: number;
-  /** Discarded (decision recorded, never sent again) but a retired copy could not be deleted from this device's storage. */
+  /** Discarded (decision recorded, never sent again) but a retired copy could not be deleted from this device. */
   cleanupPending: number;
+  /** Of `cleanupPending`: already handed to the network. */
+  cleanupPendingPossiblySent: number;
   /** Another context was sending it at that moment: kept, nothing decided. */
   keptInFlight: number;
-  /** The discard could not be recorded (storage failure or unknown outcome): kept exactly as before, nothing removed. */
+  /** NOT discarded: the discard could not be recorded (storage failure or unknown outcome); kept exactly as before. */
   failed: number;
+  /** NOT discarded: its identity could not be established safely (R10); preserved in quarantine, never sent. */
+  unidentified: number;
   alreadyGone: number;
 }
 
-export interface DiscardSnapshot { records: Array<{ recordId: string; item: { clientRequestId: string } }>; corruptIds: string[]; quarantined: QuarantinedSource[] }
+export interface DiscardSnapshot {
+  records: Array<{ recordId: string; item: { clientRequestId: string } }>;
+  corruptIds: string[];
+  corrupt?: Array<{ recordId: string; clientRequestId: string | null }>;
+  quarantined: QuarantinedSource[];
+}
 
 /**
  * R9 -- the account's CONFIRMED discard of exactly the activity it was shown (sign-out), by LOGICAL identity.
+ * R10 -- identity is established by activityIdentity alone: a copy with malformed NON-identity fields is still
+ * discarded durably by its identity; a copy whose identity cannot be established is preserved (never deleted).
  *
- *   1. ONE IndexedDB transaction records the 'discarded' decision of every logical activity of the
- *      snapshot -- including those that exist ONLY in a retired localStorage entry -- and removes every
- *      IndexedDB copy of it (a request another context is sending right now is kept, undecided).
- *   2. Only after that transaction COMMITTED are the retired localStorage entries removed (each only if
- *      still exactly what was shown). If the transaction fails or its outcome is unknown, nothing is
- *      removed. If a removal fails after the commit, the surviving entry is permanently ineligible (its
- *      decision exists) and is reported as `cleanupPending`.
+ *   1. ONE IndexedDB transaction records the 'discarded' decision of every IDENTIFIED logical activity of the
+ *      snapshot (IndexedDB, localStorage-only or both) and removes its identified IndexedDB copies (a request
+ *      another context is sending right now is kept, undecided).
+ *   2. Only after that transaction COMMITTED are retired localStorage entries removed -- each only if still
+ *      exactly what was shown and if it contains no unidentified entry. A failed or unknown transaction removes
+ *      nothing. A removal that fails after the commit leaves an entry that is permanently ineligible.
  */
 export async function discardOwned(owner: string, snap: DiscardSnapshot, { tab }: { tab: string }): Promise<LogicalDiscardResult> {
-  const out: LogicalDiscardResult = { removed: 0, removedPossiblySent: 0, cleanupPending: 0, keptInFlight: 0, failed: 0, alreadyGone: 0 };
+  const out: LogicalDiscardResult = { removed: 0, removedPossiblySent: 0, cleanupPending: 0, cleanupPendingPossiblySent: 0, keptInFlight: 0, failed: 0, unidentified: 0, alreadyGone: 0 };
   const own = (key: string) => QUARANTINED_PREFIXES.some((p) => key === `${p}${owner}` || key.startsWith(`${p}${owner}:`));
   const sources = snap.quarantined.filter((x) => own(x.key));
   const sourceCrids = new Set(sources.flatMap((x) => x.crids));
-  const snapCrids = new Set([...snap.records.map((r) => r.item.clientRequestId), ...sourceCrids]);
-  const opaqueUnits = sources.reduce((n, x) => n + x.unparsed, 0);
-  let committed: { decided: Set<string>; possiblySent: Set<string>; units: number } | null = null;
+  const corrupt = snap.corrupt ?? snap.corruptIds.map((recordId) => ({ recordId, clientRequestId: null }));
+  const snapCrids = new Set([...snap.records.map((r) => r.item.clientRequestId), ...sourceCrids, ...corrupt.map((c) => c.clientRequestId).filter((c): c is string => c !== null)]);
+  const unidentifiedBefore = sources.reduce((n, x) => n + x.unidentified, 0) + corrupt.filter((c) => c.clientRequestId === null).length;
+  let committed: { decided: Set<string>; possiblySent: Set<string>; unidentifiedRecords: number } | null = null;
   try {
     const now = Date.now();
     committed = await tx('readwrite', async (st) => {
       const decided = new Set<string>();
       const possiblySent = new Set<string>();
-      const payloadOf = new Map<string, string | null>();
-      let units = 0;
-      // Unreadable records of the snapshot: each its own unit, removed (it has no readable request to decide).
-      for (const id of snap.corruptIds) {
-        const rec = (await asPromise(st.records.get(id))) as Stored | undefined;
-        if (!rec || rec.ownerUserId !== owner) { out.alreadyGone++; continue; }
-        await asPromise(st.records.delete(id));
-        units++; out.removed++;
+      let unidentifiedRecords = 0;
+      const crids = new Set(snapCrids);
+      // The snapshot's damaged records: discarded by their identity when it can be established, otherwise kept.
+      for (const c of corrupt) {
+        const rec = (await asPromise(st.records.get(c.recordId))) as Stored | undefined;
+        if (!rec) { if (c.clientRequestId === null) out.alreadyGone++; continue; }
+        if (rec.ownerUserId !== owner) continue; // never another account's record
+        const id = activityIdentity(rec.item, owner, rec.clientRequestId);
+        if (id.kind === 'identified') crids.add(id.crid); else unidentifiedRecords++;
       }
-      // The logical activities of the snapshot: from its records and from its retired entries.
-      const crids = snapCrids;
-      for (const src of sources) for (const c of src.crids) if (src.payloads?.[c] && !payloadOf.has(c)) payloadOf.set(c, src.payloads[c]);
       for (const crid of crids) {
         const key = requestKey(owner, crid);
         const all = (await asPromise(st.records.index('ownerCrid').getAll(IDBKeyRange.only([owner, crid])))) as Stored[];
+        const mine = all.filter((r) => { const id = activityIdentity(r.item, owner, r.clientRequestId); return id.kind === 'identified' && id.crid === crid; });
         const c = (await asPromise(st.claims.get(key))) as Claim | undefined;
-        if (all.some(isActive) && fresh(c, now) && c!.tab !== tab) { out.keptInFlight++; continue; }
-        if (all.length === 0 && !sourceCrids.has(crid)) { out.alreadyGone++; continue; }
-        for (const r of all) if (isQueuedHabitLog(r.item) && !payloadOf.has(crid)) payloadOf.set(crid, canonicalPayload(r.item));
+        if (mine.some(isActive) && fresh(c, now) && c!.tab !== tab) { out.keptInFlight++; continue; }
+        if (mine.length === 0 && !sourceCrids.has(crid)) { out.alreadyGone++; continue; }
         if (await asPromise(st.dispatches.get(key))) possiblySent.add(crid);
-        for (const r of all) await asPromise(st.records.delete(r.recordId));
-        await writeDecision(st, owner, crid, payloadOf.get(crid) ?? null, 'discarded', now);
-        await asPromise(st.dispatches.delete(key));
-        await asPromise(st.claims.delete(key));
+        const payloads = new Set<string>();
+        for (const r of mine) if (isQueuedHabitLog(r.item) && r.item.clientRequestId === crid) payloads.add(canonicalPayload(r.item));
+        for (const src of sources) if (src.payloads?.[crid]) payloads.add(src.payloads[crid]);
+        for (const r of mine) await asPromise(st.records.delete(r.recordId));
+        // The decision carries the payload only when every readable copy agrees; otherwise any payload is refused.
+        await writeDecision(st, owner, crid, payloads.size === 1 ? [...payloads][0] : null, 'discarded', now);
+        if (mine.length === all.length) { await asPromise(st.dispatches.delete(key)); await asPromise(st.claims.delete(key)); }
         decided.add(crid);
-        units++;
       }
-      return { decided, possiblySent, units };
+      return { decided, possiblySent, unidentifiedRecords };
     });
   } catch {
     committed = null;
   }
   if (!committed) {
     // Nothing was recorded or removed (the transaction is atomic): every logical activity is kept as it was.
-    out.removed = 0;
-    out.keptInFlight = 0;
-    out.failed = snapCrids.size + snap.corruptIds.length + opaqueUnits;
-    out.alreadyGone = 0;
-    return out;
+    return { ...out, removed: 0, keptInFlight: 0, alreadyGone: 0, failed: snapCrids.size, unidentified: unidentifiedBefore };
   }
-  // Committed: now, and only now, remove the retired entries whose every request is decided.
+  out.unidentified += committed.unidentifiedRecords;
+  // Committed: now, and only now, remove the retired entries whose every entry is identified and decided.
   const pendingCleanup = new Set<string>();
-  let opaqueRemoved = 0;
   const s = storageOrNull();
   for (const src of sources) {
-    if (!src.crids.every((c) => committed!.decided.has(c))) { // a request of it was kept (in flight): leave the entry
-      for (const c of src.crids) pendingCleanup.add(c);
-      out.failed += src.unparsed;
-      continue;
-    }
+    out.unidentified += src.unidentified; // preserved, never removed
+    if (src.unidentified > 0 || !src.crids.every((c) => committed!.decided.has(c))) { for (const c of src.crids) pendingCleanup.add(c); continue; }
     let gone = false;
     try {
       if (s && s.getItem(src.key) === src.raw) s.removeItem(src.key);
       gone = Boolean(s) && s!.getItem(src.key) === null;
     } catch { gone = false; }
-    if (gone) opaqueRemoved += src.unparsed;
-    else { for (const c of src.crids) pendingCleanup.add(c); out.failed += src.unparsed; }
+    if (!gone) for (const c of src.crids) pendingCleanup.add(c);
   }
   for (const crid of committed.decided) {
-    if (pendingCleanup.has(crid)) out.cleanupPending++; else out.removed++;
-    if (committed.possiblySent.has(crid)) out.removedPossiblySent++;
+    const sent = committed.possiblySent.has(crid);
+    if (pendingCleanup.has(crid)) { out.cleanupPending++; if (sent) out.cleanupPendingPossiblySent++; }
+    else { out.removed++; if (sent) out.removedPossiblySent++; }
   }
-  out.removed += opaqueRemoved;
   return out;
 }
 

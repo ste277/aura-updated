@@ -82,6 +82,10 @@ export interface OwnedDiscardReport {
   failed: number;
   /** R9: discarded (will never be sent) but a copy could not be deleted from this device's storage. */
   cleanupPending?: number;
+  /** R10: of `cleanupPending`: already handed to the network (may have been sent and saved). */
+  cleanupPendingPossiblySent?: number;
+  /** R10: NOT discarded because its identity could not be established safely; kept (paused, never sent). */
+  unidentified?: number;
 }
 
 export interface SignOutDeps {
@@ -134,7 +138,8 @@ export function discardOutcomeMessage(r: SignOutResult): string | null {
       parts.push("Aura couldn't read this account's unsynced activity on this device, so none of it was removed. Whatever is stored is kept on this device and syncs only if you sign in to the same account again.");
     } else {
       if (o.removed > 0) parts.push(`${plural(o.removed, '1 unsynced activity log was', '# unsynced activity logs were')} removed from this device.`);
-      if (o.removedPossiblySent > 0) parts.push(`${o.removedPossiblySent === o.removed ? (o.removed === 1 ? 'It' : 'They') : `${o.removedPossiblySent} of them`} may already have been sent, so ${o.removedPossiblySent === 1 ? 'it' : 'they'} may be saved to your account; removing ${o.removedPossiblySent === 1 ? 'it' : 'them'} here doesn't undo that.`);
+      // R10: "possibly sent" is stated only for the activities of THIS category.
+      if (o.removed > 0 && o.removedPossiblySent > 0) parts.push(`${o.removedPossiblySent === o.removed ? (o.removed === 1 ? 'It' : 'They') : `${o.removedPossiblySent} of them`} may already have been sent, so ${o.removedPossiblySent === 1 ? 'it' : 'they'} may be saved to your account; removing ${o.removedPossiblySent === 1 ? 'it' : 'them'} here doesn't undo that.`);
       const kept = o.keptInFlight + o.failed;
       if (kept > 0) {
         const why: string[] = [];
@@ -144,6 +149,10 @@ export function discardOutcomeMessage(r: SignOutResult): string | null {
       }
       const cp = o.cleanupPending ?? 0;
       if (cp > 0) parts.push(`${plural(cp, '1 activity log was', '# activity logs were')} discarded and will never be sent, but Aura couldn't delete ${cp === 1 ? 'its copy' : 'their copies'} from this device's storage.`);
+      const cps = o.cleanupPendingPossiblySent ?? 0;
+      if (cp > 0 && cps > 0) parts.push(`${cps === cp ? (cp === 1 ? 'It' : 'They') : `${cps} of those`} may already have been sent, so ${cps === 1 ? 'it' : 'they'} may be saved to your account; discarding ${cps === 1 ? 'it' : 'them'} here doesn't undo that.`);
+      const un = o.unidentified ?? 0;
+      if (un > 0) parts.push(`${plural(un, '1 activity log', '# activity logs')} from an earlier test version of Aura couldn't be identified safely, so ${un === 1 ? 'it was' : 'they were'} kept on this device (paused, never sent).`);
     }
   }
   if (r.legacyKept === null) parts.push("Aura couldn't check this device for activity logs from an earlier version; any there were left in place.");
@@ -266,7 +275,7 @@ async function run(deps: SignOutDeps): Promise<SignOutResult> {
       // R9: one logical discard -- the decisions and every IndexedDB copy in one transaction, retired
       // localStorage entries removed only after it committed (a failure keeps everything as it was).
       const d = await discardOwned(owner, snapshot, { tab: getTabId() });
-      owned = { unknown: false, removed: d.removed, removedPossiblySent: d.removedPossiblySent, keptInFlight: d.keptInFlight, failed: d.failed, cleanupPending: d.cleanupPending };
+      owned = { unknown: false, removed: d.removed, removedPossiblySent: d.removedPossiblySent, keptInFlight: d.keptInFlight, failed: d.failed, cleanupPending: d.cleanupPending, cleanupPendingPossiblySent: d.cleanupPendingPossiblySent, unidentified: d.unidentified };
     }
     const legacy = readLegacySnapshot();
     transition.end('signed-out');

@@ -989,6 +989,10 @@ jobs:
         env:
           TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
         run: npx ts-node --project tsconfig.jsdom-tests.json test/rel04R9LifecycleEnforcement.test.ts
+      - name: Run REL-04 R10 durable discard identity test (39228-R9 witnesses on 513c12b vs current)
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/rel04R10DurableDiscardIdentity.test.ts
       - name: Run REL-04 R3-head (b323d2a) reproduction test
         env:
           TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'

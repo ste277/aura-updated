@@ -1,0 +1,1733 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  math-core-tests:
+    name: Ephemeris / panchang tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - name: Install root deps
+        run: npm install
+      - name: Run ephemeris test
+        run: npx ts-node test/ephemeris.test.ts
+      - name: Run PA-3B solar windows timezone fix test
+        run: npx ts-node test/pa3bSolarWindowsTimezoneFix.test.ts
+      - name: Run PA-3C-C1A typed solar errors test
+        run: npx ts-node test/pa3cC1ASolarErrorHandling.test.ts
+      - name: Run PA-3C-C1B-01 solar unavailable classification test
+        run: npx ts-node test/pa3cC1B01SolarUnavailable.test.ts
+      - name: Run PA-3C-C1B-02 Muhurtham eligibility test
+        run: npx ts-node test/pa3cC1B02MuhurthamEligibility.test.ts
+      - name: Run PA-3C-C1B-03 Daily Assistant availability test
+        run: npx ts-node test/pa3cC1B03DailyAssistantAvailability.test.ts
+      - name: Run PA-3C-C1C-01 Timing Search solar unavailable containment test
+        run: npx ts-node test/pa3cC1C01TimingSearchSolarUnavailable.test.ts
+      - name: Run integration test
+        run: npx ts-node test/integration.test.ts
+      - name: Run timezone test
+        run: npx ts-node test/timezone.test.ts
+      - name: Run window notifications test
+        run: npx ts-node test/windowNotifications.test.ts
+      - name: Run activity ontology test
+        run: npx ts-node test/activityOntology.test.ts
+      - name: Run muhurta reasons test
+        run: npx ts-node test/muhurtaReasons.test.ts
+      - name: Run muhurta test
+        run: npx ts-node test/muhurta.test.ts
+      - name: Run PA-2C Tithi/Karana aberration fix test
+        run: npx ts-node test/pa2cTithiKaranaAberrationFix.test.ts
+      - name: Run timing search test
+        run: npx ts-node test/timingSearch.test.ts
+      - name: Run timing search API validation test
+        run: npx ts-node test/timingSearchApi.test.ts
+      # AURA-MCP-02-I1 -- remote MCP transport foundation (packages/mcp-tools):
+      # fail-closed config, 404 when off, Origin/body/auth gates, shared tool
+      # definition, parity with the shared executor, 14-day remote window,
+      # dependency pin guard and static isolation. No network, DB or env.
+      - name: Run remote MCP transport test
+        run: npx ts-node test/mcpRemoteTransport.test.ts
+      # AURA-MCP-02-I2a -- local OAuth authorization server (oidc-provider)
+      # -> remote MCP, on an ephemeral 127.0.0.1 port with synthetic users
+      # and clients: discovery, Authorization Code + PKCE (S256), token
+      # issuance, expiry, forged/tampered tokens, audience, scope,
+      # revocation, client binding, rate limits, audit redaction, and the
+      # environment gate that keeps Production/staging reject-all. No DB.
+      - name: Run local OAuth -> MCP test
+        run: npx ts-node test/mcpOAuthLocal.test.ts
+      # AURA-MCP-02-I2a-R1 -- regressions for the independent security review:
+      # provider/Aura session binding (sign-out, account switch, prompt=none,
+      # attacker PKCE, session expiry, concurrency, re-authorization), per-user
+      # vs per-client rate limits, bounded limiter, loopback-only AS.
+      - name: Run OAuth security regression test
+        run: npx ts-node test/mcpOAuthSecurityRegression.test.ts
+      # AURA-MCP-02-I2b -- offline production-readiness security tests:
+      # atomic single-use codes and refresh-token rotation/replay (F6),
+      # pre-auth throttling (F5), trusted client-address resolution and
+      # proxy-header spoofing (R1-L2), keys and rotation, ID-token privacy,
+      # client registration policy, disconnect, sign-in return, audit
+      # redaction, multi-instance behaviour on a shared store. No DB.
+      - name: Run I2b OAuth production-readiness test
+        run: npx ts-node test/mcpOAuthI2b.test.ts
+      # AURA-MCP-02-I2b-S2 -- staging-blocker fixes, offline: canonical
+      # IPv4/IPv6 parsing and /32 + /64 buckets, unresolved-address bucket,
+      # spoofed headers (I2b-R-3); global shards summing exactly to the
+      # ceiling (I2b-1); deadlines, single-flight cleanup, hung/late pool
+      # connections, 503 vs 429, no code or token with the store down
+      # (I2b-R-2). No DB.
+      - name: Run I2b-S2 staging-blocker offline test
+        run: npx ts-node test/mcpOAuthStagingBlockers.test.ts
+      # I2b-S8: request-origin pinning (a forged Host / X-Forwarded-* never
+      # reaches discovery, endpoint URLs or redirects; I2b-R-3), signing-key
+      # integrity and secret strength (I2b-R-6), 503 for a store outage on
+      # the interaction page (S3-3), one address source (S3-4), bounded
+      # address parsing (S3-5), keyed address buckets (S3-6), versioned shard
+      # keys (S3-7), COMMIT confirmed by its tag and bounded (S5). No DB.
+      - name: Run I2b-S8 offline security test
+        run: npx ts-node test/mcpOAuthS8.test.ts
+      # I2b-S10: secret formats (every supported CSPRNG format accepted for
+      # every role incl. retained rotation keys; S8 weak patterns refused; no
+      # newly refused S8-accepted value), the per-request time budget, ONE
+      # deadline through COMMIT, connection recovery, and the held activation
+      # transaction (commit / unknown / not_committed / abort / expiry). No DB.
+      - name: Run I2b-S10 offline activation-readiness test
+        run: npx ts-node test/mcpOAuthS10.test.ts
+      # I2b-S11 (S10 review): absolute monotonic deadlines under a fake clock
+      # (late checkout, pre-COMMIT expiry, late acknowledgement, hold expiry,
+      # limiter causes), the checkout error guard, canonical secret formats
+      # and the review's counterexamples. No DB.
+      - name: Run I2b-S11 offline remediation test
+        run: npx ts-node test/mcpOAuthS11.test.ts
+      - name: Run panchang day service test
+        run: npx ts-node test/panchangDay.test.ts
+      - name: Run panchang month service test
+        run: npx ts-node test/panchangMonth.test.ts
+      - name: Run window overlap test
+        run: npx ts-node test/windowOverlap.test.ts
+      - name: Run day activity suggestions test
+        run: npx ts-node test/dayActivitySuggestions.test.ts
+      - name: Run everyday activity catalog test
+        run: npx ts-node test/activityCatalogEveryday.test.ts
+      - name: Run Muhurtham Finder test
+        run: npx ts-node test/muhurthamFinder.test.ts
+      - name: Run Panchang reference-instant regression test
+        run: npx ts-node test/panchangReferenceInstantRegression.test.ts
+      - name: Run Muhurtham search API validation test
+        run: npx ts-node test/muhurthamSearchApi.test.ts
+      - name: Run Muhurta rule packs test
+        run: npx ts-node test/muhurtaRulePacks.test.ts
+      - name: Run Muhurta traditional coverage test (PCE-2A)
+        run: npx ts-node test/muhurtaTraditionalCoverage.test.ts
+      - name: Run Lahiri ayanamsa epoch-fix regression test (PCE-4A)
+        run: npx ts-node test/pce4aLahiriAyanamsaEpochFix.test.ts
+      - name: Run PCE-3B independent reference validation (strict checks fail CI; observational findings are report-only, printed to this step's own log, and never fail it -- see the test file's own doc comment)
+        run: npx ts-node test/pce3bIndependentReferenceValidation.test.ts
+      - name: Run Marriage Muhurtham foundation test
+        run: npx ts-node test/marriageMuhurthamFoundation.test.ts
+      - name: Run Marriage required eligibility test
+        run: npx ts-node test/marriageRequiredEligibility.test.ts
+      - name: Run Griha Pravesh required eligibility test (PCE-3E)
+        run: npx ts-node test/grihaPraveshRequiredEligibility.test.ts
+      - name: Run ceremonial Muhurtham eligibility test
+        run: npx ts-node test/ceremonialMuhurthamEligibility.test.ts
+      - name: Run inauspicious period precedence test
+        run: npx ts-node test/inauspiciousPeriodPrecedence.test.ts
+      - name: Run Marriage candidate discovery hardening test
+        run: npx ts-node test/marriageCandidateDiscoveryHardening.test.ts
+      - name: Run Ask Aura Marriage routing test
+        run: npx ts-node test/askAuraMarriageRouting.test.ts
+      - name: Run Personal Muhurtham test
+        run: npx ts-node test/personalMuhurtham.test.ts
+      - name: Run SavedPerson request validation test
+        run: npx ts-node test/savedPersonRequest.test.ts
+      - name: Run SavedPerson natal context test
+        run: npx ts-node test/savedPersonNatalContext.test.ts
+      - name: Run Shared Muhurtham test
+        run: npx ts-node test/sharedMuhurtham.test.ts
+      - name: Run everyday shared timing fit test
+        run: npx ts-node test/everydayTimingFit.test.ts
+      - name: Run score engine test
+        run: npx ts-node test/scoreEngine.test.ts
+      - name: Run Aura Moment alternatives (rescheduling) test
+        run: npx ts-node test/auraMomentAlternatives.test.ts
+      - name: Run Aura Moment request validation test
+        run: npx ts-node test/auraMomentRequest.test.ts
+      - name: Run Aura Updates test
+        run: npx ts-node test/auraUpdates.test.ts
+      - name: Run product metrics test
+        run: npx ts-node test/productMetrics.test.ts
+      - name: Run Home dashboard time-left formatting test
+        run: npx ts-node test/formatTimeLeft.test.ts
+      - name: Run Intentional Day Builder domain test
+        run: npx ts-node test/dayBuilder.test.ts
+      # Goals V2 Rhythm structural guards -- reads apps/web source files as
+      # plain text via `fs`/`path` only (no module import of anything under
+      # apps/web/lib), so it needs no apps/web/node_modules and belongs in
+      # this root-deps-only group, not the "Install web deps" group below.
+      - name: Run Goal Activity Rhythm structural guards test
+        run: npx ts-node test/goalActivityRhythmStructuralGuards.test.ts
+      # Goals V2 Candidate A3.3 -- imports planDayEntry.ts/goalDemandIntentId.ts
+      # only, neither of which imports db.ts/`pg` anywhere in their own
+      # import graphs (confirmed: planDayEntry.ts is itself a client-safe
+      # module, imported by PlanDayClient.tsx, a 'use client' component --
+      # it cannot depend on `pg` by construction). Needs no apps/web/node_modules,
+      # same root-deps-only group as the structural guards test above.
+      - name: Run Automatic Goal suggestion inclusion test
+        run: npx ts-node test/autoGoalSuggestionInclusion.test.ts
+      # Goals V2 Candidate A3.4 -- goalDemandIntentId.ts's own one real
+      # dependency (isValidCalendarDateString, packages/panchang/src/localDate.ts)
+      # is itself zero-import, so this test needs no apps/web/node_modules.
+      - name: Run Goal demand intent id test
+        run: npx ts-node test/goalDemandIntentId.test.ts
+      # Goals V2 Candidate A3.4 -- goalDemandProvenanceAuthorization.ts
+      # imports goalDemandIntentId.ts (zero-dependency) plus TYPE-ONLY
+      # imports from dayConstructorAcceptance.ts (fully erased at compile
+      # time, never actually resolved at runtime) -- needs no
+      # apps/web/node_modules either.
+      - name: Run Goal demand provenance authorization test
+        run: npx ts-node test/goalDemandProvenanceAuthorization.test.ts
+      # Goals V2 Candidate A3.4 -- reads source as plain text via `fs`/`path`
+      # only, same convention as the structural guards test above.
+      - name: Run Goal demand provenance authorization structural guards test
+        run: npx ts-node test/goalDemandProvenanceAuthorizationStructuralGuards.test.ts
+      # Goals V2 Candidate B1 -- apps/web/lib/goals.ts imports only
+      # packages/recommendation/src/personalizedTasks.ts (itself one
+      # type-only import, erased at compile time) and the zero-dependency
+      # apps/web/lib/goalCompletion.ts -- needs no apps/web/node_modules,
+      # same root-deps-only group as the structural guards tests above.
+      - name: Run Goal template category matching test
+        run: npx ts-node test/goalTemplateCategoryMatching.test.ts
+      # Home Recommendations: Daily Rhythm Alignment -- this test calls only
+      # dailyRhythmPrefsFromUser/applyDailyRhythmPreference directly (pure
+      # functions, explicit inputs); db.ts is loaded transitively via
+      # dailyGuidanceCandidates.ts's own import but its Pool is never
+      # connected/queried here (confirmed: this file runs with no
+      # DATABASE_URL set at all). Needs no apps/web/node_modules (no
+      # 'next'/'.tsx' import anywhere in this chain) -- same root-deps-only
+      # group as the tests above.
+      - name: Run Daily Guidance Daily Rhythm alignment test
+        run: npx ts-node test/dailyGuidanceDailyRhythmAlignment.test.ts
+      # test/savedPersonDb.test.ts, test/auraMomentsDb.test.ts,
+      # test/auraUpdatesDb.test.ts, test/productEventsDb.test.ts, and
+      # test/dayBuilderDb.test.ts are intentionally NOT run here -- they
+      # make real INSERT/SELECT/UPDATE/DELETE calls against Postgres via a
+      # live DATABASE_URL, and this job has no Postgres service provisioned.
+      # Run them locally against a real database instead (see each file's
+      # own doc comment for the exact command).
+      - name: Install web deps
+        working-directory: apps/web
+        run: npm install
+      # test/auraMoments.test.ts imports apps/web/lib/auraMoments.ts, which
+      # imports a `next/server` TYPE (NextRequest) -- ts-node's module
+      # resolution walks up from that file's own directory, so it needs
+      # apps/web/node_modules (installed above) to exist, unlike every
+      # other DB-free test in this job, which never import anything from
+      # the `next` package.
+      - name: Run Aura Moment test
+        run: npx ts-node test/auraMoments.test.ts
+      # test/productEvents.test.ts imports apps/web/lib/productEvents.ts,
+      # which imports apps/web/lib/db.ts (for its `pg` dependency) -- same
+      # apps/web/node_modules requirement as the Aura Moment test above, so
+      # it also has to run after "Install web deps".
+      - name: Run product events validation test
+        run: npx ts-node test/productEvents.test.ts
+      # AURA-PALM-01-I1 -- educational Palmistry guide. The content test
+      # imports apps/web/lib/productEvents.ts (analytics enum checks), so it
+      # also needs apps/web/node_modules; the jsdom test mounts ExploreView
+      # and PalmistryView with the shared harness (tsconfig.jsdom-tests.json).
+      # AURA-PALM-G6-I1 -- fast synthetic engine + adapter tests (zero dependencies,
+      # node:test). The expensive differential campaigns, coverage contract and
+      # mutation suite stay manual (packages/palm-reading-engine/README.md).
+      - name: Run palm reading engine and adapter tests (synthetic, fast)
+        working-directory: packages/palm-reading-engine/prototype
+        run: node --test test/*.test.mjs
+      - name: Run Palmistry content, privacy and isolation test
+        run: npx ts-node test/palm01I1Content.test.ts
+      - name: Run Palmistry Explore + guide component test
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/palm01I1ExploreJsdom.test.ts
+      # AURA-PALM-01-P4 -- runs the real apps/web/scripts/vercel-build.sh (what
+      # Vercel executes for Preview and Production) in an isolated temp tree
+      # with fake next/npx, proving the Palmistry bundle scanner runs after
+      # the build and that its failure fails the build. No deploy/credentials.
+      - name: Run Palmistry Vercel build guard test
+        run: npx ts-node test/palm01P4VercelGuard.test.ts
+      # AURA-MCP-02-I1.5-D -- database identity guard run by vercel-build.sh
+      # before `prisma migrate deploy`: fail-closed checks of DATABASE_URL and
+      # AURA_DATABASE_URL against the approved staging identity, and the real
+      # script's ordering. Synthetic URLs only; no database, no migration.
+      - name: Run database identity guard test
+        run: npx ts-node test/dbIdentityGuard.test.ts
+      # Goals V2 Candidate A1 -- goalDemandCandidates.ts imports apps/web/lib/db.ts
+      # (for its `pg` dependency), same apps/web/node_modules requirement as
+      # the Aura Moment/product events tests above.
+      - name: Run Goal demand candidates test
+        run: npx ts-node test/goalDemandCandidates.test.ts
+      # HGR1 -- homeGoalRhythmSuggestions.ts imports goalDemandCandidates.ts
+      # and planDayBootstrap.ts, same apps/web/node_modules requirement.
+      - name: Run Home Goal Rhythm suggestions test
+        run: npx ts-node test/homeGoalRhythmSuggestions.test.ts
+      # HGR2 -- same apps/web/node_modules requirement (imports
+      # homeGoalRhythmSuggestions.ts only, no new dependency).
+      - name: Run Home Goal Rhythm prioritization and overflow test
+        run: npx ts-node test/homeGoalRhythmSuggestionsPrioritization.test.ts
+      # HOME-INTENT-1 -- same apps/web/node_modules requirement (imports
+      # homeAskAuraHandoff.ts only, no new dependency).
+      - name: Run Home Ask Aura handoff test
+        run: npx ts-node test/homeIntent1AskAuraHandoff.test.ts
+      # HOME-INTENT-1 P2-4 -- real component-level lifecycle tests (jsdom
+      # + react-dom/client, see test/jsdomReactHarness.ts's own doc
+      # comment for why this needs its own tsconfig with `"jsx": "react"`
+      # rather than the plain `npx ts-node test/<file>.test.ts` every
+      # other step above uses).
+      - name: Run Home Ask Aura handoff component lifecycle test
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/homeIntent1AskAuraHandoffComponent.test.ts
+      # HGR3-A -- same apps/web/node_modules requirement (imports
+      # goalRhythmWeeklyProposal.ts, which itself only imports
+      # goalDemandCandidates.ts/goalActivityRhythm.ts/dayBuilderOrchestrator.ts/
+      # timezone.ts, no new dependency).
+      - name: Run Goal Rhythm weekly proposal test
+        run: npx ts-node test/goalRhythmWeeklyProposal.test.ts
+      # AURA-HPG-FIX-01 -- Home -> Plan -> Goals stabilization regressions
+      # (V1-03 title persistence, V1-05 already-scheduled recommendations,
+      # weekly-plan proposal validity, V1-09 Home refresh). Same
+      # apps/web/node_modules requirement; the jsdom one needs the jsx
+      # tsconfig like the other component tests above.
+      - name: Run HPG-FIX-01 activity title persistence test
+        run: npx ts-node test/hpgFix01TitlePersistence.test.ts
+      - name: Run HPG-FIX-01 already-scheduled recommendation test
+        run: npx ts-node test/hpgFix01AlreadyScheduled.test.ts
+      - name: Run HPG-FIX-01 weekly proposal validity test
+        run: npx ts-node test/hpgFix01WeeklyProposal.test.ts
+      - name: Run HPG-FIX-01 Home rhythm refresh (jsdom) test
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/hpgFix01HomeRefreshJsdom.test.ts
+      # AURA-MR3 -- mounted RhythmSettingsEditor: minimal PATCH bodies,
+      # cancel, validation, failed/duplicate saves, pause/resume.
+      - name: Run MR3 My Rhythm preferences editor (jsdom) test
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/myRhythmPreferencesEditorJsdom.test.ts
+      # AURA-REM-01 (PV-F03) -- mounted DeviceNotificationSettings in every
+      # permission/availability state (never "on" without a running
+      # scheduler), dispatch auth, too-late cutoff, no page-load prompt.
+      - name: Run REM-01 notification settings (jsdom) test
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/reminderNotificationSettingsJsdom.test.ts
+      # Existing reminder suites, never wired into CI before REM-01.
+      - name: Run Aura Reminders eligibility test
+        run: npx ts-node test/auraReminders.test.ts
+      - name: Run reminder push payload test
+        run: npx ts-node test/pushPayload.test.ts
+      - name: Run reminder attention test
+        run: npx ts-node test/reminderAttention.test.ts
+      - name: Run reminder consistency test
+        run: npx ts-node test/reminderConsistency.test.ts
+      - name: Run Web Push client capability test
+        run: npx ts-node test/webPushClientCapability.test.ts
+      - name: Run HPG-FIX-01 Goal -> Plan -> Tomorrow (V1-02) test
+        run: npx ts-node test/hpgFix01GoalPlanTomorrow.test.ts
+      # HGR3-B -- same apps/web/node_modules requirement (imports
+      # goalRhythmWeeklyAcceptance.ts, which transitively imports
+      # dayConstructorPreviewRequest.ts/dayConstructorAcceptancePersistence.ts/
+      # dayConstructorPreviewIntegrity.ts/goalDemandProvenanceAuthorization.ts,
+      # all already-required by other steps in this same job).
+      - name: Run Goal Rhythm weekly acceptance test
+        run: npx ts-node test/goalRhythmWeeklyAcceptance.test.ts
+      # HGR3-C2 -- same apps/web/node_modules requirement (imports
+      # goalRhythmWeeklyProposal.ts/goalRhythmWeeklyAcceptance.ts's own
+      # exported types plus the existing, shared muhurtaReasonFormat.ts
+      # formatter -- no new dependency).
+      - name: Run Weekly plan review client test
+        run: npx ts-node test/weeklyPlanReviewClient.test.ts
+      # Goals V2 Candidate A2 -- goalPlanningSourceAdapter.ts imports
+      # dayConstructorPreviewRequest.ts, which transitively imports
+      # apps/web/lib/db.ts -- same apps/web/node_modules requirement.
+      - name: Run Goal planning-source adapter test
+        run: npx ts-node test/goalPlanningSourceAdapter.test.ts
+      # Goals V2 Candidate A3.2 -- resolveAutomaticGoalDemand (planDayBootstrap.ts)
+      # imports goalDemandCandidates.ts, same apps/web/node_modules requirement.
+      - name: Run Automatic Goal demand bootstrap test
+        run: npx ts-node test/automaticGoalDemandBootstrap.test.ts
+      - name: Run Plan-with-Aura view logic test
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react"}'
+        run: npx ts-node test/planWithAuraViewLogic.test.ts
+      - name: Run Panchang calendar logic test
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react"}'
+        run: npx ts-node test/panchangCalendarLogic.test.ts
+      - name: Run Muhurtham Finder view logic test
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react"}'
+        run: npx ts-node test/muhurthamFinderViewLogic.test.ts
+      - name: Run Home dashboard logic test
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react"}'
+        run: npx ts-node test/homeDashboardLogic.test.ts
+      # HPG4-1 -- homeRecomposition.test.ts renders RecompositionCard.tsx via
+      # renderToStaticMarkup, same jsx-enabled/apps-web-node_modules
+      # requirement as the Home dashboard logic test above; no live DB.
+      - name: Run Home recomposition test
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react"}'
+        run: npx ts-node test/homeRecomposition.test.ts
+      # AURA-READY-03-F1 -- onboarding never presents Rahu Kalam/Yamaganda/
+      # Gulika as the "next favourable window". Renders RecommendationStep
+      # (automatic JSX runtime, hence react-jsx) via renderToStaticMarkup;
+      # fixed dates/clocks, real ephemeris; no live DB.
+      - name: Run onboarding recommendation test
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
+        run: npx ts-node test/onboardingRecommendation.test.ts
+      # Goals V2 Candidate B2 (resumed) -- goalActivityProposal.ts imports
+      # a type-only RhythmPickerValue from the 'use client'
+      # components/RhythmPicker.tsx, same jsx-enabled/apps-web-node_modules
+      # requirement as the Home dashboard logic test above.
+      - name: Run Goal activity proposal test
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react"}'
+        run: npx ts-node test/goalActivityProposal.test.ts
+      # Goals V2 Candidate B3.1 -- goalCreateIdempotency.ts imports only
+      # the Node `crypto` builtin plus the zero-dependency
+      # goalCompletion.ts/goalActivityRhythm.ts -- needs no jsx, no
+      # apps/web/node_modules.
+      - name: Run Goal create idempotency test
+        run: npx ts-node test/goalCreateIdempotency.test.ts
+      # PR #181 reconciliation -- 22 previously-unexecuted, non-DB Goals
+      # test files, wired in at this job's existing Goals-domain insertion
+      # point. Each is zero-dependency or jsx-enabled per the same
+      # conventions already established above; see each file's own header
+      # comment for its exact import chain.
+      - name: Run Goals domain test
+        run: npx ts-node test/goals.test.ts
+      - name: Run Goals wiring test
+        run: npx ts-node test/goalsWiring.test.ts
+      - name: Run Goals presentation test
+        run: npx ts-node test/goalsPresentation.test.ts
+      - name: Run Goal planning handoff test
+        run: npx ts-node test/goalPlanningHandoff.test.ts
+      - name: Run Goal planning handoff UI test
+        run: npx ts-node test/goalPlanningHandoffUi.test.ts
+      - name: Run Goal planning handoff wiring test
+        run: npx ts-node test/goalPlanningHandoffWiring.test.ts
+      - name: Run Goal completion test
+        run: npx ts-node test/goalCompletion.test.ts
+      - name: Run Goal completion structural guards test
+        run: npx ts-node test/goalCompletionStructuralGuards.test.ts
+      - name: Run Goal activity execution test
+        run: npx ts-node test/goalActivityExecution.test.ts
+      - name: Run Goal activity execution structural guards test
+        run: npx ts-node test/goalActivityExecutionStructuralGuards.test.ts
+      - name: Run Goal activity occurrence structural guards test
+        run: npx ts-node test/goalActivityOccurrenceStructuralGuards.test.ts
+      - name: Run Goal activity rhythm test
+        run: npx ts-node test/goalActivityRhythm.test.ts
+      - name: Run Goal activity rhythm materialization structural guards test
+        run: npx ts-node test/goalActivityRhythmMaterializationStructuralGuards.test.ts
+      - name: Run Goal activity rhythm Goal Detail structural guards test
+        run: npx ts-node test/goalActivityRhythmGoalDetailStructuralGuards.test.ts
+      - name: Run Goal activity rhythm Goal Detail UI test
+        run: npx ts-node test/goalActivityRhythmGoalDetailUi.test.ts
+      # test/goalActivityRhythmSetupUi.test.ts is intentionally NOT wired in
+      # here -- it asserts on a CreateGoalModal shape (isOngoingTemplate/
+      # GOAL_TEMPLATE_LIKELY_ONGOING) that the later Goals V2 Candidate B2/B3
+      # activity-proposal review flow has since replaced; it currently fails
+      # 5 checks against the real GoalsListClient.tsx and needs a maintainer
+      # decision (update vs retire this suite), not a blind wire-in.
+      - name: Run Goal activity rhythm setup structural guards test
+        run: npx ts-node test/goalActivityRhythmSetupStructuralGuards.test.ts
+      # AURA-MR1 -- My Rhythm foundation: pure validation/merge rules for a
+      # weekly rhythm's pause state and preferences (migration 0053).
+      - name: Run My Rhythm preferences test
+        run: npx ts-node test/goalActivityRhythmPreferences.test.ts
+      # AURA-MR2 -- scheduling preferences + next-week planning (pure): week
+      # bounds, shared weekday rule, weekly proposal preference/fallback and
+      # Panchang-order behavior, Home view/actions, Plan My Day intents.
+      - name: Run My Rhythm scheduling preferences test
+        run: npx ts-node test/myRhythmSchedulingPreferences.test.ts
+      # AURA-MR3 -- preferences UI draft/patch logic and structural guards.
+      - name: Run MR3 My Rhythm preferences UI test
+        run: npx ts-node test/myRhythmPreferencesUi.test.ts
+      # AURA-INS-01 (PV-F04) -- alignment insight display thresholds,
+      # neutral wording, Home removal and calculation edge cases.
+      - name: Run INS-01 alignment insight safeguards test
+        run: npx ts-node test/insightsAlignmentSafeguards.test.ts
+      - name: Run Daily agenda Goal context test
+        run: npx ts-node test/dailyAgendaGoalContext.test.ts
+      - name: Run Goal context structural guards test
+        run: npx ts-node test/goalContextStructuralGuards.test.ts
+      - name: Run Goal Detail completion structural guards test
+        run: npx ts-node test/goalDetailCompletionStructuralGuards.test.ts
+      - name: Run Right Now Goal context test
+        run: npx ts-node test/rightNowGoalContext.test.ts
+      - name: Run Goal template completion test
+        run: npx ts-node test/goalTemplateCompletion.test.ts
+      - name: Run Goal-aware Recomposition presentation test
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react"}'
+        run: npx ts-node test/goalAwareRecompositionPresentation.test.ts
+      # HPG3-A3b final review correction -- the 2 non-DB presentation
+      # suites this ticket itself added were never wired in; both import
+      # only type-only declarations from .tsx-adjacent modules (erased at
+      # compile time), so neither needs the jsx TS_NODE_COMPILER_OPTIONS.
+      - name: Run Day Plan acceptance presentation test
+        run: npx ts-node test/dayPlanAcceptancePresentation.test.ts
+      - name: Run Scheduling eligibility presentation test
+        run: npx ts-node test/schedulingEligibilityPresentation.test.ts
+      # HPG3-A4a -- homeMove.test.ts (pure/injectable, no .tsx import, reads
+      # HomeDashboard.tsx/HomeTimeline.tsx/PlanWithAuraView.tsx as plain text
+      # for its own structural checks rather than importing them) was never
+      # wired into CI; this ticket's own new checks live inside it.
+      - name: Run Home Move test
+        run: npx ts-node test/homeMove.test.ts
+      # HPG4-2 CI coverage reconciliation -- these 4 suites already pass
+      # against main but were never wired into CI; none import a .tsx
+      # module at runtime (homeSkip/missedRecovery/skipPlannedActivity read
+      # HomeDashboard.tsx/PlanWithAuraView.tsx as plain text for their own
+      # structural checks, same convention as homeMove.test.ts above), so
+      # none need the jsx TS_NODE_COMPILER_OPTIONS.
+      - name: Run Home Skip test
+        run: npx ts-node test/homeSkip.test.ts
+      - name: Run Missed activity presentation test
+        run: npx ts-node test/missedActivityPresentation.test.ts
+      - name: Run Missed recovery test
+        run: npx ts-node test/missedRecovery.test.ts
+      - name: Run Skip planned activity test
+        run: npx ts-node test/skipPlannedActivity.test.ts
+      # Daily Rhythm Home Timeline Navigation Fix -- reads page.tsx/
+      # HomeDashboard.tsx/HomeTimeline.tsx as plain text for its own
+      # structural checks (same convention as the Home tests above), so it
+      # needs no jsx TS_NODE_COMPILER_OPTIONS; this suite already passes
+      # against main but was never wired into CI.
+      - name: Run Full-day timeline navigation test
+        run: npx ts-node test/fullDayTimelineNavigation.test.ts
+      # Goals V2 Candidate B4 -- goalDecompositionObservability.ts imports
+      # goalActivityProposal.ts (a type-only RhythmPickerValue from the
+      # 'use client' components/RhythmPicker.tsx), same jsx-enabled group
+      # as the Goal activity proposal test above.
+      - name: Run Goal decomposition observability test
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react"}'
+        run: npx ts-node test/goalDecompositionObservability.test.ts
+      # Goals V2 Candidate B4 release review -- goalsUiWiring.test.ts (the
+      # structural proof that GoalsListClient.tsx/the Goals pages actually
+      # wire up every prior Goals ticket's requirements -- scope isolation,
+      # copy rules, B3.1 idempotency, B4 telemetry call sites, etc.) existed
+      # and passed locally throughout B2/B3.1/B4 but was never added as a
+      # CI step, so a future regression here would stay green. Same
+      # jsx-enabled group as the Goal activity proposal test above (it
+      # imports RhythmPicker.tsx-adjacent types transitively).
+      - name: Run Goals UI wiring test
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react"}'
+        run: npx ts-node test/goalsUiWiring.test.ts
+      # Constructor Decision Intelligence -- Decision Facts V1 architecture
+      # proof (pure): forbidden modules/imports in the Goal-blind
+      # orchestrator/decisionFacts/preview-handler, provider behavior,
+      # failure behavior, trust, and two-direction source neutrality.
+      - name: Run Decision Facts V1 architecture test
+        run: npx ts-node test/decisionFactsArchitecture.test.ts
+      # Opportunity Scarcity V1 -- O1: the pure generic opportunity
+      # projection engine (no DB, no jsx) and its architecture guard.
+      - name: Run opportunity projection test
+        run: npx ts-node test/opportunityProjection.test.ts
+      - name: Run opportunity projection architecture test
+        run: npx ts-node test/opportunityProjectionArchitecture.test.ts
+      # Opportunity Scarcity V1 -- O2: the generic range adapter (pure,
+      # injected fakes) and its architecture guard.
+      - name: Run opportunity range adapter test
+        run: npx ts-node test/opportunityRangeAdapter.test.ts
+      - name: Run opportunity range adapter architecture test
+        run: npx ts-node test/opportunityRangeAdapterArchitecture.test.ts
+      # Opportunity Scarcity V1 -- O3: recurrence period bounds carried by
+      # the Decision Facts provider (pure; DB threading is gated above in
+      # the Decision Facts V1 threading DB step).
+      - name: Run recurrence period bounds test
+        run: npx ts-node test/recurrencePeriodBounds.test.ts
+      # Opportunity Scarcity V1 -- O4: inert opportunity facts (pure: the real
+      # O1 + O2 composed through the generic enrichment and the preview
+      # handler with injected loaders) and its architecture guard.
+      - name: Run opportunity decision facts test
+        run: npx ts-node test/opportunityDecisionFacts.test.ts
+      - name: Run opportunity decision facts architecture test
+        run: npx ts-node test/opportunityDecisionFactsArchitecture.test.ts
+      # O5 prerequisite P0a -- manual Goal provenance parity: the manual and
+      # automatic entry paths share ONE canonical identity and receive
+      # identical facts (permanent source-path-privilege guard), plus its
+      # architecture guard.
+      - name: Run manual Goal provenance parity test
+        run: npx ts-node test/manualGoalProvenanceParity.test.ts
+      - name: Run manual Goal provenance parity architecture test
+        run: npx ts-node test/manualGoalProvenanceParityArchitecture.test.ts
+      # O5 prerequisite P0b -- opportunity fact quality: the horizon's first
+      # day reported apart from the days after it (exhaustive partition
+      # sweep, scenario matrix, DST, blockers) and its architecture guard.
+      - name: Run opportunity fact quality test
+        run: npx ts-node test/opportunityFactQuality.test.ts
+      - name: Run opportunity fact quality architecture test
+        run: npx ts-node test/opportunityFactQualityArchitecture.test.ts
+      # Goal lifecycle authorization -- archived-Goal acceptance guard:
+      # the single common, batched, locking, current-state boundary and the
+      # absence of any path-specific bypass or client Goal-status claim.
+      - name: Run Goal lifecycle authorization architecture test
+        run: npx ts-node test/goalLifecycleAuthorizationArchitecture.test.ts
+      # O5 prerequisite P0c -- real overload decision fixture guard: pins the
+      # CURRENT decision ordering and proves no policy, score, source branch
+      # or fact consumption exists in any decision module.
+      - name: Run Constructor overload decision architecture test
+        run: npx ts-node test/dayConstructorOverloadDecisionArchitecture.test.ts
+      # O5 P1 -- pre-Constructor decision fact preparation: facts are
+      # prepared once, before the Constructor, kept outside its input,
+      # attached unchanged afterwards, and never read by any decision module.
+      - name: Run decision fact preparation architecture test
+        run: npx ts-node test/decisionFactPreparationArchitecture.test.ts
+      - name: Run decision fact preparation behavior test
+        run: npx ts-node test/decisionFactPreparation.test.ts
+      # Constructor Decision Intelligence O5 P2a -- immutable DecisionEvidence:
+      # behavior (frozen, by-value, built once, inert) and its architecture guard.
+      - name: Run decision evidence test
+        run: npx ts-node test/decisionEvidence.test.ts
+      - name: Run decision evidence architecture test
+        run: npx ts-node test/decisionEvidenceArchitecture.test.ts
+      # Constructor Decision Intelligence O5 P2b -- pure Decision Pressure derivation:
+      # the semantic matrix and its architecture guard (unwired, evidence-only).
+      - name: Run decision pressure test
+        run: npx ts-node test/decisionPressure.test.ts
+      - name: Run decision pressure architecture test
+        run: npx ts-node test/decisionPressureArchitecture.test.ts
+      # Constructor Decision Intelligence O5 P2c -- Decision Pressure AUTHORITY (the
+      # facts -> evidence -> pressure chain, exact reader allowlists, single derivation
+      # authority, inertness) and duration-source / catalog REACHABILITY through the real
+      # orchestrator. Evidence for P3 shadow only; says nothing about active policy.
+      - name: Run decision pressure authority test
+        run: npx ts-node test/decisionPressureAuthority.test.ts
+      - name: Run decision pressure catalog reachability test
+        run: npx ts-node test/decisionPressureCatalogReachability.test.ts
+      # Constructor Decision Intelligence O5 P3a -- the inert CONTENTION TRACE: which candidate's
+      # attempted interval lost to an interval already owned by a Proposed candidate, accumulated
+      # across Constructor rounds. Behavior (pure Constructor + orchestrator) and architecture guard.
+      - name: Run contention trace test
+        run: npx ts-node test/contentionTrace.test.ts
+      - name: Run contention trace architecture test
+        run: npx ts-node test/contentionTraceArchitecture.test.ts
+      # O5 P3a observer isolation -- observation has no authority over construction: no caller
+      # observer / sink can be supplied to the Constructor, and a returned trace is detached,
+      # frozen and independently owned from the Constructor result.
+      - name: Run contention observer isolation test
+        run: npx ts-node test/contentionObserverIsolation.test.ts
+      # Constructor Decision Intelligence O5 P3b -- the inert SHADOW PRESSURE stage: derived pressure + the
+      # P3a contention trace + the final result, classified per Deferred loser against the dimensions that
+      # already outrank pressure. Observation only; says nothing about who should win and authorizes no policy.
+      - name: Run shadow pressure evaluation test
+        run: npx ts-node test/shadowPressureEvaluation.test.ts
+      - name: Run shadow pressure architecture test
+        run: npx ts-node test/shadowPressureArchitecture.test.ts
+      # Constructor Decision Intelligence O5 P2d -- every database-derived decision-evidence input is read once, in
+      # one REPEATABLE READ transaction, into a detached deep-frozen context; CPU projection follows the transaction.
+      - name: Run decision scheduling context test
+        run: npx ts-node test/decisionSchedulingContext.test.ts
+      - name: Run decision scheduling context architecture test
+        run: npx ts-node test/decisionSchedulingContextArchitecture.test.ts
+      # Constructor Decision Intelligence O5 P4a -- the typed, immutable PromotionInput: permission for a pressured, finally
+      # Deferred candidate to enter a FUTURE promotion policy against its final contention owners. Inert; consumed by nothing.
+      - name: Run promotion input test
+        run: npx ts-node test/promotionInput.test.ts
+      - name: Run promotion input architecture test
+        run: npx ts-node test/promotionInputArchitecture.test.ts
+      # O5 pre-P4b counterfactual safety prerequisites: (1) a stronger FLEXIBLE candidate that loses to a weaker FIXED
+      # owner through the real FIXED reservation is a PRECEDENCE_ANOMALY and never becomes a PromotionInput; (2) the
+      # audited scheduling path contains no Date mutator that could rewrite aliased baseline Dates in a future second pass.
+      - name: Run precedence anomaly real-pipeline test
+        run: npx ts-node test/precedenceAnomalyRealPipeline.test.ts
+      - name: Run scheduling Date mutator architecture test
+        run: npx ts-node test/schedulingDateMutatorArchitecture.test.ts
+      # O5 P4b1 -- the immutable ConstructionBasis: the detached, deeply frozen scheduling authority of one baseline run (initial AND
+      # final candidate lists, blockers, FIXED authority, window), captured inside the orchestration with no second search,
+      # Constructor pass or clock read. Inert; consumed by nothing.
+      - name: Run construction basis test
+        run: npx ts-node test/constructionBasis.test.ts
+      - name: Run construction basis architecture test
+        run: npx ts-node test/constructionBasisArchitecture.test.ts
+      # O5 P4b1b -- the immutable BaselinePlacements: the baseline OUTCOME authority (the exact Proposed placements the same run chose),
+      # captured from the terminal result.day, validated against the same run's ConstructionBasis, separate from it. Inert; consumed by nothing.
+      - name: Run baseline placements test
+        run: npx ts-node test/baselinePlacements.test.ts
+      - name: Run baseline placements architecture test
+        run: npx ts-node test/baselinePlacementsArchitecture.test.ts
+      # O5 P4b2a -- the immutable PromotionContentionAuthority: the exact intervals a pressured Deferred candidate attempted and lost to the owners its
+      # PromotionInput authorizes, projected from the same run's P3a events (event authority, not candidate-list history). Inert; consumed by nothing.
+      - name: Run promotion contention authority test
+        run: npx ts-node test/promotionContentionAuthority.test.ts
+      - name: Run promotion contention authority architecture test
+        run: npx ts-node test/promotionContentionAuthorityArchitecture.test.ts
+      # O5 P4b2b -- the immutable SchedulingAttemptAuthority: P3a's attempt events (now carrying the attempting candidate's own descriptive timing fit)
+      # normalized once into typed attempts for P AND for the owners it may displace; typed promotion pairs; run-level basis / placements / attempts from one
+      # orchestration. Event authority, not candidate-list history. Inert; consumed by nothing.
+      - name: Run scheduling attempt authority test
+        run: npx ts-node test/schedulingAttemptAuthority.test.ts
+      - name: Run scheduling attempt authority architecture test
+        run: npx ts-node test/schedulingAttemptAuthorityArchitecture.test.ts
+      # O5 P4b2 -- the pure scope-isolated LOCAL COUNTERFACTUAL GENERATOR: one same-run promotion pair -> what mechanically happens if the candidate is tried in
+      # one of its real historical contention slots with every unrelated baseline placement pinned. Mechanical and neutral (no acceptance / safety policy -- P4b3).
+      # The gate-parity suite compares its minimal local gates with the REAL Constructor (test oracle only). Inert; consumed by nothing.
+      - name: Run local counterfactual test
+        run: npx ts-node test/localCounterfactual.test.ts
+      - name: Run local counterfactual gate parity test
+        run: npx ts-node test/localCounterfactualGateParity.test.ts
+      - name: Run local counterfactual architecture test
+        run: npx ts-node test/localCounterfactualArchitecture.test.ts
+      # O5 P4b3 -- the pure COUNTERFACTUAL ACCEPTANCE PREDICATE: may Aura prefer the P4b2 mechanical counterfactual over the baseline under the V1 safety
+      # policy (FIXED / non-owner unchanged, tie recheck, owner loss, owner timing floor)? ACCEPT | REJECT | UNAVAILABLE for one immutable pair; no
+      # regeneration, no pressure read (NONE is never "safe"). Inert; consumed by nothing.
+      - name: Run counterfactual acceptance test
+        run: npx ts-node test/counterfactualAcceptance.test.ts
+      - name: Run counterfactual acceptance architecture test
+        run: npx ts-node test/counterfactualAcceptanceArchitecture.test.ts
+      # O5 P4b4 -- the SAME-RUN SHADOW POLICY COMPOSITION: ONE orchestration -> per PromotionInput the P4b2 generator -> the P4b3 predicate, as frozen diagnostic
+      # observations (GENERATION_UNAVAILABLE / ACCEPTANCE_UNAVAILABLE / REJECT / ACCEPT, exact source reasons). Same-run by construction (the seam takes only request +
+      # deps); decides nothing, changes nothing, wired nowhere. Also carries the committed P4b3 timing-floor grid. Inert; consumed by nothing.
+      - name: Run shadow policy observation test
+        run: npx ts-node test/shadowPolicyObservation.test.ts
+      - name: Run shadow policy observation architecture test
+        run: npx ts-node test/shadowPolicyObservationArchitecture.test.ts
+      # O5 P4c3 -- the PURE ACTIVE RESULT MATERIALIZER (inert): the typed same-run accepted-counterfactual authority (minted only by a P4b3 ACCEPT), the V1
+      # selector (APPLY iff exactly one ACCEPT in a complete observation set), the materializability gate (P the only Deferred / conflict, else fail closed) and
+      # the materializer (the authoritative READY result from the baseline + basis + authority, no second Constructor). Nothing consumes it; no ACTIVE mode.
+      - name: Run active result materializer test
+        run: npx ts-node test/activeResultMaterializer.test.ts
+      - name: Run active result materializer architecture test
+        run: npx ts-node test/activeResultMaterializerArchitecture.test.ts
+      # O5 P4b5 -- the SHADOW EXECUTION & OBSERVATION BOUNDARY: OFF by default, server-controlled (AURA_SHADOW_POLICY_MODE, exactly SHADOW), no ACTIVE. In SHADOW the Plan Day
+      # preview's ONE orchestration runs through the P4b4 composition instead of the plain call (never in addition); every shadow failure is isolated; only a minimal
+      # aggregate metrics record (closed categories and counts, no identifiers / text / instants / placements) leaves, through a one-way synchronous sink.
+      - name: Run shadow policy execution test
+        run: npx ts-node test/shadowPolicyExecution.test.ts
+      - name: Run shadow policy execution architecture test
+        run: npx ts-node test/shadowPolicyExecutionArchitecture.test.ts
+      # O5 SHADOW EVIDENCE OBSERVABILITY -- per-run aggregate evidence in SHADOW only: positive pressure / real contention funnel counts (bucketed), and what the REAL
+      # P4c1 selector, P4c2a gate, P4c3 materializer and an invariant verifier WOULD have done on the same run (the materialized result is discarded; the baseline is
+      # returned). Bounded categories only, no identifiers, no ACTIVE, no second Constructor / search / query, no persistence.
+      - name: Run shadow evidence test
+        run: npx ts-node test/shadowEvidence.test.ts
+      - name: Run shadow evidence architecture test
+        run: npx ts-node test/shadowEvidenceArchitecture.test.ts
+      # O5 SHADOW ROLLOUT R3 -- the Preview-only manual review harness: an authorized internal tester can see, in the SAME request/response, what
+      # the real P4c1/P4c2a/P4c3/invariant pipeline WOULD have built, only when the server's own VERCEL_ENV says this is not Production AND the
+      # run reaches selector=APPLY/gate=MATERIALIZABLE/materializer=READY/invariant=PASS. Ephemeral (no storage), not independently acceptable
+      # (no token), never alters the baseline, never changes the aggregate log line.
+      - name: Run shadow review delta test
+        run: npx ts-node test/shadowReviewDelta.test.ts
+      - name: Run shadow review delta architecture test
+        run: npx ts-node test/shadowReviewDeltaArchitecture.test.ts
+      - name: Run shadow rollout R3 preview review test
+        run: npx ts-node test/shadowRolloutR3PreviewReview.test.ts
+      - name: Run shadow rollout R3 architecture test
+        run: npx ts-node test/shadowRolloutR3Architecture.test.ts
+      # O5 P4b5 -- engine-independent seeded fixtures: the incidence sweeps no longer use a random sort comparator (whose order depended on the engine's sort
+      # algorithm, so Node 20 CI and a newer local Node generated different fixtures from the same seed). This narrow test proves the root cause and the fix
+      # and forbids the pattern; the incidence suites pin exact authoritative counts, so any engine difference fails here on Node 20.
+      - name: Run seeded fixture reproducibility test
+        run: npx ts-node test/seededFixtureReproducibility.test.ts
+      # Constructor scheduling correctness -- the target-day blocker load
+      # uses half-open OVERLAP semantics (a plan that starts before the day
+      # but runs into it must block), through the one shared definition.
+      - name: Run Constructor blocker overlap architecture test
+        run: npx ts-node test/dayConstructorBlockerOverlapArchitecture.test.ts
+      # CI reliability -- the automatic Goal lifecycle DB fixture's calendar is ANCHORED to a future Monday (a hard-coded week rotted on 2026-10-06 when production's
+      # stale-preview / move-destination checks, which read the real clocks, began refusing its now-past days). This pure suite proves the anchor over every simulated
+      # run date and keeps the DB fixture free of hard-coded dates and uncontrolled clock reads.
+      - name: Run lifecycle fixture calendar test
+        run: npx ts-node test/lifecycleFixtureCalendar.test.ts
+      # Birth Data Correctness B2 -- the civil birth date is stored as an explicit UTC-midnight surrogate: the pure canonicalization, the three-writer guard and the
+      # read-only operator diagnostic's shape. (The DB timezone matrix runs in the Day Constructor acceptance DB job.)
+      - name: Run birth date canonicalization test
+        run: npx ts-node test/birthDateCanonicalization.test.ts
+      - name: Run Constructor blocker overlap behavior test
+        run: npx ts-node test/dayConstructorBlockerOverlap.test.ts
+      # Schedule write consistency S1 -- acceptance's fresh-blocker read uses the
+      # canonical overlap loader on its transaction client (no race-free claim).
+      - name: Run acceptance fresh-overlap architecture test
+        run: npx ts-node test/dayConstructorAcceptanceFreshOverlapArchitecture.test.ts
+      # Preview-item signing integrity -- the HMAC sign/verify module and its
+      # closed, explicit set of approved server-only callers. No live DB.
+      - name: Run day constructor preview integrity test
+        run: npx ts-node test/dayConstructorPreviewIntegrity.test.ts
+      # Plan My Day -- single-item time editing (UI). Pure client/
+      # preview-state logic plus structural wiring checks against the real
+      # components; no live DB (the backend endpoint's own DB suite is
+      # dayConstructorPreviewItemDb.test.ts, unmodified by this ticket).
+      - name: Run day constructor preview item client test
+        run: npx ts-node test/dayConstructorPreviewItemClient.test.ts
+      - name: Run day plan preview item editing test
+        run: npx ts-node test/dayPlanPreviewItemEditing.test.ts
+      - name: Run day plan preview item editing wiring test
+        run: npx ts-node test/dayPlanPreviewItemEditingWiring.test.ts
+      # PR #281 P0 fix -- Preview Lifecycle and Async Race. Real async/
+      # lifecycle behavior (deferred promises, controlled resolution
+      # order) against a faithful mirror of the Escape/generation-guard/
+      # mounted-guard control flow -- see this file's own header comment
+      # for why a mirror, not a mounted React tree (no jsdom in this repo).
+      - name: Run day plan preview item lifecycle race condition test
+        run: npx ts-node test/dayPlanPreviewItemLifecycleRaceConditions.test.ts
+      # Schedule write consistency S2 -- the manual plan writer takes the shared
+      # per-user lock in a transaction (serialization only; no overlap check).
+      - name: Run manual writer serialization architecture test
+        run: npx ts-node test/scheduleWriteManualSerializationArchitecture.test.ts
+      # Schedule write consistency S4 -- the Recomposition proposal loads plans and
+      # blockers with the canonical half-open overlap loader over the civil day.
+      - name: Run Recomposition proposal overlap architecture test
+        run: npx ts-node test/remainingDayRecompositionProposalOverlapArchitecture.test.ts
+      # Scheduling read authority R2 -- Forward Planner loads persisted-plan conflicts
+      # with the canonical overlap loader over the requested range and candidate extent.
+      - name: Run Forward Planner overlap blocker architecture test
+        run: npx ts-node test/forwardPlannerOverlapBlockerArchitecture.test.ts
+      # AURA-HPG5-V2-I1 -- Find a Time availability/conflict constraints (pure
+      # T1-T24 logic; imports lib/db.ts for types, so it runs after "Install web
+      # deps", jsx-enabled like the Home dashboard tests). No live DB.
+      - name: Run Find a Time constraints test (HPG5-V2-I1)
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react"}'
+        run: npx ts-node test/findATimeConstraints.test.ts
+      # AURA-HPG5-V2-I1 -- the mounted Plan tab's PLAN_OVERLAP refusal, Choose
+      # another time and explicit Save anyway (shared jsdom harness).
+      - name: Run Find a Time conflict component test (HPG5-V2-I1)
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/findATimeConflictJsdom.test.ts
+      # AURA-READY-03-F2 -- Resend code / Change email on the 6-digit sign-in code
+      # screen: cooldown, in-flight lock, 429/failure messages, verification
+      # against the newly entered address (mounted LoginScreen, scripted fetch).
+      - name: Run sign-in resend / change-email component test (AURA-READY-03-F2)
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/signInResendChangeEmailJsdom.test.ts
+      # AURA-READY-02-F3 -- landing intro + "Try it without an account" link to the
+      # existing guest /find; email sign-in unchanged (mounted LoginScreen).
+      - name: Run landing guest-entry component test (AURA-READY-02-F3)
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/landingGuestEntryJsdom.test.ts
+      # AURA-DISC-01 -- guest "What are you planning?" discovery: six Popular,
+      # four expandable categories, search, selection into the unchanged guest
+      # flow (pure data checks + mounted GuestFindClient).
+      - name: Run guest activity discovery tests (AURA-DISC-01)
+        run: |
+          npx ts-node test/disc01GuestActivityDiscovery.test.ts
+          npx ts-node --project tsconfig.jsdom-tests.json test/disc01GuestActivityDiscoveryJsdom.test.ts
+      # AURA-READY-02-F4 -- Find a Time: failed searches (connection, server,
+      # timeout, malformed) are told apart from a genuine empty result, with Retry.
+      - name: Run Find a Time error-state component test (AURA-READY-02-F4)
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/findATimeErrorStatesJsdom.test.ts
+      # AURA-HPG5-V2-I2 -- conflict copy names the proposed save and the
+      # existing plan in the user's timezone (pure).
+      - name: Run conflict presentation test (HPG5-V2-I2)
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react"}'
+        run: npx ts-node test/hpg5I2ConflictPresentation.test.ts
+      # AURA-HPG5-V2-I2 -- Plan tab conflict panel placement/override and the
+      # My Day story card's protected recommended-time save (jsdom harness).
+      - name: Run conflict panel and My Day save component test (HPG5-V2-I2)
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/hpg5I2ConflictPanelJsdom.test.ts
+      # AURA-HPG5-V2-I3 -- the live Home save paths (Home timeline / Right Now
+      # Plan, Day Builder Add): REJECT opt-in, conflict panel beside the action,
+      # explicit Save anyway, double-submit and stale-state guards (jsdom).
+      - name: Run Home save conflict component test (HPG5-V2-I3)
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/hpg5I3HomeSaveJsdom.test.ts
+      # ---- AURA-ANDROID-REL-03 -- Android functional readiness (offline only) ----
+      # No device, emulator, adb, network or database: Capacitor plugins are mocked,
+      # routes/geocoder run in-process with stubs, LocationPicker mounts in jsdom
+      # (automatic JSX runtime, hence "react-jsx").
+      # AND-COMPAT-05 -- timezone fallback for WebViews without Intl "shortOffset".
+      - name: Run COMPAT-05 timezone shortOffset fallback test
+        run: npx ts-node test/timezoneShortOffsetFallback.test.ts
+      # AND-MIN-01 / AND-ERR-01 -- static Android checks (minSdk, WebView floor 91,
+      # errorPath + fallback pages, AuraWebViewClient/MainActivity wiring).
+      - name: Run Android minimum-support static test
+        run: node test/androidMinimumSupportConfig.test.mjs
+      # AND-COMPAT-03 -- @capacitor/geolocation 6.1.1 coarse-location patch. CI builds
+      # no Android, so these cover the patch script and the patched Java logic
+      # (the two Java-logic tests compile the pristine and patched sources: JDK).
+      - name: Check JDK for COMPAT-03 Java logic tests
+        run: javac -version && java -version
+      - name: Run COMPAT-03 geolocation patch script test
+        run: node test/geolocationCompatPatchScript.test.mjs
+      - name: Run COMPAT-03 geolocation Java logic test
+        run: node test/geolocationCompatJavaLogic.test.mjs
+      - name: Run COMPAT-03 geolocation Java logic harness test
+        run: node test/geolocationCompatJavaLogicHarness.test.mjs
+      # M2-A/B -- secure-context client request ids (AND-01), hardware back (AND-02),
+      # and the structural tests those changes updated.
+      - name: Run M2 client request id test
+        run: npx ts-node test/clientId.test.ts
+      - name: Run M2 Android back navigation test
+        run: npx ts-node test/androidBackNavigation.test.ts
+      - name: Run onboarding Goal step wiring test
+        run: npx ts-node test/onboardingGoalStepWiring.test.ts
+      - name: Run pending activity visual consistency test
+        run: npx ts-node test/pendingActivityVisualConsistency.test.ts
+      - name: Run pending activity reload visibility test
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/pendingActivityReloadVisibility.test.ts
+      # M2-B/C/D + IOS-02 location -- native geolocation, permission recovery, timeout
+      # lifecycle, StrictMode, POST reverse-geocode route, location error wording.
+      - name: Run location search API test
+        run: npx ts-node test/locationSearchApi.test.ts
+      - name: Run LocationPicker smart selection test
+        run: npx ts-node test/locationPickerSmartSelection.test.ts
+      - name: Run LocationPicker native geolocation test
+        run: npx ts-node test/locationPickerNativeGeolocation.test.ts
+      - name: Run IOS-02 reverse-geocode POST route test
+        run: npx ts-node test/ios02ReverseRoutePost.test.ts
+      - name: Run LocationPicker M2-D reliability test
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/locationPickerM2dReliability.test.ts
+      - name: Run LocationPicker native timeout diagnostics test
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/locationPickerNativeTimeoutDiagnostics.test.ts
+      - name: Run LocationPicker StrictMode lifecycle test
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/locationPickerStrictModeLifecycle.test.ts
+      # REL-03 F1 -- choosing a location another way supersedes a still-running
+      # "Use my current location" request (a late fix never wins).
+      - name: Run LocationPicker REL-03 supersede test
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/locationPickerRel03Supersede.test.ts
+      - name: Run IOS-02 location errors and privacy test
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/ios02LocationErrorsAndPrivacy.test.ts
+      # ---- AURA-ANDROID-REL-04 -- application release readiness (offline only) ----
+      # Backup/device-transfer off, cookie flush, release-build gate, logout attributes.
+      - name: Run REL-04 Android application readiness static test
+        run: node test/androidRel04AppReadiness.test.mjs
+      # Sign-out reports success only when the server removed the cookie; clears the
+      # account-less offline queue (after asking) only then.
+      - name: Run REL-04 sign-out test
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/signOutRel04.test.ts
+      # IR-01/IR-03 -- account isolation and the sign-out transition: real client
+      # modules (one instance per tab) against the real logout/session/habit-logs/
+      # plans routes in-process, synthetic accounts A and B, held/failed requests.
+      - name: Run REL-04 account isolation integration test (IR-01/IR-03)
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/rel04AccountIsolation.test.ts
+      # The real Home page and /find mounted in jsdom across sign-out, sign-in,
+      # late responses, session expiry and another tab's account switch.
+      - name: Run REL-04 Home and /find transition test (IR-01/IR-03)
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/rel04HomeFindTransitionJsdom.test.ts
+      # The original cross-account failure reproduces with the reviewed head's code
+      # (a54daf6, vendored verbatim) and is prevented by the corrected head.
+      - name: Run REL-04 reviewed-head reproduction test (IR-01)
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/rel04ReviewedHeadReproduction.test.ts
+      # R2 -- plan creation and existing mutations through the real callers
+      # (shared helper, overlap override, fetch wrapper) and the real mounted /find
+      # sign-in-and-save flow, incl. competing sign-in and late completion.
+      - name: Run REL-04 bound writes and /find flow test (IR-01/IR-03 R2)
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/rel04BoundWritesJsdom.test.ts
+      # R2 -- the delta review's findings reproduce with the R1 head's code
+      # (d09449b, vendored verbatim) and are prevented by the corrected head,
+      # including the pre-REL-04 client against both routes (mixed-version).
+      - name: Run REL-04 R1-head reproduction and mixed-version test (R2)
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/rel04R1HeadReproduction.test.ts
+      # R3 -- final independent disposition of 091e3ce: queue durability and auth
+      # transitions; shared account boundary across every surface; overlap-override
+      # binding on the mounted My Day / PlanWithAura flows; 091e3ce reproductions.
+      - name: Run REL-04 R3 queue durability and auth-transition test
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/rel04R3QueueAuth.test.ts
+      - name: Run REL-04 R3 shared account boundary test (route inventory, surfaces)
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/rel04R3BoundaryJsdom.test.ts
+      - name: Run REL-04 R3 overlap-override binding test (mounted)
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/rel04R3OverrideBindingJsdom.test.ts
+      - name: Run REL-04 R2-head (091e3ce) reproduction test
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/rel04R2HeadReproduction.test.ts
+      # AURA-ANDROID-REL-04 R4 (assessment of b323d2a): IndexedDB queue integrity,
+      # account-bound server-rendered state and downloads, and b323d2a reproductions.
+      - name: Run REL-04 R4 queue integrity test
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/rel04R4QueueIntegrity.test.ts
+      - name: Run REL-04 R4 server-rendered account agreement and bound download test
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/rel04R4SsrAgreementJsdom.test.ts
+      - name: Run REL-04 R5 queue lifecycle test
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/rel04R5QueueLifecycle.test.ts
+      - name: Run REL-04 R6 findings test (R5-head reproductions + corrections)
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/rel04R6Findings.test.ts
+      - name: Run REL-04 R7 queue ownership test (historical record; R6 head 13d773e vs R7 head 7cae58a)
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/rel04R7QueueOwnership.test.ts
+      - name: Run REL-04 R8 logical lifecycle test (R7-assessment findings on 7cae58a vs current; retired formats quarantined)
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/rel04R8LogicalLifecycle.test.ts
+      - name: Run REL-04 R9 lifecycle enforcement test (R8-assessment witnesses on eab072c vs current)
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/rel04R9LifecycleEnforcement.test.ts
+      - name: Run REL-04 R3-head (b323d2a) reproduction test
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/rel04R3HeadReproduction.test.ts
+      # Pending replay reconciliation (was outside CI; structural assertion corrected in R3).
+      - name: Run pending replay reconciliation test
+        run: npx ts-node test/pendingReplayReconciliation.test.ts
+      # S5-A RV-1 in-process: logout clears the cookie; a copied token stays valid
+      # until exp (documents the accepted residual of revocation Option B).
+      - name: Run REL-04 RV-1 token replay test
+        run: npx ts-node test/rel04Rv1TokenReplay.test.ts
+      # An older, slower city-search response never replaces newer results.
+      - name: Run LocationPicker REL-04 search race test
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/locationPickerRel04SearchRace.test.ts
+  palm-g5-upload-tests:
+    # AURA-PALM-G5-C2 -- dedicated job for the development-only Upload Photo
+    # pipeline suites (G5-I1..R4.3), so a Palmistry failure stays visible on
+    # its own check and can no longer skip unrelated steps in
+    # math-core-tests. Synthetic fixtures and a fake MediaPipe runtime only;
+    # no real images, no network. Production exclusion is also asserted by
+    # check-palmistry-bundle.js after `next build` (web-build job).
+    name: Palmistry upload pipeline tests (G5)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Install root deps
+        run: npm install
+      - name: Install web deps
+        working-directory: apps/web
+        run: npm install
+      - name: Run Palm upload image validation tests (G5-I1)
+        run: npx ts-node test/palmG5I1Validation.test.ts
+      # G5-C5 (F-1): JPEG decompression bombs rejected before decode, wherever
+      # the SOF lies; bounded windowed reads; decoder never called.
+      - name: Run Palm upload JPEG pre-decode dimension tests (G5-C5)
+        run: npx ts-node test/palmG5C5JpegDecodeBomb.test.ts
+      - name: Run Palm upload pipeline tests (G5-I1)
+        run: npx ts-node test/palmG5I1Pipeline.test.ts
+      - name: Run Palm upload privacy, isolation and gate tests (G5-I1)
+        run: npx ts-node test/palmG5I1PrivacyGate.test.ts
+      - name: Run Palm upload component test (G5-I1, jsdom)
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/palmG5I1UploadJsdom.test.ts
+      - name: Run Palm upload lifecycle tests (G5-I1-R2)
+        run: npx ts-node test/palmG5I1R2Lifecycle.test.ts
+      - name: Run Palm upload production exclusion tests (G5-I1-R2)
+        run: npx ts-node test/palmG5I1R2ProductionExclusion.test.ts
+      # G5-R4.4: the reader differential needs libarchive's bsdtar (the reader
+      # behind HR2R1-F1/F2); G5-D7-A: real xz/bzip2/zstd/lz4/7z streams and the
+      # 7-Zip extraction precondition. Without them those checks report NOT RUN.
+      # G5-C7: imagemagick provides the libjpeg decoder for the JPEG marker
+      # differential (ImageIO/sips is macOS-only and reports NOT RUN here).
+      # G5-C15: cabextract (libmspack cab reader), lzip and ncompress (compress
+      # .Z) let the C15 reader-behaviour checks run here instead of NOT RUN.
+      - name: Install stock archive readers for the scanner differential
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends libarchive-tools xz-utils bzip2 zstd lz4 7zip imagemagick cabextract lzip ncompress
+      # G5-C7 (C6-F1): JPEG marker allowlist before SOF; exactly one SOF before
+      # SOS; RST/TEM desync rejected; real-encoder compatibility + decoder diff.
+      - name: Run Palm upload JPEG marker desync tests (G5-C7)
+        run: npx ts-node test/palmG5C7JpegMarkerDesync.test.ts
+      - name: Run Palm bundle scanner hardening tests (G5-I1-R3..R4.4, G5-D7-A)
+        run: |
+          npx ts-node test/palmG5I1R3ScannerHardening.test.ts
+          npx ts-node test/palmG5I1R4ArchiveScanner.test.ts
+          npx ts-node test/palmG5I1R41ArchiveBypass.test.ts
+          npx ts-node test/palmG5I1R42ArchiveFormat.test.ts
+          npx ts-node test/palmG5I1R43ZipRecognition.test.ts
+          npx ts-node test/palmG5I1R44StreamingZip.test.ts
+          npx ts-node test/palmG5D7ArchiveFormats.test.ts
+      # G5-C11 (C10-F1..F4): xar/xz/bzip2 variants fail closed; gzip member cap
+      # and in-loop work-time check. Real-tool cases need bsdtar/xz/bzip2 (above).
+      - name: Run Palm bundle scanner fail-open regression tests (G5-C11)
+        run: npx ts-node test/palmG5C11ForeignFormatFailOpen.test.ts
+      # G5-C13 (C12-F1..F7): xar size < 28, 7z major version, cab fields, lz4 and
+      # zstd legacy frames, rar v4 block order, gzip post-loop budget check.
+      - name: Run Palm bundle scanner format-variant regression tests (G5-C13)
+        run: npx ts-node test/palmG5C13ForeignFormatVariants.test.ts
+      # G5-C15 (C14-F1..F4, P3): embedded gzip probe, rar Tier A, lzip / .Z / ISO 9660,
+      # cab reader union (cabextract), budget checks after the last entry and the scan.
+      - name: Run Palm bundle scanner recognition-strategy regression tests (G5-C15)
+        run: npx ts-node test/palmG5C15RecognitionStrategy.test.ts
+      # G5-C15-CI-1: compress .Z maxbits 0..16 (GNU gzip / libarchive decode 0..8).
+      - name: Run Palm bundle scanner .Z maxbits regression tests (G5-C15-CI-1)
+        run: npx ts-node test/palmG5C15CI1CompressMaxbits.test.ts
+      # G5-C17 (C16-F1..F3): reader-versus-scanner matrix -- embedded gzip that fails after
+      # emitting content, LHA, pack, gzip LZH, old-magic gzip; real readers on Ubuntu.
+      - name: Run Palm bundle scanner reader-versus-scanner matrix (G5-C17)
+        run: npx ts-node test/palmG5C17ReaderMatrix.test.ts
+  rel04-chromium-multitab:
+    # AURA-ANDROID-REL-04 (R3) -- REAL Chromium multi-tab checks: two tabs in one
+    # browser context (real localStorage, Web Locks and cookie jar) running the
+    # actual client modules against the real middleware and route handlers over
+    # HTTP. Synthetic accounts, in-memory db stub, no network beyond localhost.
+    # Chromium only: not WKWebView / Android WebView / device acceptance.
+    name: REL-04 Chromium multi-tab tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Install root deps
+        run: npm install
+      - name: Install web deps
+        working-directory: apps/web
+        run: npm install
+      - name: Install Chromium for Playwright
+        run: npx playwright install --with-deps chromium
+      - name: Run REL-04 Chromium multi-tab test
+        run: npx ts-node test/rel04Chromium.test.ts
+  rel04-next-app-rendering:
+    # AURA-ANDROID-REL-04 (R5) -- ACTUAL APPLICATION RENDERING evidence: the real
+    # production build (next build + next start) against a fresh Postgres with a
+    # synthetic account. Checks the real HTTP responses of Plan Day, Goals, Goal
+    # detail and Captures carry no account data, the real bootstrap route is
+    # account-scoped, and (real Chromium) data appears only after verification.
+    name: REL-04 Next.js app rendering tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: aura_ci
+          POSTGRES_PASSWORD: aura_ci
+          POSTGRES_DB: aura_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U aura_ci -d aura_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://aura_ci:aura_ci@localhost:5432/aura_ci
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - name: Install root deps
+        run: npm install
+      - name: Install web deps
+        working-directory: apps/web
+        run: npm install
+      - name: Apply the complete migration chain to a fresh database
+        working-directory: apps/web
+        run: npx prisma migrate deploy
+      - name: Install Chromium for Playwright
+        run: npx playwright install --with-deps chromium
+      - name: Run REL-04 Next.js app rendering test (builds the app)
+        run: npx ts-node test/rel04R5NextAppRendering.test.ts
+  web-build:
+    name: Next.js production build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - name: Install root deps
+        run: npm install
+      - name: Install web deps
+        working-directory: apps/web
+        run: npm install
+      - name: Build
+        working-directory: apps/web
+        env:
+          # Dummy values so the build step doesn't fail on missing env vars.
+          # Nothing in this project queries the DB at build time (all data
+          # fetching is client-side), so these never actually get used here.
+          DATABASE_URL: postgresql://user:pass@localhost:5432/placeholder
+          AUTH_SECRET: ci-placeholder-secret-not-for-production
+        run: npm run build
+      # AURA-PALM-01-P1 -- while Palmistry content awaits qualified human
+      # approval, the production build must contain none of it (build-level
+      # exclusion, apps/web/palmistry-build-exclusion.js). Fails on any
+      # sentinel string from the unapproved content.
+      - name: Verify unapproved Palmistry content is excluded from the build
+        working-directory: apps/web
+        run: node scripts/check-palmistry-bundle.js
+      # AURA-PALM-G6-I1 -- the synthetic palm reading engine and its test-only
+      # detector adapter (packages/palm-reading-engine) must never be bundled;
+      # unconditional, and the sentinels are self-checked against the source.
+      - name: Verify the palm reading engine is excluded from the build
+        working-directory: apps/web
+        run: node scripts/check-palm-engine-bundle.js
+      # AURA-MCP-02-I2a-R2 (B1) -- runs the DEPLOYABLE standalone server the
+      # way deploy/Dockerfile does (`node server.js` from an isolated copy of
+      # .next/standalone, outside any node_modules tree) with Docker defaults,
+      # with every local OAuth opt-in, and Preview-like env. Every disabled
+      # OAuth route must answer 404 (not 500) and /api/mcp must never accept a
+      # token. Synthetic values only, 127.0.0.1 only.
+      - name: Verify disabled OAuth routes return 404 in the standalone server
+        working-directory: apps/web
+        run: node scripts/check-standalone-oauth.js
+  mcp-server:
+    # AURA-MCP-01-M1 -- local stdio MCP server (apps/mcp). Runs its protocol,
+    # validation, Timing Search parity and isolation suites. Deliberately no
+    # path filter: the server compiles shared apps/web/lib and packages/*
+    # Timing Search/Panchangam code into its build, so any change there must
+    # re-run parity. No secrets, no database, no migrations, no deployment.
+    name: MCP Server
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - name: Install MCP deps (lockfile)
+        working-directory: apps/mcp
+        run: npm ci
+      - name: Build and test MCP server
+        working-directory: apps/mcp
+        run: npm test
+  mcp-server-node20-compat:
+    # AURA-MCP-02-I1.5-B -- transitional compatibility evidence only. Node 24
+    # is the supported runtime (the required "MCP Server" check above runs on
+    # it); apps/mcp still declares engines >=20 for local stdio users, so this
+    # job proves that floor until it is deliberately raised. A separate job
+    # (not a matrix) keeps the required check name "MCP Server" byte-identical
+    # for branch protection. Not a required check.
+    name: MCP Server (Node 20 compatibility)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 20
+      - name: Install MCP deps (lockfile)
+        working-directory: apps/mcp
+        run: npm ci
+      - name: Build and test MCP server
+        working-directory: apps/mcp
+        run: npm test
+  db-migration-validation:
+    # Database Migration Baseline Reconciliation V1 (PR A) -- proves the
+    # complete repository migration chain (apps/web/prisma/migrations/,
+    # 0001 through the latest) builds a brand-new Postgres database from
+    # zero via the exact command production uses (`prisma migrate deploy`
+    # -- confirmed via the real _prisma_migrations ledger to be the
+    # mechanism already in historical use, not merely intended). This is
+    # the ONLY thing this job proves: that the migration chain itself is
+    # complete and internally consistent. It does NOT prove production has
+    # received any given migration -- that remains a separate, deployment-
+    # time concern (PR B). Disposable, ephemeral Postgres service only;
+    # no production secret of any kind is used or required.
+    name: Database migration validation
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: aura_ci
+          POSTGRES_PASSWORD: aura_ci
+          POSTGRES_DB: aura_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U aura_ci -d aura_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      # Disposable CI-only database -- never production, never Vercel/Neon.
+      DATABASE_URL: postgresql://aura_ci:aura_ci@localhost:5432/aura_ci
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - name: Install web deps
+        working-directory: apps/web
+        run: npm install
+      - name: Apply the complete migration chain to a fresh database
+        working-directory: apps/web
+        run: npx prisma migrate deploy
+      - name: Verify migration status is up to date
+        working-directory: apps/web
+        run: npx prisma migrate status
+      # AURA-MCP-02-I2b -- the durable OAuth store and the distributed rate
+      # limiter (migration 0052) against this disposable database: atomic
+      # single use across independent instances (F6), refresh rotation and
+      # replay, hashed-at-rest ids, disconnect, expiry/cleanup, shared
+      # limits across instances (R1-L1) and fail-closed on DB loss. Touches
+      # only the two MCP tables.
+      - name: Install root deps (I2b OAuth DB test)
+        run: npm install
+      - name: Run I2b OAuth Postgres store and distributed limiter test
+        run: npx ts-node test/mcpOAuthPostgresDb.test.ts
+      # AURA-MCP-02-I2b-R1 / RR1 (I2b-R-1, I2b-RR-1) -- inspects this
+      # disposable database mid-flow and after the real library account-switch
+      # flow: no session id / interaction uid / code / token / cookie in
+      # clear; Interaction session.cookie dropped; Interaction returnTo,
+      # Session state.secret and Session state.postLogoutRedirectUri sealed
+      # (AES-256-GCM); tampered/moved/unsealed/missing values fail closed
+      # (400 recovery page, never 500); key rotation; no keys -> no store.
+      # Touches only the two MCP tables.
+      - name: Run I2b-R1 OAuth storage protection test
+        run: npx ts-node test/mcpOAuthStorageProtectionDb.test.ts
+      # AURA-MCP-02-I2b-S2 -- staging-blocker fixes against this disposable
+      # database: hung server, held locks and terminated connections deny
+      # fast (503), pool isolation, store timeout through the full flow
+      # issues nothing; sharded global ceiling exact across 3 instances, no
+      # deadlocks; /64 rotation and shared NAT. Touches only the two MCP
+      # tables.
+      - name: Run I2b-S2 staging-blocker DB test
+        run: npx ts-node test/mcpOAuthStagingBlockersDb.test.ts
+      # AURA-MCP-02-I2b-S4 -- S3 review findings: every store statement after
+      # the authorization-code write failed in turn (reject and hang) never
+      # discloses or leaves a redeemable code and issues no token (S3-1); a
+      # store write that misses its deadline behind a lock never lands later
+      # and cannot overwrite a newer session, server-side waits end, the pool
+      # recovers (S3-2). Touches only the two MCP tables.
+      - name: Run I2b-S4 OAuth store DB test
+        run: npx ts-node test/mcpOAuthStoreS4Db.test.ts
+      # I2b-S6: an activation whose outcome the server cannot confirm (lost
+      # COMMIT acknowledgement, timeout) or a client that disconnects before
+      # the response is written leaves no redeemable code: the code is revoked
+      # whether pending or active. Concurrent flows, PKCE and the normal flow
+      # are unaffected. Touches only the two MCP tables.
+      - name: Run I2b-S6 authorization-code lifecycle DB test
+        run: npx ts-node test/mcpOAuthCodeS6Db.test.ts
+      # I2b-S8: an undelivered code whose revocation failed is refused by
+      # that instance and deleted by a background retry (S3-1 residual); an
+      # unconfirmed or late COMMIT is never a success (S5); a frozen limiter
+      # transaction releases its shard lock (S3-8); limiter rows hold no
+      # client address and name G/N (S3-6, S3-7). Touches only the MCP tables.
+      - name: Run I2b-S8 security DB test
+        run: npx ts-node test/mcpOAuthS8Db.test.ts
+      # I2b-S10 (S3-1 closure): an abandoned code -- activation failure,
+      # database outage, disconnect, partial delivery, replaced response,
+      # frozen process -- stays PENDING and is refused on ANOTHER instance even
+      # with the server-known code + verifier; issued codes (hand-off without
+      # proof of receipt) redeem once; a racing redemption waits for the
+      # in-flight activation; the request budget bounds a slow flow. Two
+      # instances with separate stores and pools. Touches only the MCP tables.
+      - name: Run I2b-S10 cross-instance code safety DB test
+        run: npx ts-node test/mcpOAuthS10Db.test.ts
+      # I2b-S11 (S10 review): the APPLICATION pg pool survives terminated /
+      # idle-timed-out held activations, killed statements and limiter
+      # backends with no unhandled client error and no listener leak; issuance
+      # only in query mode (form_post / fragment refused, same-status
+      # replacement never committed, discovery advertises query only); the
+      # A6 freeze asserted deterministically. Touches only the MCP tables.
+      - name: Run I2b-S11 checked-out client and issuance DB test
+        run: npx ts-node test/mcpOAuthS11Db.test.ts
+      - name: Verify every repository migration was recorded as applied
+        run: |
+          set -euo pipefail
+          expected="$(find apps/web/prisma/migrations -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')"
+          # count(DISTINCT migration_name), not raw row count: a migration
+          # that failed once and succeeded on retry (this has happened in
+          # production's own real ledger) legitimately has more than one
+          # row for the same name -- only the successful, non-rolled-back
+          # name should count once.
+          applied="$(PGPASSWORD=aura_ci psql -h localhost -U aura_ci -d aura_ci -tAc \
+            "SELECT count(DISTINCT migration_name) FROM \"_prisma_migrations\" WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL;")"
+          echo "expected migration directories: $expected"
+          echo "successfully applied, recorded migrations: $applied"
+          if [ "$expected" != "$applied" ]; then
+            echo "::error::Migration count mismatch: $expected migration directories under apps/web/prisma/migrations/ but only $applied recorded as successfully applied in _prisma_migrations."
+            exit 1
+          fi
+      - name: Verify the two columns behind the recent production incidents
+        run: |
+          set -euo pipefail
+          PGPASSWORD=aura_ci psql -h localhost -U aura_ci -d aura_ci -v ON_ERROR_STOP=1 -c "
+            DO \$\$
+            BEGIN
+              IF NOT EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name = 'HabitLog' AND column_name = 'activityId'
+                  AND data_type = 'text' AND is_nullable = 'YES'
+              ) THEN
+                RAISE EXCEPTION 'HabitLog.activityId is missing or has an unexpected shape (expected: text, nullable)';
+              END IF;
+              IF NOT EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name = 'PlannedActivity' AND column_name = 'activityId'
+                  AND data_type = 'text' AND is_nullable = 'YES'
+              ) THEN
+                RAISE EXCEPTION 'PlannedActivity.activityId is missing or has an unexpected shape (expected: text, nullable)';
+              END IF;
+            END \$\$;
+          "
+  day-constructor-acceptance-db-tests:
+    # Day Constructor V1 PR E2 -- the live-Postgres test job for Day
+    # Constructor acceptance persistence
+    # (test/dayConstructorAcceptancePersistenceDb.test.ts). Its own atomic
+    # multi-item save, rollback, replay, concurrency, and set-identity
+    # collision behavior all depend materially on real Postgres
+    # transactions/advisory locks, which no DB-free job can exercise --
+    # this is a dedicated job (not bundled into math-core-tests, which has
+    # no Postgres service, and deliberately not folded into
+    # db-migration-validation, which proves a different, narrower thing:
+    # that the migration chain itself is complete). Same disposable,
+    # ephemeral Postgres service pattern as db-migration-validation above
+    # -- never production, never Vercel/Neon.
+    #
+    # Goals V2 Candidate A3.1 -- this job's own already-correct
+    # Postgres-service/migrate-deploy environment is also the smallest
+    # existing home for test/goalDemandCandidatesDb.test.ts (Candidate A1),
+    # which depends on the exact same real-transaction/advisory-lock
+    # machinery (materializeGoalActivityRhythmOccurrence) -- no second
+    # Postgres-backed job was created for it.
+    name: Day Constructor acceptance DB tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: aura_ci
+          POSTGRES_PASSWORD: aura_ci
+          POSTGRES_DB: aura_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U aura_ci -d aura_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://aura_ci:aura_ci@localhost:5432/aura_ci
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - name: Install root deps
+        run: npm install
+      - name: Install web deps
+        working-directory: apps/web
+        run: npm install
+      - name: Apply the complete migration chain to a fresh database
+        working-directory: apps/web
+        run: npx prisma migrate deploy
+      - name: Run Day Constructor acceptance persistence DB tests
+        run: npx ts-node test/dayConstructorAcceptancePersistenceDb.test.ts
+      # AURA-ANDROID-REL-04 (R3) -- five DB suites changed by REL-04 (they call the
+      # account-bound plan route) that were outside this workflow until now.
+      - name: Run plan goal-activity link DB test
+        run: npx ts-node test/planGoalActivityLinkDb.test.ts
+      - name: Run plan goal-activity completion integrity DB test
+        run: npx ts-node test/planGoalActivityCompletionIntegrityDb.test.ts
+      - name: Run plan goal-activity archived lifecycle DB test
+        run: npx ts-node test/planGoalActivityArchivedLifecycleDb.test.ts
+      - name: Run plan status preservation DB test
+        run: npx ts-node test/planStatusPreservationDb.test.ts
+      - name: Run planned activity scheduling mode DB test
+        run: npx ts-node test/plannedActivitySchedulingModeDb.test.ts
+      - name: Run Goal demand candidates DB test
+        run: npx ts-node test/goalDemandCandidatesDb.test.ts
+      # AURA-HPG-FIX-01 -- read-only daily-occupancy loader agrees with the
+      # acceptance-time daily guard (V1-05 / weekly proposal).
+      - name: Run HPG-FIX-01 daily occupancy DB test
+        run: npx ts-node test/hpgFix01DailyOccupancyDb.test.ts
+      # HGR3-B -- the critical, non-today EXPLICIT_RANGE construction gate;
+      # requires a real DB (real GoalActivity/PlannedActivity/GoalActivityOccurrence
+      # rows through the real, unmodified preview+accept pipeline).
+      - name: Run Goal Rhythm weekly acceptance DB test
+        run: npx ts-node test/goalRhythmWeeklyAcceptanceDb.test.ts
+      # HGR3-C2 -- proves the CLIENT-SIDE weeklyPlanReviewClient.ts pure
+      # functions genuinely compose with the real weekly-proposal/
+      # weekly-accept route handlers end to end, including the full
+      # HGR3-C-R1 cancel/rebook journey, against a real database.
+      - name: Run Weekly plan review client DB test
+        run: npx ts-node test/weeklyPlanReviewClientDb.test.ts
+      - name: Run Automatic Goal demand bootstrap DB test
+        run: npx ts-node test/automaticGoalDemandBootstrapDb.test.ts
+      - name: Run Goal demand provenance authorization DB test
+        run: npx ts-node test/goalDemandProvenanceAuthorizationDb.test.ts
+      - name: Run automatic Goal lifecycle closure DB test
+        run: npx ts-node test/automaticGoalLifecycleClosureDb.test.ts
+      - name: Run Goals reviewed-create DB test
+        run: npx ts-node test/goalsReviewedCreateDb.test.ts
+      - name: Run Goals create idempotency DB test
+        run: npx ts-node test/goalsCreateIdempotencyDb.test.ts
+      # PR #181 reconciliation -- 13 previously-unexecuted, live-Postgres
+      # Goals test files, reusing this job's existing Postgres service and
+      # migration-deploy step rather than a new dedicated job.
+      - name: Run Goals DB test
+        run: npx ts-node test/goalsDb.test.ts
+      - name: Run Goal planning handoff DB test
+        run: npx ts-node test/goalPlanningHandoffDb.test.ts
+      - name: Run Goal activity execution DB test
+        run: npx ts-node test/goalActivityExecutionDb.test.ts
+      - name: Run Goal activity execution completion DB test
+        run: npx ts-node test/goalActivityExecutionCompletionDb.test.ts
+      - name: Run Goal activity execution Move continuity DB test
+        run: npx ts-node test/goalActivityExecutionMoveContinuityDb.test.ts
+      - name: Run Goal activity occurrence DB test
+        run: npx ts-node test/goalActivityOccurrenceDb.test.ts
+      - name: Run Goal activity rhythm DB test
+        run: npx ts-node test/goalActivityRhythmDb.test.ts
+      - name: Run Goal activity rhythm materialization DB test
+        run: npx ts-node test/goalActivityRhythmMaterializationDb.test.ts
+      - name: Run Goal activity rhythm Goal Detail DB test
+        run: npx ts-node test/goalActivityRhythmGoalDetailDb.test.ts
+      - name: Run Goal activity rhythm setup DB test
+        run: npx ts-node test/goalActivityRhythmSetupDb.test.ts
+      # AURA-MR1 -- My Rhythm foundation against this disposable database:
+      # legacy-row compatibility, set/clear preferences, invalid inputs,
+      # ownership, pause/resume with confirmed plans left untouched, and no
+      # duplicate sessions.
+      - name: Run My Rhythm foundation DB test
+        run: npx ts-node test/myRhythmFoundationDb.test.ts
+      # AURA-MR2 -- real engine + routes on this disposable DB: preferences,
+      # Daily Rhythm, Panchang ranking, next-week confirmation without
+      # duplicates, Home paused/next-occurrence, consistent pause/weekday
+      # handling across Home, Plan My Day and the weekly proposal, timezones.
+      - name: Run My Rhythm scheduling DB test
+        run: npx ts-node test/myRhythmSchedulingDb.test.ts
+      # AURA-MR3 -- the editor's own PATCH bodies through the real route,
+      # reload, pause/resume, and preferences flowing into scheduling.
+      - name: Run MR3 My Rhythm preferences UI DB test
+        run: npx ts-node test/myRhythmPreferencesUiDb.test.ts
+      # AURA-REM-01 (PV-F03) -- background reminder dispatcher on this
+      # disposable DB with an injected sender: on-time delivery, duplicate and
+      # concurrent runs, reschedule/cancel/complete, retry and expiry,
+      # stale-claim recovery, midnight boundary, missing configuration and
+      # the scheduler heartbeat. Plus the existing reminder DB suites, which
+      # were never wired into CI before.
+      - name: Run REM-01 reminder reliability DB test
+        run: npx ts-node test/reminderReliabilityDb.test.ts
+      - name: Run reminder delivery DB test
+        run: npx ts-node test/reminderDeliveryDb.test.ts
+      - name: Run reminder delivery claim DB test
+        run: npx ts-node test/reminderDeliveryClaimDb.test.ts
+      - name: Run push subscriptions DB test
+        run: npx ts-node test/pushSubscriptionsDb.test.ts
+      - name: Run reminder attention DB test
+        run: npx ts-node test/reminderAttentionDb.test.ts
+      - name: Run Goal context DB test
+        run: npx ts-node test/goalContextDb.test.ts
+      - name: Run Goal template completion DB test
+        run: npx ts-node test/goalTemplateCompletionDb.test.ts
+      - name: Run Goal-aware Recomposition presentation DB test
+        run: npx ts-node test/goalAwareRecompositionPresentationDb.test.ts
+      # HPG3-A3b final review correction -- the live-DB presentation suite
+      # this ticket itself added was never wired in; reuses this job's
+      # existing Postgres service/migration-deploy step, same as the PR
+      # #181 reconciliation block above.
+      - name: Run Scheduling eligibility UI presentation DB test
+        run: npx ts-node test/schedulingEligibilityUiPresentationDb.test.ts
+      # Goals V2 Candidate B5 -- composed B1->B2->B3->B3.1->Candidate A->
+      # planning lifecycle closure. Needs the jsx-enabled compiler option
+      # because it imports goalActivityProposal.ts (same reason as the
+      # Goal activity proposal / Goal decomposition observability tests).
+      - name: Run Goal decomposition planning handoff DB test
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react"}'
+        run: npx ts-node test/goalDecompositionPlanningHandoffDb.test.ts
+      # CI reliability -- Goal-create idempotent replay ordering: the activity order is
+      # durable (strictly increasing createdAt) and the load is a total order, so an
+      # identical replay never conflicts under any query plan or physical row order.
+      - name: Run Goal create replay ordering DB test
+        run: npx ts-node test/goalCreateReplayOrderingDb.test.ts
+      # Constructor Decision Intelligence -- Decision Facts V1 (architecture
+      # foundation slice). No jsx needed: this test imports dayConstructor.ts/
+      # dayConstructorOrchestrator.ts/goalDemandCandidates.ts directly, none
+      # of which touch a 'use client' component type.
+      - name: Run Decision Facts V1 threading DB test
+        run: npx ts-node test/decisionFactsThreadingDb.test.ts
+      # Opportunity Scarcity V1 -- O2: real user-scoped wiring + the overlap
+      # query against a live database.
+      - name: Run opportunity range adapter DB test
+        run: npx ts-node test/opportunityRangeAdapterDb.test.ts
+      # Opportunity Scarcity V1 -- O4: the real chain (Rhythm facts -> period
+      # bounds -> range data -> projection -> decision facts) through the
+      # real preview boundary against a live database.
+      - name: Run opportunity decision facts DB test
+        run: npx ts-node test/opportunityDecisionFactsDb.test.ts
+      # O5 prerequisite P0a -- the real manual/automatic parity lifecycle:
+      # identical facts, acceptance, idempotency, no duplicate occurrence in
+      # either order, cross-user and forged-input isolation.
+      - name: Run manual Goal provenance parity DB test
+        run: npx ts-node test/manualGoalProvenanceParityDb.test.ts
+      # O5 prerequisite P0b -- the new first-day / after-first-day facts
+      # through the real chain (real data -> O2 -> O1 -> O4 -> preview).
+      - name: Run opportunity fact quality DB test
+        run: npx ts-node test/opportunityFactQualityDb.test.ts
+      # Goal lifecycle authorization -- archived-Goal acceptance guard against
+      # a live database (preview -> archive -> accept for every entry path,
+      # replay, mixed requests, controls, and a real concurrent-archive race).
+      - name: Run Goal lifecycle archived-acceptance DB test
+        run: npx ts-node test/goalLifecycleArchivedAcceptanceDb.test.ts
+      # O5 prerequisite P0c -- the behavioral anchor for future decision
+      # policy: a real-DB, real-pipeline overload contest (characterization).
+      - name: Run Constructor overload decision DB test
+        run: npx ts-node test/dayConstructorOverloadDecisionDb.test.ts
+      # O5 P1 -- real-DB proof that facts are prepared before construction,
+      # attached unchanged afterwards, inert, and load-bounded.
+      - name: Run decision fact preparation DB test
+        run: npx ts-node test/decisionFactPreparationDb.test.ts
+      # Constructor Decision Intelligence O5 P2a -- real-DB proof that evidence is built
+      # once per fact-bearing candidate, adds no queries, and leaves the signed preview identical.
+      - name: Run decision evidence DB test
+        run: npx ts-node test/decisionEvidenceDb.test.ts
+      # Constructor Decision Intelligence O5 P2b -- real-DB proof that real evidence
+      # classifies correctly and identically for canonical manual and automatic entry.
+      - name: Run decision pressure DB test
+        run: npx ts-node test/decisionPressureDb.test.ts
+      # Constructor Decision Intelligence O5 P2c -- real-DB proof of which duration sources
+      # (explicit, stored preference, behavioral, catalog default) actually reach RESOLVED
+      # evidence for canonical Goal demand, identically for manual and automatic entry.
+      - name: Run decision pressure reachability DB test
+        run: npx ts-node test/decisionPressureReachabilityDb.test.ts
+      # Constructor Decision Intelligence O5 P2d -- real-DB concurrency proof (explicit barriers, no sleeps) that
+      # the evidence inputs come from ONE REPEATABLE READ snapshot, where independent reads observed mixed states.
+      - name: Run decision scheduling snapshot DB test
+        run: npx ts-node test/decisionSchedulingSnapshotDb.test.ts
+      # Constructor Decision Intelligence O5 P4b5 -- real-DB OFF vs SHADOW parity through the PRODUCTION snapshot wiring: identical status, body, signatures, exact SQL statement
+      # sequence (no extra query, no second snapshot, no write, no transaction), snapshot loaded once, domain rows unchanged; the shadow executes over real pressure and contention.
+      - name: Run shadow policy execution DB test
+        run: npx ts-node test/shadowPolicyExecutionDb.test.ts
+      # O5 P4c3 -- the pure active result materializer over REAL Goal-occurrence data through the production preview boundary: a real P4b3 ACCEPT is selected and materialized,
+      # every materialized result satisfies the property oracle, the selector and materializer send zero SQL, the baseline response and domain rows are unchanged, and the
+      # signed result passes the existing acceptance validation. Inert: nothing consumes the materialized result.
+      - name: Run active result materializer DB test
+        run: npx ts-node test/activeResultMaterializerDb.test.ts
+      # O5 SHADOW ROLLOUT R3 -- the Preview-only manual review harness over REAL Goal-occurrence data: the directed real ACCEPT reaches
+      # APPLY/MATERIALIZABLE/READY/PASS and the response carries a review payload with zero extra writes and the identical SQL sequence
+      # to the plain preview; Production (reviewEligible=false) on the SAME run carries no review field; the review alternative is
+      # rejected by the real route-level signature gate; normal baseline acceptance persists exactly as before.
+      - name: Run shadow rollout R3 preview review DB test
+        run: npx ts-node test/shadowRolloutR3PreviewReviewDb.test.ts
+      # Birth Data Correctness B2 -- the three birth-date writers are invariant to the PostgreSQL session TimeZone and the process TZ: stored surrogate, round trip, natal context,
+      # the REAL timing search / constructed day identical across 5 database timezones; UTC parity for every date 1900-2100; the read-only diagnostic. Synthetic users only.
+      - name: Run birth date writers DB test
+        run: npx ts-node test/birthDateWritersDb.test.ts
+      # Constructor scheduling correctness -- real-DB regression for the
+      # overnight/multi-day overlapping plan blocker defect.
+      - name: Run Constructor overlapping blocker DB test
+        run: npx ts-node test/dayConstructorOverlappingBlockerDb.test.ts
+      # Schedule write consistency S1 -- real-DB regression for acceptance's
+      # authoritative overlap read (in-progress / overnight blockers).
+      - name: Run acceptance fresh-overlap DB test
+        run: npx ts-node test/dayConstructorAcceptanceFreshOverlapDb.test.ts
+      # Plan My Day -- single-item time editing backend: real-DB regression for the
+      # new /api/day-constructor/preview-item re-signing endpoint (signature binding,
+      # tampering/unauthorized-user rejection, zero persistence, sibling isolation,
+      # and acceptance-time-only scheduling safeguards).
+      - name: Run Day Constructor preview-item DB test
+        run: npx ts-node test/dayConstructorPreviewItemDb.test.ts
+      # Schedule write consistency S2 -- real-DB concurrency proof through the real
+      # POST /api/plans route (acceptance, Move and manual writers serialize).
+      - name: Run manual writer serialization DB test
+        run: npx ts-node test/scheduleWriteManualSerializationDb.test.ts
+      # AURA-HPG5-V2-I1 -- real-DB proof through the real /api/timing-search and
+      # POST /api/plans routes: Find a Time constraints, opt-in
+      # REJECT_ACTIVE_OVERLAP (409 PLAN_OVERLAP, rollback, concurrency, goal
+      # identity). Synthetic users only; cleans up after itself.
+      - name: Run Find a Time constraints DB test (HPG5-V2-I1)
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react"}'
+        run: npx ts-node test/findATimeConstraintsDb.test.ts
+      # AURA-HPG5-V2-I2 -- the My Day story card's client save function against
+      # the real routes: stale recommendation refused, no write, Save anyway,
+      # concurrency, isolation. jsx-enabled (it imports the client component).
+      - name: Run My Day save protection DB test (HPG5-V2-I2)
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react"}'
+        run: npx ts-node test/hpg5I2MyDaySaveDb.test.ts
+      # AURA-HPG5-V2-I3 -- Home Plan / Day Builder Add saves against the real
+      # routes: stale refusal with no write, Save anyway with the same
+      # idempotency key, races, privacy.
+      - name: Run Home save protection DB test (HPG5-V2-I3)
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react"}'
+        run: npx ts-node test/hpg5I3HomeSaveDb.test.ts
+      # AURA-AUTH-01 -- sign-in rate limit under concurrency (atomic quota reservation),
+      # against this job's own Postgres service. Email goes through a stubbed fetch inside
+      # the test; no provider credentials exist here, and any other outbound request fails it.
+      - name: Run sign-in rate-limit concurrency DB test (AURA-AUTH-01)
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react"}'
+        run: npx ts-node test/authRequestLinkQuotaDb.test.ts
+      # AURA-SEC-01 (#350) -- sign-in logs carry a keyed email reference, never a plaintext
+      # address, code or token; link/code sign-in and the rate limit unchanged. Stubbed email.
+      - name: Run sign-in log redaction DB test (AURA-SEC-01)
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react"}'
+        run: npx ts-node test/authLogRedactionDb.test.ts
+      # Schedule write consistency S4 -- real-DB proof through the real proposal path
+      # (explicit clock) that an overnight / prior-start plan blocks a Recomposition proposal.
+      - name: Run Recomposition proposal overlap DB test
+        run: npx ts-node test/remainingDayRecompositionProposalOverlapDb.test.ts
+      # Scheduling read authority R2 -- real-DB proof through the real
+      # buildForwardPlannerResult that a prior-start UPCOMING plan blocks a candidate.
+      - name: Run Forward Planner overlap blocker DB test
+        run: npx ts-node test/forwardPlannerOverlapBlockerDb.test.ts
+      # AURA-AUTH-02 -- magic links only in authorized local development: env matrix,
+      # no issuance / valid-token rejection in Production and Preview, code-only email,
+      # code sign-in and rate limit unchanged. Stubbed fetch; synthetic identities only.
+      - name: Run magic-link local-only DB test (AURA-AUTH-02)
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react"}'
+        run: npx ts-node test/authMagicLinkLocalOnlyDb.test.ts
+      # HPG3-A4b CI coverage reconciliation -- these 4 suites already pass
+      # against main but were never wired into CI; reusing this job's
+      # existing Postgres service/migration-deploy step, same as the PR
+      # #181 reconciliation block above.
+      - name: Run scheduling eligibility error contract DB test
+        run: npx ts-node test/schedulingEligibilityErrorContractDb.test.ts
+      - name: Run Goal activity daily occurrence eligibility DB test
+        run: npx ts-node test/goalActivityDailyOccurrenceEligibilityDb.test.ts
+      - name: Run multi-occurrence Rhythm Move capacity DB test
+        run: npx ts-node test/multiOccurrenceRhythmMoveCapacityDb.test.ts
+      - name: Run Home Move DB test
+        run: npx ts-node test/homeMoveDb.test.ts
+      # HPG4-2 CI coverage reconciliation -- these 3 DB-backed suites
+      # already pass against main but were never wired into CI; reusing
+      # this job's existing Postgres service/migration-deploy step, same
+      # convention as the HPG3-A4b block above.
+      - name: Run Home Skip DB test
+        run: npx ts-node test/homeSkipDb.test.ts
+      - name: Run Missed recovery DB test
+        run: npx ts-node test/missedRecoveryDb.test.ts
+      - name: Run Skip planned activity DB test
+        run: npx ts-node test/skipPlannedActivityDb.test.ts
+      # HPG3-A4b -- live-DB proof that Recomposition acceptance preserves a
+      # genuine scheduling-eligibility conflict's typed code rather than
+      # collapsing it into a bare, codeless SAVE_FAILED.
+      - name: Run Recomposition error propagation DB test
+        run: npx ts-node test/remainingDayRecompositionErrorPropagationDb.test.ts
+      # Home Recommendations: Daily Rhythm Alignment -- this suite already
+      # existed and already passes against main but was never wired into
+      # CI (same pre-existing gap class as the HPG4-2 block above); reusing
+      # this job's existing Postgres service/migration-deploy step. Proves,
+      # against a real Day Builder suggestion, that Daily Rhythm preference
+      # filtering is genuinely wired into the live recommendation pipeline
+      # end-to-end, including the display/commit-consistency guarantee.
+      - name: Run Daily Guidance orchestrator DB test
+        run: npx ts-node test/dailyGuidanceOrchestratorDb.test.ts
