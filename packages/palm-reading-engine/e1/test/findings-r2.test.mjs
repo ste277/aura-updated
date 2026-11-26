@@ -6,7 +6,6 @@ import fs from 'node:fs';
 import path from 'node:path';
 import * as E from '../src/index.mjs';
 import * as composeModule from '../src/compose.mjs';
-import * as coreModule from '../src/engine-core.mjs';
 import { E1, CAT_PATH, SCHEMA_PATH, readJson, clone, rec, python, pythonCheck, tmpdir, shape } from './helpers.mjs';
 
 const CAT = readJson(CAT_PATH);
@@ -52,7 +51,7 @@ test('F1 forged, copied or re-classified libraries are refused; eligibility is r
   const forged = [{ ...lib }, Object.create(lib), structuredClone(lib), new Proxy(lib, {}), { catalogue: lib.catalogue, byId: { ...lib.byId } }];
   for (const f of forged) assert.throws(() => compose({}, { library: f }), (e) => e.code === 'invalid-library');
   // R4: no text composer is exported at all; text is produced only inside the pipeline, from the pinned library
-  assert.ok(!('composeReading' in composeModule) && Object.keys(coreModule).sort().join() === 'E1Error,E1_ENGINE,claimSyntheticReader');
+  assert.ok(!('composeReading' in composeModule) && !fs.existsSync(path.join(E1, 'src', 'engine-core.mjs')));
   const reclass = clone(CAT); rec(reclass, 'C1-WE-INDEX-LONG').eligibility.status = 'eligible-initial';
   assert.throws(() => E.loadLibrary(reclass, SCHEMA), (e) => e.code === 'invalid-catalogue');
   // historical records: metadata only, never personalised text

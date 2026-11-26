@@ -66,9 +66,12 @@ echo 'module.exports={}' > .next/server/webpack-runtime.js
 echo '{"/page":"app/page.js"}' > .next/server/app-paths-manifest.json
 echo '{"/_app":"pages/_app.js"}' > .next/server/pages-manifest.json
 echo 'module.exports={}' > .next/standalone/.next/server/app/page.js
-echo 'require("next")' > .next/standalone/server.js
+printf "require('next')\\nrequire('next/dist/server/lib/start-server')\\n" > .next/standalone/server.js
 echo '{"name":"web"}' > .next/standalone/package.json
-echo '{"name":"next"}' > .next/standalone/node_modules/next/package.json
+echo '{"name":"next","main":"./dist/server/next.js"}' > .next/standalone/node_modules/next/package.json
+mkdir -p .next/standalone/node_modules/next/dist/server/lib
+echo 'module.exports={}' > .next/standalone/node_modules/next/dist/server/next.js
+echo 'exports.startServer=function(){}' > .next/standalone/node_modules/next/dist/server/lib/start-server.js
 [ "$FAKE_NEXT_MODE" = "incomplete-no-standalone" ] && rm -rf .next/standalone
 [ "$FAKE_NEXT_MODE" = "incomplete-no-chunks" ] && rm -rf .next/static/chunks
 [ "$FAKE_NEXT_MODE" = "incomplete-no-build-id" ] && rm -f .next/BUILD_ID
@@ -115,12 +118,14 @@ try {
   const put = (base: string, rel: string, body: string) => { fs.mkdirSync(path.dirname(path.join(base, rel)), { recursive: true }); fs.writeFileSync(path.join(base, rel), body); };
   const B = 'fakeBuild0001';
   const common: Record<string, string> = { '.next/BUILD_ID': B, [`.next/static/${B}/_buildManifest.js`]: 'x', '.next/static/chunks/a.js': 'x', '.next/server/webpack-runtime.js': 'x', '.next/server/app-paths-manifest.json': '{"/p":"p"}', '.next/server/pages-manifest.json': '{"/_app":"a"}', '.next/server/app/page.js': 'x', 'public/manifest.json': '{"name":"Aura"}' };
-  for (const [r, b] of Object.entries({ ...common, '.next/standalone/server.js': 'x', '.next/standalone/package.json': '{"name":"w"}', '.next/standalone/.next/BUILD_ID': B, '.next/standalone/.next/server/app/page.js': 'x', '.next/standalone/node_modules/next/package.json': '{"name":"next"}' })) put(tmp, r, b);
-  for (const [r, b] of Object.entries({ ...common, 'server.js': 'x', 'package.json': '{"name":"w"}', 'node_modules/next/package.json': '{"name":"next"}', 'migrations/0001_init/migration.sql': 'SELECT 1;' })) put(tree, r, b);
+  const SERVER = "require('next')\nrequire('next/dist/server/lib/start-server')\n";
+  const nextFiles = (pre: string): Record<string, string> => ({ [`${pre}node_modules/next/package.json`]: '{"name":"next","main":"./dist/server/next.js"}', [`${pre}node_modules/next/dist/server/next.js`]: 'x', [`${pre}node_modules/next/dist/server/lib/start-server.js`]: 'x' });
+  for (const [r, b] of Object.entries({ ...common, '.next/standalone/server.js': SERVER, '.next/standalone/package.json': '{"name":"w"}', '.next/standalone/.next/BUILD_ID': B, '.next/standalone/.next/server/app/page.js': 'x', ...nextFiles('.next/standalone/') })) put(tmp, r, b);
+  for (const [r, b] of Object.entries({ ...common, 'server.js': SERVER, 'package.json': '{"name":"w"}', ...nextFiles(''), 'migrations/0001_init/migration.sql': 'SELECT 1;' })) put(tree, r, b);
   const guard = path.join(ROOT, 'apps/web/scripts/check-palm-e1-bundle.js');
   const ok = spawnSync('node', [guard, tmp], { encoding: 'utf8' });
   const okTree = spawnSync('node', [guard, '--tree', tree], { encoding: 'utf8' });
-  fs.writeFileSync(path.join(tmp, '.next/standalone/server.js'), 'var lib="palm-03-c1-library@0.4.0-draft"');
+  fs.writeFileSync(path.join(tmp, '.next/standalone/server.js'), `${SERVER}var lib="palm-03-c1-library@0.4.0-draft"`);
   const bad = spawnSync('node', [guard, tmp], { encoding: 'utf8' });
   check('C5. the guard exits 0 on a complete clean artifact (web build and Docker tree) and non-zero on a standalone-server leak', ok.status === 0 && okTree.status === 0 && bad.status === 1, `${ok.stderr}${okTree.stderr}`);
   fs.rmSync(path.join(tree, 'migrations'), { recursive: true });

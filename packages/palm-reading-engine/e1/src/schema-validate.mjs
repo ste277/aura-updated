@@ -19,7 +19,8 @@ function isCalendarDate(v) {
 const FORMATS = { date: isCalendarDate };
 
 const own = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
-const isPlain = (v) => v !== null && typeof v === 'object' && !Array.isArray(v) && Object.getPrototypeOf(v) === Object.prototype;
+// R5: the loader normalizes catalogue and schema into null-prototype records (library.mjs normalizeRecord)
+const isPlain = (v) => v !== null && typeof v === 'object' && !Array.isArray(v) && (Object.getPrototypeOf(v) === Object.prototype || Object.getPrototypeOf(v) === null);
 
 function typeOf(v) {
   if (v === null) return 'null';

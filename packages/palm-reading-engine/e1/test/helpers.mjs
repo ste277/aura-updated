@@ -92,6 +92,9 @@ export const CATALOGUE_MUTATIONS = [
  * Returns the list of required relative paths written (each one can be removed or emptied by negative tests).
  */
 export const FIXTURE_BUILD_ID = 'fixtureBuild01';
+// R5: the startup requires of a generated Next 14 standalone server.js, and the Next entry files they resolve to
+const SERVER_JS = "const path = require('path')\nrequire('next')\nconst { startServer } = require('next/dist/server/lib/start-server')\n";
+const NEXT_PKG = '{"name":"next","version":"14.2.35","main":"./dist/server/next.js"}';
 export function writeArtifactFixture(dir, target) {
   const B = FIXTURE_BUILD_ID;
   const web = {
@@ -102,15 +105,17 @@ export function writeArtifactFixture(dir, target) {
     '.next/server/app-paths-manifest.json': '{"/page":"app/page.js"}',
     '.next/server/pages-manifest.json': '{"/_app":"pages/_app.js"}',
     '.next/server/app/page.js': 'module.exports={}',
-    '.next/standalone/server.js': 'require("next")',
+    '.next/standalone/server.js': SERVER_JS,
     '.next/standalone/package.json': '{"name":"web"}',
     '.next/standalone/.next/BUILD_ID': B,
     '.next/standalone/.next/server/app/page.js': 'module.exports={}',
-    '.next/standalone/node_modules/next/package.json': '{"name":"next"}',
+    '.next/standalone/node_modules/next/package.json': NEXT_PKG,
+    '.next/standalone/node_modules/next/dist/server/next.js': 'module.exports=function next(){}',
+    '.next/standalone/node_modules/next/dist/server/lib/start-server.js': 'exports.startServer=function(){}',
     'public/manifest.json': '{"name":"Aura"}',
   };
   const tree = {
-    'server.js': 'require("next")',
+    'server.js': SERVER_JS,
     'package.json': '{"name":"web"}',
     '.next/BUILD_ID': B,
     [`.next/static/${B}/_buildManifest.js`]: 'self.__BUILD_MANIFEST={}',
@@ -119,7 +124,9 @@ export function writeArtifactFixture(dir, target) {
     '.next/server/app-paths-manifest.json': '{"/page":"app/page.js"}',
     '.next/server/pages-manifest.json': '{"/_app":"pages/_app.js"}',
     '.next/server/app/page.js': 'module.exports={}',
-    'node_modules/next/package.json': '{"name":"next"}',
+    'node_modules/next/package.json': NEXT_PKG,
+    'node_modules/next/dist/server/next.js': 'module.exports=function next(){}',
+    'node_modules/next/dist/server/lib/start-server.js': 'exports.startServer=function(){}',
     'public/manifest.json': '{"name":"Aura"}',
     'migrations/0001_init/migration.sql': 'CREATE TABLE t (id int);',
   };

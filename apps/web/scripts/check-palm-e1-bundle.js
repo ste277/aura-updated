@@ -69,6 +69,7 @@ function scanTree(base, label, out) {
 
 const BUILD_ID_RE = /^[A-Za-z0-9_-]{8,128}$/;
 let out_standaloneRoot = null; // located standalone app root (reported on success)
+const out_startup = []; // resolved startup entry files (reported on success)
 /**
  * Required artifact structure per build target. `{B}` is the build id read from BUILD_ID.
  *   web-build            apps/web after `next build` (output: 'standalone'): CI web-build job, vercel-build.sh
@@ -101,6 +102,62 @@ const REQUIRED = Object.freeze({
     migrations: 'migrations',
   }),
 });
+
+// R5: EXECUTABLE runtime completeness. The generated standalone server.js starts Next through its own require()s
+// (Next 14: require('next') and require('next/dist/server/lib/start-server')). Each non-builtin dependency it names
+// is resolved the way Node would, but ONLY through node_modules directories from the app root up to the artifact
+// boundary (the standalone tree for web-build, /app for the Docker tree) -- never from the workspace or the host.
+// The resolved entry file must exist, be a readable non-empty regular file, and lie inside the boundary.
+const BUILTINS = new Set(require('module').builtinModules);
+function startupRequires(serverJs) {
+  return [...new Set([...serverJs.matchAll(/\brequire\(\s*(['"])([^'"\n]+)\1\s*\)/g)].map((m) => m[2]))];
+}
+function resolveStartup(root, appRel, boundaryRel, spec) {
+  const bare = spec.replace(/^node:/, '');
+  if (BUILTINS.has(bare) || BUILTINS.has(bare.split('/')[0])) return { builtin: true };
+  if (spec.startsWith('.') || spec.startsWith('/')) return { error: `server.js requires a path (${spec}); only package dependencies are expected` };
+  const parts = spec.split('/');
+  const pkgName = spec.startsWith('@') ? parts.slice(0, 2).join('/') : parts[0];
+  const sub = parts.slice(spec.startsWith('@') ? 2 : 1).join('/');
+  const boundary = path.resolve(root, boundaryRel);
+  let realBoundary;
+  try { realBoundary = fs.realpathSync(boundary); } catch (e) { return { error: `artifact boundary ${boundaryRel} is unreadable` }; }
+  let pkgDir = null;
+  for (let dir = path.resolve(root, appRel); ; dir = path.dirname(dir)) {
+    const cand = path.join(dir, 'node_modules', pkgName);
+    try { if (fs.statSync(cand).isDirectory()) { pkgDir = cand; break; } } catch { /* keep looking upward */ }
+    if (dir === boundary || path.dirname(dir) === dir || !dir.startsWith(boundary)) break;
+  }
+  if (!pkgDir) return { error: `startup dependency ${spec} does not resolve from ${appRel || '.'} within ${boundaryRel || '.'}` };
+  let manifest;
+  try { manifest = JSON.parse(fs.readFileSync(path.join(pkgDir, 'package.json'), 'utf8')); } catch { return { error: `startup dependency ${pkgName} has no readable package.json` }; }
+  if (manifest === null || typeof manifest !== 'object' || Array.isArray(manifest)) return { error: `startup dependency ${pkgName} has a malformed package.json` };
+  if (manifest.exports !== undefined) return { error: `startup dependency ${pkgName} uses an exports map, which this check does not resolve` };
+  const target = path.join(pkgDir, sub || (typeof manifest.main === 'string' && manifest.main ? manifest.main : 'index.js'));
+  for (const cand of [target, `${target}.js`, `${target}.json`, path.join(target, 'index.js')]) {
+    let st;
+    try { st = fs.statSync(cand); } catch { continue; }
+    if (!st.isFile()) continue;
+    let real;
+    try { real = fs.realpathSync(cand); } catch { return { error: `startup entry for ${spec} is unreadable` }; }
+    if (real !== realBoundary && !real.startsWith(realBoundary + path.sep)) return { error: `startup entry for ${spec} resolves outside the shipped artifact (${path.relative(root, real)})` };
+    if (st.size === 0) return { error: `startup entry for ${spec} is empty (${path.relative(root, cand)})` };
+    try { fs.readFileSync(cand); } catch (e) { return { error: `startup entry for ${spec} is unreadable: ${e.code || e.message}` }; }
+    return { file: path.relative(root, cand) };
+  }
+  return { error: `startup entry for ${spec} is missing (${path.relative(root, target)}[.js])` };
+}
+function checkStartup(root, appRel, boundaryRel, errs) {
+  let text;
+  try { text = fs.readFileSync(path.join(root, appRel, 'server.js'), 'utf8'); } catch { return; } // reported by the file checks
+  const specs = startupRequires(text);
+  if (!specs.some((x) => x === 'next' || x.startsWith('next/'))) { errs.push(`cannot identify the Next startup dependency in ${path.join(appRel, 'server.js')}`); return; }
+  for (const spec of specs) {
+    const r = resolveStartup(root, appRel, boundaryRel, spec);
+    if (r.error) errs.push(r.error);
+    else if (r.file) out_startup.push(r.file);
+  }
+}
 
 /** Verify the required structure of `root` for `target`. Returns a list of problems (empty when complete). */
 function checkStructure(root, target) {
@@ -177,8 +234,10 @@ function checkStructure(root, target) {
       const pkg = up('package.json');
       if (!pkg) errs.push(`missing package.json for the standalone app root ${app}`);
       for (const rel of [nextPkg, pkg].filter(Boolean)) { const t = readFile(rel); if (t !== null) { try { const v = JSON.parse(t); if (v === null || typeof v !== 'object' || Array.isArray(v) || !Object.keys(v).length) errs.push(`empty or non-object JSON ${rel}`); } catch { errs.push(`malformed JSON ${rel}`); } } }
+      checkStartup(root, app, spec.standalone, errs); // R5: the Next startup module itself
     }
   }
+  if (target === 'docker-release-tree') checkStartup(root, '', '', errs); // R5: the Next startup module itself, within /app
   if (spec.migrations) {
     const dir = path.join(root, spec.migrations);
     let subs = [];
@@ -218,7 +277,7 @@ function report(res, where) {
     for (const h of res.hits.slice(0, 20)) console.error(`  ${h.sentinel}  ->  ${h.file}`);
   }
   if (res.errors.length || res.hits.length) process.exit(1);
-  console.log(`[palm-e1-bundle] OK: none of ${SENTINELS.length} E1 sentinels in ${res.files} file(s) under ${where}.${out_standaloneRoot !== null ? ` Artifact complete; standalone app root: ${out_standaloneRoot}.` : ' Artifact complete.'}`);
+  console.log(`[palm-e1-bundle] OK: none of ${SENTINELS.length} E1 sentinels in ${res.files} file(s) under ${where}.${out_standaloneRoot !== null ? ` Artifact complete; standalone app root: ${out_standaloneRoot}.` : ' Artifact complete.'} Startup: ${out_startup.join(', ') || 'none'}.`);
 }
 
 if (require.main === module) {

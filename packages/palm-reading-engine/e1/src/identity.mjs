@@ -41,10 +41,19 @@ export const RECORD_MANIFEST = Object.freeze({
 });
 
 /**
- * R4 (finding F7): the explicit synthetic declaration. `options` must be a plain object (prototype Object.prototype or
- * null) whose OWN data property `synthetic` is exactly the boolean true. Inherited, accessor, false, truthy-but-not-true
- * and malformed declarations are refused. Every other own key must be listed in `allowed` and be a data property.
- * Returns a frozen snapshot of the options, so nothing is read from the caller's object afterwards.
+ * R5: is `d` (a property descriptor) a data descriptor? Decided from the descriptor's OWN fields only. A descriptor
+ * object returned by Object.getOwnPropertyDescriptor inherits from Object.prototype, so `'value' in d` or `d.value`
+ * can be satisfied by an inherited Object.prototype.value on an accessor-only property (R4 witness).
+ */
+export const isOwnDataDescriptor = (d) => d !== undefined && Object.prototype.hasOwnProperty.call(d, 'value') && !Object.prototype.hasOwnProperty.call(d, 'get') && !Object.prototype.hasOwnProperty.call(d, 'set');
+
+/**
+ * R4/R5 (finding F7): the explicit synthetic declaration -- the ONE validation used by every reading and planning
+ * entry point (reading.ts generateSyntheticReading, compose.mjs planSelection), before any work begins.
+ * `options` must be a plain object (prototype Object.prototype or null) whose OWN DATA property `synthetic` is
+ * exactly the primitive boolean true. Omitted, inherited, accessor (including an accessor paired with an inherited
+ * descriptor `value`), false, boxed, non-boolean and malformed declarations are refused. Every other own key must be
+ * listed in `allowed` and be an own data property. Returns a frozen null-prototype snapshot of the options.
  */
 export function requireSyntheticOptions(options, allowed) {
   const refuse = (why) => { throw new E1Error('synthetic-required', `pass an own { synthetic: true } declaration (${why}); real input is not authorised`); };
@@ -53,13 +62,13 @@ export function requireSyntheticOptions(options, allowed) {
   if (proto !== Object.prototype && proto !== null) refuse('options must be a plain object');
   const d = Object.getOwnPropertyDescriptor(options, 'synthetic');
   if (d === undefined) refuse('no own synthetic property');
-  if (!('value' in d)) refuse('synthetic must be a data property');
+  if (!isOwnDataDescriptor(d)) refuse('synthetic must be a data property');
   if (d.value !== true) refuse('synthetic must be exactly true');
   const snap = Object.create(null);
   for (const k of Reflect.ownKeys(options)) {
     if (typeof k !== 'string' || !allowed.includes(k)) throw new E1Error('invalid-option', `unsupported option: ${String(k)}`);
     const dk = Object.getOwnPropertyDescriptor(options, k);
-    if (!dk || !('value' in dk)) throw new E1Error('invalid-option', `option ${k} must be a data property`);
+    if (!isOwnDataDescriptor(dk)) throw new E1Error('invalid-option', `option ${k} must be a data property`);
     snap[k] = dk.value;
   }
   return Object.freeze(snap);

@@ -161,6 +161,55 @@ test('G1b R4 positive artifact verification: missing, empty, incomplete, malform
   } finally { for (const x of [e, w, d]) fs.rmSync(x, { recursive: true, force: true }); }
 });
 
+test('G1c R5 executable runtime completeness: the Next startup modules named by server.js must resolve INSIDE the artifact', async () => {
+  const { checkStructure } = await import(pathToFileURL(GUARD).href);
+  const START = 'node_modules/next/dist/server/lib/start-server.js', MAIN = 'node_modules/next/dist/server/next.js';
+  const layouts = [
+    ['web-build flat', 'web-build', (t) => { writeArtifactFixture(t, 'web-build'); return '.next/standalone/'; }],
+    ['web-build nested (Vercel)', 'web-build', (t) => { writeArtifactFixture(t, 'web-build'); const sa = path.join(t, '.next/standalone'); fs.mkdirSync(path.join(sa, 'apps/web'), { recursive: true }); for (const n of ['server.js', '.next']) fs.renameSync(path.join(sa, n), path.join(sa, 'apps/web', n)); return '.next/standalone/'; }],
+    ['docker-release-tree', 'docker-release-tree', (t) => { writeArtifactFixture(t, 'docker-release-tree'); return ''; }],
+  ];
+  for (const [name, target, make] of layouts) {
+    const fresh = () => { const t = tmpdir('g1c'); const pre = make(t); return { t, pre }; };
+    const errsOf = (t) => checkStructure(t, target);
+    let { t, pre } = fresh();
+    try {
+      assert.deepEqual(errsOf(t), [], name);
+      // the R4 independent witness: package metadata present, startup module removed
+      fs.rmSync(path.join(t, pre + START));
+      assert.ok(errsOf(t).some((x) => /startup entry for next\/dist\/server\/lib\/start-server is missing/.test(x)), `${name}: missing start-server`);
+      fs.writeFileSync(path.join(t, pre + START), '');
+      assert.ok(errsOf(t).some((x) => /start-server is empty/.test(x)), `${name}: empty start-server`);
+      fs.writeFileSync(path.join(t, pre + START), 'x');
+      fs.rmSync(path.join(t, pre + MAIN));
+      assert.ok(errsOf(t).some((x) => /startup entry for next is missing/.test(x)), `${name}: missing next main`);
+      fs.writeFileSync(path.join(t, pre + MAIN), 'x');
+      assert.deepEqual(errsOf(t), [], `${name} restored`);
+      // a host/workspace copy of Next OUTSIDE the boundary must not satisfy the check
+      const hostNext = `${t}-host-next`;
+      fs.renameSync(path.join(t, pre + 'node_modules/next'), hostNext);
+      const outside = target === 'web-build' ? path.join(t, 'node_modules') : path.join(path.dirname(t), `${path.basename(t)}-host`, 'node_modules');
+      fs.mkdirSync(outside, { recursive: true }); fs.cpSync(hostNext, path.join(outside, 'next'), { recursive: true });
+      const res = target === 'web-build' ? errsOf(t) : checkStructure(t, target);
+      assert.ok(res.some((x) => /does not resolve from .* within/.test(x)), `${name}: resolved from outside the artifact: ${JSON.stringify(res)}`);
+      fs.rmSync(outside, { recursive: true, force: true }); if (target !== 'web-build') fs.rmSync(path.dirname(outside), { recursive: true, force: true });
+      // a symlinked Next whose real files are outside the boundary
+      fs.symlinkSync(hostNext, path.join(t, pre + 'node_modules/next'));
+      assert.ok(errsOf(t).some((x) => /resolves outside the shipped artifact/.test(x)), `${name}: symlink escape`);
+    } finally { fs.rmSync(t, { recursive: true, force: true }); fs.rmSync(`${t}-host-next`, { recursive: true, force: true }); }
+    // server.js that names no Next startup dependency, and a Next with an exports map
+    ({ t, pre } = fresh());
+    try {
+      const appServer = name.includes('nested') ? '.next/standalone/apps/web/server.js' : pre + 'server.js';
+      fs.writeFileSync(path.join(t, appServer), "require('path')\n");
+      assert.ok(errsOf(t).some((x) => /cannot identify the Next startup dependency/.test(x)), `${name}: no startup dependency`);
+      fs.writeFileSync(path.join(t, appServer), "require('next')\nrequire('next/dist/server/lib/start-server')\n");
+      fs.writeFileSync(path.join(t, pre + 'node_modules/next/package.json'), '{"name":"next","main":"./dist/server/next.js","exports":{".":"./x.js"}}');
+      assert.ok(errsOf(t).some((x) => /exports map/.test(x)), `${name}: exports map`);
+    } finally { fs.rmSync(t, { recursive: true, force: true }); }
+  }
+});
+
 test('G2 nothing outside the engine package imports or names E1; no manifest, alias or config resolves to it', () => {
   const outside = code(['apps', 'packages'].flatMap((d) => read(path.join(REPO, d)))).filter((f) => !path.resolve(f).startsWith(PKG + path.sep) && path.resolve(f) !== GUARD);
   const hits = outside.filter((f) => /palm-reading-engine\/e1|aura\.palm\.e1|composeFromObservations|generateE1Reading/.test(fs.readFileSync(f, 'utf8')));
@@ -172,8 +221,13 @@ test('G2 nothing outside the engine package imports or names E1; no manifest, al
 test('G3 E1 source has no network, storage, console, camera, process, file-system, clock or randomness access', () => {
   for (const f of read(path.join(E1, 'src'))) {
     let s = fs.readFileSync(f, 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
-    // reading.ts loads the ESM core through the CommonJS loader (one local require) -- nothing else may require
-    if (path.basename(f) === 'reading.ts') s = s.replace("require('./engine-core.mjs')", '');
+    // R5: reading.ts (the pipeline) loads the E1 modules and the I1 contract adapter through the CommonJS loader --
+    // exactly these local requires, nothing else
+    if (path.basename(f) === 'reading.ts') {
+      const allowedRequires = ["require('./identity.mjs')", "require('./packaged.mjs')", "require('./compose.mjs')", "require('./construction.mjs')", "require('./descriptors.mjs')", "require('./grid.mjs')", "require('../../adapter/feature-set-adapter.mjs')"];
+      assert.deepEqual([...s.matchAll(/require\([^)]*\)/g)].map((m) => m[0]).sort(), [...allowedRequires].sort(), 'reading.ts requires');
+      for (const r of allowedRequires) s = s.replace(r, '');
+    }
     // R4 (F2): packaged.mjs reads exactly its two vendored library files once, as bytes, and checks their digests --
     // only these two imports and this one read are allowed; no other file-system or crypto use anywhere.
     if (path.basename(f) === 'packaged.mjs') {
@@ -187,8 +241,8 @@ test('G3 E1 source has no network, storage, console, camera, process, file-syste
     assert.ok(!/\bfetch\s*\(|XMLHttpRequest|WebSocket|localStorage|sessionStorage|indexedDB|document\.|navigator\.|getUserMedia|console\.|process\.|node:fs|node:child_process|node:net|node:http|node:crypto|require\(|Date\.now|new Date|Math\.random|https?:\/\//.test(s), path.basename(f));
     assert.ok(!/prototype\/src/.test(s), `${path.basename(f)} imports the frozen G6 engine`);
   }
-  const core = fs.readFileSync(path.join(E1, 'src', 'engine-core.mjs'), 'utf8');
-  assert.match(core, /from '\.\.\/\.\.\/adapter\/feature-set-adapter\.mjs'/); // I1 contract validation only
+  const pipeline = fs.readFileSync(path.join(E1, 'src', 'reading.ts'), 'utf8');
+  assert.match(pipeline, /require\('\.\.\/\.\.\/adapter\/feature-set-adapter\.mjs'\)/); // I1 contract validation only
   assert.match(fs.readFileSync(path.join(E1, 'src', 'reading.ts'), 'utf8'), /from '\.\.\/\.\.\/\.\.\/\.\.\/apps\/web\/lib\/palm-analysis\/features'/); // the I1 builder, nothing else from apps
   assert.equal(E1_ENGINE.syntheticOnly, true);
 });

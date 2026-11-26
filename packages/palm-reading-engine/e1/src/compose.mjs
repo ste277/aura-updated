@@ -15,13 +15,13 @@
 // Trust boundaries (R4):
 //   planSelection(library, observations, { synthetic: true })  ids and reason codes only -- NO text. Any validated
 //       library (loadLibrary) and strictly validated abstract observations. Used by the pipeline and by fixtures.
-//   Text is produced ONLY inside engine-core.mjs (module-private), from one synthetic input and the pinned library;
+//   Text is produced ONLY inside reading.ts (module-private), from one synthetic input and the pinned library;
 //       validateReadingOutput() checks the complete reading before it is returned (F2).
 //   Mutual exclusion (F4): if more than one record qualifies for the same observed feature, none is shown and the
 //       feature is listed as 'ambiguous-in-source'.
 
 import { E1_ENGINE, E1Error, MODES, DOMAINS, RECORD_MANIFEST, requireSyntheticOptions } from './identity.mjs';
-import { isValidatedLibrary, BANNED_WORDING, FORECAST_WORDING } from './library.mjs';
+import { isValidatedLibrary, normalizeRecord, BANNED_WORDING, FORECAST_WORDING } from './library.mjs';
 import { toGrid, gridStatus } from './grid.mjs';
 
 const INITIAL = new Set(RECORD_MANIFEST['eligible-initial']);
@@ -101,8 +101,12 @@ export function concernCount(rec) { return Object.values(rec.suitability).filter
  * Selection and placement only: record ids and reason codes, never interpretation text.
  * opts: { synthetic: true, mode = 'combined', qualityAccepted = true, qualityDetail? }
  */
-export function planSelection(library, observations, options) {
+export function planSelection(library, observationsInput, options) {
   const opts = requireSyntheticOptions(options, ['synthetic', 'mode', 'qualityAccepted', 'qualityDetail']);
+  // R5 (F2): observations are normalized into null-prototype records (own data only) before validation and matching
+  let observations;
+  try { observations = normalizeRecord(observationsInput, 'observations'); } catch (err) { throw new E1Error('invalid-input', String(err?.message ?? err)); }
+  if (observations === null || typeof observations !== 'object' || Array.isArray(observations)) throw new E1Error('invalid-input', 'observations must be an object');
   const mode = opts.mode ?? 'combined';
   if (!MODES.includes(mode)) throw new E1Error('invalid-option', `mode must be one of ${MODES.join(', ')}`);
   if (typeof (opts.qualityAccepted ?? true) !== 'boolean') throw new E1Error('invalid-option', 'qualityAccepted must be boolean');

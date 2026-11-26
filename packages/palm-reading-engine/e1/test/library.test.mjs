@@ -23,7 +23,9 @@ test('L1 all 29 research records load with their classifications (12 / 7 / 3 / 2
 
 test('L2 records are preserved unchanged: sources, tradition, suitability, provenance requirements, unreviewed status', () => {
   const lib = defaultLibrary();
-  assert.deepEqual(lib.catalogue, CAT);
+  // R5: identical content (same JSON serialization, key order included), held as null-prototype records
+  assert.equal(JSON.stringify(lib.catalogue), JSON.stringify(CAT));
+  assert.equal(Object.getPrototypeOf(lib.catalogue), null);
   for (const id of lib.order) {
     const e = lib.byId[id];
     assert.equal(e.review.status, 'UNREVIEWED_RESEARCH_CONTENT', id);

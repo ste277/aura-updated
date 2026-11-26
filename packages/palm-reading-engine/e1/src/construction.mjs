@@ -134,6 +134,63 @@ function ratioStatusFromInput(input, frameInfo, values) {
   };
 }
 
+// R5 (finding F6): port of the I1 trace placement (features.ts placeTrace, traceGeometryProblem, TRACE_LIMITS), so
+// every line state E1 reads -- placed points AND the specific unassessed reason -- is recomputed from the input.
+// Same operations in the same order; tests compare TRACE_LIMITS and the verdicts with I1 across many traces.
+export const TRACE_LIMITS = Object.freeze({ minPoints: 2, maxPoints: 64, minLength: 0.02, maxTurnDeg: 120, maxTortuosity: 2.0, eps: 1e-9, bounds: Object.freeze({ xMin: -0.2, xMax: 1.2, yMin: -0.2, yMax: 1.6 }) });
+const inBounds = (p) => p.x >= TRACE_LIMITS.bounds.xMin && p.x <= TRACE_LIMITS.bounds.xMax && p.y >= TRACE_LIMITS.bounds.yMin && p.y <= TRACE_LIMITS.bounds.yMax;
+const below = (v, l) => v < l - TRACE_LIMITS.eps;
+const above = (v, l) => v > l + TRACE_LIMITS.eps;
+function withoutConsecutiveDuplicates(points) { const out = []; for (const p of points) { const q = out[out.length - 1]; if (!q || q.x !== p.x || q.y !== p.y) out.push(p); } return out; }
+function canonical(points) {
+  const n = points.length;
+  for (let i = 0; i < n; i++) {
+    const a = points[i], b = points[n - 1 - i];
+    if (a.x !== b.x) return a.x < b.x ? points : [...points].reverse();
+    if (a.y !== b.y) return a.y < b.y ? points : [...points].reverse();
+  }
+  return points;
+}
+const crossP = (o, a, b) => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+const onSeg = (p, q, r) => Math.min(p.x, r.x) <= q.x && q.x <= Math.max(p.x, r.x) && Math.min(p.y, r.y) <= q.y && q.y <= Math.max(p.y, r.y);
+function segmentsTouch(p1, p2, p3, p4) {
+  const c1 = crossP(p3, p4, p1), c2 = crossP(p3, p4, p2), c3 = crossP(p1, p2, p3), c4 = crossP(p1, p2, p4);
+  if (((c1 > 0 && c2 < 0) || (c1 < 0 && c2 > 0)) && ((c3 > 0 && c4 < 0) || (c3 < 0 && c4 > 0))) return true;
+  return (c1 === 0 && onSeg(p3, p1, p4)) || (c2 === 0 && onSeg(p3, p2, p4)) || (c3 === 0 && onSeg(p1, p3, p2)) || (c4 === 0 && onSeg(p1, p4, p2));
+}
+function problemInOrder(pts) {
+  if (pts.length < 2) return 'trace-too-few-distinct-points';
+  const seen = new Set();
+  for (const p of pts) { const k = `${p.x},${p.y}`; if (seen.has(k)) return 'trace-repeated-point'; seen.add(k); }
+  let len = 0;
+  for (let i = 1; i < pts.length; i++) len += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y);
+  if (below(len, TRACE_LIMITS.minLength)) return 'trace-too-short';
+  for (let i = 1; i + 1 < pts.length; i++) {
+    const ax = pts[i].x - pts[i - 1].x, ay = pts[i].y - pts[i - 1].y, bx = pts[i + 1].x - pts[i].x, by = pts[i + 1].y - pts[i].y;
+    const cos = Math.max(-1, Math.min(1, (ax * bx + ay * by) / (Math.hypot(ax, ay) * Math.hypot(bx, by))));
+    if (above((Math.acos(cos) * 180) / Math.PI, TRACE_LIMITS.maxTurnDeg)) return 'trace-doubles-back';
+  }
+  for (let i = 0; i + 1 < pts.length; i++) for (let j = i + 2; j + 1 < pts.length; j++) if (segmentsTouch(pts[i], pts[i + 1], pts[j], pts[j + 1])) return 'trace-self-intersecting';
+  const chord = Math.hypot(pts[pts.length - 1].x - pts[0].x, pts[pts.length - 1].y - pts[0].y);
+  if (above(len / chord, TRACE_LIMITS.maxTortuosity)) return 'trace-tortuous';
+  return null;
+}
+function traceGeometryProblem(points) { const c = canonical(withoutConsecutiveDuplicates(points)); return problemInOrder(c) ?? problemInOrder([...c].reverse()); }
+/** Port of I1 placeTrace: { ok, palmPoints } or { ok: false, reason }. */
+export function placeTraceFromInput(points, frame) {
+  if (!Array.isArray(points) || points.length < TRACE_LIMITS.minPoints) return { ok: false, reason: 'trace-too-few-points' };
+  if (points.length > TRACE_LIMITS.maxPoints) return { ok: false, reason: 'trace-too-many-points' };
+  const pts = [];
+  for (let k = 0; k < points.length; k++) { if (!own(points, k)) return { ok: false, reason: 'trace-point-invalid' }; const p = readPoint(points[k]); if (!p) return { ok: false, reason: 'trace-point-invalid' }; pts.push(p); }
+  if (!pts.every((p) => p.x >= 0 && p.x <= 1 && p.y >= 0 && p.y <= 1)) return { ok: false, reason: 'trace-outside-image' };
+  const rounded = pts.map((p) => toPalm4(frame, p));
+  if (!rounded.every((p) => isNum(p.x) && isNum(p.y))) return { ok: false, reason: 'trace-point-invalid' };
+  if (!rounded.every(inBounds)) return { ok: false, reason: 'trace-outside-palm-frame' };
+  const problem = traceGeometryProblem(rounded);
+  if (problem) return { ok: false, reason: problem };
+  return { ok: true, palmPoints: rounded };
+}
+
 const samePoints = (a, b) => Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((p, i) => p.x === b[i].x && p.y === b[i].y);
 
 /**
@@ -150,22 +207,22 @@ export function verifyConstruction(input, featureSet) {
   const status = q === null || q === undefined ? 'unknown' : Array.isArray(q) && q.length === 0 ? 'accepted' : 'needs-retake';
   if (featureSet.frame.qualityStatus !== status) fail('quality status');
   if (Array.isArray(q) && JSON.stringify([...q]) !== JSON.stringify([...featureSet.frame.qualityIssues])) fail('quality issues');
+  // R5: every line state is recomputed from the input and must match exactly (provenance, placed points, reason)
   const lines = Array.isArray(input.lines) ? input.lines : [];
   for (const id of ['heart', 'head', 'life', 'upward']) {
     const given = lines.filter((l) => l && l.line === id);
     const l = featureSet.lines[id];
     if (given.length > 1) fail(`line ${id} given twice`);
     const g = given[0];
-    if (l.provenance === 'user-confirmed') {
-      if (!g || g.action !== 'traced' || g.confirmed !== true) fail(`line ${id} confirmed without a confirmed trace`);
-      if (!fi.frame) fail(`line ${id} placed without a frame`);
-      const pts = Array.isArray(g.points) ? g.points.map(readPoint) : null;
-      if (!pts || pts.some((p) => !p) || !samePoints(pts.map((p) => toPalm4(fi.frame, p)), l.palmPoints)) fail(`line ${id} trace differs from the supplied trace`);
-    } else if (!g) { if (l.reason !== 'not-requested') fail(`line ${id} state`); }
-    else if (g.action === 'skipped') { if (l.reason !== g.reason) fail(`line ${id} skip reason`); }
-    else if (g.action === 'traced' && g.confirmed !== true) { if (l.reason !== 'not-confirmed') fail(`line ${id} confirmation`); }
-    else if (g.action === 'traced') { if (!(l.reason === 'frame-unavailable' || /^trace-/.test(l.reason))) fail(`line ${id} unassessed reason`); }
-    else fail(`line ${id} action`);
+    let want;
+    if (!g) want = { reason: 'not-requested' };
+    else if (g.action === 'skipped') want = { reason: g.reason };
+    else if (g.action !== 'traced') fail(`line ${id} action`);
+    else if (g.confirmed !== true) want = { reason: 'not-confirmed' };
+    else if (!fi.frame) want = { reason: 'frame-unavailable' };
+    else { const placed = placeTraceFromInput(g.points, fi.frame); want = placed.ok ? { palmPoints: placed.palmPoints } : { reason: placed.reason }; }
+    if (want.palmPoints) { if (l.provenance !== 'user-confirmed' || !samePoints(want.palmPoints, l.palmPoints)) fail(`line ${id} trace differs from the supplied trace`); }
+    else if (l.provenance !== 'unassessed' || l.reason !== want.reason) fail(`line ${id} state (${l.provenance}/${l.reason ?? '-'}) differs from the supplied input (${want.reason})`);
   }
   if (featureSet.frame.palmFacing !== palmFacingFromInput(input, fi)) fail('palm facing');
   const ratios = ratiosFromInput(fi) ?? { middleToPalmRatio: null, indexToRingRatio: null };
@@ -174,14 +231,18 @@ export function verifyConstruction(input, featureSet) {
     const m = featureSet.measurements.measurements[id], e = expected[id];
     if (m.status !== e.status || m.value !== e.value || JSON.stringify([...m.reasons]) !== JSON.stringify(e.reasons)) fail(`measurement ${id} (status, value or reasons) differs from the supplied landmarks and quality`);
   }
+  // R5: mark states recomputed exactly (port of the I1 mark rules: report, skip, location validity)
   const marks = Array.isArray(input.marks) ? input.marks : [];
   for (const id of ['yava', 'matsya', 'shankha', 'chatra', 'vedi']) {
-    const given = marks.filter((m) => m && m.mark === id)[0];
-    const m = featureSet.marks[id];
-    const ok = !given ? m.provenance === 'unassessed' && m.reason === 'not-requested'
-      : given.action === 'skipped' ? m.provenance === 'unassessed' && m.reason === 'user-skipped'
-        : m.provenance === 'user-reported' || (m.provenance === 'unassessed' && m.reason === 'location-invalid');
-    if (!ok) fail(`mark ${id} state`);
+    const given = marks.filter((m) => m && m.mark === id);
+    if (given.length > 1) fail(`mark ${id} given twice`);
+    const g = given[0], m = featureSet.marks[id];
+    let want;
+    if (!g) want = 'unassessed/not-requested';
+    else if (g.action === 'skipped') want = 'unassessed/user-skipped';
+    else if (g.approximateLocation === undefined) want = 'user-reported/';
+    else { const loc = readPoint(g.approximateLocation); want = !loc || loc.x < 0 || loc.x > 1 || loc.y < 0 || loc.y > 1 ? 'unassessed/location-invalid' : 'user-reported/'; }
+    if (`${m.provenance}/${m.provenance === 'unassessed' ? m.reason : ''}` !== want) fail(`mark ${id} state`);
   }
   return Object.freeze({ frameAvailable: fi.frame !== null, fingerBases: fingerBasesFromInput(input) });
 }

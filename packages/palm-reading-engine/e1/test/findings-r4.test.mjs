@@ -11,7 +11,6 @@ import * as E from '../src/index.mjs';
 import * as packaged from '../src/packaged.mjs';
 import { validateReadingOutput, READING_FRAME } from '../src/compose.mjs';
 import { requireSyntheticOptions } from '../src/identity.mjs';
-import { claimSyntheticReader } from '../src/engine-core.mjs';
 import { E1, CAT_PATH, SCHEMA_PATH, readJson, clone, rec, tmpdir } from './helpers.mjs';
 
 const CAT = readJson(CAT_PATH);
@@ -120,38 +119,34 @@ test('F7 an own data property exactly true is required; omitted, inherited, fals
   assert.throws(() => requireSyntheticOptions({ synthetic: true, [Symbol('x')]: 1 }, ['synthetic']), (e) => e.code === 'invalid-option');
 });
 
-test('F7 witness, fresh process: a polluted Object.prototype does not make {} a synthetic declaration', () => {
+test('F7 witness, fresh process: a polluted Object.prototype does not make {} -- or an accessor -- a synthetic declaration', () => {
   const r = node(`
-    Object.prototype.synthetic = true;
     const E = await import('./src/index.mjs');
-    const { claimSyntheticReader } = await import('./src/engine-core.mjs');
-    const reader = claimSyntheticReader(() => { throw new Error('builder must not run'); });
     const out = {};
-    try { E.planSelection(E.defaultLibrary(), {}, {}); out.plan = 'produced'; } catch (e) { out.plan = e.code; }
-    try { reader({}, {}); out.reader = 'produced'; } catch (e) { out.reader = e.code; }
+    const tryPlan = (o) => { try { E.planSelection(E.defaultLibrary(), {}, o); return 'produced'; } catch (e) { return e.code; } };
+    Object.defineProperty(Object.prototype, 'synthetic', { value: true, configurable: true });
+    out.ambient = tryPlan({});
+    delete Object.prototype.synthetic;
+    // R4 independent witness: an accessor-only declaration whose descriptor inherits Object.prototype.value = true
+    const accessor = { get synthetic() { throw new Error('getter invoked'); } };
+    Object.defineProperty(Object.prototype, 'value', { value: true, configurable: true });
+    out.accessorInheritedValue = tryPlan(accessor);
+    delete Object.prototype.value;
+    out.valid = tryPlan({ synthetic: true });
     console.log(JSON.stringify(out));`);
   assert.equal(r.status, 0, r.stderr);
-  assert.deepEqual(JSON.parse(r.stdout.trim()), { plan: 'synthetic-required', reader: 'synthetic-required' });
+  assert.deepEqual(JSON.parse(r.stdout.trim()), { ambient: 'synthetic-required', accessorInheritedValue: 'synthetic-required', valid: 'produced' });
 });
 
 // ---------------------------------------------------------------- F6 single construction path (package level)
-test('F6 one construction path: the pipeline is claimable once; the reader checks options and input before building', () => {
-  let built = 0;
-  const reader = claimSyntheticReader(() => { built++; return { ok: false, errors: ['fixture builder'] }; });
-  assert.throws(() => claimSyntheticReader(() => ({ ok: true })), (e) => e.code === 'pipeline-claimed');
-  assert.equal(reader.length, 2);
-  for (const [what, o] of NOT_DECLARED()) assert.throws(() => reader({}, o), (e) => e.code === 'synthetic-required', what);
-  for (const extra of ['library', 'catalogue', 'schema', 'featureSet', 'fingerBases', 'observations']) assert.throws(() => reader({}, { synthetic: true, [extra]: {} }), (e) => e.code === 'invalid-option', extra);
-  assert.throws(() => reader({}, { synthetic: true, mode: 'future' }), (e) => e.code === 'invalid-option');
-  // the input is snapshotted as plain data: accessors, prototypes and non-plain values are refused before building
-  const bad = [
-    Object.defineProperty({}, 'landmarks', { get: () => [], enumerable: true }),
-    { landmarks: [Object.defineProperty({}, 'x', { get: () => 0.5, enumerable: true })] },
-    Object.create({ landmarks: [] }), { when: new Date(0) }, { lines: new Map() }, { f: () => 1 }, [],
-    JSON.parse('{"__proto__": {"x": 1}}'),
-  ];
-  for (const [i, b] of bad.entries()) assert.throws(() => reader(b, { synthetic: true }), (e) => e.code === 'invalid-input', String(i));
-  assert.equal(built, 0);
-  assert.throws(() => reader({ imageWidth: 1 }, { synthetic: true }), (e) => e.code === 'invalid-input' && /fixture builder/.test(e.message));
-  assert.equal(built, 1);
+test('F6 R5: no package module exports a pipeline, a claim, or any function taking a builder or feature set; the reader is reading.ts only', async () => {
+  assert.ok(!fs.existsSync(path.join(E1, 'src', 'engine-core.mjs')) && !fs.existsSync(path.join(E1, 'src', 'observations.mjs')));
+  const forbidden = /claim|reader|pipeline|composeReading|deriveObservations|readingFromConstruction|generate/i;
+  for (const f of fs.readdirSync(path.join(E1, 'src')).filter((x) => x.endsWith('.mjs'))) {
+    const m = await import(pathToFileURL(path.join(E1, 'src', f)).href);
+    for (const k of Object.keys(m)) assert.ok(!forbidden.test(k), `${f} exports ${k}`);
+  }
+  const reading = fs.readFileSync(path.join(E1, 'src', 'reading.ts'), 'utf8');
+  assert.deepEqual([...reading.matchAll(/^export (?:function|const|type) (\w+)/gm)].map((x) => x[1]).sort(), ['E1Error', 'E1_ENGINE', 'ReadingMode', 'generateSyntheticReading']);
+  assert.match(reading, /^const BUILD: \(input: PalmFeatureSetInput\) => Any = buildPalmFeatureSet;$/m); // bound at load, never a parameter
 });

@@ -2,11 +2,12 @@
 // F6 and the end-to-end text path are in test/palm03E1Engine.test.ts, the release guards in test/palm03E1ReleaseGuards).
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
 import * as E from '../src/index.mjs';
 import * as compose from '../src/compose.mjs';
-import * as core from '../src/engine-core.mjs';
 import * as packaged from '../src/packaged.mjs';
-import { CAT_PATH, SCHEMA_PATH, readJson, clone, rec } from './helpers.mjs';
+import { E1, CAT_PATH, SCHEMA_PATH, readJson, clone, rec } from './helpers.mjs';
 
 const CAT = readJson(CAT_PATH);
 const SCHEMA = readJson(SCHEMA_PATH);
@@ -121,7 +122,7 @@ test('F5 exact boundaries and one grid step either side, plus large in-range mag
 // ---------------------------------------------------------------- F7 synthetic-only enforcement
 test('F7 R2 witness: importing compose.mjs directly cannot emit a reading (R4: it exports no text composer)', () => {
   assert.ok(!('composeReading' in compose));
-  assert.deepEqual(Object.keys(core).sort(), ['E1Error', 'E1_ENGINE', 'claimSyntheticReader']);
+  assert.ok(!fs.existsSync(path.join(E1, 'src', 'engine-core.mjs'))); // R5: no core module, no claimable pipeline
 });
 
 test('F7 every exported function able to produce a plan refuses without an own { synthetic: true }', () => {
@@ -133,5 +134,5 @@ test('F7 every exported function able to produce a plan refuses without an own {
   }
   // the inventory of exported functions per module is fixed; a new reading-capable export must be added here
   assert.deepEqual(Object.keys(compose).sort(), ['READING_FRAME', 'concernCount', 'planSelection', 'validateObservations', 'validateReadingOutput']);
-  assert.deepEqual(Object.keys(core).sort(), ['E1Error', 'E1_ENGINE', 'claimSyntheticReader']);
+  assert.ok(!fs.existsSync(path.join(E1, 'src', 'engine-core.mjs')));
 });

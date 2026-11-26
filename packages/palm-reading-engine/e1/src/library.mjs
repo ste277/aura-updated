@@ -10,7 +10,7 @@
 // loader refuses any record whose review status is not UNREVIEWED_RESEARCH_CONTENT.
 
 import { assertSupportedSchema, validateAgainstSchema } from './schema-validate.mjs';
-import { E1_ENGINE, E1Error, IMPLEMENTED_CAPABILITIES, RECORD_MANIFEST } from './identity.mjs';
+import { E1_ENGINE, E1Error, IMPLEMENTED_CAPABILITIES, RECORD_MANIFEST, isOwnDataDescriptor } from './identity.mjs';
 
 // R4 (finding F2, defence in depth): medical-claim vocabulary (diagnoses, conditions, treatment). Integrity of the
 // packaged catalogue rests on its pinned bytes and immutability (packaged.mjs), never on this keyword list.
@@ -234,13 +234,51 @@ export const isValidatedLibrary = (lib) => typeof lib === 'object' && lib !== nu
 const deepFreeze = (o) => { if (o && typeof o === 'object' && !Object.isFrozen(o)) { Object.freeze(o); for (const v of Object.values(o)) deepFreeze(v); } return o; };
 
 /**
- * Load and validate a library. `catalogue` and `schema` are parsed JSON. Throws E1Error('invalid-catalogue') with the
- * failure list. Returns a deep-frozen library with lookup indexes. The input objects are cloned, never mutated.
+ * R5 (finding F2): normalize parsed JSON into private records -- every object becomes a null-prototype object holding
+ * only its OWN data properties, recursively (arrays are rebuilt dense from own indexes). With no prototype chain, a
+ * property that is absent from the catalogue can never be supplied by an inherited value (Object.prototype or any
+ * other), for optional fields read by eligibility, matching, wording, diagnostics or output metadata alike. The
+ * schema (additionalProperties: false) then restricts each record to its permitted fields. Accessors, symbols,
+ * sparse arrays and non-JSON values are refused. Validation and generation use this same normalized structure.
  */
-export function loadLibrary(catalogue, schema) {
+export function normalizeRecord(v, at = '$', depth = 0) {
+  const fail = (why) => { throw new E1Error('invalid-catalogue', `${at}: ${why}`); };
+  if (v === null || typeof v === 'string' || typeof v === 'boolean') return v;
+  if (typeof v === 'number') { if (!Number.isFinite(v)) fail('non-finite number'); return v; }
+  if (typeof v !== 'object') fail(`unsupported value type ${typeof v}`);
+  if (depth > 32) fail('nested too deeply');
+  if (Array.isArray(v)) {
+    const out = [];
+    for (let i = 0; i < v.length; i++) {
+      const d = Object.getOwnPropertyDescriptor(v, i);
+      if (!isOwnDataDescriptor(d)) fail(`[${i}] is missing or not a data property`);
+      out.push(normalizeRecord(d.value, `${at}[${i}]`, depth + 1));
+    }
+    return out;
+  }
+  const proto = Object.getPrototypeOf(v);
+  if (proto !== Object.prototype && proto !== null) fail('not a plain object');
+  const out = Object.create(null);
+  for (const k of Reflect.ownKeys(v)) {
+    if (typeof k !== 'string') fail('symbol key');
+    const d = Object.getOwnPropertyDescriptor(v, k);
+    if (!isOwnDataDescriptor(d)) fail(`${k} is not a data property`);
+    out[k] = normalizeRecord(d.value, `${at}.${k}`, depth + 1);
+  }
+  return out;
+}
+const nullProtoFrom = (entries) => Object.assign(Object.create(null), Object.fromEntries(entries));
+
+/**
+ * Load and validate a library. `catalogue` and `schema` are parsed JSON. Throws E1Error('invalid-catalogue') with the
+ * failure list. Returns a deep-frozen library with lookup indexes. The inputs are normalized into new null-prototype
+ * records (normalizeRecord), never mutated.
+ */
+export function loadLibrary(catalogue, schemaInput) {
+  const schema = normalizeRecord(schemaInput, 'schema');
   const unsupported = assertSupportedSchema(schema);
   if (unsupported.length) throw new E1Error('invalid-schema', `unsupported schema keywords: ${unsupported.slice(0, 5).join(', ')}`);
-  const cat = structuredClone(catalogue);
+  const cat = normalizeRecord(catalogue, 'catalogue'); // R5: private null-prototype records (own data only)
   const schemaErrors = validateAgainstSchema(cat, schema);
   if (schemaErrors.length) throw new E1Error('invalid-catalogue', `schema: ${schemaErrors.slice(0, 8).join('; ')}`);
   let policy;
@@ -258,15 +296,15 @@ export function loadLibrary(catalogue, schema) {
   }
   deepFreeze(cat);
   // R2 (finding F1): no writable map is exposed; records are reachable only through frozen, null-prototype objects.
-  const byId = Object.freeze(Object.assign(Object.create(null), Object.fromEntries(cat.interpretations.map((e) => [e.id, e]))));
-  const lib = deepFreeze({
+  const byId = Object.freeze(nullProtoFrom(cat.interpretations.map((e) => [e.id, e])));
+  const lib = deepFreeze(Object.assign(Object.create(null), {
     catalogue: cat,
     byId,
     order: cat.interpretations.map((e) => e.id),
     initialIds: initial.map((e) => e.id),
-    reasons: Object.fromEntries(cat.globalPolicy.notAssessedReasons.map((r) => [r.code, r])),
-    sources: Object.fromEntries(cat.sources.map((s) => [s.id, s])),
-  });
+    reasons: nullProtoFrom(cat.globalPolicy.notAssessedReasons.map((r) => [r.code, r])),
+    sources: nullProtoFrom(cat.sources.map((s) => [s.id, s])),
+  }));
   VALIDATED.add(lib);
   return lib;
 }

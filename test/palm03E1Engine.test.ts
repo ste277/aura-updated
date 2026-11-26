@@ -15,8 +15,6 @@ import { generateSyntheticReading } from '../packages/palm-reading-engine/e1/src
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const e1 = require('../packages/palm-reading-engine/e1/src/index.mjs');
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const core = require('../packages/palm-reading-engine/e1/src/engine-core.mjs');
-// eslint-disable-next-line @typescript-eslint/no-var-requires
 const construction = require('../packages/palm-reading-engine/e1/src/construction.mjs');
 
 const ROOT = path.resolve(__dirname, '..');
@@ -120,7 +118,7 @@ check('A4-1. consistent diagnostics: every line is either read by an item or lis
   });
 })());
 check('A5-1. tentative ceiling everywhere; quality is never shown as a confidence number', rFull.tierCeiling === 'tentative' && rFull.sections.every((s: any) => s.items.every((i: any) => i.confidence.tier === 'tentative' && !Object.values(i.confidence).some((v) => typeof v === 'number'))));
-check('A5-2. synthetic-only: the reading interface and planSelection refuse without an explicit OWN { synthetic: true } (R4 F7)', [undefined, null, {}, { synthetic: 'yes' }, { synthetic: 1 }, { synthetic: false }, Object.create({ synthetic: true }), Object.defineProperty({}, 'synthetic', { get: () => true, enumerable: true })].every((o) => throwsCode(() => generateSyntheticReading(input(), o as any), 'synthetic-required') && throwsCode(() => e1.planSelection(e1.defaultLibrary(), {}, o), 'synthetic-required')) && Object.keys(core).sort().join() === 'E1Error,E1_ENGINE,claimSyntheticReader' && !('composeReading' in e1) && !('deriveObservations' in e1) && !('composeFromObservations' in e1));
+check('A5-2. synthetic-only: the reading interface and planSelection refuse without an explicit OWN { synthetic: true } (R4 F7)', [undefined, null, {}, { synthetic: 'yes' }, { synthetic: 1 }, { synthetic: false }, Object.create({ synthetic: true }), Object.defineProperty({}, 'synthetic', { get: () => true, enumerable: true })].every((o) => throwsCode(() => generateSyntheticReading(input(), o as any), 'synthetic-required') && throwsCode(() => e1.planSelection(e1.defaultLibrary(), {}, o), 'synthetic-required')) && !fs.existsSync(path.join(ROOT, 'packages/palm-reading-engine/e1/src/engine-core.mjs')) && !('composeReading' in e1) && !('deriveObservations' in e1) && !('composeFromObservations' in e1));
 check('A5-3. separate identity from the frozen G6 engine, which E1 never imports', e1.E1_ENGINE.id === 'aura.palm.e1-reading' && fs.readdirSync(path.join(ROOT, 'packages/palm-reading-engine/e1/src')).every((f) => !/from '[^']*prototype\//.test(fs.readFileSync(path.join(ROOT, 'packages/palm-reading-engine/e1/src', f), 'utf8'))));
 check('A5-4. the 23 Western G6 rule texts are excluded: none appears in the E1 catalogue or any reading', (() => {
   const rules = fs.readFileSync(path.join(ROOT, 'packages/palm-reading-engine/prototype/src/rules.mjs'), 'utf8');
@@ -159,7 +157,8 @@ check('D2. no app module imports the helper; the G5 public surface does not expo
 check('D3. the E1 production-build guard is wired into CI after next build', /node scripts\/check-palm-e1-bundle\.js/.test(fs.readFileSync(path.join(ROOT, '.github/workflows/ci.yml'), 'utf8')));
 
 // ============================================================ F. one construction path (R3 F6, R4 F6)
-// R4: no function accepts a feature set separately from building it. The pipeline (engine-core.mjs) is claimed once,
+// R5: construction authority is not exported or claimable: reading.ts binds the I1 builder at load and builds,
+// verifies, derives and composes in module-private functions. (R4 text follows.) No function accepts a feature set separately from building it. The pipeline (engine-core.mjs) is claimed once,
 // by reading.ts, and builds the I1 feature set itself from a snapshot of the input. The internal check that a feature
 // set derives from the input (construction.mjs verifyConstruction, which returns no reading) still refuses every
 // mixed state, which also covers a pipeline claimed by other code with a builder of its own (F12).
@@ -169,7 +168,7 @@ const inB = input({ landmarks: XY_B.map(point), lines: [heartTo(0.1667), upwardT
 const fsA = built(inA), fsB = built(inB);
 const verify = (i: unknown, f: unknown) => construction.verifyConstruction(i, f);
 check('F1. the reading interface has no geometry or feature-set parameter: generateSyntheticReading(input, { synthetic, mode })', generateSyntheticReading.length === 2 && ['fingerBases', 'featureSet', 'observations', 'library'].every((k) => throwsCode(() => generateSyntheticReading(inA, { synthetic: true, [k]: {} } as any), 'invalid-option')));
-check('F1b. the pipeline is already claimed by reading.ts: no second reader, and no mixed-state entry point exists', throwsCode(() => core.claimSyntheticReader(buildPalmFeatureSet), 'pipeline-claimed') && Object.keys(core).sort().join() === 'E1Error,E1_ENGINE,claimSyntheticReader' && !fs.existsSync(path.join(ROOT, 'packages/palm-reading-engine/e1/src/observations.mjs')));
+check('F1b. R5: there is no claimable pipeline, core module or mixed-state entry point; reading.ts exports only the interface', !fs.existsSync(path.join(ROOT, 'packages/palm-reading-engine/e1/src/engine-core.mjs')) && !fs.existsSync(path.join(ROOT, 'packages/palm-reading-engine/e1/src/observations.mjs')) && Object.keys(require('../packages/palm-reading-engine/e1/src/reading')).sort().join() === 'E1Error,E1_ENGINE,generateSyntheticReading');
 check('F2. swapped finger bases (witness): hand B geometry with hand A traces -> construction-mismatch', throwsCode(() => verify(inA, fsB), 'construction-mismatch'));
 check('F3. substituted trace (witness): a feature set whose heart trace differs from the supplied trace -> construction-mismatch', throwsCode(() => verify(inA, built(input({ lines: [heartTo(-0.05), upwardTo(0.3333)] }))), 'construction-mismatch'));
 check('F4. fabricated frame (witness): a feature set claiming no frame, or another frame, for this input -> construction-mismatch', throwsCode(() => verify(inA, built(input({ landmarks: null, lines: [heartTo(0.1667), upwardTo(0.3333)] }))), 'construction-mismatch') && throwsCode(() => verify(input({ landmarks: XY_B.map(point) }), built(input())), 'construction-mismatch'));
@@ -205,24 +204,85 @@ check('F11. the facing and status ports agree with the I1 builder (no false refu
   }
   return n >= 100;
 })());
-check('F12. fresh process: a pipeline claimed BEFORE reading.ts with builders returning another input\'s feature set refuses every mixed state, and reading.ts then fails to load', (() => {
-  const script = `
-    const W = ${JSON.stringify(ROOT)};
-    const { buildPalmFeatureSet } = require(W + '/apps/web/lib/palm-analysis/features');
-    const core = require(W + '/packages/palm-reading-engine/e1/src/engine-core.mjs');
-    const pairs = JSON.parse(process.argv[1]);
-    let k = 0;
-    const reader = core.claimSyntheticReader(() => ({ ok: true, featureSet: buildPalmFeatureSet(pairs[k][1]).featureSet }));
-    const codes = [];
-    for (; k < pairs.length; k++) { try { reader(pairs[k][0], { synthetic: true }); codes.push('reading'); } catch (e) { codes.push(e.code); } }
-    try { require(W + '/packages/palm-reading-engine/e1/src/reading'); codes.push('loaded'); } catch (e) { codes.push(e.code); }
-    console.log(JSON.stringify(codes));`;
-  const pairs = [[inBack, inA], [inA, inB], [inA, input({ lines: [heartTo(-0.05), upwardTo(0.3333)] })], [inA, input({ landmarks: null, lines: [heartTo(0.1667), upwardTo(0.3333)] })], [input({ qualityIssues: ['blurry'], lines: [heartTo(0.1667)] }), input({ lines: [heartTo(0.1667)] })]];
+// R5 witnesses, fresh processes. The R4 independent witness substituted a feature set claiming the confirmed heart trace
+// was unassessed ('trace-too-few-points'). There is no claim any more; the only remaining substitution route is
+// replacing the I1 module's exported builder BEFORE reading.ts binds it (initialization order). Every substituted
+// state -- including apparently valid unassessed states -- must be refused, and nothing eligible suppressed.
+const R5_SCRIPT = `
+  const W = ${JSON.stringify(ROOT)};
+  const features = require(W + '/apps/web/lib/palm-analysis/features');
+  const real = features.buildPalmFeatureSet;
+  const cases = JSON.parse(process.argv[1]);
+  let k = 0;
+  if (process.argv[2] === 'substitute') features.buildPalmFeatureSet = () => real(cases[k].builtFrom); // before reading.ts loads
+  const { generateSyntheticReading } = require(W + '/packages/palm-reading-engine/e1/src/reading');
+  const out = [];
+  for (; k < cases.length; k++) {
+    try { const r = generateSyntheticReading(cases[k].supplied, { synthetic: true }); out.push({ ids: r.sections.flatMap((x) => x.items).concat(r.moreFromYourReading).map((x) => x.recordId), heart: (r.notAssessed.find((n) => n.feature === 'lines.heart') || {}).detail || null }); }
+    catch (e) { out.push({ code: e.code, message: String(e.message).slice(0, 160) }); }
+  }
+  console.log(JSON.stringify(out));`;
+const r5run = (cases: unknown[], mode: string): any[] => {
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   const { spawnSync } = require('child_process');
-  const r = spawnSync(process.execPath, ['-r', require.resolve('ts-node/register/transpile-only'), '-e', script, JSON.stringify(pairs)], { encoding: 'utf8', cwd: ROOT });
-  const codes = JSON.parse((r.stdout || '[]').trim() || '[]');
-  return r.status === 0 && JSON.stringify(codes) === JSON.stringify([...pairs.map(() => 'construction-mismatch'), 'pipeline-claimed']) || (console.log('F12', r.status, r.stdout, r.stderr.slice(0, 800)), false);
+  const r = spawnSync(process.execPath, ['-r', require.resolve('ts-node/register/transpile-only'), '-e', R5_SCRIPT, JSON.stringify(cases), mode], { encoding: 'utf8', cwd: ROOT });
+  if (r.status !== 0) console.log('R5 run failed', r.status, r.stderr.slice(0, 800));
+  return JSON.parse((r.stdout || '[]').trim() || '[]');
+};
+const heartFull: any = heartTo(0.1667);
+const onePoint = input({ lines: [{ ...heartFull, points: [heartFull.points[0]] } as any, upwardTo(0.3333)] });
+const r5cases = [
+  { name: 'false unassessed state (R4 witness: trace-too-few-points for a valid trace)', supplied: inA, builtFrom: onePoint },
+  { name: 'mixed facing (palm-facing set for a back-facing input)', supplied: inBack, builtFrom: inA },
+  { name: 'swapped landmarks / finger bases', supplied: inA, builtFrom: inB },
+  { name: 'substituted trace', supplied: inA, builtFrom: input({ lines: [heartTo(-0.05), upwardTo(0.3333)] }) },
+  { name: 'fabricated frame', supplied: inA, builtFrom: input({ landmarks: null, lines: [heartTo(0.1667), upwardTo(0.3333)] }) },
+  { name: 'false skip of the heart line', supplied: inA, builtFrom: input({ lines: [skipped('heart'), upwardTo(0.3333)] }) },
+  { name: 'false unconfirmed state', supplied: inA, builtFrom: input({ lines: [{ ...heartFull, confirmed: false } as any, upwardTo(0.3333)] }) },
+  { name: 'false quality', supplied: inA, builtFrom: input({ qualityIssues: ['blurry'], lines: [heartTo(0.1667), upwardTo(0.3333)] }) },
+];
+const r5sub = r5run(r5cases, 'substitute');
+check('F12. R5 initialization order: a builder substituted BEFORE reading.ts loads cannot change construction -- every substituted state is refused (construction-mismatch)', r5sub.length === r5cases.length && r5sub.every((x) => x.code === 'construction-mismatch'), JSON.stringify(r5sub.map((x, i) => [r5cases[i].name, x.code ?? x.ids])));
+check('F12b. ... including the R4 false-unassessed witness, refused on the heart line state itself', /the feature set does not derive from the supplied input: line heart (trace differs|state)/.test(r5sub[0]?.message ?? ''), r5sub[0]);
+const r5ctl = r5run(r5cases.slice(0, 2), 'control');
+check('F12c. control: the valid confirmed trace keeps its eligibility (heart reading emitted, no trace diagnostic); back-facing stays empty', r5ctl.length === 2 && r5ctl[0].ids?.includes('C1-WE-HEART-BETWEEN') && r5ctl[0].heart === null && r5ctl[1].ids?.length === 0, r5ctl);
+check('F12d. the line-state port agrees with I1 for every unassessed reason (too few / too many points, invalid, outside image, outside frame, too short, repeated, doubles back, self-intersecting, tortuous)', (() => {
+  const P = (X: number, Y: number) => point([12 * X, 12 * Y]);
+  const traces: [string, Array<[number, number]>][] = [
+    ['ok', [[0.95, 0.22], [0.5, 0.2], [0.17, 0.15]]], ['one', [[0.5, 0.2]]], ['many', Array.from({ length: 65 }, (_, i) => [0.1 + i * 0.01, 0.2] as [number, number])],
+    ['outside-image', [[0.5, 0.2], [3.5, 0.2]]], ['outside-frame', [[0.5, 0.2], [1.6, 0.2]]], ['short', [[0.5, 0.2], [0.505, 0.2]]],
+    ['repeated', [[0.5, 0.2], [0.7, 0.2], [0.5, 0.2]]], ['doubles-back', [[0.2, 0.2], [0.7, 0.2], [0.3, 0.21]]],
+    ['self-intersecting', [[0.2, 0.2], [0.7, 0.4], [0.7, 0.2], [0.2, 0.4]]], ['tortuous', [[0.2, 0.2], [0.3, 0.6], [0.4, 0.2], [0.5, 0.6], [0.6, 0.2]]],
+  ];
+  const reasons = new Set<string>();
+  for (const [, pts] of traces) {
+    const i = input({ lines: [{ line: 'heart', action: 'traced', points: pts.map(([x, y]) => P(x, y)), confirmed: true } as any] });
+    const b = buildPalmFeatureSet(i);
+    if (!b.ok) return false;
+    const l: any = b.featureSet.lines.heart;
+    const mine = construction.placeTraceFromInput((i.lines![0] as any).points, construction.frameFromInput(i).frame);
+    if (l.provenance === 'user-confirmed' ? !(mine.ok && JSON.stringify(mine.palmPoints) === JSON.stringify(l.palmPoints)) : mine.ok || mine.reason !== l.reason) { console.log('F12d disagreement', JSON.stringify(pts), l.reason, mine); return false; }
+    try { verify(i, b.featureSet); } catch (e) { console.log('F12d false refusal', String(e)); return false; }
+    reasons.add(l.provenance === 'user-confirmed' ? 'ok' : l.reason);
+  }
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { TRACE_LIMITS } = require('../apps/web/lib/palm-analysis/features');
+  return JSON.stringify(TRACE_LIMITS) === JSON.stringify(construction.TRACE_LIMITS) && reasons.size >= 9;
+})());
+check('F12e. R5 F2 witness, fresh processes: an inherited Object.prototype value for any optional text or metadata field never reaches the reading', (() => {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { spawnSync } = require('child_process');
+  const script = (field: string) => `
+    const field = ${JSON.stringify(field)};
+    if (field) Object.defineProperty(Object.prototype, field, { value: field === 'conflicts' ? [{ withId: 'C1-WE-HEAD-STRAIGHT', kind: 'x', handling: 'You have melanoma.' }] : 'You have melanoma.', configurable: true, writable: true });
+    const { generateSyntheticReading } = require(${JSON.stringify(ROOT)} + '/packages/palm-reading-engine/e1/src/reading');
+    const r = generateSyntheticReading(JSON.parse(process.argv[1]), { synthetic: true });
+    if (field) delete Object.prototype[field];
+    console.log(JSON.stringify(r));`;
+  const run = (field: string) => spawnSync(process.execPath, ['-r', require.resolve('ts-node/register/transpile-only'), '-e', script(field), JSON.stringify(inA)], { encoding: 'utf8', cwd: ROOT });
+  const clean = run('');
+  if (clean.status !== 0) { console.log('F12e clean', clean.stderr.slice(0, 500)); return false; }
+  return ['applicationNote', 'reflection', 'conflicts', 'thresholdStatus', 'title', 'overallSupport', 'note', 'notes', 'detail', 'adjacentZone', 'descriptor'].every((f) => { const r = run(f); const ok = r.status === 0 && r.stdout === clean.stdout && !r.stdout.includes('melanoma'); if (!ok) console.log('F12e', f, r.status, r.stderr.slice(0, 300)); return ok; });
 })());
 check('F13. the input is read once, as plain data: accessor and non-plain inputs are refused', [Object.defineProperty({ ...inA }, 'landmarks', { get: () => inA.landmarks, enumerable: true }), Object.assign(Object.create({ extra: 1 }), inA), { ...inA, landmarks: inA.landmarks!.map((p, k) => (k === 0 ? Object.defineProperty({}, 'x', { get: () => p.x, enumerable: true }) : p)) }].every((i) => throwsCode(() => generateSyntheticReading(i as any, { synthetic: true }), 'invalid-input')));
 

@@ -95,9 +95,12 @@ echo 'module.exports={}' > .next/server/webpack-runtime.js
 echo '{"/page":"app/page.js"}' > .next/server/app-paths-manifest.json
 echo '{"/_app":"pages/_app.js"}' > .next/server/pages-manifest.json
 echo 'module.exports={}' > .next/standalone/.next/server/app/page.js
-echo 'require("next")' > .next/standalone/server.js
+printf "require('next')\\nrequire('next/dist/server/lib/start-server')\\n" > .next/standalone/server.js
 echo '{"name":"web"}' > .next/standalone/package.json
-echo '{"name":"next"}' > .next/standalone/node_modules/next/package.json
+echo '{"name":"next","main":"./dist/server/next.js"}' > .next/standalone/node_modules/next/package.json
+mkdir -p .next/standalone/node_modules/next/dist/server/lib
+echo 'module.exports={}' > .next/standalone/node_modules/next/dist/server/next.js
+echo 'exports.startServer=function(){}' > .next/standalone/node_modules/next/dist/server/lib/start-server.js
 if [ "$FAKE_NEXT_MODE" = "leak" ]; then
   echo 'var c={status:"PENDING_HUMAN_REVIEW",id:"zysk-2025"};' > .next/static/chunks/app/leak-def.js
 fi

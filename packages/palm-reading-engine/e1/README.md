@@ -9,8 +9,7 @@
 | Path | What |
 |---|---|
 | `library/catalogue.json`, `library/schema.json` | C1 rev. 4 catalogue and schema. Byte-identical to the C1 deliverables. |
-| **`src/reading.ts`** | **The reading interface:** `generateSyntheticReading(input, { synthetic: true, mode })`. It builds the I1 feature set from **one** synthetic input, using the frozen I1 builder. |
-| `src/engine-core.mjs` | **The single pipeline** (R4). Its only callable export is `claimSyntheticReader(build)`, claimable once (`reading.ts` claims it at load). It snapshots the input, builds the feature set, verifies the construction, then derives observations and text in module-private functions. |
+| **`src/reading.ts`** | **The reading interface and the only reading pipeline** (R5): `generateSyntheticReading(input, { synthetic: true, mode })`. It binds the frozen I1 builder at load. It then checks the declaration, snapshots the input, builds the I1 feature set from the snapshot and verifies the construction. Finally it derives observations and text, all in module-private functions. Nothing is claimable or injectable. |
 | `src/construction.mjs` | Exact ports of the I1 frame, trace placement and ratio maths. They re-derive and verify everything E1 reads from the same input. |
 | `src/compose.mjs` | `planSelection`: ids and codes only, never text.<br>`validateReadingOutput`: the full output check. No text composer is exported (R4). |
 | `src/library.mjs`, `src/schema-validate.mjs`, `src/packaged.mjs` | Loader and lint. `packaged.mjs` reads the two library files once, as bytes; checks them against the C1 rev. 4 SHA-256 digests; parses and deep-freezes them at initialization; and validates them once. No raw catalogue or schema object is exported (R4). |
@@ -28,23 +27,24 @@ generateSyntheticReading(input /* one synthetic PALM-03-I1 input */, { synthetic
 - There is **no** catalogue, schema, library, feature-set, finger-base or observation parameter. Unknown options are refused.
 - The text-emitting path always uses the pinned packaged library.
 
-**Construction (F6; one path since R4):**
-- No function accepts a feature set separately from building it. The pipeline:
+**Construction (F6; one path since R4, no external authority since R5):**
+- No exported function accepts a builder, a feature set or derived observations. The pipeline in `reading.ts`:
   - takes one plain-data snapshot of the input (accessors and non-plain objects are refused);
   - builds the I1 feature set from that snapshot;
   - re-derives from the same snapshot, and compares field by field:
     - the palm frame and finger bases;
     - palm facing;
-    - every trace and each line's state;
+    - every trace and each line's exact state (placed points, or the specific unassessed reason; a port of I1 `placeTrace`);
     - the two interpreted ratios, with their availability, status and reasons;
-    - the hand, quality and marks.
-- It refuses any mismatch (`construction-mismatch`). This also holds if other code claimed the pipeline first with a builder of its own; `reading.ts` then fails to load (`pipeline-claimed`).
+    - the hand, quality and each mark's exact state.
+- It refuses any mismatch (`construction-mismatch`). This also holds if code that loads first replaces the I1 module's exported builder before `reading.ts` binds it (initialization order).
 - No checksum or seal is used as proof of origin.
 
-**Synthetic-only (F7):** the reading interface and `planSelection` require an **own** data property `synthetic` that is exactly `true`, on a plain options object. Omitted, inherited, accessor, `false`, non-boolean and malformed declarations are refused. No other exported function produces a reading or a plan.
+**Synthetic-only (F7):** the reading interface and `planSelection` use one check (`requireSyntheticOptions`), run before any work. It requires an **own data** property `synthetic` that is exactly `true`, on a plain options object. A data property is decided from the descriptor's own fields, so an accessor paired with an inherited `Object.prototype.value` is refused (R5). Omitted, inherited, `false`, boxed, non-boolean and malformed declarations are also refused. No other exported function produces a reading or a plan.
 
 **Content (F2):**
-- **Integrity (R4):** the packaged catalogue and schema are immutable from initialization. They are read once from their pinned C1 rev. 4 bytes and deep-frozen before validation. Validation and reading generation use the same frozen object, and no mutable reference is exported. Altered bytes make the engine fail to load.
+- **Integrity (R5):** the loader normalizes the catalogue, the schema and any observations into private null-prototype records holding only their own data, recursively (`normalizeRecord`). An inherited value for an absent optional field therefore cannot affect eligibility, matching, wording, diagnostics or output metadata. The schema then restricts each record to its permitted fields. The pipeline's own intermediate objects are read through own-property checks.
+- **Immutability (R4):** the packaged catalogue and schema are immutable from initialization. They are read once from their pinned C1 rev. 4 bytes and deep-frozen before validation. Validation and reading generation use the same frozen object, and no mutable reference is exported. Altered bytes make the engine fail to load.
 - The complete output is validated before it is returned:
   - types;
   - fields;
@@ -137,11 +137,13 @@ A symlink that leaves the scanned tree is a scan error, so the scan fails closed
   - a non-empty `.js` chunk under `.next/static/chunks`;
   - `.next/server/webpack-runtime.js`, plus non-empty output under `.next/server/app`;
   - parseable `app-paths-manifest.json` and `pages-manifest.json`;
-  - `.next/standalone/server.js`, `package.json` and `node_modules/next/package.json`;
-  - a standalone `BUILD_ID` equal to the build's, and standalone server output;
+  - exactly one standalone app root, located: `server.js` beside a `.next/BUILD_ID` equal to the build's (CI and Docker: `.next/standalone`; Vercel: `.next/standalone/apps/web`), with server output;
+  - `package.json` and `node_modules/next` in that root or an ancestor within `.next/standalone`;
   - a parseable `public/manifest.json`.
 - **`docker-release-tree`** (`/app`): the same Next files at the tree root, plus `server.js`, `package.json`, `node_modules/next` and a non-empty `migration.sql` in every migration directory.
 
+**Executable runtime (R5):** every package that `server.js` requires (Next 14: `next` and `next/dist/server/lib/start-server`) must resolve. Resolution searches only `node_modules` from the app root up to the artifact boundary, never the workspace or the host, and the resolved entry file must be non-empty, readable and inside the shipped artifact.
+
 Missing, empty, unreadable, malformed or inconsistent required output fails closed. This is a structural check, not a file count.
 
-It is unconditional. `test/palm03E1ReleaseGuards.test.ts` and the package `guard.test.mjs` (G1, G1b) cover it.
+It is unconditional. `test/palm03E1ReleaseGuards.test.ts` and the package `guard.test.mjs` (G1, G1b, G1c) cover it.
