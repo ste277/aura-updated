@@ -1,0 +1,59 @@
+$ npx ts-node test/opportunityDecisionFactsDb.test.ts
+# job=day-constructor-acceptance-db-tests step=Run opportunity decision facts DB test env={}
+=== S1: configured availability, no blockers ===
+OK   S1: preview READY through the real boundary with the real chain
+OK   S1: O3 bounds -> O2 range -> O1 projection: horizon Mon 10-05 .. Sun 10-11, 7 evaluated, 5 viable (Mon-Fri), 0 unknown, COMPLETE
+OK   S1: effective horizon start is the planning date (the recurrence period start is the same Monday here)
+OK   S1: byte-identical Constructor output with and without enrichment (selection/placement unchanged)
+OK   S1: pre-O4 behavior: without the enrichment wired, no intent carries opportunity facts
+=== S2: active blockers change supply factually, never the Constructor ===
+OK   S2: 30 min fits Mon/Wed/Thu/Fri -> viable 4 (down from 5), COMPLETE
+OK   S2: 120 min fits only Mon/Thu/Fri -> viable 3 (candidate-local, per its own duration)
+OK   S2: supply differs from S1 while the recurrence facts are unchanged
+OK   S2: byte-identical Constructor output with and without enrichment
+OK   S2: the day's proposed/deferred selection is the same with the enrichment wired
+=== demand and supply stay independent facts ===
+OK   demand 5 > supply 4 (60 min): both carried, no shortfall field
+OK   demand 4 = supply 4 (30 min): both carried, no interpretation
+OK   demand 3 < supply 4 (30 min): both carried, no interpretation
+OK   the opportunity entry never repeats the requirement fields
+=== durationBasis ===
+OK   an intent with no resolvable duration signal is labelled GENERIC_FALLBACK (45 min) and the preview warns the same
+OK   explicitly-specified durations are RESOLVED
+=== multiple Goals / non-recurrent / manual / exhausted ===
+OK   multiple Goals share the same architecture and the same horizon (Goal one and Goal two intents)
+OK   a typed (non-recurrent) intent carries no decision facts at all
+OK   the MANUAL Goal handoff intent (plan-day-goal-*) still carries no facts (existing source-path asymmetry, unchanged)
+OK   an exhausted activity (excluded upstream) gets no recurrence facts and NO opportunity facts
+=== forged client values are ignored ===
+OK   forged opportunity/range/timezone: the facts equal the server-derived S2 facts exactly
+OK   forged opportunity on typed and manual intents never appears
+=== zero writes ===
+OK   previews wrote nothing: since the S1 snapshot only the 3 fixture plans S2 inserted were added; no occurrence, execution or availability row changed
+=== unconfigured availability ===
+OK   unconfigured user: preview READY (the constructor's today fallback still builds a day) but supply is UNKNOWN: 7 evaluated, 7 unknown, 0 viable, UNKNOWN
+=== fully blocked availability ===
+OK   fully blocked: COMPLETE with viableDays 0 and no unknown days -- a factual zero, no classification
+OK   fully blocked: no policy consequence -- the Constructor output is byte-identical with and without enrichment
+=== DST uncertainty (America/New_York, fall back Sunday 2026-11-01) ===
+OK   the ambiguous 01:30 Sunday window is UNKNOWN, not zero: 7 evaluated, 5 viable (lower bound), 1 unknown, PARTIAL
+=== cross-user: same instant, different authoritative timezones ===
+OK   Los Angeles (Sunday 13:00 local): horizon is just Sunday 10-11 (period end), 1 evaluated, a known-empty Sunday -> 0 viable, COMPLETE
+OK   Kolkata at the same instant (already Monday 10-12 01:30): the NEXT period, 10-12..10-18, 5 viable -- no cross-user leakage
+=== query counts: 1 / 3 / 10 candidates ===
+OK   1 candidate(s): every candidate got opportunity facts
+     1 candidates -> goal discovery 1, goal facts 1, availability 1, blockers 1 (orchestrator own: plans 1, availability 1)
+OK   3 candidate(s): every candidate got opportunity facts
+     3 candidates -> goal discovery 1, goal facts 1, availability 1, blockers 1 (orchestrator own: plans 1, availability 1)
+OK   10 candidate(s): every candidate got opportunity facts
+     10 candidates -> goal discovery 1, goal facts 1, availability 1, blockers 1 (orchestrator own: plans 1, availability 1)
+OK   availability and blocker queries are exactly one each for 1, 3 and 10 candidates (no candidate-linear growth)
+OK   Goal discovery and Rhythm-facts queries are also one each regardless of candidate count (unchanged by O4)
+=== no candidates / no horizon: no load ===
+OK   an empty request is rejected before anything loads: no goal facts, no availability, no blockers
+OK   a typed-only request: no opportunity facts and NO range load (no horizon exists)
+=== cleanliness ===
+OK   still no writes after every scenario (only fixture rows exist)
+ALL OPPORTUNITY DECISION FACTS DB CHECKS PASSED
+
+# exit=0 signal=

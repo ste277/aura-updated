@@ -1,0 +1,15 @@
+$ npx ts-node test/reminderAttentionDb.test.ts
+# job=day-constructor-acceptance-db-tests step=Run reminder attention DB test env={}
+OK   markReminderSeen persists a row with the right occurrence identity
+OK   markReminderSeen persists the exact reminderAt submitted
+OK   Marking the SAME occurrence seen twice does not create a second row (upsert on the unique constraint)
+OK   Exactly one ReminderAttention row exists for this occurrence after two mark-seen calls
+OK   A new reminderAt for the SAME scheduledItemId creates a NEW row, not an update to the old one
+OK   Both the old and new occurrence rows exist (old one is a harmless historical record, not deleted)
+OK   A query window that excludes both occurrences returns none of them
+OK   The same raw id, but scheduledItemType AURA_MOMENT, is a DIFFERENT row from the PLANNED_ACTIVITY one
+OK   ReminderAttention rows never contain any birth/natal/person/token field name
+
+ALL REMINDER ATTENTION DB CHECKS PASSED
+
+# exit=0 signal=

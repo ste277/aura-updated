@@ -1,0 +1,33 @@
+$ npx ts-node test/forwardPlannerOverlapBlockerArchitecture.test.ts
+# job=math-core-tests step=Run Forward Planner overlap blocker architecture test env={}
+OK   LOADER: the orchestrator imports the canonical overlap loader `listPlannedActivitiesOverlappingRange` from db
+OK   NO START-SCOPED LOADER: no Forward Planner module (orchestrator, pure planner, route) references `listPlannedActivitiesForDay`
+OK   NO NEW SQL: no Forward Planner module contains SQL against PlannedActivity (no table reference, SELECT, INSERT, UPDATE, DELETE or BETWEEN)
+OK   the canonical overlap predicate is defined exactly once in db.ts and is half-open: `plannedStartAt < $3 AND plannedEndAt > $2`, user-scoped, CANCELLED excluded in SQL
+OK   the overlap loader is unchanged in shape: `(userId, from, to, executor = pool)`
+OK   SINGLE LOAD: exactly one call to the overlap loader in the whole orchestrator
+OK   NO N+1: the call sits in a straight-line block -- no loop, no per-candidate map/forEach/Promise.all around it
+OK   the load is user-scoped by the authenticated user the request was built for (never a request value)
+OK   ZERO CANDIDATES: the plan load is skipped when no candidate remains to be filtered (guarded by `aboveFloor.length > 0`); the result is still NO_SUITABLE_WINDOW
+OK   REQUESTED RANGE: derived with the canonical civil-date helper (`localDayBoundsUTC` of the range's start and end dates), not millisecond arithmetic
+OK   AUTHORITATIVE LOAD RANGE: the load bounds are `resolveForwardPlannerBlockerLoadBounds({ from, to }, aboveFloor)` -- the requested range widened by the actual candidate set that is filtered
+OK   CANDIDATE EXTENT: the helper takes the min start / max end of the candidates' own instants (`new Date(candidate.start|end)`), starting from the requested bounds -- no constant buffer, day, week or history
+OK   no arbitrary widening anywhere in the orchestrator: no day/week/history constants around the blocker load
+OK   POLICY: only UPCOMING plans block (`plan.status === 'UPCOMING'`); LOGGED, CANCELLED, SKIPPED and MOVED are not blockers; no lifecycle machinery (`isActivePlanBlocker`) was added
+OK   the conflict test itself is unchanged: the pure `filterConflictingCandidates` (half-open [start,end) overlap with every blocking interval) in forwardPlanner.ts
+OK   FILTERING ORDER preserved: timing FIND -> one-per-date -> floor -> persisted-blocker filtering -> personal fit -> ranking -> max results
+OK   ONE FIND call, one-candidate-per-date, floor, personal-fit and max-results policy are untouched
+OK   READ-ONLY / NO SERIALIZATION: no Forward Planner module takes an advisory lock, row lock or transaction or calls a plan writer
+OK   the request `now` is the single explicit clock: no `Date.now()` / `new Date()` is read for "the current time" in the orchestrator
+OK   SHARED AUTHORITY: the API route and Ask Aura both call the SAME `buildForwardPlannerResult` (route once, Ask Aura at its two sites); neither loads plans for forward planning itself
+OK   DAILY GUIDANCE UNCHANGED: collectPlanCandidates still reads "plans that start today" with the start-scoped loader (R1 proved that is its correct contract) and does not use the overlap loader
+OK   MY DAY UNCHANGED: the day agenda and tomorrow preview still list by start day (documented boundary); Day Builder availability is not touched here
+OK   NO GLOBAL BAN: `listPlannedActivitiesForDay` still exists, unchanged, as the loader of the legitimately start-scoped readers
+OK   RECOMPOSITION / CONSTRUCTOR UNCHANGED (structure): the proposal and the Constructor still load blockers with the canonical overlap loader; acceptance still takes the shared lock
+OK   the shared advisory lock is still taken at exactly the same four production sites (no new blocker-adding writer)
+OK   NO SCHEMA CHANGE: no exclusion constraint in the Prisma schema or in any migration directory's own contents (count-independent -- holds regardless of how many unrelated migrations exist)
+OK   the DB test makes no snapshot-coherence, race-freedom or serialization claim in any assertion label
+OK   the DB test drives the real `buildForwardPlannerResult` with an explicit clock (no wall clock) and covers: primary prior-start case, full span, same-day control, lifecycle, cross-user, boundaries, multi-date single query, candidate extent (both ends), zero candidates, DST/Auckland, row volume, zero writes
+ALL FORWARD PLANNER OVERLAP BLOCKER ARCHITECTURE CHECKS PASSED
+
+# exit=0 signal=

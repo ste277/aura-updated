@@ -1,14 +1,21 @@
 # AURA-ANDROID-REL-04 — Application Release Readiness
 
-**Date:** 2026-11-25 · **PR:** #392 · **Branch:** `aura-android-rel04-app-readiness`, cut from `main` `ad49e6a`
+**Date:** 2026-11-26 (R7) · **PR:** #392 · **Branch:** `aura-android-rel04-app-readiness`, cut from `main` `ad49e6a`
 
-**Revision:** **R6** (ticket 39219). R6 is a targeted correction of the four application findings that the R5 independent assessment reproduced against `0c97d3a406bce24b5ea2490aebb7d1cd2ad66bdc` (code `a3a02b8`). The assessment is at `~/Documents/ChatGPT/Product Onboarding/AURA_ANDROID_REL_04_R5_INDEPENDENT_DISPOSITION_0c97d3a.md`.
+**Revision:** **R7** — queue ownership and legacy compatibility. R7 corrects the sole remaining application finding of the R6 independent assessment of final head `8d83f1fd63799ce174a091e212736c1a3897eb57` (§R7). The R6 assessment file was not available locally; R7 works from the ticket's five reproductions, all of which are reproduced against the R6 code head.
+
+- **R7 code commit:** `7cae58a6f7273060433388f6f1c6ddf446f46c4b`.
+- **Evidence:** `docs/android/evidence/rel04-r7-7cae58a/`.
+
+**§R7 supersedes R6 where they differ.** Everything below §R7 is kept as history.
+
+**Previous revision — R6** (ticket 39219). R6 is a targeted correction of the four application findings that the R5 independent assessment reproduced against `0c97d3a406bce24b5ea2490aebb7d1cd2ad66bdc` (code `a3a02b8`). The assessment is at `~/Documents/ChatGPT/Product Onboarding/AURA_ANDROID_REL_04_R5_INDEPENDENT_DISPOSITION_0c97d3a.md`.
 
 - **R6 code commit:** `13d773eef0717952e8fcb940b83498c0d09e67fa`.
 - **Evidence:** `docs/android/evidence/rel04-r6-13d773e/`.
 - **Closures kept:** all independently closed findings are preserved, none is reopened, and the IndexedDB architecture and attempt-token fencing are unchanged.
 
-**§R6 supersedes R5 where they differ.** R5, R4 and R3 sections are kept as history.
+R5, R4 and R3 sections are kept as history.
 
 **Independent reviews (kept unchanged):**
 - `…_INDEPENDENT_REVIEW_REPORT.md` (`a54daf6`);
@@ -16,21 +23,111 @@
 - `…_FINAL_INDEPENDENT_DISPOSITION_091e3ce.md`;
 - `…_INDEPENDENT_EVIDENCE_ASSESSMENT_b323d2a.md`;
 - `…_R4_INDEPENDENT_DISPOSITION_a59a934.md`;
-- `…_R5_INDEPENDENT_DISPOSITION_0c97d3a.md`.
+- `…_R5_INDEPENDENT_DISPOSITION_0c97d3a.md`;
+- the R6 independent assessment of `8d83f1f`.
 
 **Not done:** no merge, deployment, hosting-setting change, Production access, credential, infrastructure, emulator, physical device, signing or Play Store activity.
 
 ## 1. Verdict
 
-**ALL REMAINING R5 APPLICATION FINDINGS CORRECTED — FOCUSED REGRESSIONS PASS — READY FOR INDEPENDENT VERIFICATION.**
+**ALL SUPPORTED QUEUE FORMATS ACCOUNT-ISOLATED — NO DISCARDED ACTIVITY RESURRECTION — READY FOR FINAL FOCUSED INDEPENDENT VERIFICATION.**
 
 | Disposition | State |
 |---|---|
-| **1. Application implementation** | **Corrected (R6)** for the four reproduced R5 findings (§R6-1). The findings stay OPEN until independent verification. |
+| **1. Application implementation** | **Corrected (R7)** for the remaining queue-ownership finding (§R7). It stays OPEN until focused independent verification. All other findings closed by the R6 assessment are unchanged (none reopened). |
 | **2. Controlled merge readiness** | **NO-GO**. Still needed: independent verification, owner approval, and deployment-boundary reconfirmation at merge time. PR #392 stays **separate from REL-05**. |
 | **3. Production activation and native acceptance** | **NO-GO / HOLD**, unchanged. The separately gated items are listed in §R5-4: A-1 to A-3, AUTH-01 dependencies, rollout criteria and telemetry, supported-client compatibility, worker rollback, and native plus REL-03 supervised acceptance. |
 
 ---
+
+## R7. Queue ownership across every supported storage format
+
+### R7-1. Finding, root cause, correction
+
+**Finding (R6 assessment).** Two accounts with identical request ids and payloads, both queued by an R3 bundle, shared one record identity. On R6 code that caused five failures, all reproduced (O1):
+
+| Reproduced on R6 code `13d773e` | Before (R6) | After (R7) |
+|---|---|---|
+| The actual R3 migrator gives both accounts' `aura_q4` entries the **same** recordId | shared | still shared in the source (historical data, untouched); the stored records are now distinct |
+| Account B's readable queue | **0** entries | **1** (its own) |
+| B's discard and A's settlement marker | B's discard **replaces** A's marker | each account keeps its own marker |
+| A's source after a cleanup failure | **resurrected** | matched to A's marker; not recreated |
+| A's explicitly discarded activity | **replayed, server row created** | never replayed; no server row |
+
+**Root cause.** R6 made the identity account-scoped for `offline_habit_queue_v2` and `aura_q3`, but an `aura_q4` entry kept its stored `recordId`. The R3 migrator derived that id from `clientRequestId + payload` only. All markers were keyed by the bare `recordId`, so a marker was found by an id two accounts share, and a later write replaced the other account's marker.
+
+**Correction: one ownership mechanism** (`apps/web/lib/offlineHabitQueue.ts`). No schema change, destructive normalization or marker deletion was needed.
+
+| Invariant | Implementation |
+|---|---|
+| A recordId alone never proves ownership | Ownership comes only from the account stored **with** a record or marker. |
+| One identity per logical entry, whatever the source format | Every migrated entry (R1, R2, R3) gets `migratedRecordId(item, owner)`. Earlier ids (the R3 `aura_q4` id, the R4/R5 owner-less id) are **aliases**, honoured only for a record or marker that names the same account. |
+| No duplicate logical work | Deduplication is by account + `clientRequestId` + canonical payload, in every format, through the `ownerCrid` index. |
+| Markers cannot collide across accounts | Every marker written from R7 on is keyed `markerKey(owner, recordId)`. A pre-R7 bare-id marker is honoured only for the account it names. |
+| No cross-account settle, discard or delete | `settleRecords` and `discardRecords` act only on the given account's records. Others are counted as `foreign` and left untouched. Callers pass the account: replay, outbox settle and sign-out. |
+| Ownership not established → preserve, do not guess | If only **another** account's pre-R7 marker exists under one of an entry's shared ids, this account's own decision may have been overwritten (R6 damage). The entry is migrated **held**: kept and shown, counted at sign-out and discardable, but excluded from replay groups, refused by `claimForDispatch` (`held`) and never claimed by `enqueueOwned`. |
+| Unchanged | Source removal only after the committed transaction, with the source unchanged. Marker retirement only when positively established. Unreadable storage is reported unreadable. Claims, attempt tokens and dispatch marks are unchanged. |
+
+### R7-2. Supported formats and compatibility
+
+| Format (producer) | Identity before R7 | R7 behaviour |
+|---|---|---|
+| `offline_habit_queue_v2:<owner>` array (R1 `d09449b`) | R6: account-scoped; R4/R5: owner-less | Account-scoped id; owner-less id is an alias |
+| `aura_q3:<owner>:<crid>` (R2 `db8607e`) | same as above | same |
+| `aura_q4:<owner>:<crid>:<random>` (R3 `enqueueOwned`) | its random id | Account-scoped id; random id is an alias |
+| `aura_q4:<owner>:<crid>:m<hash>` (R3 migrator) | **shared** id (the defect) | Account-scoped id; shared id is an alias, owner-checked |
+| `aura_q4t:<owner>:<id>` (R3 marker) | account-scoped key | Honoured for that account (unchanged) |
+| IndexedDB records (R4–R6: owner-less, shared, random or account-scoped ids) | as stored | **Kept as stored.** Matched to sources by account + crid + payload, so nothing is duplicated. Two records of one entry that R6 already stored stay two records but form one replay group and are sent once. |
+| IndexedDB markers keyed by the bare recordId (R4–R6) | bare id + `ownerUserId` | Kept; honoured only for the named account; a foreign one triggers **held** |
+| IndexedDB markers from R7 on | — | `markerKey(owner, id)` with `ref` |
+| `offline_habit_queue` (pre-REL-04, unowned) | quarantined | unchanged |
+
+### R7-3. Regression evidence
+
+`test/rel04R7QueueOwnership.test.ts` (**35/35**, added to CI) produces its data with the **actual historical producers**: R1, R2 and R3 `enqueueOwned`, the R3 migrator and marker writer, and the R5 IndexedDB lifecycle. All are vendored byte-for-byte and checked against git. Every scenario runs against the **R6 head** (`test/fixtures/rel04-r6-head`: queue, replay and sign-out at `13d773e`) and against the current code.
+
+| Group | What it shows | R6 → R7 |
+|---|---|---|
+| O1 | the five reproductions in the table above | 5 defects reproduced → all corrected |
+| O2 | each of the 4 source formats, with two accounts, identical crid and payload, and cleanup failing throughout. Two legs: (S) A replays, B discards, A's source is re-read; (D) A discards, B replays, A replays | R1, R2 and R3-random: isolated on both. **R3-migrated: DEFECT → isolated** |
+| O3 | R5 owner-less records and markers; R6 two-record state; mixed R1 + R2 + R3 sources; R3 `localStorage` marker | same-account compatibility kept; no duplicates; each sent once |
+| O4 | an R6-damaged marker (A's decision overwritten by B) | kept, shown, **held**: not replayed, claim `held`; sign-out counts and discards it |
+| O5 | B settling or discarding A's recordId | refused as `foreign`; every marker is account-scoped |
+| O6 | interrupted (IndexedDB write failure) and repeated migration; denied storage | unreadable + sources kept → one record per account; markers and records kept |
+| O7 | two tabs, two accounts: concurrent reads, replay of A and discard of B, then an account switch | ownership preserved; 6 account-scoped markers; nothing recreated |
+
+Two existing setups were updated for the intended change; their assertions are unchanged:
+- **M1** (queue integrity) now expects an `aura_q4` entry to migrate to the account-scoped id.
+- **T3** (lifecycle) needs two records of one request. Migration no longer creates that state, so the test writes the two-record state R5/R6 persisted.
+
+**Evidence at code commit `7cae58a`** (`docs/android/evidence/rel04-r7-7cae58a/`; manifests and checksums are in its README):
+
+| Run | Result |
+|---|---|
+| `rel04R7QueueOwnership` | **35/35**: 7 fixture-provenance checks, 5 R6 reproductions (all fail on R6, as the assessment reported), and the corrections |
+| `math-core-tests`, every `npx ts-node` command | **248/248** (manifest sha256 `9919c174…c753`) |
+| Day Constructor DB suites (fresh isolated Postgres 16, 54 migrations) | **76/76** |
+| Chromium multi-tab | **29/29** |
+| Real Next.js app rendering | **12/12** (DB and browser manifest sha256 `1be0f02b…10bb`) |
+| `prisma generate`, web `tsc`, root `tsc` | exit 0, exit 0, exit 0 |
+| CI on the PR merge ref with current `main` `3b56830` | **Run 45784953083 on `7cae58a`: success, 9/9 jobs.** No AURA-CI-07 or MCP I2b-S2 recurrence. No historical job was rerun. |
+
+The closed R6 findings were re-run, and every check passes:
+- the R6 findings suite (22/22): unreadable storage, worker acknowledgement and reload reservation, and Plan Day authentication;
+- Chromium CH15;
+- real-app N2;
+- sign-out (19/19), account isolation (50/50), and authentication coordination and replay suites.
+
+### R7-4. Remaining limitations
+
+- **Held entries.** An entry is held when a pre-R7 marker of *another* account exists under its shared id. That happens only when two accounts on one device had identical `clientRequestId` **and** payload in R3-era storage. Held entries are visible and discardable but are not sent automatically, and there is no manual "send anyway". Holding is the conservative choice: from the stored data, the user's own earlier discard cannot be told apart from another account's overwrite.
+- **Mixed versions.** An R6 (or older) tab still open on the same device reads markers by the bare recordId. It does not see R7's account-scoped markers, and for the shared-id format it can still show the R6 defect until it reloads. This is part of the separately gated rollout and supported-client compatibility (§R5-4).
+- **Not device evidence.** This is jsdom with fake-indexeddb, Chromium and the real Next.js app; it is not WebView or WKWebView acceptance.
+- The R6 limitations (§R6-3) are unchanged.
+
+---
+
+## R6 round (historical)
 
 ## R6-1. Findings, root causes, corrections, before/after evidence
 
@@ -637,6 +734,21 @@ Open:
 RC-1…RC-8 as in R2, and RC-1 now also requires the activation plan (§R6.2).
 
 ## 13. Independent verification request
+
+### R7: final focused verification (queue ownership only)
+
+**Scope:** `8d83f1f..<R7 final head>`. Code: `apps/web/lib/offlineHabitQueue.ts`, plus the owner arguments in `activitySync.ts` and `signOut.ts`. Tests: `test/rel04R7QueueOwnership.test.ts` and `test/fixtures/rel04-r6-head`.
+
+**Questions:**
+1. Can any account replace, suppress, settle, discard or delete another account's record or marker, in any supported format (§R7-2) or in mixed-format storage?
+2. Is a recordId anywhere still trusted as proof of ownership?
+3. Can explicitly discarded or settled activity be resurrected or replayed after a cleanup failure, an interrupted or repeated migration, or an account switch?
+4. Are existing records and markers from R3–R6 preserved without duplicate logical work?
+5. Is the **held** rule (ownership not established, so kept but never sent automatically) applied exactly where it should be, and nowhere else?
+
+**Not in scope:** findings already closed by the R6 assessment, activation, native acceptance, REL-05.
+
+### Earlier rounds (historical)
 
 **Scope:** `091e3ce..<R3 head>`.
 

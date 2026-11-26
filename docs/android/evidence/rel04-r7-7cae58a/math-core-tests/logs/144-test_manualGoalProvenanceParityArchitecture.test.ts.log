@@ -1,0 +1,31 @@
+$ npx ts-node test/manualGoalProvenanceParityArchitecture.test.ts
+# job=math-core-tests step=Run manual Goal provenance parity architecture test env={}
+OK   the canonical goal-demand id is built in exactly one place: no production CODE (comments excluded) outside goalDemandIntentId.ts constructs a `goal-demand:` string
+OK   the encoder is called only by the three known producers/matchers: the Plan Day client (automatic AND manual), the planning source adapter, and the facts provider
+OK   the Plan Day client derives the canonical id for BOTH entry paths from the same encoder and the server-supplied planning date
+OK   the client no longer seeds manual rows with the legacy factory directly; it goes through createIntentRowFromGoalHandoffItem
+OK   planDayEntry.ts and planDayBootstrap.ts never import or mention the encoder/decoder (they compute no identity)
+OK   a canonical manual row is built by the EXISTING automatic row factory (one row shape for both paths)
+OK   the legacy manual factory remains unmodified as the fallback (legacy ids, unmarked items, load failures)
+OK   canonicalDemand is ASSIGNED in exactly one production place: the server-side marking function
+OK   canonicalDemand is referenced only by the bootstrap (decides) and the row factory (reads)
+OK   marking is exact-id membership only: no title, activityId, label or similarity access
+OK   the canonical set comes from the SAME single eligible-demand load (one loadEligibleGoalDemand call, no second eligibility implementation)
+OK   the page passes the server-marked items to the client (never the raw handoff) and marks nothing on a failed load
+OK   the preview request body type and parser carry no Goal claim field
+OK   the request builder never reads row.goalActivityId (provenance stays out of the preview request)
+OK   the preview route and the O4 enrichment add no Goal claim channel
+OK   the accept-link builder is unchanged: it still reads only row.goalActivityId (the existing accept-time link, still re-authorized against the signed id)
+OK   no source-neutral module (DecisionFacts, O1, O2, O4, orchestrator, preview handler, Constructor) mentions the manual id scheme or the canonical marker
+OK   the Goal facts provider has no manual exception: no manual id scheme, no marker, no title/label matching
+OK   the provider still matches only exact server-derived canonical ids against the eligible set
+OK   DecisionFacts is still source-blind: zero imports and no Goal/Rhythm vocabulary
+OK   acceptance authorization still decodes only VERIFIED ids and still rejects mismatched client links, wrong planning dates and malformed ids
+OK   the accept route still authorizes through authorizeGoalActivityLinks and never classifies ids itself
+OK   persistence still materializes occurrences through the existing gate and rolls back on a failed link
+OK   no policy vocabulary exists anywhere in production except the P2b pure deriver module (decisionPressure.ts, unwired and source-neutral) and, since O5 P3b, the two inert shadow modules and, since O5 P4a, the two inert promotion-input modules that CONSUME its derived value (shadowPressureEvaluation.ts, shadowPressureObservation.ts, promotionInput.ts, promotionInputPreparation.ts and, since O5 P4b4, the inert same-run shadow policy composition shadowPolicyObservation.ts and, since O5 P4b5, the server-controlled shadow execution boundary shadowPolicyExecution.ts (wired ONLY through the preview request boundary and the preview route -- exact repo-relative paths; no other route.ts is exempt, pinned by a synthetic check -- pinned by shadowPolicyExecutionArchitecture.test.ts) -- source-neutral, unwired from the Constructor, pinned by shadowPressureArchitecture.test.ts and promotionInputArchitecture.test.ts): no decisionPressure, LAST_KNOWN_OPPORTUNITY or pressure type, gate or shadow policy elsewhere
+OK   the precedence comparator still reads no decision facts
+OK   the O1/O2/O4 modules and the facts type are untouched by this slice (no Goal, marker or manual vocabulary)
+ALL MANUAL GOAL PROVENANCE PARITY ARCHITECTURE CHECKS PASSED
+
+# exit=0 signal=

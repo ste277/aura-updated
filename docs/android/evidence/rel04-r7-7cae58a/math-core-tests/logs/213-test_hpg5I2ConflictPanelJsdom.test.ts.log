@@ -1,0 +1,54 @@
+$ npx ts-node --project tsconfig.jsdom-tests.json test/hpg5I2ConflictPanelJsdom.test.ts
+# job=math-core-tests step=Run conflict panel and My Day save component test (HPG5-V2-I2) env={}
+OK   PT setup: goal activity linked
+OK   PT setup: at least two results so a non-best card can be refused
+OK   R1-04 refused save carried REJECT_ACTIVE_OVERLAP and the goal link
+OK   R1-04 panel names the proposed activity title
+OK   R1-04 panel shows the proposed date and start–end in the user timezone
+OK   R1-04 panel shows the conflicting plan title and its date/time
+OK   R1-04 Save anyway button text carries the exact proposed start time
+OK   R1-04 Save anyway accessible name carries the proposed date/time, activity and conflict
+OK   R1-04 panel is rendered immediately after the refused card (shows its time)
+OK   R1-04 panel is NOT inside or directly after the Best Match card
+OK   R1-04 panel is role=alert, labelled and described
+OK   R1-04 focus moves to the conflict heading
+OK   R1-04 keyboard: both actions are native, enabled, tabbable <button>s in reading order (Choose, then Save)
+OK   R1-04 both actions are at least 44px tall
+OK   R1-04 no write while the panel is visible (exactly one POST so far)
+OK   R1-04 rapid triple-click sends exactly one override POST
+OK   R1-04 override is disabled and shows Saving… while in flight
+OK   R1-04 override sends overlapPolicy ALLOW
+OK   R1-04 override payload is byte-identical to the refused payload apart from overlapPolicy
+OK   R1-04 after the override succeeds the panel closes and that card is Planned
+OK   R1-04 stale setup: unlinked refusal visible
+OK   R1-04 selecting a goal activity clears the pending (unlinked) conflict -- the override can never attach a different link
+OK   R1-04 changing the goal wrote nothing
+OK   R1-04 conflict visible for the new link
+OK   R1-04 a new search clears the conflict, and it does not come back for an identical result set
+OK   R1-04 two same-tick clicks on "Use this time" send exactly one POST
+OK   R1-04 same-tick setup: conflict visible
+OK   R1-04 two same-tick clicks on "Save anyway" send exactly one POST
+OK   R1-04 Choose another time closes the panel, writes nothing, returns focus to results
+OK   MD setup: My Day FIND ran and shows Add to my day
+OK   R1-05 My Day recommended-time save sends overlapPolicy REJECT_ACTIVE_OVERLAP
+OK   R1-05 My Day payload is otherwise unchanged (same instants as the recommendation, no goal link added)
+OK   R1-05 conflict is visible, names the proposed time and the conflicting plan
+OK   R1-05 conflict announced (role=alert) and focus moves to its heading
+OK   R1-05 no silent retry: still exactly one POST, not marked added
+OK   R1-05 Choose another time runs a fresh FIND for the same activity and writes nothing
+OK   R1-05 Save anyway shows the exact proposed start time
+OK   R1-05 rapid triple-click sends exactly one override POST
+OK   R1-05 override sends ALLOW with the byte-identical refused payload
+OK   R1-05 after the override succeeds the card shows Added to your day
+OK   R1-05 two same-tick clicks on "Add to my day" send exactly one POST
+OK   R1-05 refusal shown after the same-tick attempt, and no automatic retry fired
+OK   R1-05 two same-tick clicks on "Save anyway" send exactly one POST
+OK   R1-05 a non-overlap failure shows the existing generic error and no conflict panel
+OK   no unhandled promise rejections (no hidden background save/retry)
+
+45 checks
+ALL CHECKS PASSED
+(node:70815) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+# exit=0 signal=

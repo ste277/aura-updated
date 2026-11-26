@@ -1,0 +1,57 @@
+$ npx ts-node test/dayConstructorOverlappingBlockerDb.test.ts
+# job=day-constructor-acceptance-db-tests step=Run Constructor overlapping blocker DB test env={}
+=== PRIMARY: persisted overnight plan 2026-10-06 20:00 IST -> 2026-10-07 12:00 IST ===
+OK   TARGET-DAY LOADER returns the overnight plan although it STARTED the previous civil day
+OK   the real preview is READY and proposes something to place (the assertion below is not vacuous)
+OK   NO proposed interval overlaps the overnight blocker: for every proposal, start >= blocker end OR end <= blocker start
+OK   the overnight plan reduces usable capacity by exactly the overlapping part (09:00-12:00 = 180 of 480 window minutes)
+OK   a proposal can only start at or after the blocker end (12:00 IST)
+OK   the Constructor consults the blocker loader exactly ONCE per preview (no N+1, query count unchanged)
+OK   the orchestrator hands the loader the USER'S civil-day bounds (00:00 IST to next 00:00 IST), whatever the process timezone is
+OK   preview writes nothing: the plan row count is unchanged
+=== boundary semantics: half-open [start, end), at millisecond precision ===
+OK   prior-day plan ending midday: returned
+OK   multi-day plan starting 3 days earlier and ending after the day starts: returned
+OK   plan spanning the WHOLE day (starts before, ends after): returned
+OK   plan EXACTLY matching the day [00:00, 24:00): returned
+OK   ordinary same-day plan (starts inside, ends inside): returned
+OK   plan starting inside and running past the day end: returned
+OK   plan ending EXACTLY at the day start does NOT overlap: NOT returned
+OK   plan starting EXACTLY at the day end does NOT overlap (the old BETWEEN query returned it): NOT returned
+OK   plan ending ONE millisecond after the day start overlaps: returned
+OK   plan starting ONE millisecond before the day end overlaps: returned
+OK   plan entirely BEFORE the day is not returned: NOT returned
+OK   plan entirely AFTER the day is not returned: NOT returned
+OK   a ZERO-LENGTH plan never creates blocking: capacity is untouched and the day still builds
+OK   ADJACENT plans touching at a boundary merge into one stretch: blocked is exactly 180 minutes (no phantom gap, no double count)
+OK   MULTIPLE overnight blockers are ALL returned (no first-row behaviour)
+OK   and together they block exactly 09:00-12:00 (180 minutes), proposals clear of all of them
+=== isolation: other users, lifecycle ===
+OK   another USER's overnight plan never blocks (not returned, no capacity effect)
+OK   UPCOMING overnight plan: BLOCKS (180 minutes) -- current lifecycle preserved
+OK   LOGGED overnight plan: BLOCKS (180 minutes) -- current lifecycle preserved
+OK   CANCELLED overnight plan: does NOT block -- current lifecycle preserved
+OK   SKIPPED overnight plan: does NOT block -- current lifecycle preserved
+OK   MOVED overnight plan: does NOT block -- current lifecycle preserved
+OK   a CANCELLED plan is excluded at the query level too (not even returned)
+=== availability modes ===
+OK   CONFIGURED EMPTY availability: still no new placement
+OK   UNCONFIGURED availability keeps its existing today semantics (window now -> end of day) and the overnight plan still blocks 09:00-12:00
+=== explicit construction window ===
+OK   a plan overlapping the civil day but NOT the actual window does not reduce usable capacity (clipped away): blocked 0 of 240
+OK   a window that CROSSES midnight sees a plan that starts on the NEXT civil day inside the window: blocked exactly 90 of 300 minutes
+OK   and no proposal overlaps it
+=== row volume: only overlapping rows are returned ===
+OK   160 historical/future plans plus one overnight plan: the target-day loader returns exactly the 1 overlapping row
+=== parity with the O2 range loader: one overlap definition ===
+OK   for the same bounds the Constructor target-day loader and the O2 range loader return the same plans
+=== DST: a New York civil day that is not 24 hours long ===
+OK   SPRING FORWARD (2027-03-14, 23-hour day): the civil day is 23 hours (no 24h arithmetic)
+OK   SPRING FORWARD (2027-03-14, 23-hour day): the overnight plan is returned by the target-day loader
+OK   SPRING FORWARD (2027-03-14, 23-hour day): it blocks exactly the overlapping 09:00-11:00 (120 of 480 minutes) and no proposal overlaps it
+OK   FALL BACK (2026-11-01, 25-hour day): the civil day is 25 hours (no 24h arithmetic)
+OK   FALL BACK (2026-11-01, 25-hour day): the overnight plan is returned by the target-day loader
+OK   FALL BACK (2026-11-01, 25-hour day): it blocks exactly the overlapping 09:00-11:00 (120 of 480 minutes) and no proposal overlaps it
+ALL OVERLAPPING BLOCKER DB CHECKS PASSED
+
+# exit=0 signal=

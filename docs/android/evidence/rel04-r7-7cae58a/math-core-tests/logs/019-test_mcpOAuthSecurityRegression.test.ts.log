@@ -1,0 +1,42 @@
+$ npx ts-node test/mcpOAuthSecurityRegression.test.ts
+# job=math-core-tests step=Run OAuth security regression test env={}
+OK   F1.1 baseline: A connects with explicit consent and gets a token for A
+OK   F1.1a after Aura sign-out: no code, flow stops at sign-in (401)
+OK   F1.1b after Aura sign-out, prompt=none: login_required, no code
+OK   F1.1c B signed in on the same browser: consent page is shown (nothing silent)
+OK   F1.1d B completes consent: token is for B, never A
+OK   F1.2 A authorized, B signed in, prompt=none: no code (login_required)
+OK   F1.2b even for the same user, prompt=none never issues a code (consent_required)
+OK   F1.3a attacker PKCE + prompt=none in the victim's browser: no code (consent_required)
+OK   F1.3b attacker PKCE without prompt=none: stops at the consent page, no code without the user clicking Allow
+OK   F1.3c attacker PKCE with no Aura session at all: login_required, no code
+OK   F1.4a expired Aura session: no code, stops at sign-in
+OK   F1.4b expired Aura session + prompt=none: login_required
+OK   F1.4c session resolver throws: fail closed, no code
+OK   F1.4d after signing back in, A can reconnect (with consent)
+OK   F1.5a 12 concurrent flows (A and B): every token belongs to the user who consented
+OK   F1.5b account switch while a flow is in flight never yields a token for A
+OK   F1.6a A re-authorizes: consent shown again, token for A
+OK   F1.6b both of A's tokens remain valid
+OK   F13 leftover provider session for A (no consent) does not block B
+OK   F9 extra path segment after /confirm -> 404
+OK   F14 isLoopbackPeer: 127.0.0.1, ::1, ::ffff:127.0.0.1 only
+OK   F14 a LAN peer (192.168.1.20) gets 404 on every OAuth path
+OK   F14 an IPv4-mapped LAN peer gets 404
+OK   F14 a loopback peer still reaches discovery
+OK   F2.1 100 concurrent requests from one user: exactly perUser (10) succeed
+OK   F2.2 after user 1 saturates their bucket, user 2 of the same client is unaffected
+OK   F2.3 client ceiling is a multi-user backstop: reachable only after several users max out (u1 10 + u2 10 + u3 5)
+OK   F2.4 a client ceiling not above the per-user limit is refused as misconfiguration
+OK   F3.0 victim reaches their limit
+OK   F3.1 flooding new keys never evicts an active window: victim is still limited
+OK   F3.2 table never exceeds maxKeys; excess new keys fail closed with limitedBy=capacity
+OK   F3.3 after the window expires, the victim has budget again and expired windows are reclaimed
+OK   F4.1 300k rejected requests with distinct keys create no state (size stays 1)
+     (heap delta after 300k rejected requests: 18.0 MB incl. GC noise; table size 1; previous implementation grew to 300k entries, +71.6 MB)
+OK   F4.2 invalid limits are refused
+
+All 34 AURA-MCP-02-I2a-R1 security regression checks passed.
+oidc-provider WARNING: Unsupported runtime. Use Node.js v22.x LTS, or a later LTS release.
+
+# exit=0 signal=

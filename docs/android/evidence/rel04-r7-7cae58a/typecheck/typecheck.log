@@ -1,0 +1,18 @@
+$ (apps/web) npx prisma generate
+Prisma schema loaded from prisma/schema.prisma
+✔ Generated Prisma Client (v5.22.0) to ./node_modules/@prisma/client in 174ms
+┌─────────────────────────────────────────────────────────┐
+│  Update available 5.22.0 -> 8.0.0-rc.35                 │
+│                                                         │
+│  This is a major update - please follow the guide at    │
+│                                                         │
+│  Run the following to update                            │
+│    npm i --save-dev prisma@latest                       │
+│    npm i @prisma/client@latest                          │
+└─────────────────────────────────────────────────────────┘
+# exit=0
+$ (apps/web) npx tsc --noEmit -p tsconfig.json
+# exit=0
+$ npx tsc --noEmit -p tsconfig.web.json
+# exit=0
+head 7cae58a6f7273060433388f6f1c6ddf446f46c4b
