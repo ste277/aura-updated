@@ -279,3 +279,53 @@ B's exactness and per-shard accounting pass.
 - **Serial, isolated:** every suite ran one at a time against a disposable local PG16 (socket only, `max_connections = 100`); no live database, no credentials.
 - **No retries** were used to hide failures.
 - **Exact-head CI:** round 3 `882a04f0` run 45606688808, 7/7; round 4 `54e323d6` run 45610989652, 7/7. The round 5 final-head run is recorded in the PR description.
+
+## 6. Merge and closure (ticket 39408, 2026-11-26)
+
+**Status: COMPLETE.** Main CI is green, MCP stays disabled, and staging acceptance is deferred. This section was added afterwards in the MCP-CI-02 PR (ticket 39410), at the owner's direction (no docs-only PR). Sections 1–5 describe the state before the merge and are unchanged.
+
+| Item | Value |
+|---|---|
+| PR | #394, squash merge with head-commit guard, approved by the owner on 2026-11-26 |
+| Approved head | `c3a443f38a358fcf7caba179f2df07f935aa3037` (independent GO; S8, S10, S11 and S12-A/B/C CLOSED) |
+| Pre-merge main (squash parent) | `3b568302877b3672e46aa0449d530007c5c56326` (#395, AURA-CI-07 fix) |
+| Verified integration CI | run 45784055130, attempt 1, **7/7**, merge ref `8f53b2c` (c3a443f into 3b56830) |
+| Squash commit | **`3feff0342c48959be7006648ee4bdcaa71fbb162`**, merged 2026-11-26T09:41:58Z |
+| Post-merge main CI | run **45794392858** (push, `3feff03`), attempt 1, **7/7**, with no FAIL lines |
+
+**The merge matches the reviewed candidate:**
+- The squash tree `78d0a747…` is the tree that run 45784055130 tested.
+- `git diff 3b56830 3feff03` is byte-identical to `git diff 3b56830...c3a443f`.
+- It changes six files: five tests plus this report. No runtime code, dependencies, migrations, deployment configuration or activation settings changed.
+
+**Integration history:**
+- Run 45629975131 (against `7b80f98`): 6/7. Day Constructor hit AURA-CI-07 occurrence 6; it was archived and not rerun.
+- Run 45782372636: **invalid** as acceptance evidence, because it checked out a stale merge ref (`7b29dde`).
+- Run 45784055130: valid, 7/7.
+
+**Post-merge results:**
+- S8 offline 60 and DB 11; S10 offline 137 and DB 21; S11 offline 33 and DB 19; S12 offline 86 and DB 15.
+- Staging-blocker DB 87 (limiter gate); S2 offline 52.
+- I2b offline 116, Postgres 36, R1 storage 42, S4 13, S6 14; I2a 119, I2a-R1 34.
+- Day Constructor passed, and CI-07 did not recur.
+
+**Production isolation:**
+- Git Production deployment `dpl_4KnftpEnjiPGP42Ka6NMiw8WWBRh` was canceled by the Ignored Build Step. There was no install, build or migration.
+- The live alias is still `dpl_3SstUr7PBWFJHG6zM2oKjPxVBUhE` (REL-04). Nothing was promoted or activated.
+
+**Accepted limitations (carried forward):**
+- Detecting small sustained slowdowns depends on the runner (healthy CI ratio about 3.1–3.3 against R_MAX 5, median of six controls).
+- Leftover random-sampling failures at about 0.0143% per run.
+- If the decision-statement instrumentation stops supplying usable evidence, the check fails explicitly.
+- The `assessSecret` compatibility comment discrepancy is still open.
+- The 3feff03 commit has no Co-Authored-By line. This is accepted, and main will not be rewritten.
+
+**Evidence:**
+- The independent bundle passed 79/79 checksum checks. The author-side bundle was not independently checksum-verified.
+- Merge and closure evidence: `AuraEvidence/AURA_MCP_CI_01_MERGE_CLOSURE_20261126/` (29 files, `SHA256SUMS` sha256 `5db02470…0f75`).
+- The untracked closure record is `AURA_MCP_CI_01_MERGE_CLOSURE.md` at the repo root.
+
+**Still open:**
+- MCP-CI-02 (ticket 39410) is open. Its correction is in the PR that carries this section.
+- PR #393 is a separate decision.
+- MCP development is paused: no S13, with D2–D10 and V1–V6 carried forward. Staging is NO-GO and Production is on HOLD for MCP.

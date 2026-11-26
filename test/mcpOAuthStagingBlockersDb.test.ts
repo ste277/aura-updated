@@ -533,25 +533,306 @@ async function main() {
       const slowEnvMs = await controlFlood(12);
       check('I2b-1 an unusably slow environment FAILS (control flood above 4x the deadline)', !envOk(slowEnvMs), { slowEnvMs, ENV_MAX_MS });
       // 6. Deterministic fault injection: A must fail.
-      const faultyPool = (mode: 'decide' | 'commit_lost' | 'commit_refused') => {
-        const real = pool();
+      /**
+       * AURA-MCP-CI-02 (PR #396 run 45783279199): wire-level COMMIT ground truth, recorded by the test pool and
+       * independent of the limiter's own cause labels. Per request index (decideAls):
+       *   acked   -- the server confirmed the COMMIT (tag "COMMIT"): it LANDED, even if the limiter had already
+       *              given up (deadline) and answers commit_timeout / commit_late;
+       *   refused -- explicit failure: the transaction was ROLLED BACK (injected refusal, or a non-COMMIT tag):
+       *              nothing landed;
+       *   unknown -- the COMMIT was sent but the connection failed / was destroyed before an answer: it may or
+       *              may not have landed (the only genuinely ambiguous case).
+       */
+      type Wire = 'acked' | 'refused' | 'unknown';
+      type WireLog = Map<number, Wire>;
+      type FaultClient = { on: (...a: never[]) => unknown; off: (...a: never[]) => unknown; query: (t: string, p?: unknown[]) => Promise<unknown>; release: (e?: Error) => void };
+      type FaultOpts = {
+        refuseEvery?: number; refuseAt?: number; lateAt?: number; lateMs?: number;
+        /** AURA-MCP-CI-02 r3: tag every limiter transaction with its request index (SET LOCAL aura_test.req) for the contribution trigger. */
+        tag?: boolean;
+        /** r3 harness negative controls, selected by REQUEST identity: a duplicate increment before COMMIT; a ROLLBACK reported as a lost connection. */
+        duplicateFor?: Set<number>; lostRollbackFor?: Set<number>;
+        /** r3 self-test: a fake connection source (no database). */
+        source?: () => Promise<FaultClient>;
+      };
+      const faultyPool = (mode: 'decide' | 'commit_lost' | 'commit_refused', wire?: WireLog, opts: FaultOpts = {}) => {
+        const real = opts.source ? undefined : pool();
+        const connectOne = opts.source ?? (async () => (await (real as Pool).connect()) as unknown as FaultClient);
         let n = 0;
-        return { connect: async () => {
-          const c = await real.connect();
+        const every = opts.refuseEvery ?? 10;
+        const refuseAt = opts.refuseAt ?? 0;
+        /** Injections that actually happened (r3: verified against the intended number). */
+        const injected = { refused: [] as number[], late: [] as number[], duplicate: [] as number[], lostRollback: [] as number[] };
+        const reqIndex = () => decideAls.getStore()?.i;
+        const decidedKeys = new Map<number, string[]>(); // request -> the keys its DECIDE locked
+        const mark = (i: number | undefined, w: Wire) => {
+          if (wire && i !== undefined) wire.set(i, w);
+        };
+        return { injected, connect: async () => {
+          const c = await connectOne();
           return { on: c.on.bind(c), off: c.off.bind(c), query: async (t: string, p2?: unknown[]) => {
+            const i = reqIndex(); // stable request identity, captured before any await
             if (mode === 'decide' && /^WITH want/.test(t) && (n += 1) % 10 === 0) throw new Error('injected driver fault');
-            if (mode !== 'decide' && t === 'COMMIT' && (n += 1) % 10 === 0) {
-              if (mode === 'commit_lost') {
-                await c.query('COMMIT'); // it LANDS, then the connection is "lost"
+            if (i !== undefined && typeof t === 'string' && /^WITH want/.test(t) && Array.isArray(p2)) decidedKeys.set(i, (p2[0] as string[]).map(String));
+            if (opts.tag && i !== undefined && typeof t === 'string' && t.startsWith('BEGIN;')) return c.query(`${t}; SET LOCAL aura_test.req = '${Number(i)}'`, p2 as unknown[]);
+            if (mode !== 'decide' && t === 'COMMIT') {
+              // AURA-MCP-CI-02 r3 (ticket 39419, COMMIT 2/3 ordering): this COMMIT's ordinal and every injection
+              // decision are fixed HERE, before awaiting anything; later submissions and acknowledgement order
+              // cannot change them.
+              const k = (n += 1);
+              const refuse = k % every === refuseAt;
+              const late = !refuse && opts.lateAt !== undefined && k % every === opts.lateAt;
+              if (i !== undefined && opts.duplicateFor?.has(i)) {
+                // Negative control: the SAME transaction increments its global shard row a second time.
+                injected.duplicate.push(i);
+                await c.query(`UPDATE "McpRateLimitWindow" SET "count" = "count" + 1 WHERE "key" = ANY($1::text[]) AND "key" LIKE 'preauth-mcp:global:%'`, [decidedKeys.get(i) ?? []]);
+              }
+              if (i !== undefined && opts.lostRollbackFor?.has(i)) {
+                injected.lostRollback.push(i);
+                mark(i, 'unknown'); // the client never learns the outcome ...
+                await c.query('ROLLBACK'); // ... but nothing commits
                 throw new Error('Connection terminated unexpectedly');
               }
-              await c.query('ROLLBACK'); // the server refuses: nothing lands
-              throw Object.assign(new Error('could not serialize access'), { code: '40001', severity: 'ERROR' });
+              if (refuse) {
+                injected.refused.push(k);
+                if (mode === 'commit_lost') {
+                  mark(i, 'unknown'); // recorded BEFORE sending: a destroyed connection cannot leave it blank
+                  await c.query('COMMIT'); // it LANDS, then the connection is "lost"
+                  throw new Error('Connection terminated unexpectedly');
+                }
+                mark(i, 'refused'); // ROLLBACK (or a destroyed connection mid-transaction): nothing can land
+                await c.query('ROLLBACK'); // the server refuses: nothing lands
+                throw Object.assign(new Error('could not serialize access'), { code: '40001', severity: 'ERROR' });
+              }
+              if (late) injected.late.push(k);
+              mark(i, 'unknown'); // sent, not yet answered
+              let res: { command?: string };
+              try {
+                res = (await c.query('COMMIT')) as { command?: string };
+              } catch (e) {
+                // r3: a server ErrorResponse (SQLSTATE) to COMMIT is a definitive rejection; only a lost connection stays unknown.
+                if (isServerSqlstate(e)) mark(i, 'refused');
+                throw e;
+              }
+              mark(i, res.command === 'COMMIT' ? 'acked' : 'refused');
+              // Deterministic LATE acknowledgement (decided above): the COMMIT has landed, the answer reaches the limiter after its deadline.
+              if (late) await sleep(opts.lateMs ?? DEADLINE + 250);
+              return res;
             }
             return c.query(t, p2 as unknown[]);
           }, release: (e?: unknown) => c.release(e as Error | undefined) };
         } };
       };
+      const isServerSqlstate = (e: unknown) => !!e && typeof e === 'object' && typeof (e as { code?: unknown }).code === 'string' && /^[0-9A-Z]{5}$/.test((e as { code: string }).code);
+      /**
+       * AURA-MCP-CI-02: COMMIT accounting against the wire ground truth. For every bucket (limiter row):
+       *   admitted <= acked <= counted <= acked + unknown
+       * i.e. counted >= admitted, and counted <= admitted + the INDEPENDENTLY identified ambiguous commits
+       * (acked-but-late + unknown). An explicitly refused COMMIT contributes nothing; an under-count, an
+       * unexplained over-count or a duplicate increment falls outside the bound. Per request: an admission
+       * needs a confirmed COMMIT; an explicitly refused COMMIT is never admitted; "commit_failed" only with an
+       * explicit refusal; the ambiguous labels only where a COMMIT was really sent and not refused. Optional cap:
+       * every bucket stays within its limit (capacity invariant).
+       */
+      type CommitRec = { bucket: string; d: RateLimitDecision; wire?: Wire };
+      const commitAccounting = (recs: CommitRec[], counted: Map<string, number>, cap?: number) => {
+        const reasons: string[] = [];
+        const per = new Map<string, { adm: number; acked: number; unknown: number; refused: number }>();
+        for (const r of recs) {
+          const b = per.get(r.bucket) ?? { adm: 0, acked: 0, unknown: 0, refused: 0 };
+          if (r.d.allowed) b.adm += 1;
+          if (r.wire === 'acked') b.acked += 1;
+          if (r.wire === 'unknown') b.unknown += 1;
+          if (r.wire === 'refused') b.refused += 1;
+          per.set(r.bucket, b);
+          const cause = r.d.limitedBy === 'unavailable' ? String(r.d.cause) : '';
+          if (r.d.allowed && r.wire !== 'acked') reasons.push(`unsafe admission in ${r.bucket}: admitted with COMMIT ${r.wire ?? 'never sent'}`);
+          if (cause === 'commit_failed' && r.wire !== 'refused') reasons.push(`commit_failed in ${r.bucket} without an explicit refusal (${r.wire ?? 'no COMMIT'})`);
+          // An ambiguous label needs a COMMIT that was really attempted. (A refused COMMIT answered after the
+          // deadline is legitimately "commit_timeout" to the limiter: it never learned the outcome.)
+          if (AMBIGUOUS.has(cause) && r.wire === undefined) reasons.push(`${cause} in ${r.bucket} but no COMMIT was ever sent`);
+        }
+        for (const k of counted.keys()) if (!per.has(k)) per.set(k, { adm: 0, acked: 0, unknown: 0, refused: 0 });
+        let adm = 0;
+        let cnt = 0;
+        let amb = 0;
+        for (const [k, b] of per) {
+          const c = counted.get(k) ?? 0;
+          adm += b.adm;
+          cnt += c;
+          amb += b.acked - b.adm + b.unknown;
+          if (c < b.acked) reasons.push(`under-count in ${k}: ${c} counted < ${b.acked} confirmed COMMITs`);
+          if (c > b.acked + b.unknown) reasons.push(`over-count in ${k}: ${c} counted > ${b.acked} confirmed + ${b.unknown} ambiguous (${b.refused} refused COMMITs add nothing)`);
+          if (cap !== undefined && c > cap) reasons.push(`${k} counted ${c} > limit ${cap}`);
+        }
+        return { ok: reasons.length === 0, reasons, admitted: adm, counted: cnt, ambiguous: amb };
+      };
+      // Deterministic checker coverage (synthetic; no database, no timing).
+      {
+        const ok: RateLimitDecision = { allowed: true, retryAfterSeconds: 0 };
+        const failed: RateLimitDecision = { allowed: false, retryAfterSeconds: 1, limitedBy: 'unavailable', cause: 'commit_failed' };
+        const late: RateLimitDecision = { allowed: false, retryAfterSeconds: 1, limitedBy: 'unavailable', cause: 'commit_timeout' };
+        const r = (d: RateLimitDecision, wire?: Wire): CommitRec => ({ bucket: 'b', d, wire });
+        const cnt = (n: number) => new Map([['b', n]]);
+        const refusedOnly = [r(ok, 'acked'), r(ok, 'acked'), r(failed, 'refused'), r(failed, 'refused')];
+        check('I2b-1 COMMIT accounting (synthetic): explicitly failed COMMITs add nothing -- 2 admitted + 2 refused, counted 2 PASSES', commitAccounting(refusedOnly, cnt(2)).ok, commitAccounting(refusedOnly, cnt(2)));
+        check('I2b-1 COMMIT accounting (synthetic): a refused COMMIT that incremented (counted 3) FAILS', !commitAccounting(refusedOnly, cnt(3)).ok, commitAccounting(refusedOnly, cnt(3)).reasons);
+        const lateSet = [r(ok, 'acked'), r(ok, 'acked'), r(late, 'acked'), r(late, 'acked'), r(late, 'unknown'), r(failed, 'refused')];
+        const lateOk = [4, 5].every((n) => commitAccounting(lateSet, cnt(n)).ok);
+        check('I2b-1 COMMIT accounting (synthetic): ambiguous late COMMITs may increment within the bound -- 2 admitted, 2 late-confirmed, 1 unknown: counted 4 and 5 PASS', lateOk, [4, 5].map((n) => commitAccounting(lateSet, cnt(n))));
+        check('I2b-1 COMMIT accounting (synthetic): outside the bound FAILS -- counted 3 (< confirmed: under-count) and 6 (> confirmed + unknown)', !commitAccounting(lateSet, cnt(3)).ok && !commitAccounting(lateSet, cnt(6)).ok, [commitAccounting(lateSet, cnt(3)).reasons, commitAccounting(lateSet, cnt(6)).reasons]);
+        check('I2b-1 COMMIT accounting (synthetic): a duplicate increment (3 admitted, no ambiguity, counted 4) FAILS', !commitAccounting([r(ok, 'acked'), r(ok, 'acked'), r(ok, 'acked')], cnt(4)).ok);
+        check('I2b-1 COMMIT accounting (synthetic): refused stays refused -- an explicitly refused COMMIT reported as admitted FAILS', !commitAccounting([r(ok, 'refused')], cnt(0)).ok);
+        check('I2b-1 COMMIT accounting (synthetic): unsafe admission -- admitted with an unconfirmed (unknown) or unsent COMMIT FAILS', !commitAccounting([r(ok, 'unknown')], cnt(1)).ok && !commitAccounting([r(ok)], cnt(1)).ok);
+        check('I2b-1 COMMIT accounting (synthetic): misclassification FAILS -- commit_failed on a confirmed COMMIT, commit_timeout where no COMMIT was sent', !commitAccounting([r(failed, 'acked')], cnt(1)).ok && !commitAccounting([r(late)], cnt(0)).ok);
+        check('I2b-1 COMMIT accounting (synthetic): a refused COMMIT answered after the deadline ("commit_timeout") is not admitted and adds nothing -- counted 0 PASSES, counted 1 FAILS', commitAccounting([r(late, 'refused')], cnt(0)).ok && !commitAccounting([r(late, 'refused')], cnt(1)).ok);
+        check('I2b-1 COMMIT accounting (synthetic): capacity -- a bucket above its limit FAILS', !commitAccounting([r(ok, 'acked'), r(ok, 'acked')], cnt(2), 1).ok);
+      }
+      /**
+       * AURA-MCP-CI-02 r3 (ticket 39419): INDEPENDENT TRANSACTION ATTRIBUTION. The wire record alone cannot
+       * separate "an unknown acknowledgement that committed" from "a duplicate increment hidden behind an unknown
+       * that never committed": both give acked + unknown = counted. Test-only instrumentation in the DISPOSABLE
+       * database records each committed contribution atomically: an AFTER INSERT/UPDATE row trigger on the limiter
+       * table writes (txid, request tag, key, delta) into ci02_txn_contrib INSIDE the limiter's own transaction, so
+       * a row exists if and only if that transaction committed. The request tag comes from SET LOCAL aura_test.req,
+       * which the test pool appends to the limiter's BEGIN (no extra round trip). It is installed only around the
+       * scenarios that use it and dropped afterwards. No migration, no Production schema, no runtime change.
+       *
+       * Per request (bucket = its global shard row):
+       *   acked   + 1 contribution -> confirmed (if admitted) / committed with a LATE acknowledgement (if not)
+       *   acked   + 0              -> FAIL (acknowledged but nothing committed: under-count)
+       *   refused + 0              -> rejected;     refused + 1 -> FAIL (an explicit rejection contributed)
+       *   unknown + 1              -> committed, acknowledgement lost;  unknown + 0 -> did not commit
+       *   no COMMIT + 1            -> FAIL;  > 1 contribution or > 1 transaction -> FAIL (duplicate increment)
+       * Decisions: an admission must be "confirmed"; a committed but unadmitted request must carry an ambiguous
+       * label (commit_timeout / commit_late / commit_lost). Buckets: stored count == the sum of attributed
+       * contributions EXACTLY (no bound), within the shard limit; total within G. A contribution with no request
+       * tag is UNRESOLVED and fails: an outcome the evidence cannot establish never satisfies the test silently.
+       */
+      type Contrib = { txid: string; req: string | null; key: string; delta: number };
+      type Resolved = 'confirmed' | 'rejected' | 'committed_ack_late' | 'committed_ack_lost' | 'not_committed_ack_unknown' | 'no_commit';
+      const attribution = (out: RateLimitDecision[], wire: WireLog, bucketOf: (i: number) => string, contribs: Contrib[], counted: Map<string, number>, cap: number, total: number) => {
+        const reasons: string[] = [];
+        const tally: Partial<Record<Resolved, number>> = {};
+        const buckets = new Set(out.map((_, i) => bucketOf(i)));
+        const onBuckets = contribs.filter((c) => buckets.has(c.key) && c.delta !== 0);
+        const unresolved = onBuckets.filter((c) => c.req === null || !/^\d+$/.test(c.req) || Number(c.req) >= out.length);
+        for (const c of unresolved) reasons.push(`unresolved contribution on ${c.key} (txid ${c.txid}, request tag ${String(c.req)})`);
+        out.forEach((d, i) => {
+          const mine = onBuckets.filter((c) => c.req === String(i) && c.key === bucketOf(i));
+          const sum = mine.reduce((x, c) => x + c.delta, 0);
+          const txids = new Set(mine.map((c) => c.txid));
+          if (sum > 1 || txids.size > 1) reasons.push(`request ${i}: duplicate increment (${sum} in ${txids.size} transaction(s))`);
+          if (sum < 0) reasons.push(`request ${i}: negative contribution ${sum}`);
+          const committed = sum >= 1;
+          const w = wire.get(i);
+          let r: Resolved | undefined;
+          if (w === 'acked') {
+            if (committed) r = d.allowed ? 'confirmed' : 'committed_ack_late';
+            else reasons.push(`request ${i}: acknowledged COMMIT left no contribution (under-count)`);
+          } else if (w === 'refused') {
+            if (committed) reasons.push(`request ${i}: explicitly rejected COMMIT contributed an increment`);
+            else r = 'rejected';
+          } else if (w === 'unknown') {
+            r = committed ? 'committed_ack_lost' : 'not_committed_ack_unknown';
+          } else if (committed) {
+            reasons.push(`request ${i}: contribution without any COMMIT`);
+          } else {
+            r = 'no_commit';
+          }
+          if (r) tally[r] = (tally[r] ?? 0) + 1;
+          const cause = d.limitedBy === 'unavailable' ? String(d.cause) : String(d.limitedBy ?? '');
+          if (d.allowed && r !== 'confirmed') reasons.push(`request ${i}: unsafe admission (${r ?? 'unresolved'})`);
+          if (!d.allowed && committed && !AMBIGUOUS.has(cause)) reasons.push(`request ${i}: committed but answered "${cause}" (only an ambiguous outcome may commit unadmitted)`);
+        });
+        let sumAll = 0;
+        for (const k of new Set([...buckets, ...counted.keys()])) {
+          const attributed = onBuckets.filter((c) => c.key === k).reduce((x, c) => x + c.delta, 0);
+          const c = counted.get(k) ?? 0;
+          sumAll += c;
+          if (c !== attributed) reasons.push(`${k}: stored ${c} != ${attributed} attributed contributions`);
+          if (c > cap) reasons.push(`${k}: stored ${c} > limit ${cap}`);
+        }
+        if (sumAll > total) reasons.push(`total ${sumAll} > capacity ${total}`);
+        return { ok: reasons.length === 0, reasons, tally, unresolved: unresolved.length };
+      };
+      const installContrib = async () => {
+        await admin.query('CREATE TABLE IF NOT EXISTS ci02_txn_contrib (id bigserial PRIMARY KEY, txid bigint NOT NULL, req text, key text NOT NULL, delta int NOT NULL)');
+        await admin.query(`CREATE OR REPLACE FUNCTION ci02_contrib() RETURNS trigger LANGUAGE plpgsql AS $f$
+          BEGIN
+            INSERT INTO ci02_txn_contrib (txid, req, key, delta) VALUES (txid_current(), current_setting('aura_test.req', true), NEW."key",
+              CASE WHEN TG_OP = 'INSERT' THEN NEW."count" WHEN NEW."windowStart" IS DISTINCT FROM OLD."windowStart" THEN NEW."count" ELSE NEW."count" - OLD."count" END);
+            RETURN NEW;
+          END $f$`);
+        await admin.query('DROP TRIGGER IF EXISTS ci02_contrib ON "McpRateLimitWindow"');
+        await admin.query('CREATE TRIGGER ci02_contrib AFTER INSERT OR UPDATE ON "McpRateLimitWindow" FOR EACH ROW EXECUTE FUNCTION ci02_contrib()');
+        await admin.query('TRUNCATE ci02_txn_contrib');
+      };
+      const removeContrib = async () => {
+        await admin.query('DROP TRIGGER IF EXISTS ci02_contrib ON "McpRateLimitWindow"');
+        await admin.query('DROP FUNCTION IF EXISTS ci02_contrib()');
+        await admin.query('DROP TABLE IF EXISTS ci02_txn_contrib');
+      };
+      const readContrib = async (): Promise<Contrib[]> => (await q('SELECT txid::text AS txid, req, key, delta FROM ci02_txn_contrib WHERE delta <> 0 ORDER BY id')).map((r) => ({ txid: String(r.txid), req: r.req === null ? null : String(r.req), key: String(r.key), delta: Number(r.delta) }));
+      // Deterministic attribution coverage (synthetic; no database).
+      {
+        const ok: RateLimitDecision = { allowed: true, retryAfterSeconds: 0 };
+        const failed: RateLimitDecision = { allowed: false, retryAfterSeconds: 1, limitedBy: 'unavailable', cause: 'commit_failed' };
+        const tmo: RateLimitDecision = { allowed: false, retryAfterSeconds: 1, limitedBy: 'unavailable', cause: 'commit_timeout' };
+        const lostD: RateLimitDecision = { allowed: false, retryAfterSeconds: 1, limitedBy: 'unavailable', cause: 'commit_lost' };
+        const B = () => 'b';
+        const ct = (req: number | null, txid: string, delta = 1): Contrib => ({ txid, req: req === null ? null : String(req), key: 'b', delta });
+        const W = (...ws: (Wire | undefined)[]) => new Map(ws.flatMap((w, i) => (w ? [[i, w] as [number, Wire]] : [])));
+        const att = (out: RateLimitDecision[], w: WireLog, cs: Contrib[], n: number, cap = 30) => attribution(out, w, B, cs, new Map([['b', n]]), cap, 480);
+        // The exact ticket-39419 witness: A confirmed and incremented twice; B's acknowledgement is unknown and B never committed.
+        const wOut = [ok, lostD];
+        const wWire = W('acked', 'unknown');
+        const wContrib = [ct(0, 't1'), ct(0, 't1')];
+        const prevBound = commitAccounting(wOut.map((d, i) => ({ bucket: 'b', d, wire: wWire.get(i) })), new Map([['b', 2]]));
+        const wAtt = att(wOut, wWire, wContrib, 2);
+        check('I2b-1 attribution (39419 witness): one confirmed transaction increments twice + one unknown acknowledgement that never committed -- the previous aggregate bound ACCEPTS it, attribution REJECTS it', prevBound.ok && !wAtt.ok && wAtt.reasons.some((x) => x.includes('duplicate')), { prevBound: prevBound.ok, reasons: wAtt.reasons });
+        const legit = att([ok, tmo, lostD, failed, lostD], W('acked', 'acked', 'unknown', 'refused', 'unknown'), [ct(0, 't1'), ct(1, 't2'), ct(2, 't3')], 3);
+        check('I2b-1 attribution (synthetic): legitimate outcomes ACCEPTED -- confirmed, committed with late ack, committed with lost ack, explicit rejection, unknown ack that did not commit', legit.ok && legit.tally.confirmed === 1 && legit.tally.committed_ack_late === 1 && legit.tally.committed_ack_lost === 1 && legit.tally.rejected === 1 && legit.tally.not_committed_ack_unknown === 1, legit);
+        check('I2b-1 attribution (synthetic): an explicit refusal that contributed FAILS', !att([failed], W('refused'), [ct(0, 't1')], 1).ok);
+        check('I2b-1 attribution (synthetic): duplicate increment across two transactions of one request FAILS', !att([ok], W('acked'), [ct(0, 't1'), ct(0, 't2')], 2).ok);
+        check('I2b-1 attribution (synthetic): under-count -- acknowledged COMMIT with no contribution, or stored < attributed, FAILS', !att([ok], W('acked'), [], 0).ok && !att([ok], W('acked'), [ct(0, 't1')], 0).ok);
+        check('I2b-1 attribution (synthetic): stored count above the attributed sum FAILS (no aggregate slack)', !att([ok, lostD], W('acked', 'unknown'), [ct(0, 't1')], 2).ok);
+        check('I2b-1 attribution (synthetic): unsafe admission -- admitted with an unknown, rejected or missing COMMIT FAILS', !att([ok], W('unknown'), [ct(0, 't1')], 1).ok && !att([ok], W('refused'), [], 0).ok && !att([ok], W(undefined), [], 0).ok);
+        check('I2b-1 attribution (synthetic): committed but answered as an explicit failure ("commit_failed" with a contribution) FAILS', !att([failed], W('unknown'), [ct(0, 't1')], 1).ok);
+        check('I2b-1 attribution (synthetic): an UNRESOLVED contribution (no request tag) FAILS -- it cannot silently satisfy the count', !att([lostD], W('unknown'), [ct(null, 't9')], 1).ok);
+        check('I2b-1 attribution (synthetic): capacity -- a bucket above its limit FAILS', !att([ok, ok], W('acked', 'acked'), [ct(0, 't1'), ct(1, 't2')], 2, 1).ok);
+      }
+      // Deterministic late-COMMIT injection self-test (ticket 39419 COMMIT 2/3 ordering; fake client, no database).
+      {
+        const fakeSource = (acks: { i: number; release: () => void }[]) => async (): Promise<FaultClient> => ({
+          on: () => undefined, off: () => undefined, release: () => undefined,
+          query: (t: string) => (t === 'COMMIT' ? new Promise((res) => acks.push({ i: decideAls.getStore()?.i ?? -1, release: () => res({ command: 'COMMIT' }) })) : Promise.resolve({ command: t.split(' ')[0], rows: [] })),
+        });
+        const runOrder = async (order: 'in-order' | 'reverse', submissions: number) => {
+          const acks: { i: number; release: () => void }[] = [];
+          const wire: WireLog = new Map();
+          const fp = faultyPool('commit_refused', wire, { refuseEvery: 1000, refuseAt: 1, lateAt: 2, lateMs: 40, source: fakeSource(acks) });
+          const c = await fp.connect();
+          const done: { i: number; ms: number }[] = [];
+          const t0 = Date.now();
+          const pending = Array.from({ length: submissions }, (_, i) => decideAls.run({ i, sink: [] }, () => c.query('COMMIT').then(() => done.push({ i, ms: Date.now() - t0 }), () => done.push({ i, ms: Date.now() - t0 }))));
+          await new Promise((r) => setImmediate(r));
+          await new Promise((r) => setImmediate(r));
+          (order === 'in-order' ? [...acks] : [...acks].reverse()).forEach((a) => a.release());
+          await Promise.all(pending);
+          return { injected: fp.injected, wire: Object.fromEntries(wire), done, slow: done.filter((d) => d.ms >= 35).map((d) => d.i) };
+        };
+        const exactly = (inj: { refused: number[]; late: number[] }, want: { refused: number; late: number }) => inj.refused.length === want.refused && inj.late.length === want.late;
+        for (const order of ['in-order', 'reverse'] as const) {
+          const r = await runOrder(order, 3);
+          check(`I2b-1 late-COMMIT injection (${order} acknowledgements, 3 concurrent COMMITs): exactly the 2nd submitted COMMIT is delayed, the 1st refused, the 3rd untouched`, exactly(r.injected, { refused: 1, late: 1 }) && r.injected.late[0] === 2 && r.slow.length === 1 && r.slow[0] === 1 && r.wire[0] === 'refused' && r.wire[1] === 'acked' && r.wire[2] === 'acked', r);
+        }
+        const missing = await runOrder('in-order', 1);
+        check('I2b-1 late-COMMIT injection: when the intended injection does not occur (only 1 COMMIT), the exact-count verification FAILS', !exactly(missing.injected, { refused: 1, late: 1 }), missing.injected);
+      }
+      /** The flood's buckets: decision i is charged to global shard i mod 16. */
+      const shardRecs = (res: FloodResult, wire: WireLog): CommitRec[] => res.out.map((d, i) => ({ bucket: `preauth-mcp:global:g480n16:${i % SHARDS}`, d, wire: wire.get(i) }));
+      const shardCounts = (res: FloodResult) => new Map(res.shardRows.map((row) => [String(row.key), Number(row.count)]));
       const appLimiter = (p: unknown) => createPostgresRateLimiter({ pool: observed(p as never) as never, windowMs: 60_000 });
       mark = pools.length;
       const faulty = await flood([0, 1, 2].map(() => appLimiter(faultyPool('decide'))));
@@ -559,18 +840,108 @@ async function main() {
       const g4 = checkA(faulty);
       console.log(`  I2b-1 aggregate (injected driver faults) diagnostics: ${JSON.stringify({ outcomes: faulty.by, A: g4 })}`);
       check('I2b-1 negative control: injected pre-COMMIT driver faults are classified "driver" and FAIL A', !g4.ok && (faulty.by['unavailable:driver'] ?? 0) > 0, { outcomes: faulty.by, A: g4 });
-      mark = pools.length;
-      const lost = await flood([0, 1, 2].map(() => appLimiter(faultyPool('commit_lost'))));
-      await endSince(mark);
-      const g5 = checkA(lost);
-      console.log(`  I2b-1 aggregate (post-send connection loss) diagnostics: ${JSON.stringify({ outcomes: lost.by, counted: lost.shardSum, A: g5 })}`);
-      check('I2b-1 post-send driver failure: classified "commit_lost" (ambiguous accounting: counted may exceed admitted), never shedding -- it FAILS A', (lost.by['unavailable:commit_lost'] ?? 0) > 0 && !g5.ok && lost.admitted <= lost.shardSum && lost.shardSum <= G, { outcomes: lost.by, counted: lost.shardSum, A: g5 });
-      mark = pools.length;
-      const refused = await flood([0, 1, 2].map(() => appLimiter(faultyPool('commit_refused'))));
-      await endSince(mark);
-      const g6 = checkA(refused);
-      console.log(`  I2b-1 aggregate (explicit COMMIT refusal) diagnostics: ${JSON.stringify({ outcomes: refused.by, counted: refused.shardSum, A: g6 })}`);
-      check('I2b-1 explicit COMMIT failure (server SQLSTATE): classified "commit_failed", nothing counted for it, and it FAILS A', (refused.by['unavailable:commit_failed'] ?? 0) > 0 && !g6.ok && refused.shardSum === refused.admitted, { outcomes: refused.by, counted: refused.shardSum, A: g6 });
+      // AURA-MCP-CI-02 r3: the COMMIT scenarios run with the test-only contribution trigger (removed afterwards).
+      await installContrib();
+      try {
+        const wireTally = (w: WireLog) => ({ acked: [...w.values()].filter((x) => x === 'acked').length, refused: [...w.values()].filter((x) => x === 'refused').length, unknown: [...w.values()].filter((x) => x === 'unknown').length });
+        const shardOf = (i: number) => `preauth-mcp:global:g480n16:${i % SHARDS}`;
+        mark = pools.length;
+        await admin.query('TRUNCATE ci02_txn_contrib');
+        const lostWire: WireLog = new Map();
+        const lostPools = [0, 1, 2].map(() => faultyPool('commit_lost', lostWire, { tag: true }));
+        const lost = await flood(lostPools.map((fp) => appLimiter(fp)));
+        await endSince(mark);
+        const g5 = checkA(lost);
+        const lostAtt = attribution(lost.out, lostWire, shardOf, await readContrib(), shardCounts(lost), PER_SHARD, G);
+        const lostInjected = lostPools.reduce((x, fp) => x + fp.injected.refused.length, 0);
+        console.log(`  I2b-1 aggregate (post-send connection loss) diagnostics: ${JSON.stringify({ outcomes: lost.by, counted: lost.shardSum, wire: wireTally(lostWire), injected: lostInjected, attribution: lostAtt, A: { ok: g5.ok, reasons: g5.reasons } })}`);
+        check('I2b-1 post-send driver failure: classified "commit_lost" (ambiguous accounting: counted may exceed admitted), never shedding -- it FAILS A', (lost.by['unavailable:commit_lost'] ?? 0) > 0 && !g5.ok && lost.admitted <= lost.shardSum && lost.shardSum <= G, { outcomes: lost.by, counted: lost.shardSum, A: g5 });
+        check('I2b-1 post-send connection loss (attribution): every lost acknowledgement is resolved by the transaction evidence (committed, not admitted), stored == attributed per shard, no duplicate, within capacity', lostAtt.ok && lostAtt.unresolved === 0 && (lostAtt.tally.committed_ack_lost ?? 0) >= lost.by['unavailable:commit_lost'] && lostInjected > 0, { attribution: lostAtt, injected: lostInjected, outcomes: lost.by });
+
+        mark = pools.length;
+        await admin.query('TRUNCATE ci02_txn_contrib');
+        const refusedWire: WireLog = new Map();
+        const refusedPools = [0, 1, 2].map(() => faultyPool('commit_refused', refusedWire, { tag: true }));
+        const refused = await flood(refusedPools.map((fp) => appLimiter(fp)));
+        await endSince(mark);
+        const g6 = checkA(refused);
+        const refusedAcc = commitAccounting(shardRecs(refused, refusedWire), shardCounts(refused), PER_SHARD);
+        const refusedAtt = attribution(refused.out, refusedWire, shardOf, await readContrib(), shardCounts(refused), PER_SHARD, G);
+        const refusedDiag = { outcomes: refused.by, counted: refused.shardSum, wire: wireTally(refusedWire), accounting: refusedAcc, attribution: refusedAtt, A: { ok: g6.ok, reasons: g6.reasons } };
+        console.log(`  I2b-1 aggregate (explicit COMMIT refusal) diagnostics: ${JSON.stringify(refusedDiag)}`);
+        // AURA-MCP-CI-02: previously "counted === admitted". Run 45783279199 showed 365 admitted / 373 counted with
+        // 8 commit_timeout responses; the logs cannot attribute the 8 extra increments to transactions. The
+        // late-COMMIT mechanism is reproduced deterministically below; here every request is attributed.
+        check('I2b-1 explicit COMMIT failure (server SQLSTATE): classified "commit_failed", and it FAILS A', (refused.by['unavailable:commit_failed'] ?? 0) > 0 && !g6.ok, refusedDiag);
+        check('I2b-1 explicit COMMIT failure: refused COMMITs add nothing -- per shard admitted <= confirmed <= counted <= confirmed + unknown, no unsafe admission, no misclassification, every shard within 30', refusedAcc.ok && refusedAcc.counted === refused.shardSum && refused.shardSum <= G, refusedDiag);
+        check('I2b-1 explicit COMMIT failure (attribution): every rejected COMMIT contributed nothing, every admission is a confirmed committed transaction, stored == attributed per shard, no unresolved contribution', refusedAtt.ok && refusedAtt.unresolved === 0 && (refusedAtt.tally.rejected ?? 0) >= (refused.by['unavailable:commit_failed'] ?? 0), refusedDiag);
+
+        // Deterministic reproduction of the late-COMMIT mechanism behind run 45783279199: on each of 3 instances the
+        // 1st COMMIT is explicitly refused and the 2nd lands but is acknowledged AFTER the 1250 ms production deadline
+        // (commit_timeout). Injection decided at submission (ordinal captured before awaiting) and counted exactly.
+        {
+          const M = 60;
+          const wire: WireLog = new Map();
+          mark = pools.length;
+          await admin.query('TRUNCATE ci02_txn_contrib');
+          const fps = [0, 1, 2].map(() => faultyPool('commit_refused', wire, { refuseEvery: 1000, refuseAt: 1, lateAt: 2, lateMs: DEADLINE + 250, tag: true }));
+          const lim = fps.map((fp) => createPostgresRateLimiter({ pool: fp as never, windowMs: 60_000 }));
+          await admin.query('TRUNCATE "McpRateLimitWindow"');
+          const sink: (DecideObs | undefined)[] = new Array(M).fill(undefined);
+          const out = await Promise.all(Array.from({ length: M }, (_, i) => decideAls.run({ i, sink }, () => lim[i % 3].check(buildPreAuthRules('preauth-mcp', `2001:db8:c02::${i}`, { perAddress: 480, global: G, globalShards: SHARDS }, (n) => i % n)))));
+          await sleep(400); // the late acknowledgements have returned
+          await endSince(mark);
+          const rows = await q(`SELECT "key", "count" FROM "McpRateLimitWindow" WHERE "key" LIKE 'preauth-mcp:global:%'`);
+          const counted = new Map(rows.map((row) => [String(row.key), Number(row.count)]));
+          const recs: CommitRec[] = out.map((d, i) => ({ bucket: shardOf(i), d, wire: wire.get(i) }));
+          const acc = commitAccounting(recs, counted, PER_SHARD);
+          const att = attribution(out, wire, shardOf, await readContrib(), counted, PER_SHARD, G);
+          const by: Record<string, number> = {};
+          for (const d of out) {
+            const k = d.allowed ? 'admitted' : `${d.limitedBy}:${d.cause ?? 'none'}`;
+            by[k] = (by[k] ?? 0) + 1;
+          }
+          const injected = { refused: fps.map((fp) => fp.injected.refused), late: fps.map((fp) => fp.injected.late) };
+          const refusedIdx = [...wire].filter(([, w]) => w === 'refused').map(([i]) => i);
+          const lateLanded = out.filter((d, i) => !d.allowed && d.cause === 'commit_timeout' && wire.get(i) === 'acked').length;
+          const total = [...counted.values()].reduce((x, y) => x + y, 0);
+          const diag = { outcomes: by, counted: total, injected, refused: refusedIdx.length, lateLanded, accounting: acc, attribution: att };
+          console.log(`  I2b-1 COMMIT refusal + late acknowledgement (deterministic) diagnostics: ${JSON.stringify(diag)}`);
+          check('I2b-1 COMMIT regression (deterministic): exactly the intended injections happened -- per instance the 1st COMMIT refused and the 2nd acknowledged late (ordinals [1] and [2])', injected.refused.every((r) => r.length === 1 && r[0] === 1) && injected.late.every((l) => l.length === 1 && l[0] === 2), injected);
+          check('I2b-1 COMMIT regression (deterministic): 3 explicit refusals -> 3 "commit_failed", all refused, none counted', refusedIdx.length === 3 && (by['unavailable:commit_failed'] ?? 0) === 3 && refusedIdx.every((i) => !out[i].allowed && out[i].cause === 'commit_failed'), diag);
+          check('I2b-1 COMMIT regression (deterministic): exactly the 3 late-acknowledged COMMITs committed unadmitted ("commit_timeout"), attributed as committed_ack_late', lateLanded === 3 && att.tally.committed_ack_late === 3, diag);
+          check('I2b-1 COMMIT regression (deterministic): the pre-CI-02 assertion "counted === admitted" FAILS here (counted = admitted + 3 late)', total === acc.admitted + 3, diag);
+          check('I2b-1 COMMIT regression (deterministic): the wire bound PASSES and independent attribution PASSES with every outcome resolved (stored == attributed per shard, within capacity)', acc.ok && att.ok && att.unresolved === 0 && total <= G, diag);
+        }
+
+        // Live attribution controls (ticket 39419): one bucket, request identity selects the injection.
+        const liveAttr = async (inject: Pick<FaultOpts, 'duplicateFor' | 'lostRollbackFor'>, M: number) => {
+          const wire: WireLog = new Map();
+          mark = pools.length;
+          await admin.query('TRUNCATE ci02_txn_contrib');
+          await admin.query('TRUNCATE "McpRateLimitWindow"');
+          const fp = faultyPool('commit_refused', wire, { refuseEvery: 1_000_000, refuseAt: -1, tag: true, ...inject });
+          const lim = createPostgresRateLimiter({ pool: fp as never, windowMs: 60_000, decisionDeadlineMs: 30_000, lockTimeoutMs: 5000, statementTimeoutMs: 6000 });
+          const sink: (DecideObs | undefined)[] = new Array(M).fill(undefined);
+          const out: RateLimitDecision[] = [];
+          for (let i = 0; i < M; i += 1) out.push(await decideAls.run({ i, sink }, () => lim.check(buildPreAuthRules('preauth-mcp', `2001:db8:c03::${i}`, { perAddress: 480, global: G, globalShards: SHARDS }, () => 0))));
+          await endSince(mark);
+          const rows = await q(`SELECT "key", "count" FROM "McpRateLimitWindow" WHERE "key" LIKE 'preauth-mcp:global:%'`);
+          const counted = new Map(rows.map((row) => [String(row.key), Number(row.count)]));
+          const bucket = () => 'preauth-mcp:global:g480n16:0';
+          const prev = commitAccounting(out.map((d, i) => ({ bucket: bucket(), d, wire: wire.get(i) })), counted, PER_SHARD);
+          const att = attribution(out, wire, bucket, await readContrib(), counted, PER_SHARD, G);
+          return { out: out.map((d) => (d.allowed ? 'admitted' : `${d.limitedBy}:${d.cause}`)), wire: Object.fromEntries(wire), counted: Object.fromEntries(counted), injected: fp.injected, prevBound: prev.ok, attribution: att };
+        };
+        const okLost = await liveAttr({ lostRollbackFor: new Set([1]) }, 3);
+        console.log(`  I2b-1 live attribution (unknown acknowledgement, never committed) diagnostics: ${JSON.stringify(okLost)}`);
+        check('I2b-1 live attribution: an unknown acknowledgement whose transaction never committed is resolved as not committed -- 2 confirmed + 1 not committed, stored 2, ACCEPTED', okLost.attribution.ok && okLost.attribution.tally.confirmed === 2 && okLost.attribution.tally.not_committed_ack_unknown === 1 && okLost.counted['preauth-mcp:global:g480n16:0'] === 2 && okLost.injected.lostRollback.length === 1, okLost);
+        const dupLost = await liveAttr({ duplicateFor: new Set([0]), lostRollbackFor: new Set([1]) }, 2);
+        console.log(`  I2b-1 live attribution (39419 witness: duplicate + never-committed unknown) diagnostics: ${JSON.stringify(dupLost)}`);
+        check('I2b-1 live attribution (39419 witness): a confirmed transaction that increments twice + an unknown acknowledgement that never commits -- stored 2 satisfies the previous bound, attribution REJECTS it', dupLost.prevBound && !dupLost.attribution.ok && dupLost.attribution.reasons.some((x) => x.includes('duplicate')) && dupLost.counted['preauth-mcp:global:g480n16:0'] === 2 && dupLost.injected.duplicate.length === 1 && dupLost.injected.lostRollback.length === 1, dupLost);
+      } finally {
+        await removeContrib();
+      }
       // 7. Synthetic invalid outcomes.
       const synth = (d: RateLimitDecision): FloodResult => ({ out: Array.from({ length: N }, () => d), latencies: new Array(N).fill(10), admitted: d.allowed ? N : 0, by: {}, ms: 0, shardRows: [], shardSum: 0 });
       check('I2b-1 negative control: "0 admitted, 2000 unavailable (checkout)" FAILS A', !checkA(synth({ allowed: false, retryAfterSeconds: 1, limitedBy: 'unavailable', cause: 'checkout' })).ok);
@@ -766,17 +1137,182 @@ async function main() {
       check('I2b-1 aggregate: rejections were limits (429), not failures', exact.out.every((d) => d.allowed || d.limitedBy === 'preauth-mcp'), exact.by);
       check('I2b-1 B exact per-shard accounting under the extended budget: admitted = min(30, completed) per shard, a 429 only on a full shard, invariants hold', accounting(exact).length === 0, accounting(exact));
 
-      await admin.query('TRUNCATE "McpRateLimitWindow"');
+      // AURA-MCP-CI-02 (runs 45635380561, 45640197925). The deadlock check
+      // used to run its 400 decisions under the PRODUCTION 1250 ms deadline.
+      // All 400 share the rows user:dl-a and client:dl-b, so the row locks
+      // serialize them (by design), and every deadline starts at the same
+      // instant. On a slower runner the tail of that queue was shed as
+      // "unavailable" (cause deadline). That is fail-closed shedding, not a
+      // deadlock: Postgres reported 0 deadlocks both times. It was also a weak
+      // oracle: with lock_timeout (1000 ms) <= deadlock_timeout (1 s), a REAL
+      // deadlock is cancelled as 55P03 lock_timeout before the detector runs,
+      // so pg_stat_database.deadlocks stays 0. Now:
+      //   (a) the deadlock property runs under an explicit budget whose
+      //       lock_timeout exceeds deadlock_timeout, so a real deadlock would
+      //       surface as SQLSTATE 40P01 and in the counter. Every SQLSTATE is
+      //       recorded, and the counter is read as a delta after the backends
+      //       exit (stats flushed);
+      //   (b) negative control: a real opposite-order deadlock under the same
+      //       lock_timeout IS caught (40P01, counter +1);
+      //   (c) regression: the CI failure mode, made deterministic (+6 ms per
+      //       statement => >= 2.4 s of serialized lock holds > 1250 ms). The
+      //       production-deadline shortfall must be expected shedding, or a
+      //       wait cut by the limiter's own SET LOCAL bound (57014 / 55P03, one
+      //       per "driver" answer: PostgreSQL row-lock waits are not strictly
+      //       FIFO, so an early waiter can be starved for the full 1000 ms
+      //       statement_timeout -- measured in 6 of 25 local runs). Never 40P01.
+      //       The pre-CI-02 "all admitted" assertion FAILS on that result.
+      // Throughput under the production deadline stays covered by the
+      // aggregate gate above.
       const big = 1_000_000;
-      const mixed = await Promise.all(
-        Array.from({ length: 400 }, (_, i) => {
-          const set = [{ key: 'user:dl-a', limit: big }, { key: 'client:dl-b', limit: big }, { key: `preauth-mcp:global:${i % 2}`, limit: big }];
-          return instances[i % 3].check(i % 2 ? set.reverse() : set);
-        }),
-      );
-      check('I2b-1 deadlocks: 400 opposite-order multi-key decisions on 3 instances -> all admitted, none failed', mixed.every((d) => d.allowed), mixed.filter((d) => !d.allowed).map((d) => d.limitedBy).slice(0, 5));
-      const deadlocks = Number((await q(`SELECT deadlocks::int AS n FROM pg_stat_database WHERE datname = current_database()`))[0].n);
-      check('I2b-1 deadlocks: Postgres reports 0 deadlocks', deadlocks === 0, deadlocks);
+      const DL_KEYS = ['client:dl-b', 'preauth-mcp:global:0', 'preauth-mcp:global:1', 'user:dl-a'];
+      const deadlockSet = (i: number) => {
+        const set = [{ key: 'user:dl-a', limit: big }, { key: 'client:dl-b', limit: big }, { key: `preauth-mcp:global:${i % 2}`, limit: big }];
+        return i % 2 ? set.reverse() : set;
+      };
+      const DL_APP = 'aura-ci02-deadlock';
+      /** A pool that records every error (and its SQLSTATE) raised underneath the limiter; optional +ms per statement. */
+      const sqlSpy = (extra: PoolConfig, delayMs = 0) => {
+        const real = pool({ application_name: DL_APP, ...extra });
+        const errors: { code?: string; message: string; req?: number }[] = [];
+        return { errors, connect: async () => {
+          const c = await real.connect();
+          return { on: c.on.bind(c), off: c.off.bind(c), query: async (t: string, p2?: unknown[]) => {
+            if (delayMs > 0) await sleep(delayMs);
+            try {
+              return await c.query(t, p2 as unknown[]);
+            } catch (e) {
+              // AURA-MCP-CI-02 r3: each error carries the request that produced it (stable identity via decideAls).
+              errors.push({ code: (e as { code?: string }).code, message: String((e as Error).message).slice(0, 80), req: decideAls.getStore()?.i });
+              throw e;
+            }
+          }, release: (e?: unknown) => c.release(e as Error | undefined) };
+        } };
+      };
+      /** pg_stat_database.deadlocks once every backend of this scenario has exited (exit flushes its pending stats). */
+      const settledDeadlocks = async () => {
+        for (let i = 0; i < 50 && Number((await q(`SELECT count(*)::int AS n FROM pg_stat_activity WHERE application_name = $1`, [DL_APP]))[0].n) > 0; i += 1) await sleep(100);
+        await sleep(200);
+        await admin.query('SELECT pg_stat_clear_snapshot()');
+        return Number((await q(`SELECT deadlocks::int AS n FROM pg_stat_database WHERE datname = current_database()`))[0].n);
+      };
+      const deadlockTimeoutMs = Number((await q(`SELECT setting::int AS ms FROM pg_settings WHERE name = 'deadlock_timeout'`))[0].ms);
+      const DL_LOCK_TIMEOUT = 5000;
+      check('I2b-1 deadlocks precondition: the explicit lock_timeout exceeds deadlock_timeout (a real deadlock reaches the detector)', DL_LOCK_TIMEOUT >= 2 * deadlockTimeoutMs, { lockTimeoutMs: DL_LOCK_TIMEOUT, deadlockTimeoutMs });
+      const roomyFor = (p: unknown) => createPostgresRateLimiter({ pool: p as never, windowMs: 60_000, decisionDeadlineMs: 30_000, lockTimeoutMs: DL_LOCK_TIMEOUT, statementTimeoutMs: DL_LOCK_TIMEOUT + 1000 });
+      const hotCounts = async () => Object.fromEntries((await q(`SELECT "key", "count" FROM "McpRateLimitWindow" WHERE "key" = ANY($1::text[]) ORDER BY "key"`, [DL_KEYS])).map((r) => [r.key, r.count]));
+
+      // (a) the deadlock property, explicit budget.
+      await admin.query('TRUNCATE "McpRateLimitWindow"');
+      mark = pools.length;
+      let dl0 = await settledDeadlocks();
+      const dlPools = [0, 1, 2].map(() => sqlSpy({ max: 6, connectionTimeoutMillis: 30_000, query_timeout: 30_000 }));
+      const dlLimiters = dlPools.map(roomyFor);
+      const mixed = await Promise.all(Array.from({ length: 400 }, (_, i) => dlLimiters[i % 3].check(deadlockSet(i))));
+      await endSince(mark);
+      const dlDelta = (await settledDeadlocks()) - dl0;
+      const dlErrors = dlPools.flatMap((p) => p.errors);
+      const mixedBy: Record<string, number> = {};
+      for (const d of mixed) {
+        const k = d.allowed ? 'admitted' : `${d.limitedBy}:${d.cause ?? 'none'}`;
+        mixedBy[k] = (mixedBy[k] ?? 0) + 1;
+      }
+      const hot = await hotCounts();
+      check('I2b-1 deadlocks: 400 opposite-order multi-key decisions on 3 instances (explicit budget) -> all admitted, none failed', mixed.every((d) => d.allowed), mixedBy);
+      check('I2b-1 deadlocks: every hot row counted exactly the admitted decisions (400 / 400 / 200 + 200)', hot['user:dl-a'] === 400 && hot['client:dl-b'] === 400 && hot['preauth-mcp:global:0'] === 200 && hot['preauth-mcp:global:1'] === 200, hot);
+      check('I2b-1 deadlocks: no SQLSTATE 40P01 (deadlock) or 55P03 (lock timeout) and no other error underneath the limiter', dlErrors.length === 0, dlErrors.slice(0, 5));
+      check('I2b-1 deadlocks: Postgres reports 0 new deadlocks (counter delta after the backends exited)', dlDelta === 0, dlDelta);
+
+      // (b) negative control: the same oracle DOES see a real deadlock.
+      await admin.query('TRUNCATE "McpRateLimitWindow"');
+      await admin.query(`INSERT INTO "McpRateLimitWindow" ("key","windowStart","count","expiresAt") VALUES ('user:dl-x', now(), 0, now() + interval '1 hour'), ('user:dl-y', now(), 0, now() + interval '1 hour')`);
+      mark = pools.length;
+      dl0 = await settledDeadlocks();
+      const rawPool = pool({ application_name: DL_APP, max: 2, query_timeout: 30_000 });
+      const [ra, rb] = [await rawPool.connect(), await rawPool.connect()];
+      const opposite = async (c: typeof ra, first: string, second: string) => {
+        try {
+          await c.query(`BEGIN; SET LOCAL lock_timeout = '${DL_LOCK_TIMEOUT}ms'; SET LOCAL statement_timeout = '${DL_LOCK_TIMEOUT + 1000}ms'`);
+          await c.query(`SELECT 1 FROM "McpRateLimitWindow" WHERE "key" = $1 FOR UPDATE`, [first]);
+          await sleep(150);
+          await c.query(`SELECT 1 FROM "McpRateLimitWindow" WHERE "key" = $1 FOR UPDATE`, [second]);
+          await c.query('COMMIT');
+          return 'committed';
+        } catch (e) {
+          await c.query('ROLLBACK').catch(() => undefined);
+          return String((e as { code?: string }).code);
+        }
+      };
+      const raw = (await Promise.all([opposite(ra, 'user:dl-x', 'user:dl-y'), opposite(rb, 'user:dl-y', 'user:dl-x')])).sort();
+      ra.release();
+      rb.release();
+      await endSince(mark);
+      const rawDelta = (await settledDeadlocks()) - dl0;
+      check('I2b-1 deadlock oracle (negative control): a real opposite-order deadlock under the same lock_timeout -> one 40P01, the other commits, counter +1', raw[0] === '40P01' && raw[1] === 'committed' && rawDelta >= 1, { outcomes: raw, deadlocksDelta: rawDelta });
+
+      // (c) regression: the CI-02 failure mode, deterministic.
+      await admin.query('TRUNCATE "McpRateLimitWindow"');
+      mark = pools.length;
+      dl0 = await settledDeadlocks();
+      const slowDl = [0, 1, 2].map(() => sqlSpy({ max: 6 }, 6));
+      const slowLimiters = slowDl.map(appLimiter); // production defaults: 1250 ms deadline, 1000 ms lock / statement timeouts
+      const shedSink: (DecideObs | undefined)[] = new Array(400).fill(undefined);
+      const shedOut = await Promise.all(Array.from({ length: 400 }, (_, i) => decideAls.run({ i, sink: shedSink }, () => slowLimiters[i % 3].check(deadlockSet(i)))));
+      await endSince(mark);
+      const shedDelta = (await settledDeadlocks()) - dl0;
+      const shedBy: Record<string, number> = {};
+      for (const d of shedOut) {
+        const k = d.allowed ? 'admitted' : `${d.limitedBy}:${d.cause ?? 'none'}`;
+        shedBy[k] = (shedBy[k] ?? 0) + 1;
+      }
+      const shedAdmitted = shedOut.filter((d) => d.allowed).length;
+      const shedAmbiguous = shedOut.filter((d) => AMBIGUOUS.has(String(d.cause))).length;
+      const shedCounted = (await hotCounts())['user:dl-a'] ?? 0;
+      const shedCodes = slowDl.flatMap((p) => p.errors).filter((e) => e.code !== undefined);
+      const shedDiag = { outcomes: shedBy, counted: shedCounted, sqlstates: shedCodes.slice(0, 5), deadlocksDelta: shedDelta };
+      console.log(`  I2b-1 deadlocks regression (production deadline, +6 ms/statement) diagnostics: ${JSON.stringify(shedDiag)}`);
+      check('I2b-1 deadlocks regression: a serialized hot-row queue longer than the 1250 ms production deadline sheds -- the pre-CI-02 "all admitted" assertion FAILS here', !shedOut.every((d) => d.allowed), shedDiag);
+      const BOUNDED = new Set(['57014', '55P03']); // the limiter's own SET LOCAL statement_timeout / lock_timeout
+      /**
+       * AURA-MCP-CI-02 r3 (ticket 39419): REQUEST-SPECIFIC timeout attribution (replaces count matching, which let a
+       * 57014 on a deadline-refused request satisfy an unrelated "driver" refusal). Every SQLSTATE must belong to
+       * an identified request; 40P01 or any code other than 57014 / 55P03 fails; a bounded-wait code is permitted
+       * only on a request that was itself SAFELY REFUSED ("unavailable"); and every "driver" refusal needs a
+       * bounded-wait code of ITS OWN. Every other shortfall must be expected deadline shedding.
+       */
+      const timeoutAttribution = (out: RateLimitDecision[], errs: { code?: string; req?: number }[]) => {
+        const reasons: string[] = [];
+        const coded = errs.filter((e) => e.code !== undefined);
+        for (const e of coded) {
+          if (e.req === undefined || !Number.isInteger(e.req) || e.req < 0 || e.req >= out.length) reasons.push(`SQLSTATE ${e.code} not attributed to a request`);
+          else if (e.code === '40P01') reasons.push(`request ${e.req}: 40P01 deadlock`);
+          else if (!BOUNDED.has(String(e.code))) reasons.push(`request ${e.req}: unexpected SQLSTATE ${e.code}`);
+          else if (out[e.req].allowed || out[e.req].limitedBy !== 'unavailable') reasons.push(`request ${e.req}: bounded-wait ${e.code} but the request was not safely refused`);
+        }
+        out.forEach((d, i) => {
+          if (d.allowed) return;
+          if (d.limitedBy !== 'unavailable') reasons.push(`request ${i}: refused as ${String(d.limitedBy)}`);
+          else if (d.cause === 'driver') {
+            if (!coded.some((e) => e.req === i && BOUNDED.has(String(e.code)))) reasons.push(`request ${i}: "driver" refusal without a bounded-wait SQLSTATE of its own`);
+          } else if (!EXPECTED.has(String(d.cause))) reasons.push(`request ${i}: unexpected cause ${String(d.cause)}`);
+        });
+        return { ok: reasons.length === 0, reasons };
+      };
+      {
+        const dl: RateLimitDecision = { allowed: false, retryAfterSeconds: 1, limitedBy: 'unavailable', cause: 'deadline' };
+        const drv: RateLimitDecision = { allowed: false, retryAfterSeconds: 1, limitedBy: 'unavailable', cause: 'driver' };
+        const okD: RateLimitDecision = { allowed: true, retryAfterSeconds: 0 };
+        const w1 = timeoutAttribution([dl, drv], [{ code: '57014', req: 0 }]);
+        const prevW1 = [dl, drv].filter((d) => d.cause === 'driver').length === [{ code: '57014' }].filter((e) => BOUNDED.has(e.code)).length;
+        check('I2b-1 timeout attribution (39419 witness): a 57014 on a deadline-refused request does NOT satisfy an unrelated "driver" refusal (previous count matching accepted it)', prevW1 && !w1.ok && w1.reasons.some((x) => x.includes('request 1') && x.includes('of its own')), { prevCountMatching: prevW1, reasons: w1.reasons });
+        check('I2b-1 timeout attribution (synthetic): a "driver" refusal with its OWN 57014 / 55P03, plus a 57014 on another safely refused request, PASSES', timeoutAttribution([drv, drv, dl, okD], [{ code: '57014', req: 0 }, { code: '55P03', req: 1 }, { code: '57014', req: 2 }]).ok);
+        check('I2b-1 timeout attribution (synthetic): 40P01 FAILS even on a refused request; an unattributed SQLSTATE FAILS; a bounded-wait code on an ADMITTED request FAILS; an unexpected SQLSTATE FAILS', !timeoutAttribution([drv], [{ code: '40P01', req: 0 }]).ok && !timeoutAttribution([drv], [{ code: '57014' }]).ok && !timeoutAttribution([okD], [{ code: '57014', req: 0 }]).ok && !timeoutAttribution([drv], [{ code: '57014', req: 0 }, { code: '23505', req: 0 }]).ok);
+      }
+      const shedAttr = timeoutAttribution(shedOut, shedCodes);
+      const shedDriver = shedOut.filter((d) => !d.allowed && d.limitedBy === 'unavailable' && d.cause === 'driver').length;
+      check('I2b-1 deadlocks regression: every shortfall is expected deadline shedding (deadline / commit_timeout / commit_late) or a "driver" refusal attributed to ITS OWN bounded-wait 57014 / 55P03', shedAttr.ok, { ...shedDiag, driver: shedDriver, attribution: shedAttr });
+      check('I2b-1 deadlocks regression: no 40P01 (deadlock), every SQLSTATE attributed to a safely refused request, and 0 new deadlocks', shedAttr.ok && shedCodes.every((e) => e.code !== '40P01') && shedDelta === 0, { ...shedDiag, attribution: shedAttr });
+      check('I2b-1 deadlocks regression: admitted <= counted <= admitted + ambiguous COMMITs (shedding never admits extra)', shedAdmitted <= shedCounted && shedCounted <= shedAdmitted + shedAmbiguous, { admitted: shedAdmitted, counted: shedCounted, ambiguous: shedAmbiguous });
 
       // Boundaries and window rollover (1 s windows).
       const short = createPostgresRateLimiter({ pool: pool({ max: 3 }), windowMs: 1000 });
