@@ -5,7 +5,7 @@
  * timing assessment full preview generation would have run. Requires
  * DATABASE_URL.
  */
-import { upsertUserByEmail, updateBirthProfile, getUserById, beginTransaction, createPlannedActivity } from '../apps/web/lib/db';
+import { upsertUserByEmail, updateUserLocation, updateBirthProfile, getUserById, beginTransaction, createPlannedActivity } from '../apps/web/lib/db';
 import { createSessionToken, sign } from '../apps/web/lib/auth';
 import { handleDayConstructorPreviewRequest } from '../apps/web/lib/dayConstructorPreviewRequest';
 import { createRealDayConstructorOrchestratorDeps } from '../apps/web/lib/dayConstructorOrchestrator';
@@ -15,6 +15,52 @@ import { getDatePartsInTimezone } from '../apps/web/lib/timezone';
 import { signPreviewItem, verifyPreviewItem } from '../apps/web/lib/dayConstructorPreviewIntegrity';
 import { POST as previewItemRoute } from '../apps/web/app/api/day-constructor/preview-item/route';
 import { POST as acceptRoute } from '../apps/web/app/api/day-constructor/accept/route';
+import { resolveTzOffsetMinutes } from '../apps/web/lib/timezone';
+import { computeAssistantWindows } from '../packages/recommendation/src/dailyAssistant';
+import { addCivilDays, fixtureAnchorMonday, realClockReferenceForFixture } from './lifecycleFixtureCalendar';
+
+/*
+ * AURA-CI-08 -- deterministic fixture.
+ *
+ * WHY. This suite used to pick the user's timezone from the wall clock (the first zone where it was 01:00-08:00 local), keep Chennai's coordinates,
+ * build a REMAINING_TODAY window, and try a fixed list of replacement offsets from wherever the preview happened to place the item. At about
+ * 11:55-12:49Z the chosen zone is Pacific/Kiritimati (UTC+14). At 12:20Z the preview placed the 60-minute item at 06:35Z, the window ended at
+ * Kiritimati midnight (10:00Z), and every fixed offset clamped into 07:05-09:00Z -- all overlapping that Friday's genuine Yama Gandam
+ * (07:53-09:19Z). The engine correctly returned FRICTION_WINDOW_BLOCKED for every candidate, so checks 1/8/9/9-inverse/3b failed with no defect.
+ *
+ * THE FIX. (a) The fixture timezone is pinned and consistent with the user's coordinates. (b) The target day is a future EXPLICIT_RANGE day anchored
+ * with the lifecycleFixtureCalendar convention, so the run's time of day never shrinks or shifts the window. (c) Replacement times are not guessed:
+ * one is derived from the day's own timing windows (clear of Rahu Kalam, Yama Gandam and Gulika Kalam), independently of the endpoint's response,
+ * and the route must then return UPDATED for it. (d) A legitimate rejection is asserted too: a candidate wholly inside Rahu Kalam or Yama Gandam is refused.
+ * Panchangam eligibility is never bypassed: the route still assesses every candidate itself.
+ */
+// Test-only repeatability-matrix hooks; never set in CI. Each zone is paired with a city inside it, so solar times match the clock.
+const FIXTURE_ZONES: Record<string, { cityName: string; latitude: number; longitude: number }> = {
+  'Asia/Kolkata': { cityName: 'Chennai', latitude: 13.0827, longitude: 80.2707 },
+  'America/New_York': { cityName: 'New York', latitude: 40.7128, longitude: -74.006 },
+  'Europe/London': { cityName: 'London', latitude: 51.5074, longitude: -0.1278 },
+  'Australia/Sydney': { cityName: 'Sydney', latitude: -33.8688, longitude: 151.2093 },
+  'America/Los_Angeles': { cityName: 'Los Angeles', latitude: 34.0522, longitude: -118.2437 },
+  'Pacific/Kiritimati': { cityName: 'Kiritimati', latitude: 1.87, longitude: -157.4 },
+};
+const TZ = process.env.PREVIEW_ITEM_FIXTURE_TIMEZONE ?? 'Asia/Kolkata';
+const PLACE = FIXTURE_ZONES[TZ];
+if (!PLACE) throw new Error(`PREVIEW_ITEM_FIXTURE_TIMEZONE must be one of ${Object.keys(FIXTURE_ZONES).join(', ')}`);
+// Day offset from the anchor Monday (0 = Monday .. 6 = Sunday); default Tuesday, the lifecycleFixtureCalendar convention used by CI-07.
+const DAY_OFFSET = Number(process.env.PREVIEW_ITEM_FIXTURE_DAY_OFFSET ?? '1');
+if (!Number.isInteger(DAY_OFFSET) || DAY_OFFSET < 0 || DAY_OFFSET > 6) throw new Error('PREVIEW_ITEM_FIXTURE_DAY_OFFSET must be an integer 0..6');
+const WINDOW_START_MINUTE = 6 * 60;
+const WINDOW_END_MINUTE = 21 * 60;
+const GRID_MINUTES = 15;
+
+/** The instant at `minute` past local midnight of civil `date` in `tz` (iterated so DST days resolve correctly). */
+function localInstant(date: string, minute: number, tz: string): Date {
+  const [y, m, d] = date.split('-').map(Number);
+  const wall = Date.UTC(y, m - 1, d) + minute * 60000;
+  let t = wall;
+  for (let i = 0; i < 3; i += 1) t = wall - resolveTzOffsetMinutes(tz, new Date(t)) * 60000;
+  return new Date(t);
+}
 
 let allPassed = true;
 function check(label: string, condition: boolean) {
@@ -27,20 +73,12 @@ async function sql(t: string, p: unknown[] = []): Promise<any[]> {
   const c = await beginTransaction();
   try { const r = await c.query(t, p); await c.query('COMMIT'); return r.rows; } catch (e) { await c.query('ROLLBACK').catch(() => {}); throw e; } finally { c.release(); }
 }
-function earlyDayZone(now: Date): string {
-  for (const tz of ['Pacific/Kiritimati', 'Pacific/Auckland', 'Australia/Sydney', 'Asia/Tokyo', 'Asia/Kolkata', 'Europe/London', 'America/New_York', 'America/Los_Angeles', 'Pacific/Honolulu', 'Etc/GMT+12', 'Pacific/Pago_Pago']) {
-    const hour = Number(new Intl.DateTimeFormat('en-GB', { timeZone: tz, hour: '2-digit', hourCycle: 'h23' }).format(now));
-    if (hour >= 1 && hour <= 8) return tz;
-  }
-  return 'Etc/GMT+12';
-}
-
 async function main() {
-  const now = new Date();
-  const TZ = earlyDayZone(now);
   const mkUser = async (label: string) => {
-    const U = await upsertUserByEmail({ email: `test-preview-item-${label}@example.com`, cityName: 'Chennai', latitude: 13.0827, longitude: 80.2707, timezone: TZ });
-    await updateBirthProfile(U.id, { birthDate: '1990-06-15', birthTime: '08:30', birthCityName: 'Chennai', birthLatitude: 13.0827, birthLongitude: 80.2707, birthTimezone: TZ });
+    const existing = await upsertUserByEmail({ email: `test-preview-item-${label}@example.com`, cityName: PLACE.cityName, latitude: PLACE.latitude, longitude: PLACE.longitude, timezone: TZ });
+    // upsertUserByEmail returns an EXISTING row unchanged, so on a reused database the stored location could be another run's; pin it explicitly.
+    const U = await updateUserLocation(existing.id, { cityName: PLACE.cityName, latitude: PLACE.latitude, longitude: PLACE.longitude, timezone: TZ });
+    await updateBirthProfile(U.id, { birthDate: '1990-06-15', birthTime: '08:30', birthCityName: PLACE.cityName, birthLatitude: PLACE.latitude, birthLongitude: PLACE.longitude, birthTimezone: TZ });
     return { U, tok: createSessionToken(U.id, U.email) };
   };
   const A = await mkUser('a');
@@ -48,13 +86,54 @@ async function main() {
   const users = [A.U.id, B.U.id];
   const plansOf = async (userId: string) => sql(`SELECT id, title FROM "PlannedActivity" WHERE "userId" = $1`, [userId]);
   let n = 0;
-  const targetDate = getDatePartsInTimezone(TZ, now).dateStr;
+  // The ONE wall-clock read: it only places the fixture day in the future (lifecycleFixtureCalendar); no assertion depends on the time of day.
+  const targetDate = addCivilDays(fixtureAnchorMonday(realClockReferenceForFixture(), TZ), DAY_OFFSET);
+  const explicitStart = localInstant(targetDate, WINDOW_START_MINUTE, TZ).toISOString();
+  const explicitEnd = localInstant(targetDate, WINDOW_END_MINUTE, TZ).toISOString();
+  if (getDatePartsInTimezone(TZ, new Date(explicitStart)).dateStr !== targetDate) throw new Error(`fixture window does not start on ${targetDate} in ${TZ}`);
+
+  // The target day's own Panchangam timing windows, from the same engine function the route's CHECK assessment uses (computeAssistantWindows),
+  // as absolute instants. Rahu Kalam and Yama Gandam are the engine's friction windows; Gulika Kalam is additionally an inauspicious
+  // COMMENCEMENT window for start-sensitive activities (Inauspicious Period Precedence Fix V1). A replacement clear of all three is the
+  // fixture's "valid replacement window"; a start wholly inside Rahu Kalam / Yama Gandam is its "legitimate rejection".
+  type Slot = { start: Date; end: Date };
+  const dayWindows = (() => {
+    const noon = localInstant(targetDate, 12 * 60, TZ);
+    const spans = computeAssistantWindows({ now: noon, latitude: PLACE.latitude, longitude: PLACE.longitude, timezone: TZ, tzOffsetMinutes: resolveTzOffsetMinutes(TZ, noon) } as any);
+    return spans.map((s: any) => ({ type: s.type as string, start: localInstant(targetDate, s.startMinutes, TZ), end: localInstant(targetDate, s.endMinutes, TZ) }));
+  })();
+  const INAUSPICIOUS = new Set(['RAHU_KALAM', 'YAMA', 'GULIKA']);
+  const overlaps = (t: number, durationMs: number, s: Slot) => t < s.end.getTime() && t + durationMs > s.start.getTime();
+  // First grid start inside the construction window that differs from the item's own start, avoids `busy`, and overlaps none of the day's
+  // inauspicious windows. Derived from the timing windows alone -- never from the endpoint's own response. No fallback: if the fixture day had
+  // no such slot the suite fails loudly instead of guessing.
+  const eligibleReplacement = (item: any, window: { start: Date | string; end: Date | string }, busy: Slot[] = []): string => {
+    const durationMs = new Date(item.end).getTime() - new Date(item.start).getTime();
+    const windowStart = new Date(window.start).getTime();
+    const windowEnd = new Date(window.end).getTime();
+    for (let t = windowStart; t + durationMs <= windowEnd; t += GRID_MINUTES * MIN) {
+      if (t === new Date(item.start).getTime()) continue;
+      if (busy.some((b) => overlaps(t, durationMs, b))) continue;
+      if (dayWindows.some((w) => INAUSPICIOUS.has(w.type) && overlaps(t, durationMs, w))) continue;
+      return new Date(t).toISOString();
+    }
+    throw new Error(`no replacement slot clear of Rahu Kalam / Yama Gandam / Gulika Kalam for ${item.intentId} on ${targetDate} (${TZ})`);
+  };
+  // A start wholly inside the day's Rahu Kalam or Yama Gandam and inside the construction window.
+  const frictionCandidate = (item: any, window: { start: Date | string; end: Date | string }): { start: string; type: string } => {
+    const durationMs = new Date(item.end).getTime() - new Date(item.start).getTime();
+    for (const w of dayWindows.filter((x) => x.type === 'RAHU_KALAM' || x.type === 'YAMA')) {
+      if (w.end.getTime() - w.start.getTime() < durationMs) continue;
+      if (w.start.getTime() >= new Date(window.start).getTime() && w.start.getTime() + durationMs <= new Date(window.end).getTime()) return { start: w.start.toISOString(), type: w.type };
+    }
+    throw new Error(`no Rahu Kalam / Yama Gandam span long enough for ${item.intentId} inside the window on ${targetDate} (${TZ})`);
+  };
 
   const preview = async (user: typeof A, intents: unknown[]) => {
     const result = await handleDayConstructorPreviewRequest({
       getSession: () => ({ userId: user.U.id }),
       getUser: (id) => getUserById(id),
-      getBody: async () => ({ targetDate, intents }),
+      getBody: async () => ({ targetDate, constructionWindowSource: 'EXPLICIT_RANGE', explicitStart, explicitEnd, intents }),
       now: () => new Date(),
       createOrchestratorDeps: createRealDayConstructorOrchestratorDeps,
     });
@@ -78,26 +157,11 @@ async function main() {
 
     const windowBody = JSON.parse(JSON.stringify(pv.constructionWindow));
     const itemBody = () => ({ intentId: flexItem.intentId, activityId: flexItem.activityId, title: flexItem.title, start: flexItem.start, end: flexItem.end, placementSource: flexItem.placementSource });
-    // The real muhurta/astrology engine can genuinely flag a given clock
-    // instant as a friction window (e.g. Rahu Kalam) -- this is a REAL
-    // conflict signal this endpoint is correctly designed to surface, not
-    // a bug in it (see check 6's UNAVAILABLE case below). A fixed single
-    // offset is therefore not a reliable test fixture; try several
-    // well-spaced offsets inside the window and use the first one the
-    // engine genuinely accepts, so checks 1/8/9/10/13 exercise a real
-    // UPDATED response rather than coincidentally hitting a real conflict.
-    const findWorkingCandidate = async (): Promise<{ candidateStart: string; result: any }> => {
-      const offsetsHours = [2, 1, 3, 4, 0.5, 5, 6];
-      for (const h of offsetsHours) {
-        const ms = new Date(flexItem.start).getTime() + h * HOUR;
-        const clamped = Math.min(ms, new Date(pv.constructionWindow.end).getTime() - 60 * MIN);
-        const candidateStart = new Date(clamped).toISOString();
-        const result = await postPreviewItem(A, { window: windowBody, item: itemBody(), acceptanceToken: flexItem.acceptanceToken, candidateStart });
-        if (result.status === 'UPDATED') return { candidateStart, result };
-      }
-      return { candidateStart: new Date(new Date(flexItem.start).getTime() + 2 * HOUR).toISOString(), result: { status: 'REJECTED', reason: 'UNAVAILABLE_ALL_OFFSETS_TRIED' } };
-    };
-    const { candidateStart: newCandidateStart, result: valid } = await findWorkingCandidate();
+    // The real muhurta engine genuinely refuses instants in inauspicious windows -- a REAL conflict this endpoint must surface (check 6b). The
+    // replacement time is therefore chosen from the day's timing windows (eligibleReplacement), and the route is then required to return UPDATED
+    // for exactly that time -- one request, no retry loop, no fallback.
+    const newCandidateStart = eligibleReplacement(flexItem, pv.constructionWindow);
+    const valid = await postPreviewItem(A, { window: windowBody, item: itemBody(), acceptanceToken: flexItem.acceptanceToken, candidateStart: newCandidateStart });
 
     // 1. Valid original item + valid replacement time -> UPDATED.
     check('1. a valid original item + a valid replacement time returns status UPDATED with a new item/token', valid.status === 'UPDATED' && typeof valid.item?.acceptanceToken === 'string' && valid.item.acceptanceToken !== flexItem.acceptanceToken);
@@ -144,25 +208,26 @@ async function main() {
     const atWindowStart = await postPreviewItem(A, { window: windowBody, item: itemBody(), acceptanceToken: flexItem.acceptanceToken, candidateStart: pv.constructionWindow.start });
     check('7. a candidate exactly at the window start boundary is accepted (inclusive bound), timezone-consistent with the original window', atWindowStart.status === 'UPDATED' || atWindowStart.status === 'REJECTED' && atWindowStart.reason === 'UNAVAILABLE');
 
-    // Generic version of the same real-conflict-tolerant offset search used
-    // above, parameterized so checks 10 and 13 (different previews, different
-    // windows) don't depend on one fixed offset that might coincide with a
-    // real friction window for their particular item/time.
-    // `avoid` (optional): plans this user ALREADY has. This endpoint is blocker-unaware by
-    // design (see check 14), so an edited time it returns UPDATED for can still overlap a plan
-    // an earlier check saved; a check that then expects acceptance to SAVE must not pick such
-    // a time, or the acceptance path correctly rejects it as a CONFLICT (AURA-CI-01).
-    const findCandidateStartFor = async (baseStartIso: string | Date, windowEndIso: string | Date, postFn: (candidateStart: string) => Promise<any>, avoid?: { durationMs: number; busy: { start: Date; end: Date }[] }): Promise<{ candidateStart: string; result: any }> => {
-      const offsetsHours = [1.5, 1, 2, 3, 0.5, 4, 5];
-      for (const h of offsetsHours) {
-        const ms = new Date(baseStartIso).getTime() + h * HOUR;
-        const clamped = Math.min(ms, new Date(windowEndIso).getTime() - 60 * MIN);
-        if (avoid && avoid.busy.some((b) => clamped < b.end.getTime() && clamped + avoid.durationMs > b.start.getTime())) continue;
-        const candidateStart = new Date(clamped).toISOString();
-        const result = await postFn(candidateStart);
-        if (result.status === 'UPDATED') return { candidateStart, result };
-      }
-      return { candidateStart: new Date(new Date(baseStartIso).getTime() + 1.5 * HOUR).toISOString(), result: { status: 'REJECTED', reason: 'UNAVAILABLE_ALL_OFFSETS_TRIED' } };
+    // 6b. Legitimate Panchangam rejection: a candidate wholly inside the day's Rahu Kalam or Yama Gandam is refused as UNAVAILABLE /
+    // FRICTION_WINDOW_BLOCKED, and nothing is signed. Asserted on the "Deep focus block" item: the engine blocks friction windows by task
+    // significance (scoreCandidate), and low-significance tasks such as Reading/Walk are legitimately NOT blocked there, so they are not used here.
+    const friction = frictionCandidate(flexItem, pv.constructionWindow);
+    const inFriction = await postPreviewItem(A, { window: windowBody, item: itemBody(), acceptanceToken: flexItem.acceptanceToken, candidateStart: friction.start });
+    check(`6b. a replacement time wholly inside ${friction.type} is REJECTED as UNAVAILABLE / FRICTION_WINDOW_BLOCKED and never returns an item/signature`, inFriction.status === 'REJECTED' && inFriction.reason === 'UNAVAILABLE' && inFriction.detail === 'FRICTION_WINDOW_BLOCKED' && inFriction.item === undefined);
+
+    // Checks 10/11/13/14 choose their replacement time the same way (eligibleReplacement) and then require the route to return UPDATED for it.
+    // `busy` (optional): plans this user ALREADY has. This endpoint is blocker-unaware by design (see check 14), so an edited time it returns
+    // UPDATED for can still overlap a plan an earlier check saved; a check that then expects acceptance to SAVE must not pick such a time, or
+    // the acceptance path correctly rejects it as a CONFLICT (AURA-CI-01).
+    const editTo = async (pvX: any, itemX: any, busy?: Slot[]): Promise<{ candidateStart: string; result: any }> => {
+      const candidateStart = eligibleReplacement(itemX, pvX.constructionWindow, busy);
+      const result = await postPreviewItem(A, {
+        window: JSON.parse(JSON.stringify(pvX.constructionWindow)),
+        item: { intentId: itemX.intentId, activityId: itemX.activityId, title: itemX.title, start: itemX.start, end: itemX.end, placementSource: itemX.placementSource },
+        acceptanceToken: itemX.acceptanceToken,
+        candidateStart,
+      });
+      return { candidateStart, result };
     };
 
     // 10. Sibling items in a real multi-item preview are provably untouched by editing one of them.
@@ -174,12 +239,7 @@ async function main() {
     const itemA: any = items2.find((i: any) => i.intentId === 'fl2a');
     const itemB: any = items2.find((i: any) => i.intentId === 'fl2b');
     if (pv2 && itemA && itemB) {
-      const { result: editA } = await findCandidateStartFor(itemA.start, pv2.constructionWindow.end, (candidateStart) => postPreviewItem(A, {
-        window: JSON.parse(JSON.stringify(pv2.constructionWindow)),
-        item: { intentId: itemA.intentId, activityId: itemA.activityId, title: itemA.title, start: itemA.start, end: itemA.end, placementSource: itemA.placementSource },
-        acceptanceToken: itemA.acceptanceToken,
-        candidateStart,
-      }));
+      const { result: editA } = await editTo(pv2, itemA);
       check('10. editing one item in a multi-item preview leaves the sibling item completely unaffected by this endpoint (it only ever receives/returns the one edited item)', editA.status === 'UPDATED' && editA.item.intentId === itemA.intentId && itemB.start === items2.find((i: any) => i.intentId === 'fl2b')!.start);
     } else {
       check('10. multi-item sibling-isolation precondition (two FLEXIBLE items placed)', false);
@@ -192,12 +252,7 @@ async function main() {
     const item5: any = pv5?.constructedDay.proposedItems.find((i: any) => i.intentId === 'fl5');
     if (pv5 && item5) {
       const countBeforeWrite = (await plansOf(A.U.id)).length;
-      const { result: write5 } = await findCandidateStartFor(item5.start, pv5.constructionWindow.end, (candidateStart) => postPreviewItem(A, {
-        window: JSON.parse(JSON.stringify(pv5.constructionWindow)),
-        item: { intentId: item5.intentId, activityId: item5.activityId, title: item5.title, start: item5.start, end: item5.end, placementSource: item5.placementSource },
-        acceptanceToken: item5.acceptanceToken,
-        candidateStart,
-      }));
+      const { result: write5 } = await editTo(pv5, item5);
       check('11. zero PlannedActivity rows were written by the re-signing endpoint', write5.status === 'UPDATED' && (await plansOf(A.U.id)).length === countBeforeWrite);
     } else {
       check('11. precondition (a fresh, never-before-posted preview item for the zero-write check)', false);
@@ -214,13 +269,7 @@ async function main() {
     if (pv3 && item3) {
       // Check 12 has just SAVED a plan for A; the edited time must not land on it.
       const busy3 = (await sql(`SELECT "plannedStartAt" AS start, "plannedEndAt" AS end FROM "PlannedActivity" WHERE "userId" = $1`, [A.U.id])).map((r: any) => ({ start: new Date(r.start), end: new Date(r.end) }));
-      const duration3 = new Date(item3.end).getTime() - new Date(item3.start).getTime();
-      const { candidateStart: newCandidate3, result: edited3 } = await findCandidateStartFor(item3.start, pv3.constructionWindow.end, (candidateStart) => postPreviewItem(A, {
-        window: JSON.parse(JSON.stringify(pv3.constructionWindow)),
-        item: { intentId: item3.intentId, activityId: item3.activityId, title: item3.title, start: item3.start, end: item3.end, placementSource: item3.placementSource },
-        acceptanceToken: item3.acceptanceToken,
-        candidateStart,
-      }), { durationMs: duration3, busy: busy3 });
+      const { candidateStart: newCandidate3, result: edited3 } = await editTo(pv3, item3, busy3);
       if (edited3.status === 'UPDATED') {
         const acceptBody3 = buildAcceptRequestBody(pv3, `preview-item-edit-accept-${Date.now()}-${n++}`);
         acceptBody3.proposedItems[0] = { ...acceptBody3.proposedItems[0], start: edited3.item.start, end: edited3.item.end };
@@ -244,12 +293,7 @@ async function main() {
     const pv4 = await preview(A, [{ id: 'fl4', title: 'Stretching', durationMinutes: 30, flexibility: 'FLEXIBLE', activityId: 'stretching' }]);
     const item4: any = pv4?.constructedDay.proposedItems.find((i: any) => i.intentId === 'fl4');
     if (pv4 && item4) {
-      const { result: edited4 } = await findCandidateStartFor(item4.start, pv4.constructionWindow.end, (candidateStart) => postPreviewItem(A, {
-        window: JSON.parse(JSON.stringify(pv4.constructionWindow)),
-        item: { intentId: item4.intentId, activityId: item4.activityId, title: item4.title, start: item4.start, end: item4.end, placementSource: item4.placementSource },
-        acceptanceToken: item4.acceptanceToken,
-        candidateStart,
-      }));
+      const { result: edited4 } = await editTo(pv4, item4);
       if (edited4.status === 'UPDATED') {
         await createPlannedActivity({
           userId: A.U.id,
