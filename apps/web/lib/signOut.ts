@@ -248,7 +248,7 @@ async function run(deps: SignOutDeps): Promise<SignOutResult> {
     // only EXACTLY the confirmed records (never anything added later).
     let owned: OwnedDiscardReport = { unknown: true, removed: 0, removedPossiblySent: 0, keptInFlight: 0, failed: 0 };
     if (snapshot.ok) {
-      const d = await discardRecords([...snapshot.records.map((r) => r.recordId), ...snapshot.corruptIds], { tab: getTabId() });
+      const d = await discardRecords([...snapshot.records.map((r) => r.recordId), ...snapshot.corruptIds], { tab: getTabId(), owner });
       owned = { unknown: false, removed: d.removed, removedPossiblySent: d.removedPossiblySent, keptInFlight: d.keptInFlight, failed: d.failed };
     }
     const legacy = readLegacySnapshot();

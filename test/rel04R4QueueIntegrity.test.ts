@@ -61,7 +61,7 @@ async function main() {
     const tab = await tabAs(dev, A, 'tab1');
     const r = await tab.q.readOwnedQueue(A);
     const crids = r.ok ? r.records.map((x) => x.item.clientRequestId).sort() : [];
-    check('M1 every valid owned interim entry (R1 array, R2 per-entry, R3 record) is migrated with its payload intact', r.ok && JSON.stringify(crids) === JSON.stringify(['crid-m-q3', 'crid-m-q4', 'crid-m-v2']) && r.records.find((x) => x.item.clientRequestId === 'crid-m-q4')!.recordId === 'r4x' && r.records.find((x) => x.item.clientRequestId === 'crid-m-v2')!.item.activityTitle === 'v2 entry');
+    check('M1 every valid owned interim entry (R1 array, R2 per-entry, R3 record) is migrated with its payload intact', r.ok && JSON.stringify(crids) === JSON.stringify(['crid-m-q3', 'crid-m-q4', 'crid-m-v2']) && /* R7: an aura_q4 entry migrates to its ACCOUNT-SCOPED identity ('r4x' stays an alias of A's only) */ r.records.find((x) => x.item.clientRequestId === 'crid-m-q4')!.recordId === tab.q.migratedRecordId(r.records.find((x) => x.item.clientRequestId === 'crid-m-q4')!.item, A) && r.records.find((x) => x.item.clientRequestId === 'crid-m-v2')!.item.activityTitle === 'v2 entry');
     check('M1 sources are removed only after the copy committed; an unparseable source is left in place (never guessed at); another account\'s source is untouched', !storage.data.has('offline_habit_queue_v2:' + A) && !storage.data.has(`aura_q3:${A}:crid-m-q3`) && !storage.data.has(`aura_q4:${A}:crid-m-q4:r4x`) && storage.data.get(`aura_q4:${A}:crid-bad:rbad`) === '{not json' && storage.data.has('offline_habit_queue_v2:' + B));
   }
 

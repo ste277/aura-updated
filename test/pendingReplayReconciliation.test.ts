@@ -252,7 +252,7 @@ check(
     const src = fs.readFileSync('apps/web/lib/activitySync.ts', 'utf8');
     const classify = src.indexOf('const outcome = classifyHabitLogSyncOutcome(status);');
     const keepRetry = src.indexOf("if (outcome === 'retry') { await releaseClaim(token); continue; }", classify);
-    const removeSettled = src.indexOf('const r = await settleRecords(group.map((g) => g.recordId), token);', keepRetry);
+    const removeSettled = src.indexOf('const r = await settleRecords(group.map((g) => g.recordId), token, { owner: lease.account });', keepRetry);
     return classify > 0 && keepRetry > classify && removeSettled > keepRetry && !/removeOwnedEntries|setItem\(|localStorage/.test(src);
   })()
 );

@@ -87,7 +87,7 @@ export async function submitActivityLog(payload: HabitLogPayload, tempId: string
     const outbox = stored.status === 'stored' ? stored.recordId : null;
     const token = stored.status === 'stored' ? stored.claim : null;
     // R5: release and settlement are fenced by THIS attempt's token.
-    const settle = async () => { if (outbox) await settleRecords([outbox], token ?? undefined); };
+    const settle = async () => { if (outbox) await settleRecords([outbox], token ?? undefined, { owner: lease.account }); };
     const release = async () => { if (token) await releaseClaim(token); };
     // Final checks with no await before the send.
     if (!lease.isCurrent() || isTransitionActive()) {
@@ -120,9 +120,11 @@ export interface ReplayResult {
   removeFailed: number;
   /** Identities with conflicting payloads, quarantined (never sent). */
   conflicts: number;
+  /** R7: identities held because their ownership could not be established (kept, never sent automatically). */
+  held: number;
   stoppedBecause: null | 'account-changed' | 'account-hold' | 'unreadable' | 'busy' | 'unavailable' | 'upgrade-required' | 'transition';
 }
-const EMPTY = (stoppedBecause: ReplayResult['stoppedBecause']): ReplayResult => ({ attempted: 0, confirmed: 0, removed: 0, removeFailed: 0, conflicts: 0, stoppedBecause });
+const EMPTY = (stoppedBecause: ReplayResult['stoppedBecause']): ReplayResult => ({ attempted: 0, confirmed: 0, removed: 0, removeFailed: 0, conflicts: 0, held: 0, stoppedBecause });
 
 const replaysInFlight = new Map<string, Promise<ReplayResult>>();
 
@@ -153,6 +155,7 @@ async function replayLocked(fetchImpl: typeof fetch, binding: AccountBinding): P
     const read = await readOwnedQueue(lease.account);
     if (!read.ok) return { ...result, stoppedBecause: 'unreadable' as const };
     result.conflicts = read.conflicts.length;
+    result.held = read.held.length;
     for (const group of read.groups) {
       const head = group[0];
       if (!lease.isCurrent()) { result.stoppedBecause = 'account-changed'; break; }
@@ -185,7 +188,7 @@ async function replayLocked(fetchImpl: typeof fetch, binding: AccountBinding): P
       if (outcome === 'retry') { await releaseClaim(token); continue; } // no response or 5xx: ambiguous, keep
       if (outcome === 'confirmed') result.confirmed++;
       // Settled: remove exactly the records of this identity that were read (claim cleared only if still ours).
-      const r = await settleRecords(group.map((g) => g.recordId), token);
+      const r = await settleRecords(group.map((g) => g.recordId), token, { owner: lease.account });
       result.removed += r.removed;
       result.removeFailed += r.failed;
     }

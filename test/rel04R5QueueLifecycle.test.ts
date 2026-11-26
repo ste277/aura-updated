@@ -94,9 +94,15 @@ async function main() {
     const dev = new Device();
     const t1 = await tabAs(dev, 't3a');
     const t2 = openTab('t3b'); await t2.acct.fetchVerifiedSession(dev.fetch as any);
-    // Two records of ONE logical request (same account + clientRequestId + payload): an R3 record and an R2 entry.
-    storage.data.set(`aura_q4:${A}:crid-t3:r3rec`, JSON.stringify({ ...owned('same', 'crid-t3'), recordId: 'r3rec', queuedAt: 1 }));
-    storage.data.set(`aura_q3:${A}:crid-t3`, JSON.stringify(owned('same', 'crid-t3')));
+    // Two records of ONE logical request (same account + clientRequestId + payload). R7: migration now
+    // normalizes mixed-format sources of one entry to ONE record, so the two-record state is the one an
+    // earlier build (R5/R6) persisted in IndexedDB, written here directly.
+    {
+      const db = await t1.q.__openQueueDbForTests();
+      const w = db.transaction(['records'], 'readwrite');
+      for (const [recordId, queuedAt] of [['r3rec', 1], ['m-r6-scoped', 2]] as const) w.objectStore('records').put({ recordId, ownerUserId: A, clientRequestId: 'crid-t3', item: { ...owned('same', 'crid-t3'), recordId }, queuedAt });
+      await new Promise<void>((res, rej) => { w.oncomplete = () => res(); w.onerror = () => rej(w.error); });
+    }
     const r = await t1.q.readOwnedQueue(A);
     const ids = r.ok ? r.records.map((x) => x.recordId) : [];
     const c1 = await t1.q.claimForDispatch(ids[0], 't3a');

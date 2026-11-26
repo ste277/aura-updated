@@ -61,9 +61,12 @@ function isQueuedHabitLog(value: unknown): value is QueuedHabitLog {
  *               ONE claim per LOGICAL request (account + clientRequestId), whatever number of
  *               records carry it; `attempt` identifies one send attempt (expires after CLAIM_TTL_MS)
  *   dispatches  key -> { key, attempts, lastAt }   the request has been handed to the network at least once
- *   tombstones  recordId -> { recordId, ownerUserId, at }   settled/discarded: no migration may recreate it
+ *   tombstones  key -> { recordId: key, ownerUserId, ref, at }   settled/discarded: no migration may recreate it
+ *               R7: key = markerKey(owner, recordId) -- a marker is ACCOUNT-SCOPED; markers written before R7
+ *               are keyed by the bare recordId and are honoured only for the account they name
  * (R5: version 2 re-keys claims and dispatch marks by account + clientRequestId; the
- * version-1 marks are carried over in the upgrade transaction.)
+ * version-1 marks are carried over in the upgrade transaction. R7 needs no schema change: existing
+ * records and markers are kept as they are and read through the ownership rules below.)
  *
  * Lifecycle guarantees:
  *   create     enqueue checks identity and writes the record (+ the caller's claim) in one transaction:
@@ -84,6 +87,13 @@ function isQueuedHabitLog(value: unknown): value is QueuedHabitLog {
  *              what was copied (a changed or unparseable source is left in place: uncertain sources are
  *              preserved). Tombstones are kept for as long as ANY interim source of that account still
  *              exists (source retirement), and only then expire.
+ *   ownership  (R7) a recordId alone never proves ownership. Every migrated entry gets the account-scoped
+ *              identity migratedRecordId(item, owner) whatever its source format; earlier ids are aliases
+ *              honoured only for a record/marker naming the same account; dedup is by account +
+ *              clientRequestId + payload. Settle and discard act only on the given account's records and
+ *              write only that account's markers. If only a pre-R7 marker of ANOTHER account exists for an
+ *              entry's shared id, its ownership cannot be established: it is kept and shown, but HELD
+ *              (never sent automatically), and the user's discard still removes it.
  *   failures   any IndexedDB failure => reads report `ok:false` (unreadable, never "empty"), writes report
  *              'failed'. There is NO fallback to localStorage or memory.
  */
@@ -110,6 +120,8 @@ export interface QueueRecord {
   inFlight: boolean;
   /** This request was handed to the network at least once (it may have been sent and saved). */
   dispatched: boolean;
+  /** R7: this account's ownership of the entry's earlier decision is unverified -- kept and shown, never sent automatically. */
+  held: boolean;
 }
 
 export type QueueRead =
@@ -123,6 +135,8 @@ export type QueueRead =
       groups: QueueRecord[][];
       /** clientRequestIds with conflicting payloads (quarantined, never sent). */
       conflicts: string[];
+      /** R7: clientRequestIds held because ownership could not be established (kept, shown, discardable; never sent automatically). */
+      held: string[];
       /** recordIds whose value is not a valid entry (kept, counted, discardable). */
       corruptIds: string[];
     }
@@ -170,6 +184,17 @@ export function legacyMigratedRecordId(item: QueuedHabitLog): string {
   return 'm' + hash(`${item.clientRequestId}|${canonicalPayload(item)}`);
 }
 
+/**
+ * R7 -- the settlement/discard marker key of `recordId` FOR `ownerUserId`.
+ * Every marker written from R7 on is keyed by account + recordId, so no
+ * account's settlement or discard can ever replace another account's marker,
+ * whatever recordId the two share. Markers written before R7 are keyed by the
+ * bare recordId; they are honoured only for the account they name (see markerOf).
+ */
+export function markerKey(ownerUserId: string, recordId: string): string {
+  return `t\u0000${ownerUserId}\u0000${recordId}`;
+}
+
 /** The logical request a record belongs to (claims and dispatch marks are per request). */
 export function requestKey(ownerUserId: string, clientRequestId: string): string {
   return `${ownerUserId}\u0000${clientRequestId}`;
@@ -180,10 +205,18 @@ export interface ClaimToken { readonly key: string; readonly attempt: string }
 
 // ------------------------------------------------------------------ IndexedDB plumbing
 
-type Stored = { recordId: string; ownerUserId: string; clientRequestId: string; item: OwnedQueuedHabitLog; queuedAt: number };
+/**
+ * `held` (R7): migrated, but this account's ownership of the entry's earlier
+ * decision could not be established (a pre-R7 marker under one of its shared
+ * ids names ANOTHER account, so this account's own settle/discard marker may
+ * have been overwritten). Kept, shown and discardable; never sent automatically.
+ */
+type Stored = { recordId: string; ownerUserId: string; clientRequestId: string; item: OwnedQueuedHabitLog; queuedAt: number; held?: 'ownership-unverified' };
 type Claim = { key: string; ownerUserId: string; clientRequestId: string; tab: string; attempt: string; at: number };
 type Dispatch = { key: string; attempts: number; lastAt: number };
-type Tomb = { recordId: string; ownerUserId: string; at: number };
+/** `recordId` is the store key: markerKey(owner, ref) from R7 on; the bare recordId for pre-R7 markers. */
+type Tomb = { recordId: string; ownerUserId: string; at: number; ref?: string };
+type Stores = Record<'records' | 'claims' | 'dispatches' | 'tombstones', IDBObjectStore>;
 const STORES = ['records', 'claims', 'dispatches', 'tombstones'] as const;
 
 let dbPromise: Promise<IDBDatabase> | null = null;
@@ -297,9 +330,56 @@ function keysWithPrefix(s: Storage, prefix: string): string[] {
 
 const fresh = (c: Claim | undefined, now: number) => Boolean(c && now - c.at < CLAIM_TTL_MS && c.at <= now + 5_000);
 
+// ------------------------------------------------------------------ ownership (R7: one mechanism for every persisted identity)
+//
+// A recordId alone is NEVER proof of ownership: pre-R7 formats share ids between
+// accounts (R3 aura_q4 migrated ids, R4/R5 owner-less migrated ids). Ownership is
+// established only by the account stored WITH a record or marker:
+//   record  owned  <=> record.ownerUserId === owner (and it is the same logical entry:
+//                      account + clientRequestId + canonical payload)
+//   marker  owned  <=> markerKey(owner, id) exists (R7+), OR a pre-R7 bare-id marker whose
+//                      ownerUserId === owner, OR an R3 localStorage marker aura_q4t:<owner>:<id>
+//   marker foreign <=> only a pre-R7 bare-id marker naming ANOTHER account exists for one of
+//                      the entry's ids: this account's own decision may have been overwritten.
+
+type MarkerState = 'owned' | 'foreign' | 'none';
+
+/** Is there a settlement/discard marker of `owner` for any of `ids`? */
+async function markerOf(st: Stores, owner: string, ids: string[], lsTombs: Set<string>): Promise<MarkerState> {
+  let foreign = false;
+  for (const id of ids) {
+    if (lsTombs.has(id)) return 'owned';
+    if ((await asPromise(st.tombstones.get(markerKey(owner, id)))) as Tomb | undefined) return 'owned';
+    const bare = (await asPromise(st.tombstones.get(id))) as Tomb | undefined;
+    if (bare) { if (bare.ownerUserId === owner) return 'owned'; foreign = true; }
+  }
+  return foreign ? 'foreign' : 'none';
+}
+
+/** This account's existing record of the same logical entry (any identity format), if any. */
+async function ownedRecordOf(st: Stores, owner: string, item: QueuedHabitLog, ids: string[]): Promise<Stored | undefined> {
+  const mine = canonicalPayload(item);
+  const same = (r: Stored | undefined): r is Stored => Boolean(r && r.ownerUserId === owner && r.clientRequestId === item.clientRequestId && isQueuedHabitLog(r.item) && canonicalPayload(r.item) === mine);
+  for (const id of ids) {
+    const r = (await asPromise(st.records.get(id))) as Stored | undefined;
+    if (same(r)) return r;
+  }
+  const byRequest = (await asPromise(st.records.index('ownerCrid').getAll(IDBKeyRange.only([owner, item.clientRequestId])))) as Stored[];
+  return byRequest.find(same);
+}
+
+/** Writes `owner`'s marker for `recordId` (never a bare-id marker: it could replace another account's). */
+async function writeMarker(st: Stores, owner: string, recordId: string, at: number) {
+  await asPromise(st.tombstones.put({ recordId: markerKey(owner, recordId), ownerUserId: owner, ref: recordId, at } satisfies Tomb));
+}
+
 // ------------------------------------------------------------------ migration (owned interim formats)
 
-/** One interim entry: the id it migrates to, plus earlier ids that also identify it (owned by the same account only). */
+/**
+ * One interim entry: `recordId` is its account-scoped identity (the id it migrates to, whatever its source
+ * format); `aliases` are the pre-R7 ids an earlier build may have stored it or its marker under -- honoured
+ * only for a record or marker that names this same account.
+ */
 interface Candidate { recordId: string; aliases: string[]; item: OwnedQueuedHabitLog }
 interface MigrationSource { key: string; raw: string; candidates: Candidate[] }
 /**
@@ -331,7 +411,10 @@ function inspectSources(owner: string): Inspection {
       if (raw === null) continue;
       let v: unknown; try { v = JSON.parse(raw); } catch { continue; } // unparseable: left in place, never guessed at
       if (!valid(v) || !v.recordId) continue;
-      sources.push({ key, raw, candidates: [{ recordId: v.recordId, aliases: [], item: v }] });
+      // R7: an aura_q4 recordId is NOT account-scoped (the R3 migrator derived it from clientRequestId + payload
+      // only), so it is an alias like any other pre-R7 id; the record itself gets the account-scoped identity.
+      const legacy = legacyMigratedRecordId(v);
+      sources.push({ key, raw, candidates: [{ recordId: migratedRecordId(v, owner), aliases: v.recordId === legacy ? [legacy] : [v.recordId, legacy], item: v }] });
     }
     for (const key of v3) {
       const raw = s.getItem(key);
@@ -372,20 +455,15 @@ async function migrateOwnedSources(owner: string): Promise<MigrationState> {
         let all = true;
         for (const c of src.candidates) {
           const ids = [c.recordId, ...c.aliases];
-          let found = ids.some((id) => first.lsTombs.has(id));
-          for (const id of ids) {
-            if (found) break;
-            const t = (await asPromise(st.tombstones.get(id))) as Tomb | undefined;
-            if (t && t.ownerUserId === owner) { found = true; break; } // settled or discarded before, for this account
-            const r = (await asPromise(st.records.get(id))) as Stored | undefined;
-            if (r && r.ownerUserId === owner) { found = true; break; } // already migrated, for this account
-          }
-          if (!found) {
-            const existing = (await asPromise(st.records.get(c.recordId))) as Stored | undefined;
-            if (existing) { all = false; continue; } // never reuse another account's record (cannot happen with owner-scoped ids)
-            const rec: Stored = { recordId: c.recordId, ownerUserId: owner, clientRequestId: c.item.clientRequestId, item: { ...c.item, recordId: c.recordId }, queuedAt: c.item.queuedAt ?? 0 };
-            await asPromise(st.records.add(rec));
-          }
+          const marker = await markerOf(st, owner, ids, first.lsTombs);
+          if (marker === 'owned') continue; // settled or discarded before, BY THIS ACCOUNT
+          if (await ownedRecordOf(st, owner, c.item, ids)) continue; // already stored for this account (any identity format)
+          const existing = (await asPromise(st.records.get(c.recordId))) as Stored | undefined;
+          if (existing) { all = false; continue; } // never reuse another account's record (account-scoped ids: only a hash collision)
+          const rec: Stored = { recordId: c.recordId, ownerUserId: owner, clientRequestId: c.item.clientRequestId, item: { ...c.item, recordId: c.recordId }, queuedAt: c.item.queuedAt ?? 0 };
+          // Ownership of the entry's earlier decision cannot be established: keep it, never send it automatically.
+          if (marker === 'foreign') rec.held = 'ownership-unverified';
+          await asPromise(st.records.add(rec));
         }
         if (all) ok.add(src.key);
       }
@@ -443,7 +521,7 @@ export async function readOwnedQueue(ownerUserId: string): Promise<QueueRead> {
       const item = r.item;
       if (!isQueuedHabitLog(item) || item.ownerUserId !== ownerUserId || item.clientRequestId !== r.clientRequestId) { corruptIds.push(r.recordId); continue; }
       const key = requestKey(r.ownerUserId, r.clientRequestId);
-      records.push({ recordId: r.recordId, item: { ...item, recordId: r.recordId, queuedAt: r.queuedAt }, inFlight: fresh(claims.get(key), now), dispatched: dispatches.has(key) });
+      records.push({ recordId: r.recordId, item: { ...item, recordId: r.recordId, queuedAt: r.queuedAt }, inFlight: fresh(claims.get(key), now), dispatched: dispatches.has(key), held: Boolean(r.held) });
     }
     // Deterministic order: queued time, then log time, then identity (entries queued in the same millisecond).
     records.sort((a, b) => (a.item.queuedAt ?? 0) - (b.item.queuedAt ?? 0) || a.item.logTimestamp.localeCompare(b.item.logTimestamp) || a.item.clientRequestId.localeCompare(b.item.clientRequestId) || a.recordId.localeCompare(b.recordId));
@@ -451,11 +529,14 @@ export async function readOwnedQueue(ownerUserId: string): Promise<QueueRead> {
     for (const r of records) byCrid.set(r.item.clientRequestId, [...(byCrid.get(r.item.clientRequestId) ?? []), r]);
     const groups: QueueRecord[][] = [];
     const conflicts: string[] = [];
+    const held: string[] = [];
+    const heldItems: OwnedQueuedHabitLog[] = [];
     for (const [crid, rs] of byCrid) {
       if (new Set(rs.map((r) => canonicalPayload(r.item))).size > 1) conflicts.push(crid);
+      else if (rs.some((r) => r.held)) { held.push(crid); heldItems.push(rs[0].item); } // shown, never a replay group
       else groups.push(rs);
     }
-    return { ok: true, items: groups.map((g) => g[0].item), records, groups, conflicts, corruptIds };
+    return { ok: true, items: [...groups.map((g) => g[0].item), ...heldItems], records, groups, conflicts, held, corruptIds };
   } catch {
     return { ok: false };
   }
@@ -511,7 +592,8 @@ export async function enqueueOwned(item: OwnedQueuedHabitLog, { claimFor }: { cl
         const rec: Stored = { recordId, ownerUserId: item.ownerUserId, clientRequestId: item.clientRequestId, item: { ...item, recordId }, queuedAt: now };
         await asPromise(st.records.add(rec));
       }
-      const claim = claimFor ? await takeClaim(st, item.ownerUserId, item.clientRequestId, claimFor, now) : null;
+      // R7: a held request (ownership unverified) is never claimed for sending.
+      const claim = claimFor && !same.some((r) => r.held) ? await takeClaim(st, item.ownerUserId, item.clientRequestId, claimFor, now) : null;
       return { status: 'stored', recordId, claim } as const;
     });
   } catch {
@@ -519,7 +601,7 @@ export async function enqueueOwned(item: OwnedQueuedHabitLog, { claimFor }: { cl
   }
 }
 
-export type ClaimResult = { status: 'claimed'; claim: ClaimToken } | { status: 'gone' } | { status: 'in-flight' } | { status: 'failed' };
+export type ClaimResult = { status: 'claimed'; claim: ClaimToken } | { status: 'gone' } | { status: 'in-flight' } | { status: 'held' } | { status: 'failed' };
 
 /**
  * Atomically: a record of this request still exists and no attempt holds a
@@ -532,6 +614,7 @@ export async function claimForDispatch(recordId: string, tab: string): Promise<C
     return await tx('readwrite', async (st) => {
       const rec = (await asPromise(st.records.get(recordId))) as Stored | undefined;
       if (!rec) return { status: 'gone' } as const;
+      if (rec.held) return { status: 'held' } as const; // R7: ownership unverified -- never sent automatically
       const claim = await takeClaim(st, rec.ownerUserId, rec.clientRequestId, tab, now);
       return claim ? ({ status: 'claimed', claim } as const) : ({ status: 'in-flight' } as const);
     });
@@ -554,7 +637,10 @@ export async function releaseClaim(token: ClaimToken): Promise<'released' | 'sup
   }
 }
 
-export interface RemovalResult { removed: number; alreadyGone: number; failed: number; superseded?: boolean }
+export interface RemovalResult { removed: number; alreadyGone: number; failed: number; superseded?: boolean; /** R7: records of another account, left untouched. */ foreign?: number }
+
+/** R7: the account a settlement/discard acts for (explicit, or the claim token's). */
+const ownerOfToken = (token?: ClaimToken) => (token ? token.key.split('\u0000')[0] : undefined);
 
 /**
  * Settlement after a DEFINITIVE server answer: removes exactly these records
@@ -562,19 +648,21 @@ export interface RemovalResult { removed: number; alreadyGone: number; failed: n
  * is still `token`'s attempt; a dispatch mark is cleared once no record of the
  * request remains.
  */
-export async function settleRecords(recordIds: Iterable<string>, token?: ClaimToken): Promise<RemovalResult> {
+export async function settleRecords(recordIds: Iterable<string>, token?: ClaimToken, opts: { owner?: string } = {}): Promise<RemovalResult> {
   const ids = [...recordIds];
+  const owner = opts.owner ?? ownerOfToken(token);
   try {
     const now = Date.now();
     return await tx('readwrite', async (st) => {
-      const out: RemovalResult = { removed: 0, alreadyGone: 0, failed: 0 };
+      const out: RemovalResult = { removed: 0, alreadyGone: 0, failed: 0, foreign: 0 };
       const keys = new Set<string>();
       for (const id of ids) {
         const rec = (await asPromise(st.records.get(id))) as Stored | undefined;
         if (!rec) { out.alreadyGone++; continue; }
+        if (owner !== undefined && rec.ownerUserId !== owner) { out.foreign!++; continue; } // R7: never another account's record
         keys.add(requestKey(rec.ownerUserId, rec.clientRequestId));
         await asPromise(st.records.delete(id));
-        await asPromise(st.tombstones.put({ recordId: id, ownerUserId: rec.ownerUserId, at: now } satisfies Tomb));
+        await writeMarker(st, rec.ownerUserId, id, now);
         out.removed++;
       }
       if (token) {
@@ -591,7 +679,7 @@ export async function settleRecords(recordIds: Iterable<string>, token?: ClaimTo
       return out;
     });
   } catch {
-    return { removed: 0, alreadyGone: 0, failed: ids.length };
+    return { removed: 0, alreadyGone: 0, failed: ids.length, foreign: 0 };
   }
 }
 
@@ -605,6 +693,8 @@ export interface DiscardResult {
   alreadyGone: number;
   /** Could not be removed (storage failure): still stored for their account. */
   failed: number;
+  /** R7: records of another account, left untouched. */
+  foreign?: number;
 }
 
 /**
@@ -612,22 +702,23 @@ export interface DiscardResult {
  * a request another context is sending right now are kept; records of a request
  * already dispatched are removed but reported as possibly sent.
  */
-export async function discardRecords(recordIds: Iterable<string>, { tab }: { tab: string }): Promise<DiscardResult> {
+export async function discardRecords(recordIds: Iterable<string>, { tab, owner }: { tab: string; owner?: string }): Promise<DiscardResult> {
   const ids = [...recordIds];
   try {
     const now = Date.now();
     return await tx('readwrite', async (st) => {
-      const out: DiscardResult = { removed: 0, removedPossiblySent: 0, keptInFlight: 0, alreadyGone: 0, failed: 0 };
+      const out: DiscardResult = { removed: 0, removedPossiblySent: 0, keptInFlight: 0, alreadyGone: 0, failed: 0, foreign: 0 };
       const touched = new Set<string>();
       for (const id of ids) {
         const rec = (await asPromise(st.records.get(id))) as Stored | undefined;
         if (!rec) { out.alreadyGone++; continue; }
+        if (owner !== undefined && rec.ownerUserId !== owner) { out.foreign!++; continue; } // R7: never another account's record
         const key = requestKey(rec.ownerUserId, rec.clientRequestId);
         const c = (await asPromise(st.claims.get(key))) as Claim | undefined;
         if (fresh(c, now) && c!.tab !== tab) { out.keptInFlight++; continue; }
         const dispatched = Boolean(await asPromise(st.dispatches.get(key)));
         await asPromise(st.records.delete(id));
-        await asPromise(st.tombstones.put({ recordId: id, ownerUserId: rec.ownerUserId, at: now } satisfies Tomb));
+        await writeMarker(st, rec.ownerUserId, id, now);
         touched.add(key);
         out.removed++;
         if (dispatched) out.removedPossiblySent++;
@@ -640,7 +731,7 @@ export async function discardRecords(recordIds: Iterable<string>, { tab }: { tab
       return out;
     });
   } catch {
-    return { removed: 0, removedPossiblySent: 0, keptInFlight: 0, alreadyGone: 0, failed: ids.length };
+    return { removed: 0, removedPossiblySent: 0, keptInFlight: 0, alreadyGone: 0, failed: ids.length, foreign: 0 };
   }
 }
 
