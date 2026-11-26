@@ -9,28 +9,71 @@
 | Path | What |
 |---|---|
 | `library/catalogue.json`, `library/schema.json` | C1 rev. 4 catalogue and schema. Byte-identical to the C1 deliverables. |
-| `src/library.mjs` | Loader (capability E1-E1):<br>• schema validation, with only supported keywords allowed (`src/schema-validate.mjs`);<br>• the C1 content policy, ported line by line from `reference/check_catalogue.py`;<br>• the 29-record inventory manifest;<br>• the E1 capability check. |
-| `src/descriptors.mjs` | Essential descriptors (E1-E4, E1-E5): head slope, the upward line's ending zone, the heart line's ending zone, finger-base checks and boundary margins |
-| `src/observations.mjs` | I1 feature set + finger bases → observations. The feature set is validated by the I1 contract (`adapter/feature-set-adapter.mjs`, validation only). |
-| `src/compose.mjs` | Deterministic selection, placement and composition (E1-E2): three modes, RC-1 to RC-14 |
-| `src/index.mjs` | `generateE1Reading(input, { synthetic: true, mode })`, `composeFromObservations(...)`, `loadLibrary(...)` |
-| `reference/` | The C1 reference oracle and checker, corrected in R2 (originals preserved byte-identical in `reference/original-c1-rev4/`; see `reference/README.md`), plus harness scripts. This is an independent expected-output reference, not the engine. |
-| `test/` | `node --test test/*.test.mjs`. Needs `python3` for the reference checks. |
+| **`src/reading.ts`** | **The reading interface:** `generateSyntheticReading(input, { synthetic: true, mode })`. It builds the I1 feature set from **one** synthetic input, using the frozen I1 builder. |
+| `src/engine-core.mjs` | Internal pipeline: verified construction → minted observations → reading |
+| `src/construction.mjs` | Exact ports of the I1 frame, trace placement and ratio maths. They re-derive and verify everything E1 reads from the same input. |
+| `src/observations.mjs` | Observations, with RC-13 reason codes. Only a minted observation set can be composed. |
+| `src/compose.mjs` | `planSelection`: ids and codes only, never text.<br>`composeReading`: text, pinned library, minted observations, full output validation. |
+| `src/library.mjs`, `src/schema-validate.mjs`, `src/packaged.mjs` | Loader and lint; the pinned packaged library |
+| `src/descriptors.mjs`, `src/grid.mjs` | Descriptors and the I1 numerical contract |
+| `reference/` | The C1 reference oracle and checker, corrected in R2. The originals are byte-identical in `reference/original-c1-rev4/`; see `reference/README.md`. |
+| `test/` | `node --test test/*.test.mjs`. Needs `python3`. End-to-end tests: `test/palm03E1Engine.test.ts` at the repo root. |
 
-## Input
+## Interface and guarantees (R3)
 
-```js
-generateE1Reading(envelope, { synthetic: true, mode: 'combined' | 'indian-only' | 'western-only' })
+```ts
+generateSyntheticReading(input /* one synthetic PALM-03-I1 input */, { synthetic: true, mode?: 'combined' | 'indian-only' | 'western-only' })
 ```
 
-- **The envelope:** built by `buildPalmE1Observation(input)` in `apps/web/lib/palm-analysis/fingerBases.ts` from **one** I1 input. It contains:
-  - the feature set (`palm-03-i1-feature-set@0.1.0`);
-  - the palm-frame finger bases (landmarks 5, 9, 13 and 17);
-  - a frame id;
-  - a SHA-256 seal.
-- **Frame pairing (R2, finding F6):** E1 recomputes the seal and refuses any mismatch with `frame-mismatch`. That covers finger bases from another hand, a different frame id, or a feature set or finger bases edited after sealing. The seal guards against mispairing; it is not a keyed signature.
-- **Synthetic declaration (R2, finding F7):** `{ synthetic: true }` is mandatory for **every** reading entry point, `generateE1Reading` and `composeFromObservations` alike. Without it the call is refused with `synthetic-required`. The internal `composeReading` and `deriveObservations` are not exported.
-- **Library (R2, finding F1):** a `library` option must be one returned by `loadLibrary()`. The validated library is deep-frozen and exposes no writable map. Eligibility is re-checked against the pinned manifest at composition.
+**What the interface excludes:**
+- There is **no** catalogue, schema, library, feature-set, finger-base or observation parameter. Unknown options are refused.
+- The text-emitting path always uses the pinned packaged library.
+
+**Construction (F6):**
+- The I1 feature set is built inside the interface.
+- The pipeline re-derives, from the same input:
+  - the palm frame and finger bases;
+  - every trace;
+  - each line's state;
+  - the two interpreted ratios;
+  - the hand, quality and marks.
+- It refuses any mismatch (`construction-mismatch`).
+- No checksum or seal is used as proof of origin.
+
+**Synthetic-only (F7):** every function able to emit a reading or a plan requires `{ synthetic: true }`. That includes the directly importable internals `composeReading`, `planSelection`, `deriveObservations` and `readingFromConstruction`. `composeReading` also accepts only observations minted by `deriveObservations`.
+
+**Content (F2):**
+- The complete output is validated before it is returned:
+  - types;
+  - fields;
+  - prohibited and forecast wording in every string;
+  - the pinned disclaimer frame;
+  - pinned fallback codes.
+- The loader rejects injected wording in reason texts and fallbacks.
+- **Automated checks support, and never replace, editorial and safety review.**
+
+**Conflicts (F4):**
+- The loader rejects records whose clean match regions overlap for one observation.
+- If two records ever qualify for one feature, neither is shown, and the feature is listed as `ambiguous-in-source`.
+
+**Numbers (F5):**
+- Values must lie on the I1 serialized grid, using I1's own rounding rule with no tolerance.
+- A valid I1 value beyond ±1e6 withholds only the interpretation that depends on it (`value-outside-interpretable-range`).
+
+**Guarantee:** a reading is internally consistent with the one supplied synthetic input. It does **not** prove physical-hand identity or image provenance; that belongs to the later scanner and real-image validation milestone.
+
+### Development-only privacy-gate exception (G5 B2, owner-authorised 2026-11-26)
+
+G5 check B2 normally allows only the palm-scan UI to import `lib/palm-analysis`.
+
+**The exception:**
+- It covers exactly `src/reading.ts`.
+- It allows exactly one statement: `import { buildPalmFeatureSet, type PalmFeatureSetInput } from '…/lib/palm-analysis/features'`.
+
+**Compensating checks** in `test/palmG5I1PrivacyGate.test.ts`:
+- B2 now also resolves relative and dynamic imports.
+- B2b: no module in `apps/web` or `packages/` reaches `reading.ts`, directly or indirectly, and only listed test consumers import it.
+- B2c: negative fixtures show that unauthorised imports still fail.
 
 ## Rules (C1 rev. 4)
 
@@ -41,9 +84,12 @@ generateE1Reading(envelope, { synthetic: true, mode: 'combined' | 'indian-only' 
 - **Not assessed:** every feature that is not read gets one RC-13 reason code. `user-skipped` and `user-cannot-see` are never "not detected" (M4, E1-A1). Unassessed features are never confused with an observed absence (E1-A2).
 - **Ceiling:** tentative for every item. Quality gates emission and is never displayed as confidence.
 
-### Numerical equality (R2, finding F5)
+### Numerical equality (R2 F5, revised in R3)
 
-All comparisons are exact integer steps of 0.0001: the grid I1 serializes to. Ties, gaps, margins and thresholds are **closed**, meaning a distance equal to the tolerance counts as inside it. Values off the grid are refused, never rounded.
+All comparisons are exact integer steps of 0.0001: the grid I1 serializes to.
+- **Membership:** a value is on the grid iff `Math.round(v * 1e4) / 1e4 === v`, the same rounding I1 applies, with **no tolerance**. So 0.20000000001 is off the grid.
+- **Closed bands:** ties, gaps, margins and thresholds are closed. A distance equal to the tolerance counts as inside it.
+- **Magnitude:** valid I1 values beyond ±1e6 are withheld for that interpretation only.
 
 ### Descriptor placeholders (C1 checklist C-8)
 
@@ -65,14 +111,21 @@ None of these is a content or anatomical approval. C-8 and C-12 remain pending.
 | V-C | Uncertain measurements are withheld with `measurement-unavailable` (detail `uncertain:…`), or `quality-gated` when frame quality is not accepted |
 | V-D | `palmFacing: null` is allowed for synthetic confirmed traces. `false` and unknown quality are gated. To be reassessed before any real input. |
 | V-E | `observed-absent` is a distinct state available only through synthetic observation fixtures; I1 has no such input |
-| V-F | Generated synthetic hands (varied proportions, rotations, mirroring, narrow zones, uncertain measurements) and a sealed frame pairing. Not real-hand validation. |
+| V-F | Generated synthetic hands (varied proportions, rotations, mirroring, narrow zones, uncertain measurements), and construction from one input (R3; the R2 seal is removed). Not real-hand validation. |
 | V-G | The unreviewed catalogue is committed for development only and excluded from every release build path |
 
 ## Release exclusion
 
-`apps/web/scripts/check-palm-e1-bundle.js` runs:
-- in the CI "Next.js production build" job;
-- in `apps/web/scripts/vercel-build.sh`, for every Vercel Preview and Production build;
-- in the `deploy/Dockerfile` build stage.
+`apps/web/scripts/check-palm-e1-bundle.js` scans **every** shipped file byte-wise, whatever its extension:
+- `.next/static`;
+- `.next/server`;
+- `.next/standalone`, including its shipped `node_modules`;
+- `public/`.
 
-It is unconditional and fails closed. `test/palm03E1ReleaseGuards.test.ts` covers all three paths.
+A symlink that leaves the scanned tree is a scan error, so the scan fails closed. The guard runs in:
+- the CI "Next.js production build" job;
+- `vercel-build.sh`, for every Vercel Preview and Production build;
+- the Docker build stage;
+- the Docker `release-tree` stage, with `--tree /app` over the exact runtime tree, which also covers `migrations/`.
+
+It is unconditional. `test/palm03E1ReleaseGuards.test.ts` and the package `guard.test.mjs` cover it.

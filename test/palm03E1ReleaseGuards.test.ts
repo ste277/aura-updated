@@ -38,7 +38,7 @@ const iGuide = lines.findIndex((l) => l === 'node "$SCRIPT_DIR/check-palmistry-b
 check('B1. vercel-build.sh runs the E1 guard after `next build` and before the guide guard (which stays last)', iNext >= 0 && iE1 > iNext && iGuide > iE1 && iGuide === lines.length - 1);
 check('B2. no exit-code swallowing; set -e first', lines[0] === 'set -e' && !/\|\|\s*true|set \+e|\|\|\s*:|trap /.test(lines.join('\n')));
 
-type Mode = 'clean' | 'e1-leak-static' | 'e1-leak-server' | 'e1-leak-standalone' | 'empty';
+type Mode = 'clean' | 'e1-leak-static' | 'e1-leak-server' | 'e1-leak-standalone' | 'e1-leak-standalone-node_modules' | 'e1-leak-public' | 'e1-leak-binary' | 'empty';
 function runVercel(mode: Mode, vercelEnv = 'preview') {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'palm-e1-vercel-'));
   try {
@@ -49,11 +49,11 @@ function runVercel(mode: Mode, vercelEnv = 'preview') {
     for (const f of ['vercel-build.sh', 'check-palm-e1-bundle.js', 'check-palmistry-bundle.js', 'check-db-identity.js']) fs.copyFileSync(path.join(ROOT, 'apps/web/scripts', f), path.join(web, 'scripts', f));
     fs.copyFileSync(path.join(ROOT, 'apps/web/palmistry-build-exclusion.js'), path.join(web, 'palmistry-build-exclusion.js'));
     fs.copyFileSync(path.join(ROOT, 'packages/palmistry/src/review-status.json'), path.join(tmp, 'packages/palmistry/src/review-status.json'));
-    const leak: Record<string, string> = { 'e1-leak-static': '.next/static/chunks/app/x.js', 'e1-leak-server': '.next/server/app/x.js', 'e1-leak-standalone': '.next/standalone/x.json' };
+    const leak: Record<string, string> = { 'e1-leak-static': '.next/static/chunks/app/x.js', 'e1-leak-server': '.next/server/app/x.js', 'e1-leak-standalone': '.next/standalone/x.json', 'e1-leak-standalone-node_modules': '.next/standalone/node_modules/x.js', 'e1-leak-public': 'public/x.svg', 'e1-leak-binary': '.next/static/media/x.woff2' };
     fs.writeFileSync(path.join(tmp, 'bin/next'), `#!/bin/sh
 rm -rf .next/static .next/server .next/standalone
 [ "$FAKE_NEXT_MODE" = "empty" ] && exit 0
-mkdir -p .next/static/chunks/app .next/server/app .next/standalone
+mkdir -p .next/static/chunks/app .next/static/media .next/server/app .next/standalone/node_modules public
 echo 'console.log("app")' > .next/static/chunks/app/page.js
 echo 'module.exports={}' > .next/server/app/page.js
 ${leak[mode] ? `echo '{"engine":"aura.palm.e1-reading","id":"C1-WE-HEART-JUPITER"}' > ${leak[mode]}` : ''}
@@ -69,7 +69,7 @@ exit 0
 }
 const clean = runVercel('clean');
 check('B3. clean build: exits 0; the E1 guard ran and reported OK; the guide guard still ran', clean.status === 0 && /\[palm-e1-bundle\] OK/.test(clean.out) && /\[palmistry-bundle\]/.test(clean.out), clean.out);
-for (const m of ['e1-leak-static', 'e1-leak-server', 'e1-leak-standalone'] as Mode[]) {
+for (const m of ['e1-leak-static', 'e1-leak-server', 'e1-leak-standalone', 'e1-leak-standalone-node_modules', 'e1-leak-public', 'e1-leak-binary'] as Mode[]) {
   const r = runVercel(m);
   check(`B4. ${m}: Preview build FAILS with the E1 guard message`, typeof r.status === 'number' && r.status !== 0 && /\[palm-e1-bundle\] FAIL/.test(r.out), r.out);
 }
@@ -80,7 +80,9 @@ check('B6. no build output: FAILS closed', typeof empty.status === 'number' && e
 
 // ---------------------------------------------------------------- C. Docker build path
 const docker = read('deploy/Dockerfile');
-const buildStage = docker.slice(docker.indexOf('AS build'), docker.indexOf('AS runtime'));
+const buildStage = docker.slice(docker.indexOf('AS build'), docker.indexOf('AS release-tree'));
+check('C0. R3: a release-tree stage assembles exactly the shipped files and runs the guard over all of them (--tree /app); the runtime stage copies only from it', /FROM node:24-alpine AS release-tree[\s\S]*RUN node \/opt\/guard\/check-palm-e1-bundle\.js --tree \/app && rm -rf \/opt\/guard/.test(docker) && (docker.slice(docker.indexOf('AS runtime')).match(/^COPY /gm) ?? []).length === 1 && /COPY --from=release-tree --chown=aura:aura \/app \.\//.test(docker));
+check('C0b. the release-tree stage ships the same paths the runtime previously did (standalone, static, public, migrations)', ['/repo/apps/web/.next/standalone ./', '/repo/apps/web/.next/static ./.next/static', '/repo/apps/web/public ./public', '/repo/apps/web/prisma/migrations ./migrations'].every((x) => docker.includes(`COPY --from=build ${x}`)));
 check('C1. the Docker build stage runs the E1 guard chained with && to `npm run build`', /npm run build \\\n\s*&& node scripts\/check-palm-e1-bundle\.js/.test(buildStage));
 check('C2. the guard runs in apps/web (where .next is produced) and before the runtime stage copies artifacts', /RUN cd apps\/web && npx prisma generate/.test(buildStage) && docker.indexOf('check-palm-e1-bundle.js') < docker.indexOf('AS runtime'));
 check('C3. the build stage copies apps/web (so the guard script is present in the image build)', /COPY apps\/web \.\/apps\/web/.test(buildStage));

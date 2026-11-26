@@ -1,18 +1,28 @@
-// AURA-PALM-03-E1-R2 -- numerical equality on the serialized coordinate grid.
-// I1 serializes palm-frame coordinates to 4 decimals and measurements to 3 decimals, and every C1 threshold and
-// margin is a multiple of 0.0001. E1 therefore compares values as INTEGER steps of 0.0001 (grid units), so equality
-// at a threshold, a margin, a tie tolerance or a minimum gap is exact and cannot depend on where a hand lies in the
-// frame (independent finding F5). No floating-point tolerance is added: a value that is not on the grid is refused.
+// AURA-PALM-03-E1 -- numerical contract for interpretation (R2 F5, revised in R3).
+//
+// I1 serializes palm-frame coordinates with round4 (Math.round(v * 1e4) / 1e4) and measurements with round3; every
+// C1 threshold and margin is a multiple of 0.0001. E1 uses the SAME membership rule I1 produces: a value is on the
+// interpretation grid iff Math.round(v * 1e4) / 1e4 === v exactly (a round3 value always satisfies it). There is no
+// tolerance, so 0.20000000001 is off the grid (R3, finding F5).
+//
+// Interpretation thresholds are all below 10. A finite I1 value whose magnitude exceeds MAX_INTERPRETABLE cannot be
+// compared safely as an integer step count; it is NOT an error in the reading -- the caller withholds only the
+// interpretation that depends on it, with a diagnostic (e.g. an I1 ratio of 9e+304 from a degenerate synthetic hand).
+// Within the bound, values are compared as exact integer steps of 0.0001 (|n| <= 1e10, far below 2^53).
 
-export const GRID_SCALE = 10000; // one grid unit = 0.0001 palm widths / ratio units
+export const GRID_SCALE = 10000;
+export const MAX_INTERPRETABLE = 1e6;
 
-/** Integer grid units for a value that lies on the 0.0001 grid; null when it does not (or is not finite). */
+/** 'ok' | 'off-grid' | 'out-of-range' | 'not-finite' for a candidate numeric value. */
+export function gridStatus(v) {
+  if (typeof v !== 'number' || !Number.isFinite(v)) return 'not-finite';
+  if (Math.abs(v) > MAX_INTERPRETABLE) return 'out-of-range';
+  return Math.round(v * GRID_SCALE) / GRID_SCALE === v ? 'ok' : 'off-grid';
+}
+
+/** Integer grid units for an on-grid, in-range value; null otherwise. */
 export function toGrid(v) {
-  if (typeof v !== 'number' || !Number.isFinite(v)) return null;
-  const s = v * GRID_SCALE;
-  const n = Math.round(s);
-  // the representation error of a 4-dp decimal times 1e4 is ~1e-11 here; anything above 1e-6 of a step is off-grid
-  return Math.abs(s - n) <= 1e-6 ? n + 0 : null;
+  return gridStatus(v) === 'ok' ? Math.round(v * GRID_SCALE) + 0 : null;
 }
 
 export const fromGrid = (n) => n / GRID_SCALE;

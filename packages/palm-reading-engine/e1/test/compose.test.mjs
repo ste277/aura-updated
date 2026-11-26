@@ -2,9 +2,10 @@
 // The oracle (reference/check_examples.py, unmodified) is an expected-output reference, not the engine.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { composeFromObservations, loadLibrary, defaultLibrary, MODES, E1Error } from '../src/index.mjs';
+import { planSelection, loadLibrary, defaultLibrary, MODES, E1Error } from '../src/index.mjs';
 import { oracleDump, shape, readJson, CAT_PATH, SCHEMA_PATH, EXAMPLES_PATH, clone, rec } from './helpers.mjs';
-const composeSyn = (obs, opts = {}) => composeFromObservations(obs, { synthetic: true, ...opts });
+// R3: composition-level tests run against the text-free plan (record ids and reason codes)
+const composeSyn = (obs, opts = {}) => { const { library, ...o } = opts; return planSelection(library ?? defaultLibrary(), obs, { synthetic: true, ...o }); };
 
 const CAT = readJson(CAT_PATH);
 const SCHEMA = readJson(SCHEMA_PATH);
@@ -72,7 +73,6 @@ test('C5 sweep invariants: eligibility, capacity, single placement, first-listed
           // RC-12: every category listed before the chosen one was full when the item was placed (rank order)
           const before = e.categories.slice(0, e.categories.indexOf(sec.category)).filter((c) => order.includes(c));
           for (const c of before) assert.ok(r.sections.find((x) => x.category === c)?.items.filter((x) => x.rank < it.rank).length === limit, `${it.recordId} skipped ${c}`);
-          assert.equal(it.confidence.tier, 'tentative');
         }
       }
       assert.equal(r.emptyResult, all.length ? null : lib.catalogue.readingModes.modeBehaviour[mode].emptyResult);
@@ -146,7 +146,7 @@ test('C10 provenance: an observation with a provenance the record does not allow
   assert.equal(r.sections.length, 0);
   assert.deepEqual(r.notAssessed.map((n) => n.code), ['no-supported-content', 'no-supported-content']);
   const ok = composeSyn({ 'lines.life': { provenance: 'user-confirmed', value: 'present' } });
-  assert.deepEqual(ok.sections[0].items[0].supportingFeatures[0], { feature: 'lines.life', anatomical: 'thenar', provenance: 'user-confirmed', observed: 'present', descriptor: null, thresholdStatus: 'placeholder' });
+  assert.equal(ok.sections[0].items[0].recordId, 'C1-IN-PITR-KNOWLEDGE');
 });
 
 test('C11 quality gate: nothing is emitted; observed features are quality-gated; user reasons are kept', () => {
@@ -156,7 +156,7 @@ test('C11 quality gate: nothing is emitted; observed features are quality-gated;
   assert.equal(r.quality.accepted, false);
   assert.equal(r.notAssessed.find((n) => n.feature === 'measurements.middleToPalmRatio').code, 'quality-gated');
   assert.equal(r.notAssessed.find((n) => n.feature === 'lines.heart').code, 'user-skipped');
-  assert.ok(!JSON.stringify(r).match(/confidence"?\s*:\s*0\.\d/), 'no numeric confidence is shown');
+  assert.ok(!/"text"|"wording"/.test(JSON.stringify(r)), 'the plan carries no text');
 });
 
 test('C12 invalid observations and options are rejected with typed errors', () => {
@@ -168,6 +168,7 @@ test('C12 invalid observations and options are rejected with typed errors', () =
     { 'lines.heart': { provenance: 'user-confirmed', value: 'index', nearEdge: 'yes' } },
   ];
   for (const o of bad) assert.throws(() => composeSyn(o), (e) => e instanceof E1Error && e.code === 'invalid-input', JSON.stringify(o));
+  assert.throws(() => planSelection(defaultLibrary(), {}, {}), (e) => e.code === 'synthetic-required');
   assert.throws(() => composeSyn({}, { mode: 'mixed' }), (e) => e.code === 'invalid-option');
   assert.throws(() => composeSyn({}, { qualityAccepted: 'yes' }), (e) => e.code === 'invalid-option');
 });

@@ -11,7 +11,8 @@ import { E1, CAT_PATH, SCHEMA_PATH, readJson, clone, rec, python, pythonCheck, t
 const CAT = readJson(CAT_PATH);
 const SCHEMA = readJson(SCHEMA_PATH);
 const syn = { synthetic: true };
-const compose = (obs, o = {}) => E.composeFromObservations(obs, { ...syn, ...o });
+// R3: selection is checked on the text-free plan; the text path is end to end (test/palm03E1Engine.test.ts)
+const compose = (obs, o = {}) => { const { library, ...rest } = o; return E.planSelection(library ?? E.defaultLibrary(), obs, { ...syn, ...rest }); };
 const items = (r) => r.sections.flatMap((s) => s.items.map((i) => i.recordId));
 const ORIGINAL_ORACLE = path.join(E1, 'reference', 'original-c1-rev4', 'check_examples.py');
 const CORRECTED_ORACLE = path.join(E1, 'reference', 'check_examples.py');
@@ -49,7 +50,8 @@ test('F1 forged, copied or re-classified libraries are refused; eligibility is r
   const lib = E.defaultLibrary();
   const forged = [{ ...lib }, Object.create(lib), structuredClone(lib), new Proxy(lib, {}), { catalogue: lib.catalogue, byId: { ...lib.byId } }];
   for (const f of forged) assert.throws(() => compose({}, { library: f }), (e) => e.code === 'invalid-library');
-  for (const f of forged) assert.throws(() => composeReading(f, {}, {}), (e) => e.code === 'invalid-library');
+  // R3: the text composer takes no library at all (pinned) and accepts only minted observations
+  for (const f of forged) assert.throws(() => composeReading(f, syn), (e) => e.code === 'invalid-input');
   const reclass = clone(CAT); rec(reclass, 'C1-WE-INDEX-LONG').eligibility.status = 'eligible-initial';
   assert.throws(() => E.loadLibrary(reclass, SCHEMA), (e) => e.code === 'invalid-catalogue');
   // historical records: metadata only, never personalised text
@@ -131,14 +133,11 @@ test('F4 one serialized grid step either side of every range threshold and margi
   assert.throws(() => compose({ 'lines.head': { provenance: 'user-confirmed', value: 0.08000001 } }), (e) => e.code === 'invalid-input');
 });
 
-test('F4 a feature that is a boundary for one record suppresses every other record reading it (RC-7)', () => {
+test('F4 (R3) overlapping range records for one feature are refused by the loader (formerly suppressed at runtime)', () => {
   const c = clone(CAT);
-  rec(c, 'C1-WE-HEAD-SLOPING').requires[0].observation.range.min = 0.09; // overlap: 0.1 is clean for SLOPING? (0.01 from 0.09 -> boundary)
-  rec(c, 'C1-WE-HEAD-STRAIGHT').requires[0].observation.range.max = 0.2; // 0.1 inside STRAIGHT, 0.1 from 0.2: clean
-  const lib = E.loadLibrary(c, SCHEMA);
-  const r = compose({ 'lines.head': { provenance: 'user-confirmed', value: 0.1 } }, { library: lib });
-  assert.deepEqual(items(r), []);
-  assert.equal(r.notAssessed[0].code, 'boundary');
+  rec(c, 'C1-WE-HEAD-SLOPING').requires[0].observation.range.min = 0.09;
+  rec(c, 'C1-WE-HEAD-STRAIGHT').requires[0].observation.range.max = 0.2;
+  assert.throws(() => E.loadLibrary(c, SCHEMA), (e) => e.code === 'invalid-catalogue' && /incompatible range overlap/.test(e.message));
 });
 
 // ---------------------------------------------------------------- F5 exact geometry on the serialized grid

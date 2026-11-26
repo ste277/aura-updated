@@ -12,8 +12,6 @@ export const E1_ENGINE = Object.freeze({
   contentStatus: 'UNREVIEWED_RESEARCH_CONTENT',
 });
 
-/** Sealed observation envelope produced by the I1 helper (R2, finding F6). */
-export const OBSERVATION_ENVELOPE = Object.freeze({ kind: 'palm-03-e1-observation', version: '0.1.0' });
 
 export const MODES = Object.freeze(['combined', 'indian-only', 'western-only']);
 export const DEFAULT_MODE = 'combined';

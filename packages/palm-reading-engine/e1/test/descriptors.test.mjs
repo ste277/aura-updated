@@ -4,7 +4,8 @@ import assert from 'node:assert/strict';
 import { headSlope, upwardEndingZone, heartEndingZone, zoneOf, checkFingerBases, DESCRIPTOR_CONTRACT } from '../src/index.mjs';
 
 const B = { index: { x: 0, y: 0 }, middle: { x: 0.34, y: -0.02 }, ring: { x: 0.68, y: -0.01 }, little: { x: 1, y: 0 } };
-const up = (x) => [{ x, y: 0.12 }, { x: x + 0.01, y: 0.5 }, { x: x + 0.02, y: 0.9 }];
+const r4 = (v) => Math.round(v * 1e4) / 1e4; // fixtures on the I1 serialized grid
+const up = (x) => [{ x: r4(x), y: 0.12 }, { x: r4(x + 0.01), y: 0.5 }, { x: r4(x + 0.02), y: 0.9 }];
 const heart = (x) => [{ x: 1.0, y: 0.25 }, { x: 0.6, y: 0.2 }, { x, y: 0.15 }];
 
 test('D1 head slope = y(ulnar end) - y(radial end), independent of trace direction; ambiguous endpoints refuse', () => {
@@ -52,10 +53,10 @@ test('D4 heart ending zones; the margin is capped at a quarter of the narrower a
 test('D5 zoneOf is total and monotone over x', () => {
   const anchors = [{ zone: 'a', x: 0 }, { zone: 'b', x: 1 }, { zone: 'c', x: 2 }];
   let last = -1;
-  for (let x = -3; x <= 5; x += 0.01) {
-    const r = zoneOf(x, anchors, 0.1);
-    const k = ['a', 'b', 'c'].indexOf(r.zone);
-    assert.ok(k >= last); last = k;
+  for (let k = -300; k <= 500; k++) {
+    const r = zoneOf(k / 100, anchors, 0.1);
+    const z = ['a', 'b', 'c'].indexOf(r.zone);
+    assert.ok(z >= last); last = z;
     if (r.nearEdge) assert.ok(r.adjacentZone && r.adjacentZone !== r.zone);
   }
 });

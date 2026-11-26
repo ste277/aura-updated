@@ -192,6 +192,26 @@ export function lintCatalogue(cat, schema) {
       if ((d.startsWith('proposed.urdhva.terminationFinger') || d.startsWith('proposed.heart.radialEndFinger')) && !has(e.observationQuality, 'boundaryMargin')) F(`${i}: zone descriptor without boundaryMargin (RC-7)`);
     }
   }
+  // R3 (finding F2): reason wording and fallback values are user-facing too.
+  for (const r of gpol.notAssessedReasons ?? []) {
+    if (typeof r.wording !== 'string' || typeof r.code !== 'string') { F(`notAssessedReasons ${r.code}: wording and code must be strings`); continue; }
+    if (new RegExp(BANNED.source, 'i').test(r.wording) || FUT.test(r.wording)) F(`notAssessedReasons ${r.code}: prohibited or forecast wording`);
+  }
+  for (const [mo, b] of Object.entries(mbh)) if (typeof b.emptyResult !== 'string' || !/^[a-z0-9-]+$/.test(b.emptyResult)) F(`modeBehaviour.${mo}.emptyResult must be a plain code`);
+  // R3 (finding F4): incompatible interpretations of the same observation must not overlap. For eligible-initial
+  // records reading one feature, categorical values must differ, and range records' clean regions (inside the range
+  // and farther than the margin from every threshold, on the 0.0001 grid) must be disjoint.
+  const byFeature = {};
+  for (const e of cat.interpretations.filter((x) => x.eligibility?.status === 'eligible-initial')) for (const r of e.requires) (byFeature[r.feature] ??= []).push({ id: e.id, ob: r.observation ?? {}, m: e.observationQuality?.boundaryMargin ?? 0 });
+  const g4 = (v) => (v === null || v === undefined ? null : Math.round(v * 10000));
+  for (const [f, rs] of Object.entries(byFeature)) {
+    if (rs.length < 2) continue;
+    const kinds = new Set(rs.map((x) => ('categorical' in x.ob ? 'categorical' : 'range' in x.ob ? 'range' : 'presence')));
+    if (kinds.size > 1 || kinds.has('presence')) { F(`${f}: incompatible interpretation kinds for one observation`); continue; }
+    if (kinds.has('categorical')) { const vals = rs.map((x) => String(x.ob.categorical)); if (new Set(vals).size !== vals.length) F(`${f}: two records read the same categorical value`); continue; }
+    const clean = rs.map((x) => { const m = g4(x.m), lo = g4(x.ob.range.min), hi = g4(x.ob.range.max); return { id: x.id, a: lo === null ? -Infinity : lo + m + 1, b: hi === null ? Infinity : hi - m - 1 }; });
+    for (let i = 0; i < clean.length; i++) for (let j = i + 1; j < clean.length; j++) if (Math.max(clean[i].a, clean[j].a) <= Math.min(clean[i].b, clean[j].b)) F(`${f}: ${clean[i].id} and ${clean[j].id} can both match one value (incompatible range overlap)`);
+  }
   const served = {};
   for (const e of cat.interpretations) for (const c of e.e1Capabilities ?? []) (served[c] ??= new Set()).add(e.eligibility.status);
   const elig = (c) => [...(served[c] ?? [])].some((s) => s === 'eligible-initial' || s === 'eligible-later');

@@ -8,11 +8,16 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { buildPalmFeatureSet, type LineInput, type MarkInput, type PalmFeatureSetInput } from '../apps/web/lib/palm-analysis/features';
-import { palmFingerBases, buildPalmE1Observation, canonicalJson, PALM_FINGER_BASES_VERSION } from '../apps/web/lib/palm-analysis/fingerBases';
+import { palmFingerBases, PALM_FINGER_BASES_VERSION } from '../apps/web/lib/palm-analysis/fingerBases';
+import { generateSyntheticReading } from '../packages/palm-reading-engine/e1/src/reading';
 
 // The engine package is ESM (.mjs); Node >= 22.12 loads it through require().
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const e1 = require('../packages/palm-reading-engine/e1/src/index.mjs');
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const core = require('../packages/palm-reading-engine/e1/src/engine-core.mjs');
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const construction = require('../packages/palm-reading-engine/e1/src/construction.mjs');
 
 const ROOT = path.resolve(__dirname, '..');
 let passed = 0;
@@ -38,13 +43,10 @@ const lifeLine = traced('life', [[0.1, 0.3], [0.05, 0.7], [0.12, 1.1]]);
 function input(over: Partial<PalmFeatureSetInput> = {}): PalmFeatureSetInput {
   return { imageWidth: 64, imageHeight: 128, landmarks: LM, hand: 'left', dominantHand: 'unknown', handednessLabel: 'Left', qualityIssues: [], rotationDeg: 0, lines: [], marks: [], ...over };
 }
-function envelope(over: Partial<PalmFeatureSetInput> = {}): any {
-  const r = buildPalmE1Observation(input(over));
-  if (!r.ok) throw new Error(`fixture invalid: ${r.errors.join('; ')}`);
-  return r.envelope;
-}
-const reseal = (env: any) => ({ ...env, seal: e1.observationSeal(env) }); // simulates a caller re-computing the seal
-const reading = (over: Partial<PalmFeatureSetInput> = {}, mode = 'combined') => e1.generateE1Reading(envelope(over), { synthetic: true, mode });
+const built = (i: PalmFeatureSetInput): any => { const r = buildPalmFeatureSet(i); if (!r.ok) throw new Error(`fixture invalid: ${r.errors.join('; ')}`); return r.featureSet; };
+// R3: the reading interface takes ONE synthetic input; the I1 feature set and finger bases are constructed inside.
+const reading = (over: Partial<PalmFeatureSetInput> = {}, mode = 'combined'): any => generateSyntheticReading(input(over), { synthetic: true, mode: mode as any });
+const plan = (obs: unknown, o: Record<string, unknown> = {}) => e1.planSelection(e1.defaultLibrary(), obs, { synthetic: true, ...o });
 const items = (r: any): string[] => r.sections.flatMap((s: any) => s.items.map((i: any) => i.recordId));
 // the fixture's measured middle-finger ratio (1.069) always adds C1-WE-FINGER-LONG; line assertions look at line-read items
 const lineItems = (r: any): string[] => r.sections.flatMap((s: any) => s.items.filter((i: any) => i.supportingFeatures.every((f: any) => f.feature.startsWith('lines.'))).map((i: any) => i.recordId));
@@ -98,13 +100,14 @@ check('M4/A1-4. a skipped feature produces no interpretation', !items(rSkip).som
 const rUnassessed = reading({ lines: [traced('heart', [[0.95, 0.22], [0.5, 0.2], [-0.05, 0.15]], false), traced('head', [[0.1, 0.3], [0.1001, 0.3001]])] });
 check('A2-1. not traced (optional upward) / not confirmed / unusable trace are distinct unassessed reasons; none is read', na(rUnassessed, 'lines.upward').code === 'not-traced' && na(rUnassessed, 'lines.heart').code === 'trace-unusable' && na(rUnassessed, 'lines.heart').detail === 'not-confirmed' && na(rUnassessed, 'lines.head').code === 'trace-unusable' && /^trace-/.test(na(rUnassessed, 'lines.head').detail) && lineItems(rUnassessed).length === 0, rUnassessed.notAssessed);
 check('A2-2. unreported marks are unknown (never absent); a skipped mark keeps the user reason', na(reading({ marks: [{ mark: 'vedi', action: 'skipped' } as MarkInput] }), 'marks.vedi').code === 'user-skipped' && na(reading(), 'marks.yava').code === 'mark-unknown');
-check('A2-3. I1 has no observed-absence input, so E1 never reports observed-absent from a feature set; absence is never interpreted (composer: only eligible matches emit)', !reading({ lines: [skipped('heart')] }).notAssessed.some((n: any) => n.code === 'observed-absent') && e1.composeFromObservations({ 'lines.life': { notAssessed: 'observed-absent' } }, { synthetic: true }).sections.length === 0);
+check('A2-3. I1 has no observed-absence input, so E1 never reports observed-absent from a feature set; absence is never interpreted (composer: only eligible matches emit)', !reading({ lines: [skipped('heart')] }).notAssessed.some((n: any) => n.code === 'observed-absent') && plan({ 'lines.life': { notAssessed: 'observed-absent' } }).sections.length === 0);
 const rFrame = reading({ landmarks: null, lines: [heartTo(-0.05), lifeLine] });
 check('A2-4. no palm frame -> traced lines are frame-unavailable (unassessed, not absent) and nothing is read', na(rFrame, 'lines.heart').code === 'frame-unavailable' && na(rFrame, 'lines.life').code === 'frame-unavailable' && items(rFrame).length === 0);
 check('A3-1. E1 reads no branches, forks or breaks: no initial record needs them and no reading contains them', !/branch|fork|break/i.test(JSON.stringify(rFull)) && e1.defaultLibrary().initialIds.every((id: string) => e1.defaultLibrary().byId[id].requires.every((r: any) => !/branch|fork|break|continuity/i.test(`${r.feature} ${r.observation?.descriptor ?? ''}`))));
 check('A4-1. consistent diagnostics: every line is either read by an item or listed once with the code its I1 status implies', (() => {
-  const env = envelope({ lines: [heartTo(-0.05), skipped('head'), traced('life', [[0.1, 0.3], [0.1001, 0.3001]]), upwardTo(0.52)] });
-  const r = e1.generateE1Reading(env, { synthetic: true });
+  const inp = input({ lines: [heartTo(-0.05), skipped('head'), traced('life', [[0.1, 0.3], [0.1001, 0.3001]]), upwardTo(0.52)] });
+  const env = { featureSet: built(inp) };
+  const r: any = generateSyntheticReading(inp, { synthetic: true });
   const expectCode: Record<string, string> = { 'user-skipped': 'user-skipped', 'user-cannot-see': 'user-cannot-see', 'not-requested': 'not-traced', 'frame-unavailable': 'frame-unavailable' };
   return (['heart', 'head', 'life', 'upward'] as const).every((id) => {
     const f = `lines.${id}`, l: any = env.featureSet.lines[id];
@@ -117,7 +120,7 @@ check('A4-1. consistent diagnostics: every line is either read by an item or lis
   });
 })());
 check('A5-1. tentative ceiling everywhere; quality is never shown as a confidence number', rFull.tierCeiling === 'tentative' && rFull.sections.every((s: any) => s.items.every((i: any) => i.confidence.tier === 'tentative' && !Object.values(i.confidence).some((v) => typeof v === 'number'))));
-check('A5-2. synthetic-only: every exported reading entry point refuses without an explicit synthetic declaration (R2 F7)', [undefined, null, {}, { synthetic: 'yes' }, { synthetic: 1 }].every((o) => throwsCode(() => e1.generateE1Reading(envelope(), o), 'synthetic-required') && throwsCode(() => e1.composeFromObservations({}, o), 'synthetic-required')) && !('composeReading' in e1) && !('deriveObservations' in e1));
+check('A5-2. synthetic-only: every function able to emit a reading refuses without an explicit synthetic declaration (R3 F7)', [undefined, null, {}, { synthetic: 'yes' }, { synthetic: 1 }].every((o) => throwsCode(() => generateSyntheticReading(input(), o as any), 'synthetic-required') && throwsCode(() => core.readingFromConstruction(input(), built(input()), o), 'synthetic-required') && throwsCode(() => e1.planSelection(e1.defaultLibrary(), {}, o), 'synthetic-required')) && !('composeReading' in e1) && !('deriveObservations' in e1) && !('composeFromObservations' in e1));
 check('A5-3. separate identity from the frozen G6 engine, which E1 never imports', e1.E1_ENGINE.id === 'aura.palm.e1-reading' && fs.readdirSync(path.join(ROOT, 'packages/palm-reading-engine/e1/src')).every((f) => !/from '[^']*prototype\//.test(fs.readFileSync(path.join(ROOT, 'packages/palm-reading-engine/e1/src', f), 'utf8'))));
 check('A5-4. the 23 Western G6 rule texts are excluded: none appears in the E1 catalogue or any reading', (() => {
   const rules = fs.readFileSync(path.join(ROOT, 'packages/palm-reading-engine/prototype/src/rules.mjs'), 'utf8');
@@ -129,27 +132,24 @@ const rBlur = reading({ qualityIssues: ['blurry'], lines: [skipped('heart'), lif
 check('A5-5. quality gate: not-accepted G5 quality -> nothing emitted, observed features quality-gated, user reasons kept', items(rBlur).length === 0 && rBlur.quality.accepted === false && na(rBlur, 'measurements.middleToPalmRatio').code === 'quality-gated' && /^uncertain:/.test(na(rBlur, 'measurements.middleToPalmRatio').detail) && na(rBlur, 'lines.life').code === 'quality-gated' && na(rBlur, 'lines.heart').code === 'user-skipped' && rBlur.emptyResult !== null, rBlur.notAssessed);
 check('A5-6. unknown quality (no G5 feedback) is not accepted either', reading({ qualityIssues: null, lines: [lifeLine] }).quality.accepted === false);
 check('A5-7. uncertain vs unavailable measurements stay distinct: an uncertain value under accepted quality is never read and keeps its I1 detail', (() => {
-  const r = e1.composeFromObservations({ 'measurements.middleToPalmRatio': { notAssessed: 'measurement-unavailable', detail: 'uncertain:implausible-proportions' } }, { synthetic: true });
+  const r = plan({ 'measurements.middleToPalmRatio': { notAssessed: 'measurement-unavailable', detail: 'uncertain:implausible-proportions' } });
   return r.sections.length === 0 && na(r, 'measurements.middleToPalmRatio').detail === 'uncertain:implausible-proportions';
 })());
 
-// ============================================================ C. invalid input rejection
-const good = envelope({ lines: [heartTo(-0.05)] });
-const tamper = (f: (x: any) => void) => { const x = JSON.parse(JSON.stringify(good)); f(x); return x; };
-check('C1. wrong feature-set version refused (unsealed change -> frame-mismatch; resealed -> invalid-input)', throwsCode(() => e1.generateE1Reading(tamper((x) => { x.featureSet.version = 'palm-03-i1-feature-set@0.2.0'; }), { synthetic: true }), 'frame-mismatch') && throwsCode(() => e1.generateE1Reading(reseal(tamper((x) => { x.featureSet.version = 'palm-03-i1-feature-set@0.2.0'; })), { synthetic: true }), 'invalid-input'));
-check('C2. feature set violating the I1 contract refused even when resealed (extra field, missing line, inconsistent provenance, contradictory quality)', [
-  (x: any) => { x.featureSet.extra = 1; }, (x: any) => { delete x.featureSet.lines.head; }, (x: any) => { x.featureSet.lines.heart.provenance = 'user-reported'; },
-  (x: any) => { x.featureSet.frame.qualityStatus = 'accepted'; x.featureSet.frame.qualityIssues = ['blurry']; },
-].every((f) => throwsCode(() => e1.generateE1Reading(tamper(f), { synthetic: true }), 'frame-mismatch') && throwsCode(() => e1.generateE1Reading(reseal(tamper(f)), { synthetic: true }), 'invalid-input')));
-check('C3. unknown envelope fields / legacy unsealed input / non-object input refused', throwsCode(() => e1.generateE1Reading({ ...good, mode: 'x' }, { synthetic: true }), 'invalid-input') && throwsCode(() => e1.generateE1Reading({ featureSet: good.featureSet, fingerBases: good.fingerBases }, { synthetic: true }), 'invalid-input') && throwsCode(() => e1.generateE1Reading(null, { synthetic: true }), 'invalid-input') && throwsCode(() => e1.generateE1Reading([], { synthetic: true }), 'invalid-input'));
-check('C4. finger bases changed after sealing are refused; resealed invalid bases never crash (zone lines -> frame-unavailable)', (() => {
-  const bad = { index: { x: 0.2, y: 0 }, middle: { x: 0.3, y: 0 }, ring: { x: 0.6, y: 0 }, little: { x: 1, y: 0 } };
-  if (!throwsCode(() => e1.generateE1Reading({ ...good, fingerBases: bad }, { synthetic: true }), 'frame-mismatch')) return false;
-  const r = e1.generateE1Reading(reseal({ ...good, fingerBases: bad }), { synthetic: true });
-  return na(r, 'lines.heart').code === 'frame-unavailable' && na(r, 'lines.heart').detail === 'finger-bases-not-in-palm-frame' && items(r).every((x) => !x.includes('HEART'));
+// ============================================================ C. invalid input and interface (R3)
+const goodIn = input({ lines: [heartTo(-0.05)] });
+check('C1. input the I1 builder refuses is refused (duplicate line, bad skip reason, bad mark)', [
+  { lines: [heartTo(-0.05), heartTo(0.1)] }, { lines: [{ line: 'head', action: 'skipped', reason: 'bored' } as any] }, { marks: [{ mark: 'unknown', action: 'reported' } as any] },
+].every((o) => throwsCode(() => reading(o), 'invalid-input')));
+check('C2. no catalogue, schema, library, feature-set, finger-base or observation override is accepted', ['library', 'catalogue', 'schema', 'featureSet', 'fingerBases', 'observations'].every((k) => throwsCode(() => generateSyntheticReading(goodIn, { synthetic: true, [k]: {} } as any), 'invalid-option')));
+check('C3. non-object input is refused', [null, [], 'x', 1].every((x) => throwsCode(() => generateSyntheticReading(x as any, { synthetic: true }), 'invalid-input')));
+check('C5. invalid mode refused', throwsCode(() => generateSyntheticReading(goodIn, { synthetic: true, mode: 'all' as any }), 'invalid-option'));
+check('C6. inputs are not mutated by the engine', (() => { const x = JSON.parse(JSON.stringify(goodIn)); generateSyntheticReading(x, { synthetic: true }); return JSON.stringify(x) === JSON.stringify(goodIn); })());
+check('C7. the reading is deeply frozen: derived geometry, traces and items cannot be replaced after construction', (() => {
+  const r: any = generateSyntheticReading(goodIn, { synthetic: true });
+  const tries = [() => { r.observed[0].value = 'index'; }, () => { r.sections[0].items[0].recordId = 'C1-WE-INDEX-LONG'; }, () => { r.notAssessed.push({}); }, () => { r.frame = ''; }];
+  return Object.isFrozen(r) && tries.every((t) => { try { t(); return false; } catch { return true; } });
 })());
-check('C5. invalid mode refused', throwsCode(() => e1.generateE1Reading(good, { synthetic: true, mode: 'all' }), 'invalid-option'));
-check('C6. inputs are not mutated by the engine', (() => { const x = JSON.parse(JSON.stringify(good)); e1.generateE1Reading(x, { synthetic: true }); return JSON.stringify(x) === JSON.stringify(good); })());
 
 // ============================================================ D. isolation of the new I1 helper
 const helper = fs.readFileSync(path.join(ROOT, 'apps/web/lib/palm-analysis/fingerBases.ts'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
@@ -158,26 +158,37 @@ const webFiles = (d: string): string[] => fs.readdirSync(d, { withFileTypes: tru
 check('D2. no app module imports the helper; the G5 public surface does not export it', webFiles(path.join(ROOT, 'apps/web')).every((f) => f.endsWith('fingerBases.ts') || !/fingerBases/.test(fs.readFileSync(f, 'utf8'))) && !/fingerBases/.test(fs.readFileSync(path.join(ROOT, 'apps/web/lib/palm-analysis/index.ts'), 'utf8')));
 check('D3. the E1 production-build guard is wired into CI after next build', /node scripts\/check-palm-e1-bundle\.js/.test(fs.readFileSync(path.join(ROOT, '.github/workflows/ci.yml'), 'utf8')));
 
-// ============================================================ F. frame pairing (R2 finding F6)
-// Two different synthetic hands: B's middle and ring knuckles sit elsewhere, so its finger bases differ from A's.
+// ============================================================ F. coherent construction from one input (R3 finding F6)
+// The R2 witnesses (swapped finger bases, substituted trace, fabricated frame) were externally assembled, resealed
+// bundles. The reading interface no longer accepts any such bundle; the internal pipeline re-derives everything it
+// reads from the ONE input and refuses a feature set that does not derive from it.
 const XY_B = XY.map(([x, y], k) => (k === 9 ? [3, 0] : k === 13 ? [6, 0] : [x, y]));
-const envA = envelope({ lines: [heartTo(0.1667), upwardTo(0.3333)] });
-const envB = envelope({ landmarks: XY_B.map(point), lines: [heartTo(0.1667), upwardTo(0.3333)] });
-check('F1. each envelope is sealed over one frame (frame ids differ between the two hands)', envA.frameId !== envB.frameId && /^[0-9a-f]{64}$/.test(envA.seal) && e1.observationSeal(envA) === envA.seal);
-check('F2. hand A feature set + hand B finger bases (with A seal) -> refused as frame-mismatch', throwsCode(() => e1.generateE1Reading({ ...envA, fingerBases: envB.fingerBases }, { synthetic: true }), 'frame-mismatch'));
-check('F3. hand A feature set + hand B finger bases and seal -> refused', throwsCode(() => e1.generateE1Reading({ ...envB, featureSet: envA.featureSet }, { synthetic: true }), 'frame-mismatch'));
-check('F4. hand A feature set + hand B frame id -> refused', throwsCode(() => e1.generateE1Reading({ ...envA, frameId: envB.frameId }, { synthetic: true }), 'frame-mismatch'));
-check('F5. a trace edited after sealing -> refused', throwsCode(() => e1.generateE1Reading(JSON.parse(JSON.stringify({ ...envA, featureSet: { ...envA.featureSet, lines: { ...envA.featureSet.lines, heart: { ...envA.featureSet.lines.heart, palmPoints: [{ x: 0.95, y: 0.22 }, { x: 0.5, y: 0.2 }, { x: -0.05, y: 0.15 }] } } } })), { synthetic: true }), 'frame-mismatch'));
-check('F6. finger bases present without a frame (or absent with one) are refused even when resealed', throwsCode(() => e1.generateE1Reading(reseal({ ...envA, fingerBases: null, fingerBasesReason: 'landmarks-invalid' }), { synthetic: true }), 'frame-mismatch'));
-check('F7. the I1 and E1 canonical encodings agree byte for byte', canonicalJson(envA.featureSet) === e1.canonicalJson(envA.featureSet) && canonicalJson({ b: [1, { z: undefined, a: -0 }], a: 'é' }) === e1.canonicalJson({ b: [1, { z: undefined, a: -0 }], a: 'é' }));
-check('F8. a correctly paired envelope reads both zones', ['C1-WE-HEART-BETWEEN', 'C1-IN-URDHVA-MIDDLE'].every((id) => items(e1.generateE1Reading(envA, { synthetic: true })).includes(id)));
+const inA = input({ lines: [heartTo(0.1667), upwardTo(0.3333)] });
+const inB = input({ landmarks: XY_B.map(point), lines: [heartTo(0.1667), upwardTo(0.3333)] });
+const fsA = built(inA), fsB = built(inB);
+check('F1. the reading interface has no geometry parameter: generateSyntheticReading(input, { synthetic, mode })', generateSyntheticReading.length === 2 && throwsCode(() => generateSyntheticReading(inA, { synthetic: true, fingerBases: {} } as any), 'invalid-option'));
+check('F2. swapped finger bases (witness): hand B geometry with hand A traces -> construction-mismatch', throwsCode(() => core.readingFromConstruction(inA, fsB, { synthetic: true }), 'construction-mismatch'));
+check('F3. substituted trace (witness): a feature set whose heart trace differs from the supplied trace -> construction-mismatch', throwsCode(() => core.readingFromConstruction(inA, built(input({ lines: [heartTo(-0.05), upwardTo(0.3333)] })), { synthetic: true }), 'construction-mismatch'));
+check('F4. fabricated frame (witness): a feature set claiming no frame, or another frame, for this input -> construction-mismatch', throwsCode(() => core.readingFromConstruction(inA, built(input({ landmarks: null, lines: [heartTo(0.1667), upwardTo(0.3333)] })), { synthetic: true }), 'construction-mismatch') && throwsCode(() => core.readingFromConstruction(input({ landmarks: XY_B.map(point) }), built(input()), { synthetic: true }), 'construction-mismatch'));
+check('F5. substituted measurements: a feature set from a hand with different finger lengths (same frame and traces) -> construction-mismatch', (() => {
+  const XY_C = XY.map(([x, y], k) => (k >= 10 && k <= 12 ? [x, y - 2] : [x, y]));
+  return throwsCode(() => core.readingFromConstruction(input(), built(input({ landmarks: XY_C.map(point) })), { synthetic: true }), 'construction-mismatch');
+})());
+check('F6. skip reasons, confirmation, quality and hand must also match the input', [
+  [input({ lines: [skipped('head')] }), built(input({ lines: [skipped('head', 'user-cannot-see')] }))],
+  [input({ lines: [heartTo(-0.05)] }), built(input({ lines: [traced('heart', [[0.95, 0.22], [0.5, 0.2], [-0.05, 0.15]], false)] }))],
+  [input({ qualityIssues: [] }), built(input({ qualityIssues: null }))],
+  [input({ hand: 'left' }), built(input({ hand: 'right' }))],
+].every(([i, f]) => throwsCode(() => core.readingFromConstruction(i, f, { synthetic: true }), 'construction-mismatch')));
+check('F7. a feature set that does derive from the input is accepted, and gives the same reading as the interface', JSON.stringify(core.readingFromConstruction(inA, fsA, { synthetic: true })) === JSON.stringify(generateSyntheticReading(inA, { synthetic: true })));
+check('F8. a correctly constructed hand reads both zones', ['C1-WE-HEART-BETWEEN', 'C1-IN-URDHVA-MIDDLE'].every((id) => items(generateSyntheticReading(inA, { synthetic: true })).includes(id)));
 
 // ============================================================ G. generated synthetic hands (R2: V-F expanded geometry)
 // A hand is defined in palm-frame units (index knuckle (0,0), little knuckle (1,0), y toward the wrist), then placed in
 // a 1000 x 1000 image by a similarity transform (rotation, scale, translation, optional mirror). Traces are defined in
 // the same palm units and transformed identically, so every pose of one hand must give the same reading. Synthetic
 // geometry only: this is not real-hand anatomical validation.
-type Hand = { m: number; r: number; finger: number; palm: number };
+type Hand = { m: number; r: number; finger: number; palm: number; ring?: number };
 const BASE = XY.map(([x, y]) => [x / 12, y / 12]);
 function handPoints(h: Hand): number[][] {
   return BASE.map(([x, y], k) => {
@@ -186,7 +197,7 @@ function handPoints(h: Hand): number[][] {
     const f = Math.floor((k - 5) / 4), j = (k - 5) % 4; // finger 0..3, joint 0 = knuckle
     const kx = [0, h.m, h.r, 1][f];
     const [bx, by] = BASE[5 + 4 * f];
-    return j === 0 ? [kx, 0] : [kx + (x - bx), (y - by) * h.finger];
+    return j === 0 ? [kx, 0] : [kx + (x - bx), (y - by) * h.finger * (f === 2 ? h.ring ?? 1 : 1)];
   });
 }
 type Pose = { rot: number; scale: number; tx: number; ty: number; mirror: boolean };
@@ -194,14 +205,14 @@ const place = (p: Pose) => ([X, Y]: number[]) => {
   const x = p.mirror ? -X : X, c = Math.cos(p.rot), sn = Math.sin(p.rot);
   return { x: (p.tx + p.scale * (c * x - sn * Y)) / 1000, y: (p.ty + p.scale * (sn * x + c * Y)) / 1000 };
 };
-function poseEnvelope(h: Hand, p: Pose, lines: Array<[LineInput['line'], number[][]]>): any {
+function poseInput(h: Hand, p: Pose, lines: Array<[LineInput['line'], number[][]]>): PalmFeatureSetInput {
   const pl = place(p);
   const landmarks = handPoints(h).map(pl);
   const base = { imageWidth: 1000, imageHeight: 1000, landmarks, hand: (p.mirror ? 'left' : 'right') as 'left' | 'right', dominantHand: 'unknown' as const, qualityIssues: [], rotationDeg: Math.round((p.rot * 180) / Math.PI), lines: lines.map(([line, pts]) => ({ line, action: 'traced' as const, points: pts.map(pl), confirmed: true })), marks: [] };
-  for (const label of ['Left', 'Right']) { const r = buildPalmE1Observation({ ...base, handednessLabel: label } as PalmFeatureSetInput); if (r.ok && r.envelope.featureSet.frame.palmFacing === true) return r.envelope; }
-  const dbg = ['Left', 'Right'].map((label) => { const r = buildPalmE1Observation({ ...base, handednessLabel: label } as PalmFeatureSetInput); return r.ok ? { facing: r.envelope.featureSet.frame.palmFacing, frame: r.envelope.featureSet.frame.reason, q: r.envelope.featureSet.frame.qualityStatus } : r.errors; });
-  throw new Error(`no palm-facing label for pose ${JSON.stringify(p)} ${JSON.stringify(dbg)}`);
+  for (const label of ['Left', 'Right']) { const i = { ...base, handednessLabel: label } as PalmFeatureSetInput; const r = buildPalmFeatureSet(i); if (r.ok && r.featureSet.frame.palmFacing === true) return i; }
+  throw new Error(`no palm-facing label for pose ${JSON.stringify(p)}`);
 }
+const poseReading = (h: Hand, p: Pose, lines: Array<[LineInput['line'], number[][]]>, mode = 'combined'): any => generateSyntheticReading(poseInput(h, p, lines), { synthetic: true, mode: mode as any });
 const POSES: Pose[] = [
   { rot: 0, scale: 300, tx: 450, ty: 500, mirror: false }, { rot: 0.4, scale: 260, tx: 480, ty: 470, mirror: false },
   { rot: -1.1, scale: 280, tx: 520, ty: 520, mirror: false }, { rot: 2.6, scale: 240, tx: 500, ty: 500, mirror: false },
@@ -224,21 +235,76 @@ for (const { name, h } of HANDS) {
     ['head', [[0.05, 0.35], [0.5, 0.45], [0.92, 0.55]]],
     ['life', [[0.1, 0.3], [0.05, 0.7], [0.12, 1.1]]],
   ];
-  const readings = POSES.map((p) => e1.generateE1Reading(poseEnvelope(h, p, lines), { synthetic: true }));
+  const readings = POSES.map((p) => poseReading(h, p, lines));
   const keys = readings.map(keyOf);
   check(`G1. ${name}: identical reading under translation, scale, rotation and mirroring (${POSES.length} poses)`, keys.every((k) => k === keys[0]), keys);
   check(`G2. ${name}: heart between-zone, ring-finger upward ending and sloping head line are read`, ['C1-WE-HEART-BETWEEN', 'C1-IN-URDHVA-RING', 'C1-WE-HEAD-SLOPING', 'C1-IN-PITR-KNOWLEDGE'].every((id) => items(readings[0]).includes(id)), items(readings[0]));
 }
-const shortHand = e1.generateE1Reading(poseEnvelope(HANDS[1].h, POSES[2], []), { synthetic: true });
-const longHand = e1.generateE1Reading(poseEnvelope(HANDS[0].h, POSES[3], []), { synthetic: true });
+const shortHand = poseReading(HANDS[1].h, POSES[2], []);
+const longHand = poseReading(HANDS[0].h, POSES[3], []);
 check('G3. proportions drive the finger records: short fingers -> FINGER-SHORT, long -> FINGER-LONG', items(shortHand).includes('C1-WE-FINGER-SHORT') && items(longHand).includes('C1-WE-FINGER-LONG'), [items(shortHand), items(longHand)]);
-const midHand = e1.generateE1Reading(poseEnvelope(HANDS[2].h, POSES[1], []), { synthetic: true });
+const midHand = poseReading(HANDS[2].h, POSES[1], []);
 check('G4. an in-between finger proportion reads neither finger record (boundary or no supported content)', !items(midHand).some((x) => /FINGER-(LONG|SHORT)/.test(x)) && ['boundary', 'no-supported-content'].includes(na(midHand, 'measurements.middleToPalmRatio').code), [items(midHand), na(midHand, 'measurements.middleToPalmRatio')]);
 const narrow = HANDS[3].h; // middle-ring gap 0.10: upward middle|ring edge at 0.41
-const nearMR = e1.generateE1Reading(poseEnvelope(narrow, POSES[0], [['upward', [[0.43, 0.95], [0.42, 0.55], [0.41, 0.12]]]]), { synthetic: true });
+const nearMR = poseReading(narrow, POSES[0], [['upward', [[0.43, 0.95], [0.42, 0.55], [0.41, 0.12]]]]);
 check('G5. narrow zones: an upward ending on the middle|ring edge is a boundary, never one side', na(nearMR, 'lines.upward').code === 'boundary' && !items(nearMR).some((x) => x.includes('URDHVA')));
-const tall = e1.generateE1Reading(poseEnvelope({ m: 0.3333, r: 0.6667, finger: 1, palm: 2.1 }, { rot: 0, scale: 200, tx: 450, ty: 400, mirror: false }, [['life', [[0.1, 0.3], [0.05, 0.7], [0.12, 1.1]]]]), { synthetic: true });
+const tall = poseReading({ m: 0.3333, r: 0.6667, finger: 1, palm: 2.1 }, { rot: 0, scale: 200, tx: 450, ty: 400, mirror: false }, [['life', [[0.1, 0.3], [0.05, 0.7], [0.12, 1.1]]]]);
 check('G6. uncertain measurements (implausible palm proportions) are withheld with their I1 detail; traces still read', na(tall, 'measurements.middleToPalmRatio').code === 'measurement-unavailable' && /^uncertain:.*implausible-proportions/.test(na(tall, 'measurements.middleToPalmRatio').detail) && items(tall).includes('C1-IN-PITR-KNOWLEDGE') && !items(tall).some((x) => x.includes('FINGER')), tall.notAssessed);
+
+// ============================================================ H. R3 numerical compatibility, port fidelity, A4, coverage
+// F5 witness: a valid synthetic hand whose I1 index/ring ratio is astronomically large (the ring chain is a few subnormal
+// steps long). R2 rejected the whole reading; R3 withholds only that interpretation and keeps everything else.
+const hugeHand = (() => {
+  const s2 = Math.SQRT1_2, w = 0.25, C = [0.3, 0.3], u = [s2, -s2], f = [s2, s2];
+  const at = (t: number, len: number) => ({ x: C[0] + (t - 0.5) * w * u[0] + len * f[0], y: C[1] + (t - 0.5) * w * u[1] + len * f[1] });
+  const lm: any[] = []; lm[0] = { x: 0, y: 0 };
+  lm[1] = at(-0.2, -0.15); lm[2] = at(-0.35, -0.08); lm[3] = at(-0.45, -0.02); lm[4] = at(-0.5, 0.03);
+  for (const [k, t] of [[5, 0], [9, 1 / 3], [17, 1]] as [number, number][]) for (let j = 0; j < 4; j++) lm[k + j] = at(t, j * 0.09);
+  lm[13] = { x: 0, y: 0 }; lm[14] = { x: 1e-306, y: 0 }; lm[15] = { x: 2e-306, y: 0 }; lm[16] = { x: 3e-306, y: 0 };
+  return { imageWidth: 1000, imageHeight: 1000, landmarks: lm, hand: 'right', dominantHand: 'unknown', handednessLabel: 'Right', qualityIssues: [], rotationDeg: 0, lines: [], marks: [] } as PalmFeatureSetInput;
+})();
+const hugeFs: any = built(hugeHand);
+const hugeR: any = generateSyntheticReading(hugeHand, { synthetic: true });
+check('H1. F5 witness: the I1 builder measures an index/ring ratio far beyond the interpretable range', hugeFs.measurements.measurements.indexToRingRatio.status === 'measured' && hugeFs.measurements.measurements.indexToRingRatio.value > 1e300, hugeFs.measurements.measurements.indexToRingRatio);
+check('H2. ...the reading is produced; only the dependent interpretation is withheld, with a diagnostic; other observations are kept', na(hugeR, 'measurements.indexToRingRatio').code === 'measurement-unavailable' && na(hugeR, 'measurements.indexToRingRatio').detail === 'value-outside-interpretable-range' && hugeR.observed.some((o: any) => o.feature === 'measurements.middleToPalmRatio'), hugeR.notAssessed);
+check('H3. the exact reviewer value 2.1657716808922185e+304 is classified out of range (withheld), never rounded or overflowed', e1.gridStatus(2.1657716808922185e+304) === 'out-of-range' && e1.gridStatus(9e+304) === 'out-of-range');
+
+// port fidelity: E1 derives finger bases from the input; they must equal the I1 helper on every hand and pose
+let portChecks = 0, portOk = true;
+for (const { h } of HANDS) for (const p of POSES) {
+  const i = poseInput(h, p, []);
+  const mine = construction.fingerBasesFromInput(i), ref = palmFingerBases(i.landmarks, i.imageWidth, i.imageHeight);
+  portChecks++;
+  if (!ref.ok || JSON.stringify(mine) !== JSON.stringify(ref.bases)) portOk = false;
+}
+check(`H4. the construction port equals the I1 finger-base helper exactly (${portChecks} hand x pose cases)`, portOk && portChecks === HANDS.length * POSES.length);
+
+// plan == render, A4, coverage and text safety over a generated set of hands, poses, traces and modes
+const BANNED = /\b(die|dies|death|lifespan|life span|live long|long life|longevity|rich|wealth|money|marri|husband|wife|children|sons|daughter|fertil|caste|varṇa|varna|health|illness|disease|accident|misfortune|guarantee|will become|you will|destined|fate)\w*/i;
+const seen = new Set<string>();
+let renders = 0, consistent = true, a4 = true, safe = true;
+const handsH: Hand[] = [...HANDS.map((x) => x.h), { m: 0.3333, r: 0.6667, finger: 0.65, palm: 1 }, { m: 0.3333, r: 0.6667, finger: 1.15, palm: 1 }];
+for (const h of handsH) for (const pose of [POSES[0], POSES[2], POSES[4]]) for (const hx of [-0.05, h.m / 2, h.m]) for (const ux of [0, h.m, ringMid(h), 0.98]) for (const hd of [0, 0.2]) {
+  const lines: Array<[LineInput['line'], number[][]]> = [['heart', [[0.95, 0.22], [0.55, 0.2], [Math.round(hx * 1e4) / 1e4, 0.15]]], ['upward', [[ux + 0.02, 0.95], [ux + 0.01, 0.55], [ux, 0.12]]], ['head', [[0.05, 0.35], [0.5, 0.35 + hd / 2], [0.92, 0.35 + hd]]], ['life', [[0.1, 0.3], [0.05, 0.7], [0.12, 1.1]]]];
+  for (const mode of ['combined', 'indian-only', 'western-only']) {
+    const r = poseReading(h, pose, lines, mode);
+    renders++;
+    const obs = Object.fromEntries([...r.observed.map((o: any) => [o.feature, { provenance: o.provenance, value: o.value, ...(o.nearEdge !== undefined ? { nearEdge: o.nearEdge } : {}), ...(o.adjacentZone ? { adjacentZone: o.adjacentZone } : {}) }]), ...r.notAssessed.filter((n: any) => !r.observed.some((o: any) => o.feature === n.feature)).map((n: any) => [n.feature, { notAssessed: n.code, ...(n.detail !== undefined ? { detail: n.detail } : {}) }])]);
+    const pl = plan(obs, { mode, qualityAccepted: r.quality.accepted, ...(r.quality.detail ? { qualityDetail: r.quality.detail } : {}) });
+    const ids = (x: any) => JSON.stringify([x.sections.map((sx: any) => [sx.category, sx.items.map((i: any) => i.recordId)]), x.moreFromYourReading.map((i: any) => i.recordId), x.notAssessed.map((n: any) => [n.feature, n.code]), x.emptyResult]);
+    if (ids(pl) !== ids(r)) { if (consistent) console.log('H5 first mismatch\n plan  ', ids(pl), '\n render', ids(r), '\n obs', JSON.stringify(obs)); consistent = false; }
+    const allItems = [...r.sections.flatMap((sx: any) => sx.items), ...r.moreFromYourReading];
+    for (const it of allItems) { seen.add(it.recordId); if (Object.values(it.text).some((t: any) => BANNED.test(t))) safe = false; }
+    const featuresRead = allItems.flatMap((it: any) => it.supportingFeatures.map((x: any) => x.feature));
+    if (new Set(featuresRead).size !== featuresRead.length) a4 = false;
+    for (const o of r.observed) if (featuresRead.filter((f: string) => f === o.feature).length + r.notAssessed.filter((n: any) => n.feature === o.feature).length !== 1 && !r.historicalContextMatched.length) a4 = false;
+  }
+}
+check(`H5. plan == rendered reading on every generated case (${renders} readings)`, consistent && renders >= 1000, renders);
+check('H6. A4 (independent of oracle parity): no feature is read by two items; every observed feature is read once or listed once', a4);
+check('H7. rendered text passes the prohibited-wording check everywhere (also enforced in-engine by validateReadingOutput)', safe);
+const ringLongR = poseReading({ m: 0.3333, r: 0.6667, finger: 1, palm: 1, ring: 1.3 }, POSES[0], []);
+check('H8. coverage: all 12 eligible-initial records are emitted with real text through the reading interface', (() => { const all = new Set([...seen, ...items(ringLongR)]); return e1.defaultLibrary().initialIds.every((id: string) => all.has(id)); })(), [...seen].sort());
 
 console.log(`\nPALM-03-E1 end-to-end: ${passed} passed, ${failures.length} failed`);
 if (failures.length) { for (const f of failures) console.log(`  FAIL ${f}`); process.exit(1); }
