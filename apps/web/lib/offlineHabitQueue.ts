@@ -44,8 +44,8 @@ function isQueuedHabitLog(value: unknown): value is QueuedHabitLog {
 }
 
 /**
- * AURA-ANDROID-REL-04 IR-01 / IR-03 (R4, R5) -- durable offline activity queue
- * on IndexedDB.
+ * AURA-ANDROID-REL-04 IR-01 / IR-03 (R4, R5, R8) -- durable offline activity
+ * queue on IndexedDB.
  *
  * WHY IndexedDB (decision R4, accepted by the R4 independent disposition): the
  * queue's lifecycle steps are check-then-act operations between browsing
@@ -55,57 +55,61 @@ function isQueuedHabitLog(value: unknown): value is QueuedHabitLog {
  * contexts), with or without Web Locks. Every lifecycle step below is ONE
  * such transaction.
  *
- * Stores (database `aura-offline`, version 2):
- *   records     recordId -> { recordId, ownerUserId, clientRequestId, item, queuedAt }   (immutable once written)
- *   claims      key -> { key, ownerUserId, clientRequestId, tab, attempt, at }
- *               ONE claim per LOGICAL request (account + clientRequestId), whatever number of
- *               records carry it; `attempt` identifies one send attempt (expires after CLAIM_TTL_MS)
- *   dispatches  key -> { key, attempts, lastAt }   the request has been handed to the network at least once
- *   tombstones  key -> { recordId: key, ownerUserId, ref, at }   settled/discarded: no migration may recreate it
- *               R7: key = markerKey(owner, recordId) -- a marker is ACCOUNT-SCOPED; markers written before R7
- *               are keyed by the bare recordId and are honoured only for the account they name
- * (R5: version 2 re-keys claims and dispatch marks by account + clientRequestId; the
- * version-1 marks are carried over in the upgrade transaction. R7 needs no schema change: existing
- * records and markers are kept as they are and read through the ownership rules below.)
+ * R8 -- ONE active record format, ONE decision-marker format, no migration.
+ * Release history (report §R8-1): the only queue format ever shipped to
+ * Production or to a distributed client is the unscoped localStorage
+ * `offline_habit_queue` (quarantined read-only, below). Every interim format of
+ * REL-04 R1-R7 existed only on the unmerged PR branch. By owner decision (ticket
+ * 39224) they are no longer migrated: any such data is PRESERVED IN PLACE,
+ * never replayed, counted for its account, shown as "sync paused", and removed
+ * only by that account's explicit discard (sign-out).
+ *
+ * Stores (database `aura-offline`, version 2 -- no schema change in R8):
+ *   records     recordId -> { recordId, ownerUserId, clientRequestId, item, queuedAt, fmt }
+ *               ACTIVE only when fmt === ACTIVE_RECORD_FORMAT (written by R8 enqueue). A record
+ *               without it was written by a pre-R8 development build: QUARANTINED (paused).
+ *   claims      requestKey(owner, crid) -> { key, ownerUserId, clientRequestId, tab, attempt, at }
+ *   dispatches  requestKey(owner, crid) -> { key, attempts, lastAt }
+ *   tombstones  decisionKey(owner, crid) -> { recordId: key, ownerUserId, clientRequestId, payload, decision, at, fmt }
+ *               the account's FINAL decision (settled / discarded) about one LOGICAL request. Never
+ *               expires, never pruned (no source can re-create the request, but a stale tab could
+ *               re-enqueue its clientRequestId). Pre-R8 markers stay in the store, inert and untouched.
+ *
+ * Logical identity: an activity is (account, clientRequestId); its payload
+ * (canonicalPayload) separates an EQUIVALENT copy (same payload) from a
+ * CONFLICTING request (different payload). The physical recordId identifies a
+ * stored copy only; no lifecycle decision is ever keyed by it.
  *
  * Lifecycle guarantees:
- *   create     enqueue checks identity and writes the record (+ the caller's claim) in one transaction:
- *              one clientRequestId = one payload; a different payload is refused ('conflict').
- *   dispatch   sent only after claimForDispatch() atomically confirmed a record of that request still
- *              exists and no attempt holds a fresh claim on the request, recorded the dispatch, and issued
- *              this attempt's token. No await separates the caller's final account check from the send.
- *   release    an unresolved attempt releases ONLY its own claim (token): a late completion after the
- *              claim expired and another attempt took it can never release that other attempt's claim.
- *   settle     a definitive server answer removes exactly the given records and writes tombstones; it
- *              clears the claim only if it is still this attempt's (`superseded` reports otherwise).
- *   discard    atomically removes the confirmed records EXCEPT those of a request another context is
- *              sending right now (kept, reported). Records of a request already dispatched are removed
- *              but reported as "may have been sent": a local discard never undoes a server commit.
- *   migration  each owned interim-format entry (localStorage R1/R2/R3 formats) is copied under a
- *              deterministic recordId in one transaction that first checks the record and its tombstone.
- *              A source is removed only after that transaction committed AND only if it is still exactly
- *              what was copied (a changed or unparseable source is left in place: uncertain sources are
- *              preserved). Tombstones are kept for as long as ANY interim source of that account still
- *              exists (source retirement), and only then expire.
- *   ownership  (R7) a recordId alone never proves ownership. Every migrated entry gets the account-scoped
- *              identity migratedRecordId(item, owner) whatever its source format; earlier ids are aliases
- *              honoured only for a record/marker naming the same account; dedup is by account +
- *              clientRequestId + payload. Settle and discard act only on the given account's records and
- *              write only that account's markers. If only a pre-R7 marker of ANOTHER account exists for an
- *              entry's shared id, its ownership cannot be established: it is kept and shown, but HELD
- *              (never sent automatically), and the user's discard still removes it.
- *   failures   any IndexedDB failure => reads report `ok:false` (unreadable, never "empty"), writes report
- *              'failed'. There is NO fallback to localStorage or memory.
+ *   create     enqueue (one transaction) consults the request's decision first: already settled/discarded
+ *              -> 'settled' (nothing stored, nothing sent); a quarantined copy of the request exists ->
+ *              'paused' (never adopted, never sent); a different payload -> 'conflict'. Otherwise the
+ *              record (+ the caller's claim) is written, or the identical active copy reused.
+ *   dispatch   only an ACTIVE record; claimForDispatch() atomically confirms it still exists and no attempt
+ *              holds a fresh claim on the request, records the dispatch and issues this attempt's token.
+ *   release    an unresolved attempt releases ONLY its own claim (token).
+ *   settle     a definitive server answer removes EVERY active equivalent copy of the request and writes the
+ *              account's decision, in one transaction; the claim is cleared only if still this attempt's.
+ *   discard    the account's confirmed discard removes the records (and every active equivalent copy of
+ *              their request) and writes the decision, in one transaction, EXCEPT a request another context
+ *              is sending right now (kept, reported). Quarantined localStorage entries of the account are
+ *              removed only if unchanged since they were shown; a failed removal leaves them quarantined.
+ *   ownership  every read, settle and discard is bound to one account; another account's record is never
+ *              touched; a decision applies only to its own account.
+ *   failures   any IndexedDB or localStorage inspection failure => reads report `ok:false` (unreadable, never
+ *              "empty"), writes report 'failed'. There is NO fallback to localStorage or memory.
  */
 export const LEGACY_QUEUE_KEY = 'offline_habit_queue';
+/** Retired REL-04 development formats (never released): quarantined in place, never migrated. */
 export const QUEUE_V2_PREFIX = 'offline_habit_queue_v2:';
 export const QUEUE_V3_PREFIX = 'aura_q3:';
 export const QUEUE_V4_PREFIX = 'aura_q4:';
-export const TOMBSTONE_V4_PREFIX = 'aura_q4t:';
+export const QUARANTINED_PREFIXES = [QUEUE_V2_PREFIX, QUEUE_V3_PREFIX, QUEUE_V4_PREFIX] as const;
 export const QUEUE_DB_NAME = 'aura-offline';
 export const QUEUE_DB_VERSION = 2;
 export const CLAIM_TTL_MS = 60_000;
-export const TOMBSTONE_TTL_MS = 30 * 24 * 3600_000;
+/** R8: the one active record (and decision) format. */
+export const ACTIVE_RECORD_FORMAT = 'r8';
 
 export interface OwnedQueuedHabitLog extends QueuedHabitLog {
   ownerUserId: string;
@@ -120,25 +124,34 @@ export interface QueueRecord {
   inFlight: boolean;
   /** This request was handed to the network at least once (it may have been sent and saved). */
   dispatched: boolean;
-  /** R7: this account's ownership of the entry's earlier decision is unverified -- kept and shown, never sent automatically. */
-  held: boolean;
+  /** R8: written by a retired pre-R8 build -- quarantined: kept, counted, discardable; never shown as pending, never sent. */
+  paused: boolean;
 }
+
+/**
+ * R8: one account's retired-format localStorage entry, exactly as read (discard removes it only if
+ * unchanged). `crids` = the logical requests it carries when parseable; `unparsed` = entries whose
+ * request cannot be read (each counted on its own).
+ */
+export interface QuarantinedSource { key: string; raw: string; entries: number; crids: string[]; unparsed: number }
 
 export type QueueRead =
   | {
       ok: true;
-      /** Presentation: one entry per clientRequestId, excluding conflicts. */
+      /** Presentation: activity PENDING AUTOMATIC SYNC -- one entry per active request, excluding conflicts. */
       items: OwnedQueuedHabitLog[];
-      /** Every readable record (the discard snapshot). */
+      /** Every readable IndexedDB record of the account, active and paused (the discard snapshot). */
       records: QueueRecord[];
-      /** Replay groups: identical-payload records per clientRequestId. */
+      /** Replay groups: identical-payload ACTIVE records per clientRequestId. */
       groups: QueueRecord[][];
-      /** clientRequestIds with conflicting payloads (quarantined, never sent). */
+      /** Active clientRequestIds with conflicting payloads (never sent). */
       conflicts: string[];
-      /** R7: clientRequestIds held because ownership could not be established (kept, shown, discardable; never sent automatically). */
-      held: string[];
       /** recordIds whose value is not a valid entry (kept, counted, discardable). */
       corruptIds: string[];
+      /** R8: the account's retired-format localStorage entries (kept in place, never migrated). */
+      quarantined: QuarantinedSource[];
+      /** R8: activity kept on this device that will NOT sync automatically ("sync paused"). */
+      paused: number;
     }
   | { ok: false };
 
@@ -148,16 +161,6 @@ export function canonicalPayload(v: QueuedHabitLog): string {
   const r = rest as Record<string, unknown>;
   delete r.ownerUserId; delete r.recordId; delete r.queuedAt;
   return JSON.stringify(Object.keys(r).sort().reduce<Record<string, unknown>>((o, k) => { if (r[k] !== undefined) o[k] = r[k]; return o; }, {}));
-}
-
-function hash(text: string): string {
-  let h1 = 0x811c9dc5, h2 = 0x01000193;
-  for (let i = 0; i < text.length; i++) {
-    const c = text.charCodeAt(i);
-    h1 = Math.imul(h1 ^ c, 0x01000193) >>> 0;
-    h2 = Math.imul(h2 ^ c, 0x5bd1e995) >>> 0;
-  }
-  return h1.toString(16).padStart(8, '0') + h2.toString(16).padStart(8, '0');
 }
 
 function randomId(): string {
@@ -170,34 +173,14 @@ function randomId(): string {
   }
 }
 
-/**
- * Deterministic id for an entry migrated from an interim format. R6: the
- * OWNING ACCOUNT is part of the identity -- two accounts' entries with the same
- * clientRequestId and payload are two different records.
- */
-export function migratedRecordId(item: QueuedHabitLog, ownerUserId: string): string {
-  return 'm' + hash(`${ownerUserId}|${item.clientRequestId}|${canonicalPayload(item)}`);
-}
-
-/** The R4/R5 (owner-less) migrated id; honoured only for a record or marker OWNED by the same account. */
-export function legacyMigratedRecordId(item: QueuedHabitLog): string {
-  return 'm' + hash(`${item.clientRequestId}|${canonicalPayload(item)}`);
-}
-
-/**
- * R7 -- the settlement/discard marker key of `recordId` FOR `ownerUserId`.
- * Every marker written from R7 on is keyed by account + recordId, so no
- * account's settlement or discard can ever replace another account's marker,
- * whatever recordId the two share. Markers written before R7 are keyed by the
- * bare recordId; they are honoured only for the account they name (see markerOf).
- */
-export function markerKey(ownerUserId: string, recordId: string): string {
-  return `t\u0000${ownerUserId}\u0000${recordId}`;
-}
-
-/** The logical request a record belongs to (claims and dispatch marks are per request). */
+/** The logical request (claims and dispatch marks are per request). */
 export function requestKey(ownerUserId: string, clientRequestId: string): string {
   return `${ownerUserId}\u0000${clientRequestId}`;
+}
+
+/** R8: the key of the account's settle/discard DECISION about one logical request (the only marker format). */
+export function decisionKey(ownerUserId: string, clientRequestId: string): string {
+  return `d\u0000${ownerUserId}\u0000${clientRequestId}`;
 }
 
 /** Proof of one send attempt: only its holder may release or (claim-wise) settle it. */
@@ -205,19 +188,14 @@ export interface ClaimToken { readonly key: string; readonly attempt: string }
 
 // ------------------------------------------------------------------ IndexedDB plumbing
 
-/**
- * `held` (R7): migrated, but this account's ownership of the entry's earlier
- * decision could not be established (a pre-R7 marker under one of its shared
- * ids names ANOTHER account, so this account's own settle/discard marker may
- * have been overwritten). Kept, shown and discardable; never sent automatically.
- */
-type Stored = { recordId: string; ownerUserId: string; clientRequestId: string; item: OwnedQueuedHabitLog; queuedAt: number; held?: 'ownership-unverified' };
+type Stored = { recordId: string; ownerUserId: string; clientRequestId: string; item: OwnedQueuedHabitLog; queuedAt: number; fmt?: string };
 type Claim = { key: string; ownerUserId: string; clientRequestId: string; tab: string; attempt: string; at: number };
 type Dispatch = { key: string; attempts: number; lastAt: number };
-/** `recordId` is the store key: markerKey(owner, ref) from R7 on; the bare recordId for pre-R7 markers. */
-type Tomb = { recordId: string; ownerUserId: string; at: number; ref?: string };
+type Decision = { recordId: string; ownerUserId: string; clientRequestId: string; payload: string; decision: 'settled' | 'discarded'; at: number; fmt: typeof ACTIVE_RECORD_FORMAT };
 type Stores = Record<'records' | 'claims' | 'dispatches' | 'tombstones', IDBObjectStore>;
 const STORES = ['records', 'claims', 'dispatches', 'tombstones'] as const;
+
+const isActive = (r: Stored) => r.fmt === ACTIVE_RECORD_FORMAT;
 
 let dbPromise: Promise<IDBDatabase> | null = null;
 
@@ -295,12 +273,12 @@ const asPromise = <T>(r: IDBRequest<T>) => new Promise<T>((resolve, reject) => {
  * its value only after the transaction COMMITTED (oncomplete). Any failure
  * (open, request, abort, quota) rejects.
  */
-async function tx<T>(mode: IDBTransactionMode, body: (s: Record<(typeof STORES)[number], IDBObjectStore>) => Promise<T>): Promise<T> {
+async function tx<T>(mode: IDBTransactionMode, body: (s: Stores) => Promise<T>): Promise<T> {
   const db = await openDb();
   return new Promise<T>((resolve, reject) => {
     let t: IDBTransaction;
     try { t = db.transaction(STORES as unknown as string[], mode); } catch (e) { reject(e); return; }
-    const stores = Object.fromEntries(STORES.map((n) => [n, t.objectStore(n)])) as Record<(typeof STORES)[number], IDBObjectStore>;
+    const stores = Object.fromEntries(STORES.map((n) => [n, t.objectStore(n)])) as Stores;
     let value: T;
     let failed: unknown = null;
     t.oncomplete = () => (failed ? reject(failed) : resolve(value));
@@ -330,179 +308,70 @@ function keysWithPrefix(s: Storage, prefix: string): string[] {
 
 const fresh = (c: Claim | undefined, now: number) => Boolean(c && now - c.at < CLAIM_TTL_MS && c.at <= now + 5_000);
 
-// ------------------------------------------------------------------ ownership (R7: one mechanism for every persisted identity)
-//
-// A recordId alone is NEVER proof of ownership: pre-R7 formats share ids between
-// accounts (R3 aura_q4 migrated ids, R4/R5 owner-less migrated ids). Ownership is
-// established only by the account stored WITH a record or marker:
-//   record  owned  <=> record.ownerUserId === owner (and it is the same logical entry:
-//                      account + clientRequestId + canonical payload)
-//   marker  owned  <=> markerKey(owner, id) exists (R7+), OR a pre-R7 bare-id marker whose
-//                      ownerUserId === owner, OR an R3 localStorage marker aura_q4t:<owner>:<id>
-//   marker foreign <=> only a pre-R7 bare-id marker naming ANOTHER account exists for one of
-//                      the entry's ids: this account's own decision may have been overwritten.
-
-type MarkerState = 'owned' | 'foreign' | 'none';
-
-/** Is there a settlement/discard marker of `owner` for any of `ids`? */
-async function markerOf(st: Stores, owner: string, ids: string[], lsTombs: Set<string>): Promise<MarkerState> {
-  let foreign = false;
-  for (const id of ids) {
-    if (lsTombs.has(id)) return 'owned';
-    if ((await asPromise(st.tombstones.get(markerKey(owner, id)))) as Tomb | undefined) return 'owned';
-    const bare = (await asPromise(st.tombstones.get(id))) as Tomb | undefined;
-    if (bare) { if (bare.ownerUserId === owner) return 'owned'; foreign = true; }
-  }
-  return foreign ? 'foreign' : 'none';
+/** All of `owner`'s ACTIVE copies of the logical request with this payload (the equivalent representations). */
+async function activeCopies(st: Stores, owner: string, crid: string, payload: string): Promise<Stored[]> {
+  const same = (await asPromise(st.records.index('ownerCrid').getAll(IDBKeyRange.only([owner, crid])))) as Stored[];
+  return same.filter((r) => isActive(r) && isQueuedHabitLog(r.item) && canonicalPayload(r.item) === payload);
 }
 
-/** This account's existing record of the same logical entry (any identity format), if any. */
-async function ownedRecordOf(st: Stores, owner: string, item: QueuedHabitLog, ids: string[]): Promise<Stored | undefined> {
-  const mine = canonicalPayload(item);
-  const same = (r: Stored | undefined): r is Stored => Boolean(r && r.ownerUserId === owner && r.clientRequestId === item.clientRequestId && isQueuedHabitLog(r.item) && canonicalPayload(r.item) === mine);
-  for (const id of ids) {
-    const r = (await asPromise(st.records.get(id))) as Stored | undefined;
-    if (same(r)) return r;
-  }
-  const byRequest = (await asPromise(st.records.index('ownerCrid').getAll(IDBKeyRange.only([owner, item.clientRequestId])))) as Stored[];
-  return byRequest.find(same);
+/** Records `owner`'s final decision about the logical request (first decision wins; it is never replaced). */
+async function writeDecision(st: Stores, owner: string, crid: string, payload: string, decision: Decision['decision'], at: number) {
+  const key = decisionKey(owner, crid);
+  if ((await asPromise(st.tombstones.get(key))) as Decision | undefined) return;
+  await asPromise(st.tombstones.put({ recordId: key, ownerUserId: owner, clientRequestId: crid, payload, decision, at, fmt: ACTIVE_RECORD_FORMAT } satisfies Decision));
 }
 
-/** Writes `owner`'s marker for `recordId` (never a bare-id marker: it could replace another account's). */
-async function writeMarker(st: Stores, owner: string, recordId: string, at: number) {
-  await asPromise(st.tombstones.put({ recordId: markerKey(owner, recordId), ownerUserId: owner, ref: recordId, at } satisfies Tomb));
-}
-
-// ------------------------------------------------------------------ migration (owned interim formats)
+// ------------------------------------------------------------------ quarantine of retired development formats (read-only)
 
 /**
- * One interim entry: `recordId` is its account-scoped identity (the id it migrates to, whatever its source
- * format); `aliases` are the pre-R7 ids an earlier build may have stored it or its marker under -- honoured
- * only for a record or marker that names this same account.
+ * The account's retired-format localStorage entries (R1 v2 array, R2 aura_q3,
+ * R3 aura_q4): read, never parsed into the queue, never migrated. Ownership is
+ * the account named in the key (and, when the value parses, in the entry).
+ * R3 localStorage markers (aura_q4t) are not activity: not counted, left in place.
  */
-interface Candidate { recordId: string; aliases: string[]; item: OwnedQueuedHabitLog }
-interface MigrationSource { key: string; raw: string; candidates: Candidate[] }
-/**
- * R6 -- what inspecting the account's interim (localStorage) sources established:
- *   'unavailable'  storage could not be inspected (access denied, a read threw, no storage):
- *                  NOTHING is concluded -- no source is assumed absent, no marker is pruned;
- *   'ok'           inspected; `remaining` = some interim key of this account still exists
- *                  (parseable or not), i.e. retirement is NOT established.
- */
-type Inspection = { state: 'unavailable' } | { state: 'ok'; sources: MigrationSource[]; remaining: boolean; lsTombs: Set<string> };
-
-function inspectSources(owner: string): Inspection {
+type Quarantine = { state: 'unavailable' } | { state: 'ok'; sources: QuarantinedSource[]; crids: Set<string> };
+function inspectQuarantine(owner: string): Quarantine {
   let s: Storage;
   try {
     if (typeof localStorage === 'undefined' || localStorage === null) return { state: 'unavailable' };
     s = localStorage;
   } catch {
-    return { state: 'unavailable' }; // the property itself denied
+    return { state: 'unavailable' };
   }
   try {
-    const sources: MigrationSource[] = [];
-    const lsTombs = new Set(keysWithPrefix(s, `${TOMBSTONE_V4_PREFIX}${owner}:`).map((k) => k.slice(`${TOMBSTONE_V4_PREFIX}${owner}:`.length)));
-    const valid = (v: unknown): v is OwnedQueuedHabitLog => isQueuedHabitLog(v) && (v as OwnedQueuedHabitLog).ownerUserId === owner;
-    const v4 = keysWithPrefix(s, `${QUEUE_V4_PREFIX}${owner}:`);
-    const v3 = keysWithPrefix(s, `${QUEUE_V3_PREFIX}${owner}:`);
+    const sources: QuarantinedSource[] = [];
+    const parse = (raw: string): unknown => { try { return JSON.parse(raw); } catch { return undefined; } };
+    const cridOf = (v: unknown) => (isQueuedHabitLog(v) ? v.clientRequestId : null);
     const v2 = s.getItem(QUEUE_V2_PREFIX + owner);
-    for (const key of v4) {
-      const raw = s.getItem(key);
-      if (raw === null) continue;
-      let v: unknown; try { v = JSON.parse(raw); } catch { continue; } // unparseable: left in place, never guessed at
-      if (!valid(v) || !v.recordId) continue;
-      // R7: an aura_q4 recordId is NOT account-scoped (the R3 migrator derived it from clientRequestId + payload
-      // only), so it is an alias like any other pre-R7 id; the record itself gets the account-scoped identity.
-      const legacy = legacyMigratedRecordId(v);
-      sources.push({ key, raw, candidates: [{ recordId: migratedRecordId(v, owner), aliases: v.recordId === legacy ? [legacy] : [v.recordId, legacy], item: v }] });
-    }
-    for (const key of v3) {
-      const raw = s.getItem(key);
-      if (raw === null) continue;
-      let v: unknown; try { v = JSON.parse(raw); } catch { continue; }
-      if (!valid(v)) continue;
-      sources.push({ key, raw, candidates: [{ recordId: migratedRecordId(v, owner), aliases: [legacyMigratedRecordId(v)], item: v }] });
-    }
     if (v2 !== null) {
-      let arr: unknown; try { arr = JSON.parse(v2); } catch { arr = null; }
-      if (Array.isArray(arr) && arr.every(valid)) sources.push({ key: QUEUE_V2_PREFIX + owner, raw: v2, candidates: arr.map((item) => ({ recordId: migratedRecordId(item, owner), aliases: [legacyMigratedRecordId(item)], item })) });
+      const a = parse(v2);
+      const list = Array.isArray(a) ? a : [undefined]; // unparseable: one kept entry
+      const crids = list.map(cridOf).filter((c): c is string => c !== null);
+      if (list.length > 0) sources.push({ key: QUEUE_V2_PREFIX + owner, raw: v2, entries: list.length, crids, unparsed: list.length - crids.length });
     }
-    return { state: 'ok', sources, remaining: v4.length > 0 || v3.length > 0 || v2 !== null, lsTombs };
+    for (const prefix of [QUEUE_V3_PREFIX, QUEUE_V4_PREFIX]) {
+      for (const key of keysWithPrefix(s, `${prefix}${owner}:`)) {
+        const raw = s.getItem(key);
+        if (raw === null) continue;
+        const v = parse(raw);
+        if (v && typeof v === 'object' && typeof (v as { ownerUserId?: unknown }).ownerUserId === 'string' && (v as { ownerUserId: string }).ownerUserId !== owner) continue; // another account's (an owner id extending this one)
+        const c = cridOf(v);
+        sources.push({ key, raw, entries: 1, crids: c ? [c] : [], unparsed: c ? 0 : 1 });
+      }
+    }
+    return { state: 'ok', sources, crids: new Set(sources.flatMap((x) => x.crids)) };
   } catch {
     return { state: 'unavailable' };
   }
 }
 
-const prunedThisSession = new Set<string>();
-
-export type MigrationState = 'retired' | 'pending' | 'unavailable';
-
-/**
- * Interruption-safe, idempotent migration. Rejects if IndexedDB fails. Returns
- * what is established about the interim sources afterwards. A source is removed
- * only when EVERY entry in it is confirmed in this account's own store -- an
- * owned record or an owned settlement marker -- and the source is still exactly
- * what was copied. Markers are pruned only once retirement is positively
- * established ('retired'); never when storage is 'unavailable'.
- */
-async function migrateOwnedSources(owner: string): Promise<MigrationState> {
-  const first = inspectSources(owner);
-  if (first.state === 'unavailable') return 'unavailable';
-  if (first.sources.length > 0) {
-    const confirmed = await tx('readwrite', async (st) => {
-      const ok = new Set<string>(); // source keys whose every entry is confirmed for THIS account
-      for (const src of first.sources) {
-        let all = true;
-        for (const c of src.candidates) {
-          const ids = [c.recordId, ...c.aliases];
-          const marker = await markerOf(st, owner, ids, first.lsTombs);
-          if (marker === 'owned') continue; // settled or discarded before, BY THIS ACCOUNT
-          if (await ownedRecordOf(st, owner, c.item, ids)) continue; // already stored for this account (any identity format)
-          const existing = (await asPromise(st.records.get(c.recordId))) as Stored | undefined;
-          if (existing) { all = false; continue; } // never reuse another account's record (account-scoped ids: only a hash collision)
-          const rec: Stored = { recordId: c.recordId, ownerUserId: owner, clientRequestId: c.item.clientRequestId, item: { ...c.item, recordId: c.recordId }, queuedAt: c.item.queuedAt ?? 0 };
-          // Ownership of the entry's earlier decision cannot be established: keep it, never send it automatically.
-          if (marker === 'foreign') rec.held = 'ownership-unverified';
-          await asPromise(st.records.add(rec));
-        }
-        if (all) ok.add(src.key);
-      }
-      return ok;
-    });
-    // Committed. Remove a source only if every entry was confirmed for this account AND it is still exactly what was copied.
-    try {
-      const s = localStorage;
-      for (const src of first.sources) {
-        if (!confirmed.has(src.key)) continue;
-        try { if (s.getItem(src.key) === src.raw) s.removeItem(src.key); } catch { /* re-run later */ }
-      }
-    } catch { /* storage became unavailable: sources stay; re-run later */ }
-  }
-  // Markers expire only once source retirement is POSITIVELY established.
-  const after = inspectSources(owner);
-  if (after.state === 'unavailable') return 'unavailable';
-  if (after.remaining) return 'pending';
-  if (prunedThisSession.has(owner)) return 'retired';
-  const now = Date.now();
-  await tx('readwrite', async (st) => {
-    const tombs = (await asPromise(st.tombstones.index('owner').getAll(IDBKeyRange.only(owner)))) as Tomb[];
-    for (const t of tombs) if (now - t.at > TOMBSTONE_TTL_MS) await asPromise(st.tombstones.delete(t.recordId));
-  });
-  try {
-    const s = localStorage;
-    for (const t of keysWithPrefix(s, `${TOMBSTONE_V4_PREFIX}${owner}:`)) s.removeItem(t);
-  } catch { /* best effort */ }
-  prunedThisSession.add(owner);
-  return 'retired';
-}
-
 // ------------------------------------------------------------------ reads
 
-/** The owner's queue. `ok:false` when IndexedDB or the interim (localStorage) sources cannot be read, or ANY step fails. */
+/** The owner's queue. `ok:false` when IndexedDB or the quarantined (localStorage) sources cannot be read, or ANY step fails. */
 export async function readOwnedQueue(ownerUserId: string): Promise<QueueRead> {
   try {
-    // R6: if the interim sources cannot be inspected, the queue is NOT known -- report it unreadable.
-    if ((await migrateOwnedSources(ownerUserId)) === 'unavailable') return { ok: false };
+    const q = inspectQuarantine(ownerUserId);
+    if (q.state === 'unavailable') return { ok: false }; // unknown, never "nothing paused"
     const now = Date.now();
     const { stored, claims, dispatches } = await tx('readonly', async (st) => {
       const stored = (await asPromise(st.records.index('owner').getAll(IDBKeyRange.only(ownerUserId)))) as Stored[];
@@ -521,22 +390,25 @@ export async function readOwnedQueue(ownerUserId: string): Promise<QueueRead> {
       const item = r.item;
       if (!isQueuedHabitLog(item) || item.ownerUserId !== ownerUserId || item.clientRequestId !== r.clientRequestId) { corruptIds.push(r.recordId); continue; }
       const key = requestKey(r.ownerUserId, r.clientRequestId);
-      records.push({ recordId: r.recordId, item: { ...item, recordId: r.recordId, queuedAt: r.queuedAt }, inFlight: fresh(claims.get(key), now), dispatched: dispatches.has(key), held: Boolean(r.held) });
+      records.push({ recordId: r.recordId, item: { ...item, recordId: r.recordId, queuedAt: r.queuedAt }, inFlight: fresh(claims.get(key), now), dispatched: dispatches.has(key), paused: !isActive(r) });
     }
     // Deterministic order: queued time, then log time, then identity (entries queued in the same millisecond).
     records.sort((a, b) => (a.item.queuedAt ?? 0) - (b.item.queuedAt ?? 0) || a.item.logTimestamp.localeCompare(b.item.logTimestamp) || a.item.clientRequestId.localeCompare(b.item.clientRequestId) || a.recordId.localeCompare(b.recordId));
+    // Per LOGICAL request: any quarantined copy (IndexedDB or localStorage) pauses the whole request (an active
+    // copy of it is never sent either); otherwise conflicting payloads are never sent; otherwise one replay group.
     const byCrid = new Map<string, QueueRecord[]>();
     for (const r of records) byCrid.set(r.item.clientRequestId, [...(byCrid.get(r.item.clientRequestId) ?? []), r]);
     const groups: QueueRecord[][] = [];
     const conflicts: string[] = [];
-    const held: string[] = [];
-    const heldItems: OwnedQueuedHabitLog[] = [];
+    const pausedRequests = new Set<string>(q.crids);
     for (const [crid, rs] of byCrid) {
-      if (new Set(rs.map((r) => canonicalPayload(r.item))).size > 1) conflicts.push(crid);
-      else if (rs.some((r) => r.held)) { held.push(crid); heldItems.push(rs[0].item); } // shown, never a replay group
+      if (rs.some((r) => r.paused) || q.crids.has(crid)) { pausedRequests.add(crid); for (const r of rs) r.paused = true; }
+      else if (new Set(rs.map((r) => canonicalPayload(r.item))).size > 1) conflicts.push(crid);
       else groups.push(rs);
     }
-    return { ok: true, items: [...groups.map((g) => g[0].item), ...heldItems], records, groups, conflicts, held, corruptIds };
+    // Counted per logical request (an entry with an unreadable request counts on its own).
+    const paused = pausedRequests.size + conflicts.length + corruptIds.length + q.sources.reduce((n, x) => n + x.unparsed, 0);
+    return { ok: true, items: groups.map((g) => g[0].item), records, groups, conflicts, corruptIds, quarantined: q.sources, paused };
   } catch {
     return { ok: false };
   }
@@ -544,7 +416,8 @@ export async function readOwnedQueue(ownerUserId: string): Promise<QueueRead> {
 
 /**
  * Presentation read. R5: `null` when the queue could not be read -- callers
- * must present that as UNKNOWN, never as "no pending activity".
+ * must present that as UNKNOWN, never as "no pending activity". Only activity
+ * pending automatic sync (R8: never quarantined activity).
  */
 export async function readOfflineHabitQueue(ownerUserId: string | null | undefined): Promise<OwnedQueuedHabitLog[] | null> {
   if (!ownerUserId) return [];
@@ -552,14 +425,25 @@ export async function readOfflineHabitQueue(ownerUserId: string | null | undefin
   return r.ok ? r.items : null;
 }
 
+/** R8: presentation read with the paused count ("sync paused" status); null = unreadable. */
+export async function readOfflineQueueView(ownerUserId: string | null | undefined): Promise<{ items: OwnedQueuedHabitLog[]; paused: number } | null> {
+  if (!ownerUserId) return { items: [], paused: 0 };
+  const r = await readOwnedQueue(ownerUserId);
+  return r.ok ? { items: r.items, paused: r.paused } : null;
+}
+
 // ------------------------------------------------------------------ writes
 
 export type EnqueueResult =
   | { status: 'stored'; recordId: string; claim: ClaimToken | null }
+  /** R8: this account already settled or discarded this request: nothing stored, nothing to send. */
+  | { status: 'settled' }
+  /** R8: a quarantined (retired-format) copy of this request exists: never adopted, never sent. */
+  | { status: 'paused' }
   | { status: 'conflict' }
   | { status: 'failed' };
 
-async function takeClaim(st: Record<(typeof STORES)[number], IDBObjectStore>, owner: string, crid: string, tab: string, now: number): Promise<ClaimToken | null> {
+async function takeClaim(st: Stores, owner: string, crid: string, tab: string, now: number): Promise<ClaimToken | null> {
   const key = requestKey(owner, crid);
   if (fresh((await asPromise(st.claims.get(key))) as Claim | undefined, now)) return null;
   const attempt = randomId() + randomId();
@@ -570,30 +454,32 @@ async function takeClaim(st: Record<(typeof STORES)[number], IDBObjectStore>, ow
 }
 
 /**
- * Stores one record for its owner, atomically with the identity check and
- * (claimFor) the sender's claim on the request. An identical payload already
- * queued under the same identity is reused; it is claimed only if no attempt
- * holds a fresh claim on the request. A different payload is refused.
+ * Stores one ACTIVE record for its owner, atomically with the decision and
+ * identity checks and (claimFor) the sender's claim on the request.
  */
 export async function enqueueOwned(item: OwnedQueuedHabitLog, { claimFor }: { claimFor?: string } = {}): Promise<EnqueueResult> {
   if (!item.ownerUserId || !item.clientRequestId) return { status: 'failed' };
   try {
-    await migrateOwnedSources(item.ownerUserId);
     const now = Date.now();
+    const owner = item.ownerUserId;
+    const mine = canonicalPayload(item);
+    const q = inspectQuarantine(owner);
     return await tx('readwrite', async (st) => {
-      const same = (await asPromise(st.records.index('ownerCrid').getAll(IDBKeyRange.only([item.ownerUserId, item.clientRequestId])))) as Stored[];
-      const mine = canonicalPayload(item);
+      const decided = (await asPromise(st.tombstones.get(decisionKey(owner, item.clientRequestId)))) as Decision | undefined;
+      if (decided) return decided.payload === mine ? ({ status: 'settled' } as const) : ({ status: 'conflict' } as const);
+      if (q.state === 'ok' && q.crids.has(item.clientRequestId)) return { status: 'paused' } as const; // a quarantined localStorage copy
+      const same = (await asPromise(st.records.index('ownerCrid').getAll(IDBKeyRange.only([owner, item.clientRequestId])))) as Stored[];
+      if (same.some((r) => !isActive(r))) return { status: 'paused' } as const;
       if (same.some((r) => !isQueuedHabitLog(r.item) || canonicalPayload(r.item) !== mine)) return { status: 'conflict' } as const;
       let recordId: string;
       if (same.length > 0) {
         recordId = same[0].recordId;
       } else {
-        recordId = item.recordId ?? randomId();
-        const rec: Stored = { recordId, ownerUserId: item.ownerUserId, clientRequestId: item.clientRequestId, item: { ...item, recordId }, queuedAt: now };
+        recordId = randomId();
+        const rec: Stored = { recordId, ownerUserId: owner, clientRequestId: item.clientRequestId, item: { ...item, recordId }, queuedAt: now, fmt: ACTIVE_RECORD_FORMAT };
         await asPromise(st.records.add(rec));
       }
-      // R7: a held request (ownership unverified) is never claimed for sending.
-      const claim = claimFor && !same.some((r) => r.held) ? await takeClaim(st, item.ownerUserId, item.clientRequestId, claimFor, now) : null;
+      const claim = claimFor ? await takeClaim(st, owner, item.clientRequestId, claimFor, now) : null;
       return { status: 'stored', recordId, claim } as const;
     });
   } catch {
@@ -601,12 +487,12 @@ export async function enqueueOwned(item: OwnedQueuedHabitLog, { claimFor }: { cl
   }
 }
 
-export type ClaimResult = { status: 'claimed'; claim: ClaimToken } | { status: 'gone' } | { status: 'in-flight' } | { status: 'held' } | { status: 'failed' };
+export type ClaimResult = { status: 'claimed'; claim: ClaimToken } | { status: 'gone' } | { status: 'in-flight' } | { status: 'paused' } | { status: 'failed' };
 
 /**
- * Atomically: a record of this request still exists and no attempt holds a
- * fresh claim on the request -> this attempt claims it (token) and the dispatch
- * is recorded (conservatively, before the send). Only 'claimed' permits sending.
+ * Atomically: an ACTIVE record of this request still exists, the request has no
+ * decision, and no attempt holds a fresh claim on it -> this attempt claims it
+ * (token) and the dispatch is recorded (before the send). Only 'claimed' permits sending.
  */
 export async function claimForDispatch(recordId: string, tab: string): Promise<ClaimResult> {
   try {
@@ -614,7 +500,13 @@ export async function claimForDispatch(recordId: string, tab: string): Promise<C
     return await tx('readwrite', async (st) => {
       const rec = (await asPromise(st.records.get(recordId))) as Stored | undefined;
       if (!rec) return { status: 'gone' } as const;
-      if (rec.held) return { status: 'held' } as const; // R7: ownership unverified -- never sent automatically
+      if (!isActive(rec)) return { status: 'paused' } as const; // R8: quarantined -- never sent
+      const q = inspectQuarantine(rec.ownerUserId);
+      if (q.state !== 'ok') return { status: 'failed' } as const; // the request's quarantine state is unknown: never send
+      if (q.crids.has(rec.clientRequestId)) return { status: 'paused' } as const;
+      const siblings = (await asPromise(st.records.index('ownerCrid').getAll(IDBKeyRange.only([rec.ownerUserId, rec.clientRequestId])))) as Stored[];
+      if (siblings.some((r) => !isActive(r))) return { status: 'paused' } as const; // a quarantined copy pauses the whole request
+      if ((await asPromise(st.tombstones.get(decisionKey(rec.ownerUserId, rec.clientRequestId)))) as Decision | undefined) return { status: 'gone' } as const;
       const claim = await takeClaim(st, rec.ownerUserId, rec.clientRequestId, tab, now);
       return claim ? ({ status: 'claimed', claim } as const) : ({ status: 'in-flight' } as const);
     });
@@ -637,16 +529,16 @@ export async function releaseClaim(token: ClaimToken): Promise<'released' | 'sup
   }
 }
 
-export interface RemovalResult { removed: number; alreadyGone: number; failed: number; superseded?: boolean; /** R7: records of another account, left untouched. */ foreign?: number }
+export interface RemovalResult { removed: number; alreadyGone: number; failed: number; superseded?: boolean; /** Records of another account, left untouched. */ foreign?: number; /** R8: quarantined records, never settled by a send. */ paused?: number }
 
-/** R7: the account a settlement/discard acts for (explicit, or the claim token's). */
+/** The account a settlement acts for (explicit, or the claim token's). */
 const ownerOfToken = (token?: ClaimToken) => (token ? token.key.split('\u0000')[0] : undefined);
 
 /**
- * Settlement after a DEFINITIVE server answer: removes exactly these records
- * and tombstones them, atomically. The request's claim is cleared only if it
- * is still `token`'s attempt; a dispatch mark is cleared once no record of the
- * request remains.
+ * Settlement after a DEFINITIVE server answer about the logical request of
+ * these records: removes every active equivalent copy and records the
+ * account's decision, atomically. The claim is cleared only if it is still
+ * `token`'s attempt; the dispatch mark once no record of the request remains.
  */
 export async function settleRecords(recordIds: Iterable<string>, token?: ClaimToken, opts: { owner?: string } = {}): Promise<RemovalResult> {
   const ids = [...recordIds];
@@ -654,16 +546,23 @@ export async function settleRecords(recordIds: Iterable<string>, token?: ClaimTo
   try {
     const now = Date.now();
     return await tx('readwrite', async (st) => {
-      const out: RemovalResult = { removed: 0, alreadyGone: 0, failed: 0, foreign: 0 };
+      const out: RemovalResult = { removed: 0, alreadyGone: 0, failed: 0, foreign: 0, paused: 0 };
       const keys = new Set<string>();
+      const removed = new Set<string>();
       for (const id of ids) {
+        if (removed.has(id)) continue;
         const rec = (await asPromise(st.records.get(id))) as Stored | undefined;
         if (!rec) { out.alreadyGone++; continue; }
-        if (owner !== undefined && rec.ownerUserId !== owner) { out.foreign!++; continue; } // R7: never another account's record
+        if (owner !== undefined && rec.ownerUserId !== owner) { out.foreign!++; continue; } // never another account's record
+        if (!isActive(rec) || !isQueuedHabitLog(rec.item)) { out.paused!++; continue; } // never sent, so never settled
+        const payload = canonicalPayload(rec.item);
         keys.add(requestKey(rec.ownerUserId, rec.clientRequestId));
-        await asPromise(st.records.delete(id));
-        await writeMarker(st, rec.ownerUserId, id, now);
-        out.removed++;
+        for (const copy of await activeCopies(st, rec.ownerUserId, rec.clientRequestId, payload)) {
+          await asPromise(st.records.delete(copy.recordId));
+          removed.add(copy.recordId);
+          out.removed++;
+        }
+        await writeDecision(st, rec.ownerUserId, rec.clientRequestId, payload, 'settled', now);
       }
       if (token) {
         keys.add(token.key);
@@ -672,14 +571,14 @@ export async function settleRecords(recordIds: Iterable<string>, token?: ClaimTo
         else if (c) out.superseded = true;
       }
       for (const key of keys) {
-        const [owner, crid] = key.split('\u0000');
-        const left = (await asPromise(st.records.index('ownerCrid').getAll(IDBKeyRange.only([owner, crid])))) as Stored[];
+        const [o, crid] = key.split('\u0000');
+        const left = (await asPromise(st.records.index('ownerCrid').getAll(IDBKeyRange.only([o, crid])))) as Stored[];
         if (left.length === 0) await asPromise(st.dispatches.delete(key));
       }
       return out;
     });
   } catch {
-    return { removed: 0, alreadyGone: 0, failed: ids.length, foreign: 0 };
+    return { removed: 0, alreadyGone: 0, failed: ids.length, foreign: 0, paused: 0 };
   }
 }
 
@@ -691,16 +590,18 @@ export interface DiscardResult {
   /** Another context was sending the request at that moment: kept for its account. */
   keptInFlight: number;
   alreadyGone: number;
-  /** Could not be removed (storage failure): still stored for their account. */
+  /** Could not be removed (storage failure, or a quarantined entry changed since it was shown): still stored for their account. */
   failed: number;
-  /** R7: records of another account, left untouched. */
+  /** Records of another account, left untouched. */
   foreign?: number;
 }
 
 /**
- * A CONFIRMED discard of exactly these records (sign-out). Atomic. Records of
- * a request another context is sending right now are kept; records of a request
- * already dispatched are removed but reported as possibly sent.
+ * A CONFIRMED discard of exactly these records (sign-out). Atomic. Removes each
+ * record and every active equivalent copy of its request, and records the
+ * account's 'discarded' decision for the request; a request another context is
+ * sending right now is kept; one already dispatched is removed but reported as
+ * possibly sent.
  */
 export async function discardRecords(recordIds: Iterable<string>, { tab, owner }: { tab: string; owner?: string }): Promise<DiscardResult> {
   const ids = [...recordIds];
@@ -709,23 +610,30 @@ export async function discardRecords(recordIds: Iterable<string>, { tab, owner }
     return await tx('readwrite', async (st) => {
       const out: DiscardResult = { removed: 0, removedPossiblySent: 0, keptInFlight: 0, alreadyGone: 0, failed: 0, foreign: 0 };
       const touched = new Set<string>();
+      const removed = new Set<string>();
       for (const id of ids) {
+        if (removed.has(id)) continue;
         const rec = (await asPromise(st.records.get(id))) as Stored | undefined;
         if (!rec) { out.alreadyGone++; continue; }
-        if (owner !== undefined && rec.ownerUserId !== owner) { out.foreign!++; continue; } // R7: never another account's record
+        if (owner !== undefined && rec.ownerUserId !== owner) { out.foreign!++; continue; } // never another account's record
         const key = requestKey(rec.ownerUserId, rec.clientRequestId);
         const c = (await asPromise(st.claims.get(key))) as Claim | undefined;
-        if (fresh(c, now) && c!.tab !== tab) { out.keptInFlight++; continue; }
+        if (isActive(rec) && fresh(c, now) && c!.tab !== tab) { out.keptInFlight++; continue; }
         const dispatched = Boolean(await asPromise(st.dispatches.get(key)));
-        await asPromise(st.records.delete(id));
-        await writeMarker(st, rec.ownerUserId, id, now);
+        const valid = isQueuedHabitLog(rec.item) && rec.item.clientRequestId === rec.clientRequestId;
+        const copies = valid && isActive(rec) ? await activeCopies(st, rec.ownerUserId, rec.clientRequestId, canonicalPayload(rec.item)) : [];
+        for (const r of [rec, ...copies.filter((x) => x.recordId !== rec.recordId)]) {
+          await asPromise(st.records.delete(r.recordId));
+          removed.add(r.recordId);
+          out.removed++;
+          if (dispatched) out.removedPossiblySent++;
+        }
+        if (valid) await writeDecision(st, rec.ownerUserId, rec.clientRequestId, canonicalPayload(rec.item), 'discarded', now);
         touched.add(key);
-        out.removed++;
-        if (dispatched) out.removedPossiblySent++;
       }
       for (const key of touched) {
-        const [owner, crid] = key.split('\u0000');
-        const left = (await asPromise(st.records.index('ownerCrid').getAll(IDBKeyRange.only([owner, crid])))) as Stored[];
+        const [o, crid] = key.split('\u0000');
+        const left = (await asPromise(st.records.index('ownerCrid').getAll(IDBKeyRange.only([o, crid])))) as Stored[];
         if (left.length === 0) { await asPromise(st.dispatches.delete(key)); await asPromise(st.claims.delete(key)); }
       }
       return out;
@@ -735,19 +643,41 @@ export async function discardRecords(recordIds: Iterable<string>, { tab, owner }
   }
 }
 
+/**
+ * R8 -- the account's CONFIRMED discard of exactly these quarantined
+ * localStorage entries (as read for the confirmation). An entry is removed only
+ * if it is still exactly what was shown; a changed entry or a failed removal is
+ * kept (and stays quarantined: it can never be sent).
+ */
+export function discardQuarantined(owner: string, sources: QuarantinedSource[]): { removed: number; failed: number } {
+  const out = { removed: 0, failed: 0 };
+  const s = storageOrNull();
+  for (const src of sources) {
+    const own = QUARANTINED_PREFIXES.some((p) => src.key === `${p}${owner}` || src.key.startsWith(`${p}${owner}:`));
+    if (!own || !s) { out.failed += src.entries; continue; }
+    try {
+      if (s.getItem(src.key) === src.raw) s.removeItem(src.key);
+      if (s.getItem(src.key) === null) out.removed += src.entries; else out.failed += src.entries;
+    } catch {
+      out.failed += src.entries;
+    }
+  }
+  return out;
+}
+
 // ------------------------------------------------------------------ legacy quarantine (read-only)
 
 export type LegacySnapshot = { ok: true; count: number } | { ok: false };
 
 /**
  * Pre-REL-04 entries (`offline_habit_queue`, a shared array written by OLD
- * bundles) have NO owner. They are QUARANTINED: never replayed, never assigned
- * to any account, never shown. R4: this build never rewrites or removes that
- * array. Old bundles update it with an unsynchronised read-modify-write, and
- * they may still be open in another tab or context; any destructive cleanup
- * here could lose or resurrect their entries. Cleanup is deferred until older
- * writers can no longer be active (an activation-dependent decision); until
- * then the entries are kept and only counted.
+ * bundles -- the one format ever released) have NO owner. They are
+ * QUARANTINED: never replayed, never assigned to any account, never shown. R4:
+ * this build never rewrites or removes that array. Old bundles update it with
+ * an unsynchronised read-modify-write, and they may still be open in another
+ * tab or context; any destructive cleanup here could lose or resurrect their
+ * entries. Cleanup is deferred until older writers can no longer be active (an
+ * activation-dependent decision); until then the entries are kept and only counted.
  */
 export function readLegacySnapshot(): LegacySnapshot {
   const s = storageOrNull();
@@ -775,7 +705,6 @@ export function __openQueueDbForTests(): Promise<IDBDatabase> { return openDb();
 export async function __resetQueueDbForTests(): Promise<void> {
   const p = dbPromise;
   dbPromise = null;
-  prunedThisSession.clear();
   if (p) { try { (await p).close(); } catch { /* ignore */ } }
 }
 

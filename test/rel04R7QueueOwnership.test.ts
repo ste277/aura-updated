@@ -13,7 +13,12 @@
  *   R5 a3a02b8  IndexedDB records/markers under owner-less ids          readOwnedQueue/settle/discard
  *   R6 13d773e  IndexedDB records under account-scoped ids (q3/v2) and under the SHARED aura_q4 id
  * Each scenario runs against the R6 code head (test/fixtures/rel04-r6-head) to
- * show the defect and against the current code to show the correction.
+ * show the defect and against the R7 code head 7cae58a (test/fixtures/rel04-r7-head)
+ * to show the R7 correction.
+ *
+ * R8 (ticket 39224): HISTORICAL RECORD. Automatic migration of these unreleased
+ * formats was retired; the current code is covered by test/rel04R8LogicalLifecycle.test.ts
+ * (which also reproduces the four findings of the R7 assessment on 7cae58a).
  *
  *  O1  the assessment's reproduction (R3-migrated aura_q4 for two accounts, identical id + payload):
  *      shared identity; B reads zero; B's discard replaces A's marker; A's source (cleanup failed)
@@ -48,6 +53,9 @@ const HEADS: Array<[string, string, string, string]> = [
   ['13d773e', 'rel04-r6-head', 'offlineHabitQueue.ts.txt', 'apps/web/lib/offlineHabitQueue.ts'],
   ['13d773e', 'rel04-r6-head', 'activitySync.ts.txt', 'apps/web/lib/activitySync.ts'],
   ['13d773e', 'rel04-r6-head', 'signOut.ts.txt', 'apps/web/lib/signOut.ts'],
+  ['7cae58a', 'rel04-r7-head', 'offlineHabitQueue.ts.txt', 'apps/web/lib/offlineHabitQueue.ts'],
+  ['7cae58a', 'rel04-r7-head', 'activitySync.ts.txt', 'apps/web/lib/activitySync.ts'],
+  ['7cae58a', 'rel04-r7-head', 'signOut.ts.txt', 'apps/web/lib/signOut.ts'],
 ];
 (function provenance() {
   for (const [c, dir, f, src] of HEADS) {
@@ -100,7 +108,16 @@ const R6: Impl = {
     return { q, sync, acct: t.acct, so };
   },
 };
-const R7: Impl = { name: 'R7', tab: (id) => { const t = openTab(id); return { q: t.q, sync: t.sync, acct: t.acct, so: t.so }; } };
+const R7: Impl = {
+  name: 'R7',
+  tab: (id) => {
+    const t = openTab(id); // R8: the R7 code head 7cae58a, vendored (the current code no longer migrates these formats)
+    const q = compile(fx('rel04-r7-head', 'offlineHabitQueue.ts.txt'), lib(`offlineHabitQueue.r7.${id}.js`));
+    const sync = compile(fx('rel04-r7-head', 'activitySync.ts.txt'), lib(`activitySync.r7.${id}.js`), { './offlineHabitQueue': q });
+    const so = compile(fx('rel04-r7-head', 'signOut.ts.txt'), lib(`signOut.r7.${id}.js`), { './offlineHabitQueue': q });
+    return { q, sync, acct: t.acct, so };
+  },
+};
 
 const dev = new Device();
 async function asAccount(impl: Impl, account: string, id: string): Promise<Stack> {

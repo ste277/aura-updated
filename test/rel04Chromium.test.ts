@@ -352,23 +352,30 @@ async function main() {
       await context.close();
     }
 
-    // ------------------------------------------------------------ CH8 (R4) migration racing settlement across pages: no resurrection
+    // ------------------------------------------------------------ CH8 (R4; R8: migration retired) settlement racing reads of a stale
+    // retired-format source of the same entries across pages: nothing recreated, nothing of the stale source ever active or sent
     {
       const { context, open, signIn } = await newContext();
       await signIn('alicesynth@example.invalid');
       const [t1, t2, t3] = [await open(), await open(), await open()];
-      const src = JSON.stringify([1, 2, 3].map((n) => ({ ...payload(`v2 ${n}`, `crid-mg${n}`), ownerUserId: A, tempId: 't' })));
-      await t1.evaluate(({ A, src }: { A: string; src: string }) => localStorage.setItem('offline_habit_queue_v2:' + A, src), { A, src });
-      const ids: string[] = await t1.evaluate(async (A: string) => { const r = await (window as any).aura.q.readOwnedQueue(A); return r.ok ? r.records.map((x: any) => x.recordId) : []; }, A);
-      // A stale context re-writes the source; t2 and t3 migrate while t1 settles all three, concurrently.
+      const entries = [1, 2, 3].map((n) => ({ ...payload(`v2 ${n}`, `crid-mg${n}`), ownerUserId: A, tempId: 't' }));
+      const src = JSON.stringify(entries);
+      const ids: string[] = await t1.evaluate(async ({ A, entries }: { A: string; entries: any[] }) => {
+        for (const e of entries) await (window as any).aura.q.enqueueOwned(e);
+        const r = await (window as any).aura.q.readOwnedQueue(A);
+        return r.ok ? r.records.map((x: any) => x.recordId) : [];
+      }, { A, entries });
+      const mark = serverLog.length;
+      // A stale context writes a retired-format copy of the same entries; t2 and t3 read while t1 settles all three, concurrently.
       await t1.evaluate(({ A, src }: { A: string; src: string }) => localStorage.setItem('offline_habit_queue_v2:' + A, src), { A, src });
       await Promise.all([
         t2.evaluate(async (A: string) => (window as any).aura.q.readOwnedQueue(A), A),
-        t1.evaluate(async (ids: string[]) => (window as any).aura.q.settleRecords(ids), ids),
+        t1.evaluate(async ({ ids, A }: { ids: string[]; A: string }) => (window as any).aura.q.settleRecords(ids, undefined, { owner: A }), { ids, A }),
         t3.evaluate(async (A: string) => (window as any).aura.q.readOwnedQueue(A), A),
       ]);
-      const left = await t3.evaluate(async (A: string) => { const r = await (window as any).aura.q.readOwnedQueue(A); return r.ok ? r.records.length : -1; }, A);
-      check(`CH8 (R4, real Chromium) migration in two pages racing settlement in a third never recreates a settled entry (left: ${left})`, ids.length === 3 && left === 0);
+      const after = await t3.evaluate(async (A: string) => { const r = await (window as any).aura.q.readOwnedQueue(A); await (window as any).aura.sync.replayOfflineQueue(); return r.ok ? { left: r.records.length, paused: r.paused } : null; }, A);
+      const posts = serverLog.slice(mark).filter((x) => x.path === '/api/habit-logs' && x.method === 'POST').length;
+      check(`CH8 (R4/R8, real Chromium) settlement in one page racing reads of a stale retired-format copy in two others never recreates a settled entry; the copy stays quarantined and is never sent (left: ${after?.left}, paused: ${after?.paused}, sends: ${posts})`, ids.length === 3 && after?.left === 0 && after?.paused === 3 && posts === 0);
       await context.close();
     }
 

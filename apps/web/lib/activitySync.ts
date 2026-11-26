@@ -82,6 +82,8 @@ export async function submitActivityLog(payload: HabitLogPayload, tempId: string
     const tab = getTabId();
     const stored = await enqueueOwned({ ...payload, tempId, ownerUserId: lease.account }, { claimFor: tab });
     if (stored.status === 'conflict') return { kind: 'not-stored' }; // never send a second payload under one identity
+    // R8: this account already settled/discarded the request, or a quarantined copy of it exists: never sent again.
+    if (stored.status === 'settled' || stored.status === 'paused') return { kind: 'not-stored' };
     // The identical request is already queued and another attempt is sending it: never send it twice at once.
     if (stored.status === 'stored' && !stored.claim) return lease.isCurrent() ? { kind: 'queued' } : { kind: 'account-changed', keptForAccount: true };
     const outbox = stored.status === 'stored' ? stored.recordId : null;
@@ -120,11 +122,11 @@ export interface ReplayResult {
   removeFailed: number;
   /** Identities with conflicting payloads, quarantined (never sent). */
   conflicts: number;
-  /** R7: identities held because their ownership could not be established (kept, never sent automatically). */
-  held: number;
+  /** R8: activity kept on this device that does not sync automatically (quarantined retired formats, conflicts, unreadable entries). */
+  paused: number;
   stoppedBecause: null | 'account-changed' | 'account-hold' | 'unreadable' | 'busy' | 'unavailable' | 'upgrade-required' | 'transition';
 }
-const EMPTY = (stoppedBecause: ReplayResult['stoppedBecause']): ReplayResult => ({ attempted: 0, confirmed: 0, removed: 0, removeFailed: 0, conflicts: 0, held: 0, stoppedBecause });
+const EMPTY = (stoppedBecause: ReplayResult['stoppedBecause']): ReplayResult => ({ attempted: 0, confirmed: 0, removed: 0, removeFailed: 0, conflicts: 0, paused: 0, stoppedBecause });
 
 const replaysInFlight = new Map<string, Promise<ReplayResult>>();
 
@@ -155,7 +157,7 @@ async function replayLocked(fetchImpl: typeof fetch, binding: AccountBinding): P
     const read = await readOwnedQueue(lease.account);
     if (!read.ok) return { ...result, stoppedBecause: 'unreadable' as const };
     result.conflicts = read.conflicts.length;
-    result.held = read.held.length;
+    result.paused = read.paused;
     for (const group of read.groups) {
       const head = group[0];
       if (!lease.isCurrent()) { result.stoppedBecause = 'account-changed'; break; }

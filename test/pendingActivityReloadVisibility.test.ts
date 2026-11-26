@@ -56,9 +56,9 @@ class MemoryStorage {
   key(i: number): string | null { return Object.keys(this.store)[i] ?? null; }
 }
 (global as any).localStorage = new MemoryStorage();
-// AURA-ANDROID-REL-04 (R4): the queue is IndexedDB; entries written in the R3
-// localStorage format below are MIGRATED on read (which this file therefore
-// also exercises). A spec-conformant in-memory IndexedDB stands in for the browser's.
+// AURA-ANDROID-REL-04 (R4, R8): the queue is IndexedDB; entries are seeded as
+// active (R8) records, and a retired-format localStorage value (R3 aura_q4, below)
+// is quarantined -- never read back as pending. A spec-conformant in-memory IndexedDB stands in for the browser's.
 { const fidb = require('fake-indexeddb'); (global as any).indexedDB = fidb.indexedDB; (global as any).IDBKeyRange = fidb.IDBKeyRange; }
 
 import {
@@ -72,7 +72,7 @@ import { LoggedEntryItem } from '../apps/web/components/CalendarViewSection';
 
 // AURA-ANDROID-REL-04 IR-01: the queue is per verified account; entries carry ownerUserId.
 const OWNER = 'synthetic-user-a';
-// AURA-ANDROID-REL-04 (R3): immutable records, one per key (aura_q4:<owner>:<clientRequestId>:<recordId>).
+// A retired R3-format key (aura_q4:<owner>:<clientRequestId>:<recordId>): R8 quarantines it, so a corrupt value there never yields a pending entry.
 const OWNED_KEY = 'aura_q4:' + OWNER + ':corrupt-entry:r0';
 async function clearIdb() {
   const db: IDBDatabase = await require('../apps/web/lib/offlineHabitQueue').__openQueueDbForTests();
@@ -81,15 +81,22 @@ async function clearIdb() {
   await new Promise<void>((res) => { t.oncomplete = () => res(); });
 }
 let pendingClear: Promise<void> = Promise.resolve();
+// AURA-ANDROID-REL-04 (R8): the one ACTIVE format is an IndexedDB record stamped fmt 'r8' (retired
+// localStorage formats are quarantined, never read as pending), so entries are seeded as such records.
+async function writeRecords(items: unknown[]) {
+  const db: IDBDatabase = await require('../apps/web/lib/offlineHabitQueue').__openQueueDbForTests();
+  const t = db.transaction(['records'], 'readwrite');
+  items.forEach((i, n) => {
+    const it = i && typeof i === 'object' ? { ownerUserId: OWNER, ...(i as object), recordId: `r${n}` } : i;
+    const crid = (it as { clientRequestId?: string })?.clientRequestId ?? `malformed-${n}`;
+    t.objectStore('records').put({ recordId: `r${n}`, ownerUserId: OWNER, clientRequestId: crid, item: it, queuedAt: n, fmt: 'r8' });
+  });
+  await new Promise<void>((res) => { t.oncomplete = () => res(); });
+}
 function setQueue(items: unknown[]) {
-  pendingClear = clearIdb();
+  pendingClear = clearIdb().then(() => writeRecords(items));
   const ls = (global as any).localStorage;
   for (const k of Object.keys((ls as any).store ?? {})) if (k.startsWith('aura_q')) ls.removeItem(k);
-  items.forEach((i, n) => {
-    const it = i && typeof i === 'object' ? { ownerUserId: OWNER, queuedAt: n, recordId: `r${n}`, ...(i as object) } : i;
-    const crid = (it as { clientRequestId?: string })?.clientRequestId ?? `malformed-${n}`;
-    ls.setItem('aura_q4:' + OWNER + ':' + crid + ':r' + n, JSON.stringify(it));
-  });
 }
 
 const queuedA: QueuedHabitLog = {
@@ -328,13 +335,13 @@ const insightsSource = fs.readFileSync('apps/web/components/InsightsView.tsx', '
 
 check(
   'page.tsx imports the extracted helpers from the new lib module',
-  /import \{ readOfflineHabitQueue, toPendingLoggedEntry, mergeConfirmedLogEntries, selectQueueItemsToReconstruct \} from '\.\.\/lib\/offlineHabitQueue';/.test(pageSource)
+  /import \{ readOfflineQueueView, toPendingLoggedEntry, mergeConfirmedLogEntries, selectQueueItemsToReconstruct \} from '\.\.\/lib\/offlineHabitQueue';/.test(pageSource)
 );
 check('loadUserDataAndLogs calls mergeConfirmedLogEntries (no re-implemented inline merge logic)', /return mergeConfirmedLogEntries\(confirmedEntries, prev, queuedClientRequestIds\);/.test(pageSource));
 check('the confirmed fetch propagates clientRequestId from the server row onto each entry', /clientRequestId: l\.clientRequestId \?\? undefined,/.test(pageSource));
 check('the reload-reconstruction effect calls selectQueueItemsToReconstruct (no re-implemented inline selection logic)', /const reconstructed = selectQueueItemsToReconstruct\(queued, prev\)\.map\(toPendingLoggedEntry\);/.test(pageSource));
 check('an empty queue is a no-op in the reconstruction (no unnecessary setLogEntries call)', /if \(queued && queued\.length > 0\) \{/.test(pageSource));
-check('AURA-ANDROID-REL-04: reconstruction reads only the verified account\'s queue (R4: awaited IndexedDB read, dropped if the account changed meanwhile)', /const queued = await readOfflineHabitQueue\(check\.user\.id\);\s*if \(accountIdRef\.current !== check\.user\.id\) return;\s*setQueueUnavailable\(queued === null\);/.test(pageSource));
+check('AURA-ANDROID-REL-04: reconstruction reads only the verified account\'s queue (R4: awaited IndexedDB read, dropped if the account changed meanwhile; R8: view read with the paused count)', /const view = await readOfflineQueueView\(check\.user\.id\);\s*if \(accountIdRef\.current !== check\.user\.id\) return;\s*const queued = view \? view\.items : null;\s*setQueueUnavailable\(queued === null\);/.test(pageSource));
 
 check('handleLogActivity is unchanged: still returns Promise<\'confirmed\' | \'pending\'>', /Promise<'confirmed' \| 'pending'>/.test(pageSource));
 check(

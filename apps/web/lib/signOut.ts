@@ -51,7 +51,7 @@ import {
   settleActivityOperations,
   withAuthLock,
 } from './accountSession';
-import { discardRecords, readLegacySnapshot, readOwnedQueue } from './offlineHabitQueue';
+import { discardQuarantined, discardRecords, readLegacySnapshot, readOwnedQueue } from './offlineHabitQueue';
 
 export type SignOutOutcome =
   | 'signed-out'
@@ -151,6 +151,8 @@ export interface PendingWork {
   owned: number | null; // null = unreadable
   /** Of `owned`: already sent at least once (may have been saved). */
   ownedSent?: number;
+  /** R8: of `owned`: paused -- kept on this device, never synced automatically. */
+  paused?: number;
 }
 
 /**
@@ -167,7 +169,11 @@ export function describePendingWork(p: PendingWork): string | null {
   if (p.owned === 0) return null;
   const sent = p.ownedSent ?? 0;
   const what = p.owned === 1 ? '1 activity log that has not synced yet' : `${p.owned} activity logs that have not synced yet`;
-  const note = sent > 0 ? ` (${sent === p.owned ? (p.owned === 1 ? 'it' : 'they') : `${sent} of them`} may already have been sent, so removing ${sent === 1 ? 'it' : 'them'} here won't undo that)` : '';
+  const paused = p.paused ?? 0;
+  const notes: string[] = [];
+  if (sent > 0) notes.push(`${sent === p.owned ? (p.owned === 1 ? 'it' : 'they') : `${sent} of them`} may already have been sent, so removing ${sent === 1 ? 'it' : 'them'} here won't undo that`);
+  if (paused > 0) notes.push(`${paused === p.owned ? (p.owned === 1 ? 'it is' : 'they are') : `${paused} of them ${paused === 1 ? 'is' : 'are'}`} paused legacy activity that won't sync automatically`);
+  const note = notes.length ? ` (${notes.join('; ')})` : '';
   return `You have ${what}${note}. If you sign out, Aura will remove ${p.owned === 1 ? 'it' : 'them'} from this device where it can and tell you the result; anything another window is still sending is kept. Sign out?`;
 }
 
@@ -237,7 +243,11 @@ async function run(deps: SignOutDeps): Promise<SignOutResult> {
   // The exact snapshot the question is about (owned records only).
   const snapshot = await readOwnedQueue(owner);
   const pending: PendingWork = snapshot.ok
-    ? { owned: snapshot.records.length + snapshot.corruptIds.length, ownedSent: snapshot.records.filter((r) => r.dispatched).length }
+    ? {
+        owned: snapshot.records.length + snapshot.corruptIds.length + snapshot.quarantined.reduce((n, q) => n + q.entries, 0),
+        ownedSent: snapshot.records.filter((r) => r.dispatched).length,
+        paused: snapshot.paused,
+      }
     : { owned: null };
   const question = describePendingWork(pending);
   if (question && !deps.confirm(question)) { transition.end('resumed'); return done('cancelled'); }
@@ -249,7 +259,9 @@ async function run(deps: SignOutDeps): Promise<SignOutResult> {
     let owned: OwnedDiscardReport = { unknown: true, removed: 0, removedPossiblySent: 0, keptInFlight: 0, failed: 0 };
     if (snapshot.ok) {
       const d = await discardRecords([...snapshot.records.map((r) => r.recordId), ...snapshot.corruptIds], { tab: getTabId(), owner });
-      owned = { unknown: false, removed: d.removed, removedPossiblySent: d.removedPossiblySent, keptInFlight: d.keptInFlight, failed: d.failed };
+      // R8: the account's quarantined retired-format entries, exactly as confirmed (a failed removal keeps them paused).
+      const q = discardQuarantined(owner, snapshot.quarantined);
+      owned = { unknown: false, removed: d.removed + q.removed, removedPossiblySent: d.removedPossiblySent, keptInFlight: d.keptInFlight, failed: d.failed + q.failed };
     }
     const legacy = readLegacySnapshot();
     transition.end('signed-out');

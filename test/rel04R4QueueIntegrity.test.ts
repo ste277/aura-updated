@@ -5,8 +5,8 @@
  * connection to the same spec-conformant in-memory database) and the real
  * middleware + routes.
  *
- *   M   migration vs settlement / discard in other contexts (no resurrection),
- *       existing data preserved, interrupted migration
+ *   M   R8 (migration retired): existing interim data is preserved in place (quarantined);
+ *       settlement / discard in other contexts racing stale interim sources (no resurrection)
  *   H   replay <-> discard handoff through atomic claims (both orders)
  *   D   already-dispatched work: a discard never claims to undo an accepted send
  *   C   concurrent contexts WITHOUT Web Locks: one send per identity at a time
@@ -61,22 +61,24 @@ async function main() {
     const tab = await tabAs(dev, A, 'tab1');
     const r = await tab.q.readOwnedQueue(A);
     const crids = r.ok ? r.records.map((x) => x.item.clientRequestId).sort() : [];
-    check('M1 every valid owned interim entry (R1 array, R2 per-entry, R3 record) is migrated with its payload intact', r.ok && JSON.stringify(crids) === JSON.stringify(['crid-m-q3', 'crid-m-q4', 'crid-m-v2']) && /* R7: an aura_q4 entry migrates to its ACCOUNT-SCOPED identity ('r4x' stays an alias of A's only) */ r.records.find((x) => x.item.clientRequestId === 'crid-m-q4')!.recordId === tab.q.migratedRecordId(r.records.find((x) => x.item.clientRequestId === 'crid-m-q4')!.item, A) && r.records.find((x) => x.item.clientRequestId === 'crid-m-v2')!.item.activityTitle === 'v2 entry');
-    check('M1 sources are removed only after the copy committed; an unparseable source is left in place (never guessed at); another account\'s source is untouched', !storage.data.has('offline_habit_queue_v2:' + A) && !storage.data.has(`aura_q3:${A}:crid-m-q3`) && !storage.data.has(`aura_q4:${A}:crid-m-q4:r4x`) && storage.data.get(`aura_q4:${A}:crid-bad:rbad`) === '{not json' && storage.data.has('offline_habit_queue_v2:' + B));
+    // R8 (ticket 39224): these formats were never released; they are quarantined, never migrated.
+    check('M1 (R8) every owned interim entry (R1 array, R2 per-entry, R3 record, unparseable) is counted as paused for its account and never enters the active queue', r.ok && crids.length === 0 && r.items.length === 0 && r.paused === 4 && r.quarantined.length === 4);
+    check('M1 (R8) every source is preserved byte-identical in place; another account\'s source is untouched and not counted', storage.data.get('offline_habit_queue_v2:' + A) === JSON.stringify([ownedEntry('v2 entry', 'crid-m-v2')]) && storage.data.has(`aura_q3:${A}:crid-m-q3`) && storage.data.has(`aura_q4:${A}:crid-m-q4:r4x`) && storage.data.get(`aura_q4:${A}:crid-bad:rbad`) === '{not json' && storage.data.has('offline_habit_queue_v2:' + B) && r.ok && !r.quarantined.some((x) => x.key.includes(B)));
   }
 
-  // ---------------------------------------------------------------- M2 migration racing settlement and discard in OTHER contexts
+  // ---------------------------------------------------------------- M2 (R8) active entries settled / discarded in OTHER contexts while a
+  // stale context re-writes interim sources of the same entries and reads race: nothing is recreated, nothing interim becomes active
   {
     let resurrected = 0, lost = 0;
     for (let round = 0; round < 25; round++) {
       await fresh();
       const src = JSON.stringify([ownedEntry('race 1', 'crid-r1'), ownedEntry('race 2', 'crid-r2')]);
-      storage.data.set('offline_habit_queue_v2:' + A, src);
       const dev = new Device();
       const t1 = await tabAs(dev, A, 't1');
       const t2 = openTab('t2'); await t2.acct.fetchVerifiedSession(dev.fetch as any);
       const t3 = openTab('t3'); await t3.acct.fetchVerifiedSession(dev.fetch as any);
-      const first = await t1.q.readOwnedQueue(A); // migrated once
+      for (const n of [1, 2]) await t1.q.enqueueOwned(ownedEntry(`race ${n}`, `crid-r${n}`));
+      const first = await t1.q.readOwnedQueue(A);
       const ids = first.ok ? first.records.map((x) => x.recordId) : [];
       // A stale context re-writes the old source while t2 settles record 1 and t3 discards record 2, interleaved.
       storage.data.set('offline_habit_queue_v2:' + A, src);
@@ -92,7 +94,7 @@ async function main() {
       resurrected += left.length;
       if (!first.ok || ids.length !== 2) lost++;
     }
-    check('M2 25 interleavings of migration (stale source re-written) with settlement and discard in two other contexts: a settled/discarded entry is NEVER recreated', resurrected === 0 && lost === 0);
+    check('M2 (R8) 25 interleavings of reads (stale interim source re-written) with settlement and discard in two other contexts: a settled/discarded entry is NEVER recreated', resurrected === 0 && lost === 0);
   }
 
   // ---------------------------------------------------------------- H1 replay holds the claim -> a concurrent discard keeps it

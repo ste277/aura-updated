@@ -86,7 +86,8 @@ async function main() {
     check('Q3 the identical payload reuses the existing record (no second record)', same.status === 'stored' && (same as any).recordId === (first as any).recordId);
     await putRecord(A, 'crid-c', 'rX', 'written by another build');
     const r = await tab.sync.replayOfflineQueue(dev.fetch as any);
-    check('Q3 conflicting records under one identity are QUARANTINED: reported, never sent, never removed', r.conflicts === 1 && r.attempted === 0 && (await queueKeys(A)).length === 2 && (await tab.q.readOfflineHabitQueue(A))?.length === 0);
+    // R8: a record written by another (pre-R8) build is quarantined, and it pauses its whole logical request.
+    check('Q3 conflicting records under one identity are QUARANTINED: reported, never sent, never removed', r.paused === 1 && r.attempted === 0 && (await queueKeys(A)).length === 2 && (await tab.q.readOfflineHabitQueue(A))?.length === 0);
   }
 
   // ---------------------------------------------------------------- Q4 settlement never removes a different/newer record
@@ -123,7 +124,8 @@ async function main() {
     check('Q5 a record discarded after replay took its snapshot is never sent', removed.removed === 1 && dev.calls.filter((c) => c.key === 'POST /api/habit-logs' && c.processed).length === 1 && logsOf(A).every((l) => l.clientRequestId !== 'crid-d2'));
   }
 
-  // ---------------------------------------------------------------- Q6/Q7 migration: interruption-safe, idempotent, no resurrection
+  // ---------------------------------------------------------------- Q6/Q7 (R8: migration retired) a retired-format source is
+  // quarantined in place: never copied, never sent, never removed without the account's discard; repeated reads change nothing.
   {
     await fresh();
     const v2Key = 'offline_habit_queue_v2:' + A;
@@ -135,17 +137,17 @@ async function main() {
     idbFault.write = true; // the migration transaction fails (e.g. quota)
     const r1 = await tab.q.readOwnedQueue(A);
     idbFault.write = false;
-    check('Q6 a failed migration reports unreadable, keeps the source, and copied NOTHING (one atomic transaction)', r1.ok === false && storage.data.get(v2Key) === v2Value && (await queueKeys(A)).length === 0);
+    check('Q6 (R8) a retired-format source is read without any write: kept in place, copied NOTHING, counted as 2 paused entries', r1.ok === true && r1.paused === 2 && r1.items.length === 0 && storage.data.get(v2Key) === v2Value && (await queueKeys(A)).length === 0);
     const r2 = await tab.q.readOwnedQueue(A);
-    check('Q6 re-running completes it: 2 records, no duplicates, source removed after commit', r2.ok && r2.records.length === 2 && (await queueKeys(A)).length === 2 && !storage.data.has(v2Key));
+    check('Q6 (R8) re-reading is idempotent: still no records, source unchanged', r2.ok && r2.records.length === 0 && r2.quarantined.length === 1 && (await queueKeys(A)).length === 0 && storage.data.get(v2Key) === v2Value);
     await tab.acct.fetchVerifiedSession(dev.fetch as any);
-    await tab.sync.replayOfflineQueue(dev.fetch as any);
-    check('Q7 migrated records settle once', logsOf(A).length === 2 && (await queueKeys(A)).length === 0);
+    const rr = await tab.sync.replayOfflineQueue(dev.fetch as any);
+    check('Q7 (R8) quarantined entries are never sent (no server row), and stay quarantined', rr.attempted === 0 && rr.paused === 2 && logsOf(A).length === 0 && storage.data.get(v2Key) === v2Value);
     // A concurrent context that read the OLD source now (re)writes it and migrates again.
     storage.data.set(v2Key, v2Value);
     storage.data.set(`aura_q3:${A}:crid-v1`, JSON.stringify({ ...payload('v2 one', 'crid-v1'), ownerUserId: A, tempId: 't' }));
     const r3 = await tab.q.readOwnedQueue(A);
-    check('Q7 a concurrent/repeated migration can NOT recreate settled records (tombstones checked in the same transaction)', r3.ok && r3.records.length === 0 && !storage.data.has(v2Key));
+    check('Q7 (R8) a re-written or additional retired-format source never enters the active queue (counted per logical request: 2)', r3.ok && r3.records.length === 0 && r3.items.length === 0 && r3.paused === 2 && logsOf(A).length === 0);
   }
 
   // ---------------------------------------------------------------- Q8 legacy quarantine (R4: never rewritten or removed)

@@ -25,7 +25,7 @@ import type { DailyStory } from '../lib/dailyStory';
 import type { DailyReflection } from '../lib/dailyReflection';
 import type { TomorrowPreview } from '../lib/tomorrowPreview';
 import { shouldRefreshMyDayForDateChange } from '../lib/myDayRefreshPolicy';
-import { readOfflineHabitQueue, toPendingLoggedEntry, mergeConfirmedLogEntries, selectQueueItemsToReconstruct } from '../lib/offlineHabitQueue';
+import { readOfflineQueueView, toPendingLoggedEntry, mergeConfirmedLogEntries, selectQueueItemsToReconstruct } from '../lib/offlineHabitQueue';
 import { fetchVerifiedSession, subscribeAccount, getAccountEpoch, getVerifiedAccount, AccountUnavailableError, startForegroundReverification, captureAccountBinding } from '../lib/accountSession';
 import { installAccountBoundFetch } from '../lib/accountBoundFetch';
 import { readLegacySnapshot } from '../lib/offlineHabitQueue';
@@ -157,6 +157,8 @@ function DashboardPageInner() {
   const [legacyCount, setLegacyCount] = useState(0);
   // AURA-ANDROID-REL-04 (R5): the offline queue could not be read -- pending activity is UNKNOWN, not none.
   const [queueUnavailable, setQueueUnavailable] = useState(false);
+  // R8: this account's activity kept on this device that does NOT sync automatically (quarantined).
+  const [pausedCount, setPausedCount] = useState(0);
   // AURA-ANDROID-REL-04 IR-01 -- the verified account this dashboard instance
   // belongs to (set from the session answer; the instance is remounted when
   // the account changes).
@@ -425,10 +427,12 @@ function DashboardPageInner() {
     // invariant) -- see that function's own doc comment.
     // R4: the queue read is asynchronous (IndexedDB); the merge itself is unchanged.
     const owner = accountIdRef.current;
-    void readOfflineHabitQueue(owner).then((queued) => {
+    void readOfflineQueueView(owner).then((view) => {
       if (accountIdRef.current !== owner) return; // the account changed meanwhile: this page is being replaced
       // R5: an UNREADABLE queue is unknown, not empty -- keep every pending row (never treat them as gone).
+      const queued = view ? view.items : null;
       setQueueUnavailable(queued === null);
+      if (view) setPausedCount(view.paused);
       setLogEntries((prev) => {
         const queuedClientRequestIds = queued === null
           ? new Set(prev.filter((e) => e.syncStatus === 'pending' && e.clientRequestId).map((e) => e.clientRequestId as string))
@@ -468,9 +472,11 @@ function DashboardPageInner() {
 
       // Pending Activity Reload Visibility V1, now account-scoped: only the
       // verified account's own queued entries are reconstructed.
-      const queued = await readOfflineHabitQueue(check.user.id);
+      const view = await readOfflineQueueView(check.user.id);
       if (accountIdRef.current !== check.user.id) return;
+      const queued = view ? view.items : null;
       setQueueUnavailable(queued === null);
+      setPausedCount(view ? view.paused : 0);
       if (queued && queued.length > 0) {
         setLogEntries((prev) => {
           const reconstructed = selectQueueItemsToReconstruct(queued, prev).map(toPendingLoggedEntry);
@@ -1893,6 +1899,13 @@ function DashboardPageInner() {
       {queueUnavailable && (
         <div role="status" data-queue-state="unavailable" style={{ width: '100%', maxWidth: 560, marginBottom: 12, padding: 12, borderRadius: 10, border: '1px solid var(--as-border)', background: 'var(--as-surface)', fontSize: 13 }}>
           Aura couldn&apos;t read this device&apos;s unsynced activity, so pending activity may not be shown here. Nothing was removed; it will sync when the device storage can be read again.
+        </div>
+      )}
+      {pausedCount > 0 && (
+        // AURA-ANDROID-REL-04 (R8) -- this account's activity from a retired pre-release queue format (or an
+        // entry that can't be reconciled): kept on this device, NOT pending sync, never sent automatically.
+        <div role="status" data-queue-state="paused" style={{ width: '100%', maxWidth: 560, marginBottom: 12, padding: 12, borderRadius: 10, border: '1px solid var(--as-border)', background: 'var(--as-surface)', fontSize: 13 }}>
+          Sync paused — legacy activity could not be safely reconciled. {pausedCount === 1 ? '1 activity log' : `${pausedCount} activity logs`} for this account {pausedCount === 1 ? 'is' : 'are'} kept on this device but won&apos;t be sent automatically. Signing out lets you remove {pausedCount === 1 ? 'it' : 'them'}.
         </div>
       )}
       {legacyCount > 0 && (

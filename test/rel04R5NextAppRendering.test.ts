@@ -12,6 +12,9 @@
  *   N3  in real Chromium, the account data appears only after the page's own
  *       session verification, from requests that state the verified account
  *       (Plan Day bootstrap, Goal detail, Goals list).
+ *   N4  (R8) in real Chromium, Home presents the account's quarantined activity
+ *       (a pre-R8 IndexedDB record and a retired aura_q3 entry) as "Sync paused"
+ *       with its count -- never as a "Pending sync" entry -- and never sends it.
  *
  * Requires DATABASE_URL (a disposable database with the migrations applied).
  * Builds apps/web unless REL04_SKIP_BUILD=1 and a build exists.
@@ -127,6 +130,40 @@ async function main() {
       await page.waitForFunction(() => !document.body.innerText.includes('Checking your account'), null, { timeout: 20000 }).catch(() => undefined);
       const o4 = order('/api/captures');
       check('N3 (real Chromium, real app) Captures fetches its list only after verification, stating the verified account', o4.ok);
+
+      // ---------------------------------------------------------------- N4 (R8) quarantined activity is "Sync paused", never "Pending sync"
+      const posts: string[] = [];
+      page.on('request', (r: any) => { if (r.method() === 'POST' && r.url().includes('/api/habit-logs')) posts.push(r.url()); });
+      await page.goto(`${origin}/`);
+      await page.waitForFunction(() => !document.body.innerText.includes('Checking your account'), null, { timeout: 20000 }).catch(() => undefined);
+      // The page's own queue read has created the database (version 2); write the state a pre-R8 build left.
+      const seeded = await page.evaluate(async (uid: string) => {
+        const entry = (crid: string, title: string) => ({ activityTitle: title, activeWindow: 'NEUTRAL', logTimestamp: new Date().toISOString(), durationMinutes: 30, logSource: 'MANUAL', activitySignificance: 'MEDIUM', clientRequestId: crid, tempId: 't', ownerUserId: uid });
+        for (let i = 0; i < 50; i++) {
+          const ok = await new Promise<boolean>((res) => {
+            const o = indexedDB.open('aura-offline', 2);
+            o.onsuccess = () => {
+              const db = o.result;
+              if (!db.objectStoreNames.contains('records')) { db.close(); res(false); return; }
+              const t = db.transaction(['records'], 'readwrite');
+              t.objectStore('records').put({ recordId: 'pre-r8-record', ownerUserId: uid, clientRequestId: 'r8-pre', item: { ...entry('r8-pre', 'R8PausedRecordActivity'), recordId: 'pre-r8-record' }, queuedAt: 1 });
+              t.oncomplete = () => { db.close(); res(true); };
+              t.onerror = () => { db.close(); res(false); };
+            };
+            o.onerror = () => res(false);
+          });
+          if (ok) { localStorage.setItem(`aura_q3:${uid}:r8-legacy`, JSON.stringify(entry('r8-legacy', 'R8PausedLegacyActivity'))); return true; }
+          await new Promise((r) => setTimeout(r, 200));
+        }
+        return false;
+      }, user.id);
+      await page.reload();
+      const paused = await page.waitForFunction(() => document.body.innerText.includes('Sync paused — legacy activity could not be safely reconciled.'), null, { timeout: 20000 }).then(() => true, () => false);
+      await page.waitForTimeout(1500); // let any replay attempt run
+      const text: string = await page.evaluate(() => document.body.innerText);
+      const banner: string = await page.evaluate(() => document.querySelector('[data-queue-state="paused"]')?.textContent ?? '');
+      check(`N4 (R8, real Chromium, real app) Home shows "Sync paused — legacy activity could not be safely reconciled." with the count (2) for the account's quarantined activity`, seeded && paused && /2 activity logs for this account are kept on this device/.test(banner));
+      check('N4 (R8) the quarantined activity is never shown as a pending entry ("Pending sync") and never sent (no POST /api/habit-logs)', !text.includes('R8PausedRecordActivity') && !text.includes('R8PausedLegacyActivity') && !text.includes('Pending sync') && posts.length === 0);
       await context.close();
     } finally {
       await browser.close();

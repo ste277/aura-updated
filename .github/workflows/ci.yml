@@ -977,10 +977,14 @@ jobs:
         env:
           TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
         run: npx ts-node --project tsconfig.jsdom-tests.json test/rel04R6Findings.test.ts
-      - name: Run REL-04 R7 queue ownership test (every supported format; R6 head 13d773e vs current)
+      - name: Run REL-04 R7 queue ownership test (historical record; R6 head 13d773e vs R7 head 7cae58a)
         env:
           TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
         run: npx ts-node --project tsconfig.jsdom-tests.json test/rel04R7QueueOwnership.test.ts
+      - name: Run REL-04 R8 logical lifecycle test (R7-assessment findings on 7cae58a vs current; retired formats quarantined)
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/rel04R8LogicalLifecycle.test.ts
       - name: Run REL-04 R3-head (b323d2a) reproduction test
         env:
           TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'

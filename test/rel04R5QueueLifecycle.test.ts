@@ -4,8 +4,8 @@
  * modules (one instance and IndexedDB connection per tab) and the real
  * middleware + routes.
  *
- *  T1  migration tombstones are retained until source retirement is established (prolonged cleanup failure)
- *  T2  an uncertain migration source (changed since it was copied) is preserved, and its new content migrates
+ *  T1  (R8) a settle/discard decision is retained (no expiry); a stale interim source or a re-enqueue never recreates it
+ *  T2  (R8) a quarantined interim source that changed since it was shown is preserved by the discard
  *  T3  one claim per account + clientRequestId (several records of one logical request)
  *  T4  release and settlement are fenced by the attempt token (late completion after reclaim)
  *  T5  integration: a delayed send completing after another attempt reclaimed and settled
@@ -40,34 +40,35 @@ async function tabAs(dev: Device, id: string) {
 const owned = (title: string, crid: string) => ({ ...payload(title, crid), ownerUserId: A, tempId: 't' });
 
 async function main() {
-  // ---------------------------------------------------------------- T1 tombstones retained until source retirement
+  // ---------------------------------------------------------------- T1 (R8) decisions retained; never recreated
   {
     await fresh();
     const v2Key = 'offline_habit_queue_v2:' + A;
     const src = JSON.stringify([owned('v2', 'crid-t1')]);
-    storage.data.set(v2Key, src);
-    storage.data.set(`aura_q3:${A}:crid-broken`, '{unparseable'); // a source cleanup can never retire
+    storage.data.set(`aura_q3:${A}:crid-broken`, '{unparseable'); // a source cleanup could never retire
     const dev = new Device();
     const t = await tabAs(dev, 't1');
+    await t.q.enqueueOwned(owned('v2', 'crid-t1'));
     const r = await t.q.readOwnedQueue(A);
-    await t.q.settleRecords(r.ok ? r.records.map((x) => x.recordId) : []);
+    await t.q.settleRecords(r.ok ? r.records.filter((x) => !x.paused).map((x) => x.recordId) : [], undefined, { owner: A });
     const t0 = realNow();
-    Date.now = () => t0 + 45 * DAY; // far beyond the 30-day tombstone lifetime
-    const t2 = openTab('t1b'); // fresh module (no per-session prune memo)
+    Date.now = () => t0 + 45 * DAY; // far beyond the pre-R8 30-day tombstone lifetime
+    const t2 = openTab('t1b');
     await t2.q.readOwnedQueue(A);
     const tombsKept = (await queueDump()).tombstones.length;
-    storage.data.set(v2Key, src); // a stale copy of the settled source re-appears
+    storage.data.set(v2Key, src); // a stale interim copy of the settled entry re-appears
     const again = await t2.q.readOwnedQueue(A);
-    check('T1 with an interim source still present (cleanup failing for 45 days), the tombstone is RETAINED and the settled entry is never recreated', tombsKept === 1 && again.ok && again.records.length === 0 && (await queueDump()).tombstones.length === 1);
-    storage.data.delete(`aura_q3:${A}:crid-broken`); // retirement now established
+    const re = await t2.q.enqueueOwned(owned('v2', 'crid-t1'));
+    check('T1 (R8) after 45 days the decision is RETAINED; a re-appearing interim copy stays quarantined (never active) and a re-enqueue of the request is refused as already settled', tombsKept === 1 && again.ok && again.items.length === 0 && again.records.length === 0 && re.status === 'settled' && (await queueDump()).records.length === 0);
+    storage.data.delete(`aura_q3:${A}:crid-broken`);
     storage.data.delete(v2Key);
     const t3 = openTab('t1c');
     await t3.q.readOwnedQueue(A);
-    check('T1 once no interim source remains (retirement established), the expired tombstone is pruned', (await queueDump()).tombstones.length === 0);
+    check('T1 (R8) with no interim source left the decision is still kept (no expiry; positive retirement evidence does not exist)', (await queueDump()).tombstones.length === 1);
     Date.now = realNow;
   }
 
-  // ---------------------------------------------------------------- T2 uncertain source preserved
+  // ---------------------------------------------------------------- T2 (R8) a changed quarantined source is preserved by the discard
   {
     await fresh();
     const key = `aura_q3:${A}:crid-t2`;
@@ -76,16 +77,12 @@ async function main() {
     storage.data.set(key, first);
     const dev = new Device();
     const t = await tabAs(dev, 't2');
-    // Another writer changes the source after it was read for copying, before the post-commit removal.
-    const realGet = storage.getItem.bind(storage);
-    let reads = 0;
-    (storage as any).getItem = (k: string) => { if (k === key && ++reads === 2) storage.data.set(key, changed); return realGet(k); };
-    await t.q.readOwnedQueue(A);
-    (storage as any).getItem = realGet;
-    check('T2 a source that changed after it was copied is NOT removed (uncertain: preserved)', storage.data.get(key) === changed);
+    const shown = await t.q.readOwnedQueue(A);
+    storage.data.set(key, changed); // another writer changes it after it was shown for the confirmation
+    const d = t.q.discardQuarantined(A, shown.ok ? shown.quarantined : []);
+    check('T2 (R8) a quarantined source that changed after it was shown is NOT removed (uncertain: preserved) and reported as kept', d.removed === 0 && d.failed === 1 && storage.data.get(key) === changed);
     const r = await t.q.readOwnedQueue(A);
-    const crids = r.ok ? r.records.map((x) => x.item.clientRequestId).sort() : [];
-    check('T2 its new content migrates on the next read, and the source is then retired', JSON.stringify(crids) === JSON.stringify(['crid-t2', 'crid-t2b']) && !storage.data.has(key));
+    check('T2 (R8) it stays quarantined: counted as paused, never in the active queue', r.ok && r.records.length === 0 && r.items.length === 0 && r.paused === 1);
   }
 
   // ---------------------------------------------------------------- T3 one claim per logical request
@@ -94,13 +91,12 @@ async function main() {
     const dev = new Device();
     const t1 = await tabAs(dev, 't3a');
     const t2 = openTab('t3b'); await t2.acct.fetchVerifiedSession(dev.fetch as any);
-    // Two records of ONE logical request (same account + clientRequestId + payload). R7: migration now
-    // normalizes mixed-format sources of one entry to ONE record, so the two-record state is the one an
-    // earlier build (R5/R6) persisted in IndexedDB, written here directly.
+    // Two ACTIVE records of ONE logical request (same account + clientRequestId + payload), written
+    // directly (R8 enqueue reuses the existing record, so it never produces this state itself).
     {
       const db = await t1.q.__openQueueDbForTests();
       const w = db.transaction(['records'], 'readwrite');
-      for (const [recordId, queuedAt] of [['r3rec', 1], ['m-r6-scoped', 2]] as const) w.objectStore('records').put({ recordId, ownerUserId: A, clientRequestId: 'crid-t3', item: { ...owned('same', 'crid-t3'), recordId }, queuedAt });
+      for (const [recordId, queuedAt] of [['r3rec', 1], ['m-r6-scoped', 2]] as const) w.objectStore('records').put({ recordId, ownerUserId: A, clientRequestId: 'crid-t3', item: { ...owned('same', 'crid-t3'), recordId }, queuedAt, fmt: 'r8' });
       await new Promise<void>((res, rej) => { w.oncomplete = () => res(); w.onerror = () => rej(w.error); });
     }
     const r = await t1.q.readOwnedQueue(A);

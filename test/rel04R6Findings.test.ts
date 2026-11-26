@@ -6,10 +6,12 @@
  * the defect, and against the current code to show the correction.
  *
  *  Q1  two owned interim entries, same clientRequestId and payload, DIFFERENT accounts
- *      (exact assessment probe) -> both preserved, independently migrated/replayed/settled/discarded
+ *      (exact assessment probe) -> both preserved, independently counted and discarded
+ *      (R8: interim formats are quarantined, never migrated or replayed -- ticket 39224)
  *  Q2  temporary localStorage access denial + 45 days (exact assessment probe) -> reported
- *      unreadable, marker kept, restored access never recreates or replays the settled entry;
- *      Home and sign-out report "unavailable"
+ *      unreadable, decision kept, restored access never recreates or replays the settled entry;
+ *      Home and sign-out report "unavailable" (R8: the settled entry is an active one; its
+ *      stale interim copy stays quarantined)
  *  W1  known current page, two overlapping recovery checks, acknowledgement arrives (exact worker probe)
  *  W2  three overlapping recovery checks for one old page (exact worker probe)
  *  W3  origin-wide limit persisted across restarts (exact worker probe; already correct in R5)
@@ -105,6 +107,25 @@ async function probeQ2(loadFresh: () => any, q: any) {
   return { reportedUnreadable: !unreadable.ok, markerKept, restoredAlreadySettled: Boolean(restored.ok && restored.records.some((r: any) => r.item.clientRequestId === 'marker-1')), f };
 }
 
+/** R8: the same probe for the current code, whose only active format is an enqueued IndexedDB record (a stale interim copy re-appears). */
+async function probeQ2R8(loadFresh: () => any, q: any) {
+  const x = item(A, 'marker-1', 'saved already');
+  await q.enqueueOwned(x);
+  const rx = await q.readOwnedQueue(A);
+  await q.settleRecords(rx.records.filter((r: any) => r.item.clientRequestId === 'marker-1').map((r: any) => r.recordId), undefined, { owner: A });
+  storage.data.set(key(A, 'marker-1'), JSON.stringify(x)); // a stale interim copy of the settled entry
+  const later = realNow() + 45 * 86400000;
+  Date.now = () => later;
+  const f = loadFresh();
+  denyStorage();
+  const unreadable = await f.readOwnedQueue(A);
+  const markerKept = (await queueDump()).tombstones.length > 0;
+  restoreStorage();
+  const restored = await f.readOwnedQueue(A);
+  Date.now = realNow;
+  return { reportedUnreadable: !unreadable.ok, markerKept, restoredAlreadySettled: Boolean(restored.ok && restored.records.some((r: any) => r.item.clientRequestId === 'marker-1')), restoredPaused: restored.ok ? restored.paused : -1, f };
+}
+
 // ---------------------------------------------------------------- worker harness (the assessment's)
 function workerHarness(source: string) {
   const state = new Map<string, string>();
@@ -159,27 +180,25 @@ async function main() {
   await fresh();
   const tab = openTab('q1');
   const cur1 = await probeQ1(tab.q);
-  console.log('Q1 R6:', JSON.stringify(cur1));
+  console.log('Q1 current (R8):', JSON.stringify(cur1));
   const dumpQ1 = await queueDump();
-  check('Q1 CORRECTED: each account keeps its own entry (A 1, B 1); both sources retired only after each was confirmed in its own account\'s store', cur1.a === 1 && cur1.b === 1 && !storage.data.has(key(A, 'same-id')) && !storage.data.has(key(B, 'same-id')) && dumpQ1.records.length === 2 && new Set(dumpQ1.records.map((r: any) => r.recordId)).size === 2 && dumpQ1.records.every((r: any) => r.item.ownerUserId === r.ownerUserId));
-  // Independent lifecycle per account: replay A, discard B.
+  const rqA = await tab.q.readOwnedQueue(A);
+  const rqB = await tab.q.readOwnedQueue(B);
+  check('Q1 CORRECTED (R8): each account keeps its own entry, quarantined in place (A paused 1, B paused 1); nothing migrated; both sources preserved', cur1.a === 0 && cur1.b === 0 && rqA.ok && rqA.paused === 1 && rqB.ok && rqB.paused === 1 && storage.data.has(key(A, 'same-id')) && storage.data.has(key(B, 'same-id')) && dumpQ1.records.length === 0);
   const dev = new Device();
   dev.signIn(A);
   await tab.acct.fetchVerifiedSession(dev.fetch as any);
   const rpA = await tab.sync.replayOfflineQueue(dev.fetch as any);
-  const afterA = await queueDump();
-  check('Q1 replay for A sends and settles ONLY A\'s entry (server row for A); B\'s entry is untouched', rpA.attempted === 1 && logsOf(A).length === 1 && logsOf(B).length === 0 && afterA.records.length === 1 && afterA.records[0].ownerUserId === B);
+  check('Q1 (R8) replay for A sends nothing (quarantined entries are never sent; no server row for either account); B\'s entry is untouched', rpA.attempted === 0 && rpA.paused === 1 && logsOf(A).length === 0 && logsOf(B).length === 0 && storage.data.has(key(B, 'same-id')));
   const tabB = openTab('q1b');
   dev.signIn(B);
   await tabB.acct.fetchVerifiedSession(dev.fetch as any);
   const rbB = await tabB.q.readOwnedQueue(B);
-  const dB = await tabB.q.discardRecords(rbB.ok ? rbB.records.map((r) => r.recordId) : [], { tab: 'q1b' });
-  check('Q1 B\'s entry is still B\'s after A settled (identical id/payload), and B\'s discard removes exactly it; A\'s settlement marker is unaffected', rbB.ok && rbB.records.length === 1 && dB.removed === 1 && (await queueDump()).records.length === 0 && (await queueDump()).tombstones.some((t: any) => t.ownerUserId === A) && (await queueDump()).tombstones.some((t: any) => t.ownerUserId === B));
-  // Re-appearing sources of either account are not resurrected (markers are per account).
-  storage.data.set(key(A, 'same-id'), JSON.stringify(item(A, 'same-id', 'same-payload')));
+  const dB = tabB.q.discardQuarantined(B, rbB.ok ? rbB.quarantined : []);
+  check('Q1 (R8) B\'s discard removes exactly B\'s entry; A\'s identical entry is unaffected', rbB.ok && rbB.quarantined.length === 1 && dB.removed === 1 && !storage.data.has(key(B, 'same-id')) && storage.data.has(key(A, 'same-id')));
   storage.data.set(key(B, 'same-id'), JSON.stringify(item(B, 'same-id', 'same-payload')));
   const again = [await tab.q.readOwnedQueue(A), await tabB.q.readOwnedQueue(B)];
-  check('Q1 a re-appearing source of either account is matched to THAT account\'s marker: nothing recreated, sources retired', again.every((r) => r.ok && r.records.length === 0) && !storage.data.has(key(A, 'same-id')) && !storage.data.has(key(B, 'same-id')));
+  check('Q1 (R8) a re-appearing source of either account stays quarantined for THAT account: never active', again.every((r) => r.ok && r.records.length === 0 && r.items.length === 0 && r.paused === 1));
 
   // ---------------------------------------------------------------- Q2 unreadable legacy storage
   await fresh();
@@ -189,10 +208,10 @@ async function main() {
   check('Q2 R5 HEAD reproduces the assessment: denied storage read as retirement -> not reported unreadable, marker pruned, settled entry recreated', r5q2.reportedUnreadable === false && r5q2.markerKept === false && r5q2.restoredAlreadySettled === true);
   await fresh();
   const tq = openTab('q2');
-  const cur2 = await probeQ2(() => openTab('q2-later').q, tq.q);
-  console.log('Q2 R6:', JSON.stringify({ reportedUnreadable: cur2.reportedUnreadable, markerKept: cur2.markerKept, restoredAlreadySettled: cur2.restoredAlreadySettled }));
+  const cur2 = await probeQ2R8(() => openTab('q2-later').q, tq.q);
+  console.log('Q2 current (R8):', JSON.stringify({ reportedUnreadable: cur2.reportedUnreadable, markerKept: cur2.markerKept, restoredAlreadySettled: cur2.restoredAlreadySettled }));
   check('Q2 CORRECTED: denied storage is reported UNREADABLE, the marker is KEPT, and restored access does not recreate the settled entry', cur2.reportedUnreadable === true && cur2.markerKept === true && cur2.restoredAlreadySettled === false);
-  check('Q2 after access is restored the source is retired against its marker (and only then can the marker expire)', !storage.data.has(key(A, 'marker-1')));
+  check('Q2 (R8) after access is restored the stale interim copy is preserved in place and quarantined (paused, never active); the decision never expires', storage.data.has(key(A, 'marker-1')) && cur2.restoredPaused === 1 && (await queueDump()).tombstones.length === 1);
   // Not eligible for replay after restore.
   const dev2 = new Device();
   dev2.signIn(A);
