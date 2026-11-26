@@ -146,7 +146,7 @@ function main() {
   check('16. FIND + configured + PERSONAL widens to exactly DAILY_RHYTHM_EXPANDED_SEARCH_LIMIT', resolveFindATimeSearchLimit('FIND', 'workout', CONFIGURED) === DAILY_RHYTHM_EXPANDED_SEARCH_LIMIT);
   check('16b. CHECK mode never widens (CHECK has no `limit` concept at all)', resolveFindATimeSearchLimit('CHECK', 'workout', CONFIGURED) === undefined);
   check('16c. COMPARE mode never widens', resolveFindATimeSearchLimit('COMPARE', 'workout', CONFIGURED) === undefined);
-  check('16d. a WORK activity never widens the FIND search, even with Daily Rhythm configured', resolveFindATimeSearchLimit('FIND', 'task-1', CONFIGURED) === undefined);
+  check('16d. a WORK activity widens the FIND search when Daily Rhythm is configured (re-baselined by AURA-PREF-01: work activities now prefer working hours)', resolveFindATimeSearchLimit('FIND', 'task-1', CONFIGURED) !== undefined);
   check('16e. an unconfigured user never widens the FIND search', resolveFindATimeSearchLimit('FIND', 'workout', UNCONFIGURED) === undefined);
   check('16f. an unresolvable/unknown activityId never widens the FIND search', resolveFindATimeSearchLimit('FIND', 'not-a-real-activity', CONFIGURED) === undefined);
 
@@ -171,7 +171,7 @@ function main() {
   const breakOutside = candidate(`${MONDAY}T20:00:00.000-04:00`, `${MONDAY}T20:15:00.000-04:00`);
   check('17e. a flexible break OUTSIDE work hours gets no note at all (nothing noteworthy to say, same as Day Constructor)', buildDailyRhythmNotes([breakOutside], 'tea-break', TZ, CONFIGURED, false)[breakOutside.start] === undefined);
 
-  check('17f. a WORK activity never gets any note, even inside work hours', Object.keys(buildDailyRhythmNotes([insideA], 'task-1', TZ, CONFIGURED, false)).length === 0);
+  check('17f. a WORK activity inside work hours is noted as fitting them (re-baselined by AURA-PREF-01: work activities now prefer working hours)', buildDailyRhythmNotes([insideA], 'task-1', TZ, CONFIGURED, false)[insideA.start] === 'Fits your working hours.');
   check('17g. an unconfigured user never gets any note', Object.keys(buildDailyRhythmNotes([morningOutside, afternoonInside], 'workout', TZ, UNCONFIGURED, false)).length === 0);
 
   // ============================================================

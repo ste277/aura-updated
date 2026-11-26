@@ -305,6 +305,19 @@ jobs:
       # timezone.ts, no new dependency).
       - name: Run Goal Rhythm weekly proposal test
         run: npx ts-node test/goalRhythmWeeklyProposal.test.ts
+      # AURA-PREF-01 (PV-F01) -- work hours and availability applied the same
+      # way across Find a Time, weekly/rhythm planning, Plan My Day and Home
+      # (real engine): new users unaffected, personal avoid / work prefer
+      # working hours, explicit choices win, Panchang ranking preserved.
+      - name: Run PREF-01 availability preferences test
+        run: npx ts-node test/availabilityPreferencesPref01.test.ts
+      # Existing work-hours suites, never wired into CI before PREF-01.
+      - name: Run Daily Rhythm scheduling test
+        run: npx ts-node test/dailyRhythmScheduling.test.ts
+      - name: Run Daily Rhythm Find a Time test
+        run: npx ts-node test/timingSearchDailyRhythm.test.ts
+      - name: Run Daily Rhythm candidate coverage test
+        run: npx ts-node test/dailyRhythmCandidateCoverageIntegration.test.ts
       # AURA-HPG-FIX-01 -- Home -> Plan -> Goals stabilization regressions
       # (V1-03 title persistence, V1-05 already-scheduled recommendations,
       # weekly-plan proposal validity, V1-09 Home refresh). Same
@@ -1371,6 +1384,10 @@ jobs:
       # reload, pause/resume, and preferences flowing into scheduling.
       - name: Run MR3 My Rhythm preferences UI DB test
         run: npx ts-node test/myRhythmPreferencesUiDb.test.ts
+      # AURA-PREF-01 -- new users start unconfigured; setting, changing or
+      # clearing work hours/availability never modifies confirmed plans.
+      - name: Run PREF-01 availability preferences DB test
+        run: npx ts-node test/availabilityPreferencesPref01Db.test.ts
       # AURA-REM-01 (PV-F03) -- background reminder dispatcher on this
       # disposable DB with an injected sender: on-time delivery, duplicate and
       # concurrent runs, reschedule/cancel/complete, retry and expiry,

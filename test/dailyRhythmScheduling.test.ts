@@ -223,8 +223,8 @@ function main() {
       resolveDailyRhythmSearchLimit('workout', { targetDate: MONDAY, timezone: TZ, prefs: CONFIGURED }) === DAILY_RHYTHM_EXPANDED_SEARCH_LIMIT
     );
     check(
-      '8. a WORK activity never gets a widened search, even when Daily Rhythm is configured on a workday',
-      resolveDailyRhythmSearchLimit('task-1', { targetDate: MONDAY, timezone: TZ, prefs: CONFIGURED }) === undefined
+      '8. a WORK activity gets the widened search on a configured workday (re-baselined by AURA-PREF-01: work activities now prefer working hours)',
+      resolveDailyRhythmSearchLimit('task-1', { targetDate: MONDAY, timezone: TZ, prefs: CONFIGURED }) === DAILY_RHYTHM_EXPANDED_SEARCH_LIMIT
     );
     check(
       '9. a FLEXIBLE_BREAK activity never gets a widened search',
