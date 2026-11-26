@@ -68,19 +68,27 @@ function scanTree(base, label, out) {
 }
 
 const BUILD_ID_RE = /^[A-Za-z0-9_-]{8,128}$/;
+let out_standaloneRoot = null; // located standalone app root (reported on success)
 /**
  * Required artifact structure per build target. `{B}` is the build id read from BUILD_ID.
  *   web-build            apps/web after `next build` (output: 'standalone'): CI web-build job, vercel-build.sh
- *                        (every Vercel Preview and Production build) and the Docker build stage.
+ *                        (every Vercel Preview and Production build) and the Docker build stage. The standalone
+ *                        app root is LOCATED, not assumed: CI and Docker trace from apps/web (server.js directly in
+ *                        .next/standalone), while Vercel traces from the repository root (server.js under a nested
+ *                        path such as .next/standalone/apps/web). It is the one directory (outside node_modules,
+ *                        at most 4 levels deep) holding a non-empty server.js beside a .next/BUILD_ID equal to the
+ *                        build's own id; the Next runtime and package.json must be in it or in an ancestor within
+ *                        .next/standalone (Node module resolution).
  *   docker-release-tree  the assembled runtime tree /app (Docker release-tree stage), exactly what the image ships.
  */
 const REQUIRED = Object.freeze({
   'web-build': Object.freeze({
     buildId: '.next/BUILD_ID',
-    sameBuildId: ['.next/standalone/.next/BUILD_ID'],
-    files: ['.next/static/{B}/_buildManifest.js', '.next/server/webpack-runtime.js', '.next/standalone/server.js', '.next/standalone/node_modules/next/package.json'],
-    json: ['.next/server/app-paths-manifest.json', '.next/server/pages-manifest.json', '.next/standalone/package.json', 'public/manifest.json'],
-    dirs: [['.next/static/chunks', '.js'], ['.next/server/app', ''], ['.next/standalone/.next/server/app', '']],
+    sameBuildId: [],
+    files: ['.next/static/{B}/_buildManifest.js', '.next/server/webpack-runtime.js'],
+    json: ['.next/server/app-paths-manifest.json', '.next/server/pages-manifest.json', 'public/manifest.json'],
+    dirs: [['.next/static/chunks', '.js'], ['.next/server/app', '']],
+    standalone: '.next/standalone',
     migrations: null,
   }),
   'docker-release-tree': Object.freeze({
@@ -89,6 +97,7 @@ const REQUIRED = Object.freeze({
     files: ['server.js', '.next/static/{B}/_buildManifest.js', '.next/server/webpack-runtime.js', 'node_modules/next/package.json'],
     json: ['package.json', '.next/server/app-paths-manifest.json', '.next/server/pages-manifest.json', 'public/manifest.json'],
     dirs: [['.next/static/chunks', '.js'], ['.next/server/app', '']],
+    standalone: null,
     migrations: 'migrations',
   }),
 });
@@ -137,6 +146,39 @@ function checkStructure(root, target) {
     } catch (e) { errs.push(`missing or unreadable ${rel}: ${e.code || e.message}`); continue; }
     if (!found) errs.push(`no non-empty ${ext || 'output'} file under ${rel}`);
   }
+  if (spec.standalone && id !== null && BUILD_ID_RE.test(id)) {
+    const sa = path.join(root, spec.standalone);
+    const found = [];
+    const walk = (dir, depth) => {
+      let ents;
+      try { ents = fs.readdirSync(dir, { withFileTypes: true }); } catch (e) { errs.push(`missing or unreadable ${path.relative(root, dir) || '.'}: ${e.code || e.message}`); return; }
+      const has = (n) => ents.some((x) => x.name === n);
+      if (has('server.js') && has('.next')) found.push(dir);
+      if (depth >= 4) return;
+      for (const x of ents) if (x.isDirectory() && x.name !== 'node_modules' && x.name !== '.next') walk(path.join(dir, x.name), depth + 1);
+    };
+    walk(sa, 0);
+    const matching = found.filter((d) => { try { return fs.readFileSync(path.join(d, '.next/BUILD_ID'), 'utf8').trim() === id; } catch { return false; } });
+    if (matching.length !== 1) errs.push(`expected exactly one standalone app root (server.js beside .next/BUILD_ID = ${id}) under ${spec.standalone}; found ${matching.length}${found.length ? ` (candidates: ${found.map((d) => path.relative(root, d) || '.').join(', ')})` : ''}`);
+    else {
+      const app = path.relative(root, matching[0]);
+      out_standaloneRoot = app;
+      readFile(path.join(app, 'server.js'));
+      const appDirs = [[path.join(app, '.next/server/app'), '']];
+      for (const [rel] of appDirs) {
+        let ok = false; const stack = [path.join(root, rel)];
+        try { while (stack.length && !ok) { const d = stack.pop(); for (const ent of fs.readdirSync(d, { withFileTypes: true })) { const f = path.join(d, ent.name); if (ent.isDirectory()) stack.push(f); else if (ent.isFile() && fs.statSync(f).size > 0) { ok = true; break; } } } } catch (e) { errs.push(`missing or unreadable ${rel}: ${e.code || e.message}`); continue; }
+        if (!ok) errs.push(`no non-empty output file under ${rel}`);
+      }
+      // the Next runtime and package.json resolve from the app root or an ancestor within the standalone tree
+      const up = (rel) => { for (let d = app; ; d = path.dirname(d)) { const c = path.join(d, rel); if (fs.existsSync(path.join(root, c))) return c; if (path.relative(spec.standalone, d) === '' || d === '.' || d === path.dirname(d)) return null; } };
+      const nextPkg = up('node_modules/next/package.json');
+      if (!nextPkg) errs.push(`missing node_modules/next/package.json for the standalone app root ${app}`);
+      const pkg = up('package.json');
+      if (!pkg) errs.push(`missing package.json for the standalone app root ${app}`);
+      for (const rel of [nextPkg, pkg].filter(Boolean)) { const t = readFile(rel); if (t !== null) { try { const v = JSON.parse(t); if (v === null || typeof v !== 'object' || Array.isArray(v) || !Object.keys(v).length) errs.push(`empty or non-object JSON ${rel}`); } catch { errs.push(`malformed JSON ${rel}`); } } }
+    }
+  }
   if (spec.migrations) {
     const dir = path.join(root, spec.migrations);
     let subs = [];
@@ -176,7 +218,7 @@ function report(res, where) {
     for (const h of res.hits.slice(0, 20)) console.error(`  ${h.sentinel}  ->  ${h.file}`);
   }
   if (res.errors.length || res.hits.length) process.exit(1);
-  console.log(`[palm-e1-bundle] OK: none of ${SENTINELS.length} E1 sentinels in ${res.files} file(s) under ${where}.`);
+  console.log(`[palm-e1-bundle] OK: none of ${SENTINELS.length} E1 sentinels in ${res.files} file(s) under ${where}.${out_standaloneRoot !== null ? ` Artifact complete; standalone app root: ${out_standaloneRoot}.` : ' Artifact complete.'}`);
 }
 
 if (require.main === module) {

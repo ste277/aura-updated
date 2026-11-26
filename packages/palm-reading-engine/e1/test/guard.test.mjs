@@ -128,6 +128,25 @@ test('G1b R4 positive artifact verification: missing, empty, incomplete, malform
       }
     } finally { fs.rmSync(t, { recursive: true, force: true }); }
   }
+  // R4 (Vercel): a monorepo trace root nests the standalone app (.next/standalone/apps/web/server.js) and keeps
+  // node_modules and package.json at the standalone root; the app root is located, not assumed
+  const v = tmpdir('g1b-vercel');
+  try {
+    writeArtifactFixture(v, 'web-build');
+    const sa = path.join(v, '.next/standalone');
+    fs.mkdirSync(path.join(sa, 'apps/web'), { recursive: true });
+    for (const n of ['server.js', '.next']) fs.renameSync(path.join(sa, n), path.join(sa, 'apps/web', n));
+    assert.deepEqual(checkStructure(v, 'web-build'), []);
+    fs.writeFileSync(path.join(sa, 'apps/web/.next/BUILD_ID'), 'otherBuild0001');
+    assert.ok(checkStructure(v, 'web-build').some((x) => /exactly one standalone app root/.test(x)), 'nested root with another build id');
+    fs.writeFileSync(path.join(sa, 'apps/web/.next/BUILD_ID'), FIXTURE_BUILD_ID);
+    fs.mkdirSync(path.join(sa, 'apps/other/.next'), { recursive: true });
+    fs.writeFileSync(path.join(sa, 'apps/other/server.js'), 'x'); fs.writeFileSync(path.join(sa, 'apps/other/.next/BUILD_ID'), FIXTURE_BUILD_ID);
+    assert.ok(checkStructure(v, 'web-build').some((x) => /found 2/.test(x)), 'two candidate app roots are ambiguous');
+    fs.rmSync(path.join(sa, 'apps/other'), { recursive: true });
+    fs.rmSync(path.join(sa, 'node_modules'), { recursive: true });
+    assert.ok(checkStructure(v, 'web-build').some((x) => /node_modules\/next\/package\.json/.test(x)), 'no Next runtime anywhere up the standalone tree');
+  } finally { fs.rmSync(v, { recursive: true, force: true }); }
   // the CLI fails closed on both witnesses (exit 1), and passes a complete tree
   const run = (args) => spawnSync(process.execPath, [GUARD, ...args], { encoding: 'utf8' });
   const e = tmpdir('g1b-cli'), w = tmpdir('g1b-cli'), d = tmpdir('g1b-cli');
