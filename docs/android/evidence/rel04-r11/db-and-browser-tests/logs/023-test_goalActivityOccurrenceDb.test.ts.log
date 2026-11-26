@@ -1,0 +1,16 @@
+$ npx ts-node test/goalActivityOccurrenceDb.test.ts
+# job=day-constructor-acceptance-db-tests step=Run Goal activity occurrence DB test env={}
+OK   1. occurrence row inserted, referencing GoalActivity, with the expected userId
+OK   2. one GoalActivity has THREE simultaneous occurrence rows (the fundamental R1 capability)
+OK   3. occurrence rows persist with plannedActivityId = NULL (eligible-but-unscheduled is a valid future state)
+OK   4. plannedActivityId can be linked after creation
+OK   5. a SECOND occurrence cannot claim the SAME plannedActivityId -- unique constraint rejects it
+OK   8. occurrence SURVIVES its linked PlannedActivity being hard-deleted, with plannedActivityId now NULL
+OK   9. a userId-scoped lookup for a DIFFERENT user returns zero rows for userA's occurrences (no cross-user leak)
+OK   9. an occurrence cannot be inserted against a GoalActivity id that does not exist (FK enforced, never a silent orphan)
+OK   10. GoalActivity.plannedActivityId linkage behaves exactly as before (UPCOMING), unaffected by the THREE Occurrence rows that now also exist for it
+OK   6. GoalActivity deletion cascades to its occurrences
+OK   7. Goal deletion (deleteGoal) cascades through GoalActivity to its occurrences -- deleteGoal itself is unaffected by Occurrence rows (its guard only ever checked GoalActivity.plannedActivityId, which is NULL here)
+ALL GOAL ACTIVITY OCCURRENCE DB CHECKS PASSED
+
+# exit=0 signal=

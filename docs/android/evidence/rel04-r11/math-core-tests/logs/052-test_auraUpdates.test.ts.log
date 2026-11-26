@@ -1,0 +1,28 @@
+$ npx ts-node test/auraUpdates.test.ts
+# job=math-core-tests step=Run Aura Updates test env={}
+OK   ACCEPTED produces exactly one update
+OK   ACCEPTED update has type MOMENT_ACCEPTED
+OK   ACCEPTED update never requires action (a confirmation, not a task)
+OK   ACCEPTED update is unread when never seen
+OK   ACCEPTED update has no preference field
+OK   unreadCount reflects the one unread ACCEPTED update
+OK   ANOTHER_TIME produces type MOMENT_ANOTHER_TIME
+OK   ANOTHER_TIME requires action when no successor exists yet
+OK   ANOTHER_TIME preserves the exact stored preference
+OK   ANOTHER_TIME is unread when never seen
+OK   A moment with no response yet produces no update
+OK   unread is false once ownerSeenResponseAt is AFTER respondedAt
+OK   unread is TRUE again when respondedAt is AFTER the last ownerSeenResponseAt (a new response after a prior seen mark, e.g. re-responding)
+OK   A seen ANOTHER_TIME still requires action if no successor exists
+OK   An ANOTHER_TIME update no longer requires action once its moment has a successor
+OK   A superseded ANOTHER_TIME update is NOT deleted -- it still appears, just resolved
+OK   The actionable ANOTHER_TIME ranks first even though it is chronologically the OLDEST response
+OK   Within the informational (ACCEPTED) bucket, the most recent response ranks first
+OK   AuraUpdate never contains savedPersonId
+OK   AuraUpdate never contains ownerUserId
+OK   AuraUpdate never contains any birth/natal field name
+OK   AuraUpdate does carry the safe recipient display name
+
+ALL AURA UPDATES CHECKS PASSED
+
+# exit=0 signal=

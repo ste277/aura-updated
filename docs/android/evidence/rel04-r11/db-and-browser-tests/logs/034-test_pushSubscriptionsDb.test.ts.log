@@ -1,0 +1,20 @@
+$ npx ts-node test/pushSubscriptionsDb.test.ts
+# job=day-constructor-acceptance-db-tests step=Run push subscriptions DB test env={}
+OK   Registering a new subscription creates a live (non-disabled) row
+OK   Re-registering the SAME endpoint updates the existing row in place, not a duplicate
+OK   Re-registration updates the stored keys
+OK   Owner A sees their own subscription
+OK   Owner B does NOT see owner A's subscription
+OK   hasActivePushSubscription is true for both independently-registered owners
+OK   Disabling by the WRONG owner's id does not affect owner A's real subscription
+OK   Disabling by the CORRECT owner removes it from the active list
+OK   A disabled subscription no longer counts as an active subscription for the owner
+OK   Re-registering a disabled endpoint clears disabledAt (re-enables it)
+OK   The re-enabled subscription is active again
+OK   disablePushSubscriptionByEndpoint disables regardless of owner id being passed
+OK   markPushSubscriptionSuccessful sets lastSuccessfulAt
+OK   PushSubscription rows never contain any birth/natal/email field name
+
+ALL PUSH SUBSCRIPTION DB CHECKS PASSED
+
+# exit=0 signal=

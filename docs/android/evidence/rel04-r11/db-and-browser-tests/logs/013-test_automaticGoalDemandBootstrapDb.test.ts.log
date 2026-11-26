@@ -1,0 +1,15 @@
+$ npx ts-node test/automaticGoalDemandBootstrapDb.test.ts
+# job=day-constructor-acceptance-db-tests step=Run Automatic Goal demand bootstrap DB test env={}
+OK   ownership: User A never receives User B's GoalActivity
+OK   ownership: User A does receive their OWN eligible GoalActivity
+OK   ownership: User B correctly receives their OWN GoalActivity
+OK   end-to-end setup: the real manual handoff resolved exactly the requested GoalActivity
+OK   end-to-end dedup: the manually-handed-off GoalActivity is excluded from automatic demand, the sibling GoalActivity remains
+OK   setup: an invalid/not-owned raw query id resolves to an empty manual handoff
+OK   an invalid/not-owned raw manual query id can never suppress a genuinely eligible automatic suggestion
+OK   three repeated bootstrap reads create ZERO new GoalActivityOccurrence/PlannedActivity/GoalActivityExecution rows
+OK   exactly ONE discovery query call for the whole bootstrap resolution
+OK   exactly ONE batched facts query call for the whole bootstrap resolution
+ALL AUTOMATIC GOAL DEMAND BOOTSTRAP DB CHECKS PASSED
+
+# exit=0 signal=

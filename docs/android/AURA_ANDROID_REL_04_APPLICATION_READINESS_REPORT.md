@@ -2,7 +2,15 @@
 
 **Date:** 2026-11-26 (R9) · **PR:** #392 · **Branch:** `aura-android-rel04-app-readiness`, cut from `main` `ad49e6a`
 
-**Revision:** **R10**: durable discard identity and reporting. R10 closes the open X2 findings of independent verification 39228-R9 (reviewed head `9385eb2`, implementation `513c12b`), with X1 and X3 already closed.
+**Revision:** **R11** (ticket 39245): structural queue correction for independent review 39244, which was OPEN at `4a37173`.
+- **Correction:** one identity-resolution contract, one transmission gate shared by submission and replay, a discard bound to the confirmed snapshot, and verified per-activity outcomes that keep the prior-send fact. It closes D1–D7 and P3.
+- **Implementation:** `abdd9d8192b77b9fcb844e9ad1e98cddded9b230`.
+- **Evidence:** `docs/android/evidence/rel04-r11/`. Reviewer evidence: `docs/android/evidence/rel04-r10-independent-39244/`.
+- **Handover:** `docs/android/AURA_ANDROID_REL_04_R11_VERIFICATION_HANDOVER.md`. Its sections supersede §R9 and §R10 where they differ.
+- **CI:** run 45870363531 on `abdd9d8` was **8/9**. The failure is a suspected wall-clock-window failure of `multiOccurrenceRhythmMoveCapacityDb` at 23:26 IST, recorded separately; it is not an R11 finding.
+- **Unreadable v2 recovery** stays a separate release acceptance condition (see the handover).
+
+**Previous revision:** **R10**: durable discard identity and reporting. R10 closes the open X2 findings of independent verification 39228-R9 (reviewed head `9385eb2`, implementation `513c12b`), with X1 and X3 already closed.
 - **Identity:** lifecycle identity is established from identity fields alone. Identifiable activities with damaged non-identity fields are discarded durably. Missing, malformed or conflicting identity is preserved.
 - **Reporting:** sign-out reports each logical activity in exactly one outcome, with "possibly sent" stated per category.
 - **References:** implementation `8f3d3167af2c48ea463d454600dc94358e4e7249`; evidence `docs/android/evidence/rel04-r10-8f3d316/`; reviewer evidence `docs/android/evidence/rel04-r9-independent-39228/`; handover `docs/android/AURA_ANDROID_REL_04_R10_VERIFICATION_HANDOVER.md` (sections there supersede §R9 where they differ).
@@ -46,7 +54,7 @@ R5, R4 and R3 sections are kept as history.
 
 ## 1. Verdict
 
-**DURABLE DISCARD INVARIANT VERIFIED — R10 READY FOR FOCUSED INDEPENDENT REVIEW.** (R9 boundary and durable-before-cleanup retained.)
+**R11 READY FOR INDEPENDENT VERIFICATION** (39244 D1–D7 and P3 addressed; ticket 39243 open; the unrelated CI wall-clock failure is documented separately).
 
 | Disposition | State |
 |---|---|

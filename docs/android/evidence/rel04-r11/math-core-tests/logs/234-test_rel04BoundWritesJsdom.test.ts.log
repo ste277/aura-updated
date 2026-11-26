@@ -1,0 +1,40 @@
+$ npx ts-node --project tsconfig.jsdom-tests.json test/rel04BoundWritesJsdom.test.ts
+# job=math-core-tests step=Run REL-04 bound writes and /find flow test (IR-01/IR-03 R2) env={"TS_NODE_COMPILER_OPTIONS":"{\"jsx\":\"react-jsx\"}"}
+OK   P1 ordinary plan creation, bound to A at the action -> stored for A, request stated A
+OK   P2 delayed plan confirmation bound to A after a recognized switch to B: refused, nothing sent, nothing for B
+OK   P3 overlap refusal carries the binding of the original action (A)
+OK   P4 "Save anyway" re-sent with A's binding under B's cookie -> refused by the server (409), nothing for B
+OK   P5 the 409 account_mismatch answer makes this tab forget its account (re-verify)
+OK   P6 plan creation without an account binding (out-of-date client) -> 503 upgrade, nothing stored
+OK   P7 an existing plan mutation states the account (A)
+OK   P8 sign-out waits for (and first aborts) the in-flight mutation before sending logout
+OK   P8 then signs out
+OK   P9 during another tab's sign-out, existing mutations are refused client-side
+OK   P10 an account-sensitive read after an unrecognized cookie change is refused (409, no B data) and the tab re-verifies
+OK   F4 precondition: /find reached the code step as a guest
+OK   F4 competing sign-in after verification: not confirmed and the user is told
+OK   F4 no plan request sent at all, nothing stored
+OK   F4b competing sign-in after the confirming read: the A-bound save is refused by the server (409); nothing stored
+OK   F4b and the page does not claim success
+OK   F5 the save request stated the account the code verified (A)
+OK   F5 the late completion is not shown in the new context (no "is saved", flow reset)
+OK   F5 the plan exists for A only (the server bound it to A), never B
+OK   F6 a request-code that completes after an account change does not revive the retired flow (no code step)
+OK   F6 re-entering sign-up shows the EMAIL step, not the retired flow's code step
+OK   F7 a restore that completes after an account change does not show the restored result
+
+22 passed, 0 failed
+Warning: You called act(async () => ...) without await. This could lead to unexpected testing behaviour, interleaving multiple act calls and mixing their scopes. You should - await act(async () => ...);
+request-link failed: Error [AbortError]: The operation was aborted.
+    at abortError (/Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/android-rel-04-app/test/rel04AccountIsolationHarness.ts:213:35)
+    at AbortSignal.onAbort (/Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/android-rel-04-app/test/rel04AccountIsolationHarness.ts:311:64)
+    at AbortSignal.[nodejs.internal.kHybridDispatch] (node:internal/event_target:856:20)
+    at AbortSignal.dispatchEvent (node:internal/event_target:789:26)
+    at runAbort (node:internal/abort_controller:547:10)
+    at abortSignal (node:internal/abort_controller:518:3)
+    at AbortController.abort (node:internal/abort_controller:566:5)
+    at retireFlow (/Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/android-rel-04-app/apps/web/app/find/GuestFindClient.tsx:127:26)
+    at /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/android-rel-04-app/apps/web/app/find/GuestFindClient.tsx:226:7
+    at notify (/Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/android-rel-04-app/apps/web/lib/accountSession.ts:77:11)
+
+# exit=0 signal=

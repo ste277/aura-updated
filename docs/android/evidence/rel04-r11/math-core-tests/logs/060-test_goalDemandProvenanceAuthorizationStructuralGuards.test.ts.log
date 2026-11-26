@@ -1,0 +1,33 @@
+$ npx ts-node test/goalDemandProvenanceAuthorizationStructuralGuards.test.ts
+# job=math-core-tests step=Run Goal demand provenance authorization structural guards test env={}
+OK   41a. classifyGoalDemandIntentId is imported by goalDemandProvenanceAuthorization.ts
+OK   41b. classifyGoalDemandIntentId is called exactly once in the authorization module (the one classification site)
+OK   42. dayConstructorAcceptancePersistence.ts does not import goalDemandIntentId.ts or goalDemandProvenanceAuthorization.ts
+OK   42b. dayConstructorAcceptancePersistence.ts never references the literal "goal-demand:" namespace
+OK   43. dayConstructor.ts does not import goalDemandIntentId.ts or goalDemandProvenanceAuthorization.ts
+OK   44. dayConstructorOrchestrator.ts does not import goalDemandIntentId.ts or goalDemandProvenanceAuthorization.ts
+OK   45. canonicalPreviewItemFields still signs exactly the same pre-A3.4 field list -- no goalActivityId/goalId/goalTitle/Rhythm field added
+OK   45b. dayConstructorPreviewIntegrity.ts does not reference goalActivityId/goalId/goalTitle/Rhythm anywhere
+OK   45c. dayConstructorPreviewIntegrity.ts (the signing module) was not modified to import goalDemandIntentId -- signing stays decoder-unaware
+OK   46. createIntentRowFromGoalActivity (the manual Goal row factory) still produces the plan-day-goal-<id> scheme, unmodified
+OK   46b. planDayBootstrap.ts's resolveGoalActivityHandoff is untouched by this ticket (no goalDemandIntentId/goalDemandProvenanceAuthorization reference)
+OK   47. buildGoalActivityLinksForAccept is byte-unchanged from its own pre-A3.4 shape (still derives goalActivityId from row.goalActivityId only, no new intentId-encoding logic added to it)
+OK   47b. PlanDayClient.tsx's own accept-time goalActivityLinks/captureLinks wiring is untouched (still buildGoalActivityLinksForAccept(rows, preview.constructedDay.proposedItems) verbatim)
+OK   48a. persistAcceptedConstructedDay still tries materializeGoalActivityRhythmOccurrence first for every Goal-linked write, now passing plan.plannedStartAt for the PR2 scheduled-week snapshot, otherwise unmodified
+OK   48b. the existing legacy linkGoalActivityToPlannedActivity fallback (finite/NONE Rhythm path) is still present, unmodified
+OK   48c. the existing all-or-nothing rollback contract is still present (now via typed SchedulingEligibilityError throws, same two sites)
+OK   48d. the per-user advisory lock (concurrency protection) is still present, unmodified
+OK   49a. goalDemandIntentId.ts does not import pg/db.ts/React/next in real code
+OK   49b. goalDemandIntentId.ts does not import any dayConstructor*.ts module in real code
+OK   49c. goalDemandProvenanceAuthorization.ts does not import pg/db.ts/React/next in real code (acceptance-domain, pure/types-only)
+OK   50. no second ad hoc parser of the goal-demand: namespace exists in acceptance/orchestrator/Constructor/PlanDayClient source (only the real literal-prefix mentions already proven elsewhere, e.g. encodeGoalDemandIntentId's own template, count as legitimate)
+OK   50b. the acceptance route itself never reimplements goal-demand classification -- it calls authorizeGoalActivityLinks, never classifyGoalDemandIntentId directly
+OK   trust order: verifyAcceptanceItems appears BEFORE authorizeGoalActivityLinks in route.ts source order
+OK   trust order: the integrity-gate early return appears BEFORE the authorizeGoalActivityLinks call
+OK   trust order: persistAcceptedConstructedDay receives authorization.goalActivityLinks (the AUTHORIZED map), never the raw parsed one
+OK   trust order: the authorization REJECTED early-return appears BEFORE the persistence call
+OK   goalPlanningSourceAdapter.ts still re-exports encodeGoalDemandIntentId verbatim, unmodified by A3.4
+OK   evaluateAcceptance (dayConstructorAcceptance.ts) does not reference Goal demand/goalDemandIntentId/goalActivityLinks
+ALL GOAL DEMAND PROVENANCE AUTHORIZATION STRUCTURAL GUARD CHECKS PASSED
+
+# exit=0 signal=

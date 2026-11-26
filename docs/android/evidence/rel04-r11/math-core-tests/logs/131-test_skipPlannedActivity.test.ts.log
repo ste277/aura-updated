@@ -1,0 +1,40 @@
+$ npx ts-node test/skipPlannedActivity.test.ts
+# job=math-core-tests step=Run Skip planned activity test env={}
+OK   11. SKIPPED derives SKIPPED for a current window (never CURRENT/STARTING_SOON/MISSED/COMPLETED/UPCOMING)
+OK   11. SKIPPED derives SKIPPED for a elapsed window (never CURRENT/STARTING_SOON/MISSED/COMPLETED/UPCOMING)
+OK   11. SKIPPED derives SKIPPED for a starting-soon window (never CURRENT/STARTING_SOON/MISSED/COMPLETED/UPCOMING)
+OK   11. SKIPPED derives SKIPPED for a far-future window (never CURRENT/STARTING_SOON/MISSED/COMPLETED/UPCOMING)
+OK   11. an elapsed UPCOMING plan still derives MISSED (time-derived states apply only to UPCOMING)
+OK   11. SKIPPED is neither currentItem nor nextItem, and is not counted as planned
+OK   12. SKIPPED never blocks (future window)
+OK   12. SKIPPED never blocks (current window)
+OK   12. existing semantics unchanged: UPCOMING future blocks, LOGGED blocks, CANCELLED does not, elapsed UPCOMING does not
+OK   13. Capture: a SKIPPED link derives OPEN (never PLANNED/COMPLETED)
+OK   13. Capture: completedAt still wins (a skip never un-completes)
+OK   14. GoalActivity: a SKIPPED link derives SUGGESTED
+OK   14. GoalActivity: UPCOMING still PLANNED, LOGGED still COMPLETED, CANCELLED still SUGGESTED, DISMISSED still DISMISSED
+OK   17. a SKIPPED plan in its active window is not ACTIVE_PLAN or IMMINENT_PLAN
+OK   17. a SKIPPED plan that is about to start is not IMMINENT_PLAN
+OK   18. composer: SKIPPED is resolved history (past, not current, not completed) and keeps agendaStatus SKIPPED
+OK   17. a live plan still wins Right Now when a skipped plan overlaps it
+OK   19. reflection: SKIPPED is not completed, missed or upcoming
+OK   19. compact agenda: a SKIPPED plan is not offered as an upcoming row
+OK   16. mapPlanRow preserves a SKIPPED row as SKIPPED (never LOGGED or UPCOMING)
+OK   16. the Plan tab derives its upcoming/completed lists from presentation predicates (mapPlanRow preserves SKIPPED; status-preservation suite covers replay)
+OK   16. listPlannedActivities (Plan tab / calendar feed source) excludes SKIPPED at the query
+OK   20. reminder discovery queries stay keyed on status = 'UPCOMING'
+OK   21. calendar feed keeps `plan.status !== 'UPCOMING'` -> excluded
+OK   22. forward planner blockers keep `plan.status === 'UPCOMING'` -> SKIPPED does not block
+OK   23. guidance dedupe keeps `plan.status !== 'UPCOMING'` -> SKIPPED is not an active scheduled occurrence
+OK   9. the skip route uses skipPlannedActivity and never cancel/log/delete
+OK   7. skipPlannedActivity is one conditional UPDATE (status = 'UPCOMING') with a DB-clock skippedAt; no read-then-write
+OK   10/4. skipPlannedActivity writes no HabitLog, Capture or GoalActivity
+OK   25. deletePlannedActivity is unchanged: still only LOGGED/CANCELLED (SKIPPED stays undeletable in V1)
+OK   7. logPlannedActivity/cancelPlannedActivity were not modified (still status-gated to UPCOMING)
+OK   2. migration 0037 is exactly one additive ADD COLUMN "skippedAt" TIMESTAMPTZ(3), no backfill/constraint/enum
+OK   2. schema: skippedAt DateTime? @db.Timestamptz(3); status stays a plain String (no enum)
+OK   15. both source-link UPDATEs may replace a link only over a CANCELLED or SKIPPED plan
+OK   49. Done semantics stay separate from Skip in Home: the refresh module never mentions SKIPPED, and Done is still exactly POST .../log expecting LOGGED (Skip UX lives in C2's own executor entry)
+ALL SKIP CHECKS PASSED
+
+# exit=0 signal=

@@ -1,0 +1,33 @@
+$ npx ts-node --project tsconfig.jsdom-tests.json test/reminderNotificationSettingsJsdom.test.ts
+# job=math-core-tests step=Run REM-01 notification settings (jsdom) test env={}
+OK   S1. Unsupported browser: says so, offers in-app fallback, no enable button
+OK   S2. iPhone Safari tab: Add to Home Screen guidance
+OK   S3. Service not configured: no enable button, no prompt, honest copy
+OK   S4. Not requested: enable button shown, nothing prompted on mount
+OK   S5. Denied: browser-settings guidance, no button, no prompt
+OK   S6. Denied -> allowed in browser settings -> returning to Aura re-reads the state (enable offered, no reload)
+OK   S7. Subscribed and background delivery running: "On" -- worded as what Aura sends, not as verified device delivery
+OK   S8. Subscribed but scheduler not running: never "On"; says not working yet
+OK   S9. Expired subscription: explains and offers "Turn on again"
+OK   S10. "Turn on again" drops the dead browser subscription and registers a fresh one
+OK   E1. Enable (allowed, scheduler running): one prompt, then "On"
+OK   E2. Enable while the scheduler is not running: device set up, but shown as not working yet (no false success)
+OK   E3. User blocks the prompt: denied guidance, no re-prompt button
+OK   E4. Server push keys missing at enable time: shows not-available, not a generic error
+OK   P1. No VAPID keys -> NOT_CONFIGURED
+OK   P2. Scheduler never ran -> SCHEDULER_INACTIVE
+OK   P3. Last run 15 min ago -> AVAILABLE (boundary)
+OK   P4. Last run 16 min ago -> SCHEDULER_INACTIVE
+OK   P5. Once-a-day cron (last run 20 h ago) -> SCHEDULER_INACTIVE
+OK   P6. Push not sent at or after the start time
+OK   A1. Dispatch accepts Vercel Cron's CRON_SECRET bearer
+OK   A2. Dispatch still accepts INTERNAL_REMINDER_DISPATCH_SECRET
+OK   A3. No secret configured -> always refused (fail closed)
+OK   A4. Wrong or missing bearer refused
+OK   A5. Secrets shorter than 16 characters are ignored
+OK   G1. No notification permission prompt on page load (app/page.tsx)
+OK   G2. The reminder cron still targets the dispatch route
+
+27 passed, 0 failed
+
+# exit=0 signal=

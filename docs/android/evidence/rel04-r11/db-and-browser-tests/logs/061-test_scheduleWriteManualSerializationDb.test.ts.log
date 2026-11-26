@@ -1,0 +1,42 @@
+$ npx ts-node test/scheduleWriteManualSerializationDb.test.ts
+# job=day-constructor-acceptance-db-tests step=Run manual writer serialization DB test env={}
+=== API contract and mechanics are preserved ===
+OK   POST /api/plans still returns 200 with the created plan (owner, title, FIXED scheduling mode)
+OK   the writer now runs as: advisory LOCK, then the plan INSERT on the transaction client, then COMMIT (one lock, one commit, no rollback)
+OK   the lock and the insert run on the SAME backend connection (same transaction client)
+OK   validation (400) and authentication (401) errors are unchanged and take NO lock and open NO transaction
+OK   plan-create IDEMPOTENCY is unchanged: the same clientRequestId returns the same plan and creates one row
+=== manual overlap semantics are UNCHANGED (serialization is not validation) ===
+OK   manual-manual overlap is still ALLOWED: both overlapping plans are created with 200 (no new rejection, no 409)
+=== the S1 known race is CLOSED: acceptance holds the lock, a manual write waits ===
+   timeline (ms): +0 LOCK | +3 READ:overlap | +6 LOCK | +639 COMMIT | +639 INSERT-START[manual-during] | +641 INSERT-DONE[manual-during] | +641 COMMIT
+OK   acceptance SAVED its proposal (its fresh read saw no blocker at that moment)
+OK   while acceptance was between its fresh read and its COMMIT, the manual write was BLOCKED (pending) -- it could not commit inside that critical section
+OK   the manual write began its INSERT only AFTER acceptance COMMITTED (lock released at commit)
+OK   the manual write then completed normally after acceptance (200)
+OK   ACCEPTANCE-FIRST final state (intentional Model A behavior): both plans exist and they overlap, because a manual overlap that FOLLOWS an automatic commit is allowed
+=== manual first: acceptance waits, then its authoritative read sees the manual plan ===
+OK   the manual writer held the lock inside its critical section (reached its insert gate)
+OK   while the manual writer held the lock, acceptance for the same user was BLOCKED
+OK   MANUAL-FIRST final state: the manual write succeeded, acceptance was REJECTED as CONFLICT, and only the manual interval persists
+OK   acceptance's authoritative blocker read happened AFTER the manual commit (no stale read)
+=== two manual writers, same user: serialized; both may succeed ===
+OK   the second manual write for the same user did NOT reach its insert while the first held the lock
+OK   after the first committed, the second proceeded and both succeeded (manual overlap permitted): two overlapping rows
+=== different users never wait on each other ===
+OK   while user X's writer holds X's lock, user Y's manual write AND acceptance complete without waiting (cross-user concurrency)
+OK   user X's write then completes normally
+OK   CLIENT-SUPPLIED identity is ignored: a body userId did not make the request take X's lock (it completed while X was held) and did not change the plan owner
+=== Move for the same user is serialized with a manual write ===
+   move timeline (ms): +0 LOCK | +1 LOCK | +606 COMMIT | +607 INSERT-START[manual-during-move] | +608 INSERT-DONE[manual-during-move] | +608 COMMIT | moved.to.status=UPCOMING manualStatus=200
+OK   a manual write arriving inside Move's critical section (after its overlap check) was BLOCKED
+OK   Move committed first and the manual write inserted only after Move's COMMIT
+=== failure paths release the lock ===
+OK   a failure AFTER the lock was taken rolls the transaction back (LOCK ... ROLLBACK, no commit) and surfaces as before (the error propagates)
+OK   the lock is released: no advisory lock remains and the next writer for the same user proceeds immediately
+OK   CONNECTION loss: terminating the lock holder's backend frees the transaction-scoped lock automatically (no manual unlock) and the blocked writer proceeds
+=== cost (local, informational) ===
+   uncontended manual create through the route: median 1.0 ms, max 1.5 ms (n=30)
+ALL MANUAL WRITER SERIALIZATION DB CHECKS PASSED
+
+# exit=0 signal=

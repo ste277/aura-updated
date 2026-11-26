@@ -1,0 +1,59 @@
+$ npx ts-node --project tsconfig.jsdom-tests.json test/rel04R8LogicalLifecycle.test.ts
+# job=math-core-tests step=Run REL-04 R8 logical lifecycle test (R7-assessment findings on 7cae58a vs current; retired formats quarantined) env={"TS_NODE_COMPILER_OPTIONS":"{\"jsx\":\"react-jsx\"}"}
+OK   fixture rel04-r2-head/offlineHabitQueue.ts.txt == db8607e apps/web/lib/offlineHabitQueue.ts
+OK   fixture rel04-r3-head/offlineHabitQueue.ts.txt == b323d2a apps/web/lib/offlineHabitQueue.ts
+OK   fixture rel04-r6-head/offlineHabitQueue.ts.txt == 13d773e apps/web/lib/offlineHabitQueue.ts
+OK   fixture rel04-r7-head/offlineHabitQueue.ts.txt == 7cae58a apps/web/lib/offlineHabitQueue.ts
+OK   fixture rel04-r7-head/activitySync.ts.txt == 7cae58a apps/web/lib/activitySync.ts
+OK   fixture rel04-r7-head/signOut.ts.txt == 7cae58a apps/web/lib/signOut.ts
+A R7: {"seededRandomIdRecord":true,"q3SourcePresent":true,"signedOut":true,"afterDiscard":0,"recreated":0,"replayed":1,"serverRows":1}
+OK   A R7 HEAD reproduces: R3 random-id IndexedDB record (R6 migrator) + equivalent aura_q3 source, cleanup failing; the sign-out discard succeeds and removes the record
+OK   A R7 HEAD reproduces: the discarded activity is RECREATED from the aura_q3 source and REPLAYED, creating a server row
+A current: {"seededRandomIdRecord":true,"q3SourcePresent":true,"signedOut":true,"afterDiscard":0,"recreated":0,"replayed":0,"serverRows":0}
+OK   A CORRECTED: after the successful sign-out discard (cleanup still failing) nothing is recreated, nothing replayed, ZERO server rows
+OK   A CORRECTED: the uncleaned aura_q3 source is preserved in place, quarantined (it is never a queue input)
+B R7 (B first): {"aDiscardedUnderR6":true,"sharedId":"mceee7a214a49c39f","tombsBefore":1,"markerAfter":false,"tombsAfter":1,"replayed":1,"serverRows":1}
+OK   B R7 HEAD setup: A discarded under R6 (bare marker for A), then B's discard replaced it; 45 days pass
+OK   B R7 HEAD reproduces: B reads first and RETIRES the marker (B has no source); A then migrates and REPLAYS its previously discarded activity (server row)
+B R7 (A first): {"aDiscardedUnderR6":true,"sharedId":"mceee7a214a49c39f","tombsBefore":1,"markerAfter":false,"tombsAfter":0,"replayed":0,"serverRows":0}
+OK   B R7 HEAD order dependence: if A reads before B's retirement the entry is held (not replayed) -- the outcome depends on which account reads first
+B current (B-first): {"aDiscardedUnderR6":true,"sharedId":"mceee7a214a49c39f","tombsBefore":1,"markerAfter":true,"tombsAfter":1,"replayed":0,"serverRows":0}
+OK   B CORRECTED (B reads first, 45 days): no marker is retired by any account's read (nothing pruned), A's discarded activity is never replayed, ZERO server rows
+B current (A-first): {"aDiscardedUnderR6":true,"sharedId":"mceee7a214a49c39f","tombsBefore":1,"markerAfter":true,"tombsAfter":1,"replayed":0,"serverRows":0}
+OK   B CORRECTED (A reads first, 45 days): no marker is retired by any account's read (nothing pruned), A's discarded activity is never replayed, ZERO server rows
+C/D R7: {"held":1,"paused":null,"shownAsPending":1,"viewPaused":null,"replayed":0,"bRows":0,"removed":1}
+OK   C R7 HEAD reproduces: B's valid entry is HELD solely because A (another account) has a matching historical marker
+OK   C R7 HEAD: without A's marker the same entry of B is NOT held (the hold is caused by the foreign marker)
+OK   D R7 HEAD reproduces: the held entry is presented as a PENDING entry ("Pending sync") although it is excluded from automatic replay
+OK   D R7 HEAD page.tsx reconstructs every readOfflineHabitQueue item as a pending entry and has no paused status
+C/D current: {"held":0,"paused":1,"shownAsPending":0,"viewPaused":1,"replayed":0,"bRows":0,"removed":1} {"held":0,"paused":1,"shownAsPending":0,"viewPaused":1,"replayed":0,"bRows":0,"removed":1}
+OK   C CORRECTED: A's markers have NO effect on B -- B's entry has the same state with and without A's marker (quarantined: a retired development format, ticket 39224)
+OK   C CORRECTED: B's current activity with the same request id and payload as A's settled one (A's decision + pre-R8 markers present) is stored and SENT for B -- never held
+OK   D CORRECTED: the quarantined entry is NEVER presented as a pending entry; the presentation read reports it as paused (Home: "Sync paused")
+OK   D CORRECTED: Home reads the paused count with the pending items and shows "Sync paused — legacy activity could not be safely reconciled." with that count (data-queue-state="paused")
+OK   D CORRECTED: sign-out asks about it as paused legacy activity, discards it, and reports the removal
+OK   L1 six equivalent copies of ONE logical request (3 historical IndexedDB ids: random, account-scoped, owner-less; R1/R2/R3 localStorage) = ONE paused request; never pending; repeated reads identical
+OK   L2 the sign-out discard removes every copy (3 records + 3 localStorage entries) and records ONE decision for the logical request (R9: reported as ONE logical activity)
+OK   L2 the discarded request can never re-enter: a re-enqueue is refused as decided, a re-submit sends NOTHING; ZERO server rows
+L2: {"again":{"status":"settled"},"sent":{"kind":"not-stored"},"rows":0,"posts":0}
+OK   L3 two active equivalent copies: sent ONCE, settlement removes BOTH and records one decision
+OK   L3 a stale interim copy of the settled request stays quarantined (paused, never sent)
+OK   L4 A then B: each account sees only its own 2 paused entries, its own live activity is sent once, its discard is durable though cleanup fails (copies kept, reported cleanup-pending); nothing of either account is ever replayed
+OK   L4 B then A: each account sees only its own 2 paused entries, its own live activity is sent once, its discard is durable though cleanup fails (copies kept, reported cleanup-pending); nothing of either account is ever replayed
+OK   L5 a decision survives 400 days of reads by both accounts (no expiry, no retirement) and still refuses the request
+OK   L6 an interrupted discard (IndexedDB write failure) reports failed, removes nothing, records no decision
+OK   L6 repeating the discard completes it once (then alreadyGone); the decision is written once
+OK   L6 repeating a quarantine discard is safe (removed once, then nothing left to remove)
+OK   L7 distinct requests are each sent once; conflicting active payloads are never sent and counted as paused
+OK   L7 a different payload under a decided request is refused (conflict); any payload under a quarantined request is refused (paused) and NOT sent
+OK   L9 denied localStorage: the queue is UNREADABLE (never empty, never "nothing paused"), replay sends nothing, sign-out keeps everything (owned UNKNOWN)
+OK   L9 IndexedDB unavailable: unreadable, quarantined source untouched
+OK   L10 sign-out asks about 2 logs of which 1 is paused legacy activity, removes both, and reports 2 removed
+OK   L11 enqueue, submit, claim, settle and replay all refuse retired-format data: nothing created, nothing sent, nothing settled; the record and every pre-R8 marker stay untouched
+L11: {"e1":{"status":"paused"},"e2":{"status":"paused"},"sub":{"kind":"not-stored"},"claim":{"status":"paused"},"settle":{"removed":0,"alreadyGone":0,"failed":0,"foreign":0,"paused":1},"attempted":0,"posts":0,"records":1,"tombs":1}
+OK   L11 the module has no migration path: no code copies a localStorage entry into IndexedDB, and no marker is ever deleted
+OK   L12 the released legacy offline_habit_queue is never paused-counted, never sent, byte-identical after sign-out, and reported as left in place
+
+43 passed, 0 failed
+
+# exit=0 signal=

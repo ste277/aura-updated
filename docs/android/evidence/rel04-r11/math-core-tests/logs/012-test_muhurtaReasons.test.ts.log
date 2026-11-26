@@ -1,0 +1,46 @@
+$ npx ts-node test/muhurtaReasons.test.ts
+# job=math-core-tests step=Run muhurta reasons test env={}
+OK   Supportive nakshatra produces a NAKSHATRA_SUPPORTIVE reason
+OK   NAKSHATRA_SUPPORTIVE reason is structured (factor NAKSHATRA, polarity SUPPORT, positive impact)
+OK   NAKSHATRA_SUPPORTIVE reason carries the nakshatra name as value
+OK   Unfavorable nakshatra produces a NAKSHATRA_UNFAVORABLE reason
+OK   NAKSHATRA_UNFAVORABLE reason is structured (factor NAKSHATRA, polarity CAUTION, negative impact)
+OK   NAKSHATRA_UNFAVORABLE reason carries the nakshatra name as value
+OK   Abhijit window produces a structured ABHIJIT_SUPPORT reason
+OK   Rahu Kalam produces a structured RAHU_CAUTION reason
+OK   Brahma window (DEEP_WORK family) produces a structured BRAHMA_SUPPORT reason
+OK   supports/blockers are derivable from reasons via the formatter and match evaluateMuhurta output exactly
+OK   Nakshatra caution blocker reads as the original English sentence
+OK   formatMuhurtaReason reproduces the same text found in supports[]
+OK   Rahu Kalam explains the blocker (legacy wording preserved)
+OK   Aura Fit score for start-journey in ABHIJIT is unchanged by the reason refactor (76 === 76)
+OK   Aura Fit score for start-journey in BRAHMA is unchanged by the reason refactor (60 === 60)
+OK   Aura Fit score for start-journey in GULIKA is unchanged by the reason refactor (59 === 59)
+OK   Aura Fit score for start-journey in NEUTRAL is unchanged by the reason refactor (49 === 49)
+OK   Aura Fit score for start-journey in RAHU_KALAM is unchanged by the reason refactor (26 === 26)
+OK   Aura Fit score for start-journey in YAMA is unchanged by the reason refactor (26 === 26)
+OK   Aura Fit score for deep-work in ABHIJIT is unchanged by the reason refactor (75 === 75)
+OK   Aura Fit score for deep-work in BRAHMA is unchanged by the reason refactor (74 === 74)
+OK   Aura Fit score for deep-work in GULIKA is unchanged by the reason refactor (61 === 61)
+OK   Aura Fit score for deep-work in NEUTRAL is unchanged by the reason refactor (61 === 61)
+OK   Aura Fit score for deep-work in RAHU_KALAM is unchanged by the reason refactor (30 === 30)
+OK   Aura Fit score for deep-work in YAMA is unchanged by the reason refactor (30 === 30)
+OK   Aura Fit score for tea-break in ABHIJIT is unchanged by the reason refactor (76 === 76)
+OK   Aura Fit score for tea-break in BRAHMA is unchanged by the reason refactor (70 === 70)
+OK   Aura Fit score for tea-break in GULIKA is unchanged by the reason refactor (72 === 72)
+OK   Aura Fit score for tea-break in NEUTRAL is unchanged by the reason refactor (62 === 62)
+OK   Aura Fit score for tea-break in RAHU_KALAM is unchanged by the reason refactor (51 === 51)
+OK   Aura Fit score for tea-break in YAMA is unchanged by the reason refactor (51 === 51)
+OK   evaluateActivityFit exposes structured reasons alongside the unchanged score
+OK   evaluateActivityFit reasons include the activity-rule reason for a recommended window
+OK   Personal Muhurta fit produces PERSONAL_TARA_* structured reasons
+OK   Personal Muhurta fit summary is still built from joined reason text
+OK   Free-text task without a catalog match still classifies via the regex fallback
+OK   Free-text (fallback) classification still resolves to ADMIN family
+OK   Free-text (fallback) evaluation still produces a structured reasons array
+OK   Free-text (fallback) evaluation still produces legacy supports/blockers/summary fields
+OK   Free-text planner still returns usable planning options after the reason refactor
+
+ALL MUHURTA REASON CHECKS PASSED
+
+# exit=0 signal=

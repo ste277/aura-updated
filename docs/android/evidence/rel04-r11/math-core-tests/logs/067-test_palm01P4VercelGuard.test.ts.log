@@ -1,0 +1,36 @@
+$ npx ts-node test/palm01P4VercelGuard.test.ts
+# job=math-core-tests step=Run Palmistry Vercel build guard test env={}
+OK   A1. vercel-build.sh runs `set -e` before anything else
+OK   A2. vercel-build.sh invokes the Palmistry scanner
+OK   A3. the scanner runs after `next build`
+OK   A4. the scanner is the last command (nothing after it can mask its exit code)
+OK   A5. no exit-code swallowing anywhere in the script
+OK   A6. scanner path is resolved from the script directory (cwd-independent)
+OK   A7. Production-only migration step is preserved
+OK   A8. apps/web package.json still maps vercel-build to this script
+OK   B1. Preview + clean unpublished build: exits 0
+OK   B2. ... and the scanner actually ran and reported OK
+OK   B3. ... and no migration ran in Preview
+OK   B4. Preview + planted sentinel in a production artifact: build FAILS (non-zero exit)
+OK   B5. ... with the scanner FAIL message naming the leaked file
+OK   B6. `next build` failure fails the Vercel build
+OK   B7. ... and the scanner does not run after a failed build
+OK   B8. scanner cannot inspect artifacts (no .next/static): build FAILS
+OK   B9. missing approval file: build FAILS
+OK   B10. malformed approval file: build FAILS
+OK   B11. non-exact approval ("approved") is treated as unapproved: leaked content FAILS the build
+OK   B12. Production + clean build: exits 0 with the scanner OK
+OK   B13. Production still applies migrations, before `next build`
+OK   B14. Production + planted sentinel: build FAILS (deployment never promoted)
+OK   B15. exact APPROVED semantics unchanged: scanner allows inclusion (build exits 0)
+OK   C1. all five top-level CI jobs are present
+OK   C2. the Palmistry scanner step is inside the web-build job, after the build
+OK   C3. the MCP Server job is intact (own job, lockfile install, build+test, read-only perms)
+OK   C4. the scanner is not inside the MCP Server job
+OK   C5. no leftover merge-conflict markers in the workflow
+OK   C6. this guard test is wired into CI
+OK   D1. real approval is exactly the Product Owner record (independentScholarlyReview false)
+
+30 passed, 0 failed
+
+# exit=0 signal=

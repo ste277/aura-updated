@@ -1,0 +1,30 @@
+$ npx ts-node test/hpg5I3HomeSaveDb.test.ts
+# job=day-constructor-acceptance-db-tests step=Run Home save protection DB test (HPG5-V2-I3) env={"TS_NODE_COMPILER_OPTIONS":"{\"jsx\":\"react\"}"}
+OK   HOME setup: CHECK returns the exact opportunity instant
+OK   HOME recommendation valid when made (no plans yet)
+OK   HOME a competing plan is created after the recommendation (second tab)
+OK   HOME stale save refused with typed PLAN_OVERLAP naming the competing plan
+OK   HOME refusal keeps the exact proposal
+OK   HOME no plan written on refusal (only the competitor exists)
+OK   HOME the idempotency claim exists but is unfilled (no plan id) after the rollback
+OK   HOME Save anyway with the SAME clientRequestId succeeds despite the unfilled claim (515 ms)
+OK   HOME claim now points at the saved plan
+OK   HOME activity identity preserved on the saved row
+OK   HOME a lost-response retry (REJECT, same key) returns the SAME plan -- no duplicate, no self-conflict
+OK   HOME no goal occurrence created (identity unchanged vs. before I3)
+OK   DB stale chip A refused with PLAN_OVERLAP, nothing written
+OK   DB choosing chip B (same suggestion key) then Add succeeds
+OK   DB the saved plan is chip B (the user's new choice), with activityId
+OK   DB a duplicate Add (same key) returns the same plan, no second row
+OK   RACE two tabs, same opportunity, same key -> exactly one plan row
+OK   RACE Home Plan and Day Builder Add for one slot at once -> one saved, one PLAN_OVERLAP
+OK   STALE blocker cancelled after the recommendation -> the Home save succeeds
+OK   PRIVACY another user's overlapping plans never block or appear in this user's Home save
+OK   LEGACY a caller without overlapPolicy is unchanged (soft-dedupe returns the existing identical plan)
+
+21 checks
+ALL CHECKS PASSED
+(node:51830) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+# exit=0 signal=
