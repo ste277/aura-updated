@@ -1,0 +1,15 @@
+GitHub REST checks collected 2026-11-26
+PR 392 OPEN, head 4a3717362070d2f65a170001a59048fafad6098f
+45858803540 8f3d3167af2c48ea463d454600dc94358e4e7249 pull_request completed success attempt 1, 9/9 jobs successful
+45862518425 4a3717362070d2f65a170001a59048fafad6098f pull_request completed success attempt 1, 9/9 jobs successful
+
+Both runs reported these jobs successful:
+REL-04 Chromium multi-tab tests
+REL-04 Next.js app rendering tests
+Next.js production build
+Day Constructor acceptance DB tests
+MCP Server
+MCP Server (Node 20 compatibility)
+Ephemeris / panchang tests
+Palmistry upload pipeline tests (G5)
+Database migration validation

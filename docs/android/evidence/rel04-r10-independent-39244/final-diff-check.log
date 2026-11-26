@@ -1,0 +1,8 @@
+docs/android/evidence/rel04-r10-8f3d316/math-core-tests/logs/244-test_rel04R7QueueOwnership.test.ts.log:24: trailing whitespace.
++O2 R1 offline_habit_queue_v2 (R1 enqueueOwned) R6: {"ok":true,"legS":{"sharedId":false,"a0":1,"b0":1,"aReplayed":1,"aRows":1,"b1":1,"bDiscarded":1,"aMarkerKept":true,"aResurrected":0},"legD":{"aDiscarded":1,"bReplayed":1,"bRows":1,"aDiscardedReplayed":0,"aRowsAfterDiscard":0}} 
+docs/android/evidence/rel04-r10-8f3d316/math-core-tests/logs/244-test_rel04R7QueueOwnership.test.ts.log:27: trailing whitespace.
++O2 R2 aura_q3 (R2 enqueueOwned) R6: {"ok":true,"legS":{"sharedId":false,"a0":1,"b0":1,"aReplayed":1,"aRows":1,"b1":1,"bDiscarded":1,"aMarkerKept":true,"aResurrected":0},"legD":{"aDiscarded":1,"bReplayed":1,"bRows":1,"aDiscardedReplayed":0,"aRowsAfterDiscard":0}} 
+docs/android/evidence/rel04-r10-8f3d316/math-core-tests/logs/244-test_rel04R7QueueOwnership.test.ts.log:30: trailing whitespace.
++O2 R3 aura_q4 random id (R3 enqueueOwned) R6: {"ok":true,"legS":{"sharedId":false,"a0":1,"b0":1,"aReplayed":1,"aRows":1,"b1":1,"bDiscarded":1,"aMarkerKept":true,"aResurrected":0},"legD":{"aDiscarded":1,"bReplayed":1,"bRows":1,"aDiscardedReplayed":0,"aRowsAfterDiscard":0}} 
+docs/android/evidence/rel04-r10-8f3d316/math-core-tests/logs/244-test_rel04R7QueueOwnership.test.ts.log:33: trailing whitespace.
++O2 R3 aura_q4 shared migrated id (R3 migrator) R6: {"ok":false,"legS":{"sharedId":true,"a0":1,"b0":0,"aReplayed":1,"aRows":1,"b1":1,"bDiscarded":1,"aMarkerKept":false,"aResurrected":1},"legD":{"aDiscarded":1,"bReplayed":1,"bRows":1,"aDiscardedReplayed":1,"aRowsAfterDiscard":1}} 

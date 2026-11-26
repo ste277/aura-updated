@@ -1,0 +1,224 @@
+import * as assert from 'node:assert/strict';
+import { Device, addUser, clearQueueDb, closeAllTabs, logsOf, openTab, payload, queueDump, resetStore, storage, WEB } from './rel04AccountIsolationHarness';
+
+const A = 'review-a', B = 'review-b';
+addUser(A, 'review-a@example.invalid');
+addUser(B, 'review-b@example.invalid');
+const dev = new Device();
+let sequence = 0;
+const item = (crid: string, owner = A) => ({ ...payload('review activity', crid), ownerUserId: owner, tempId: 'temp' });
+async function fresh() {
+  resetStore(); storage.clear(); closeAllTabs(); await clearQueueDb();
+}
+async function tab(owner = A) {
+  dev.signIn(owner);
+  const s = openTab('review-' + sequence++);
+  await s.acct.fetchVerifiedSession(dev.fetch as any);
+  return s;
+}
+type Tab = Awaited<ReturnType<typeof tab>>;
+const submit = (s: Tab, id: string) => s.sync.submitActivityLog(payload('review activity', id), 'temp', dev.fetch);
+const replay = (s: Tab) => s.sync.replayOfflineQueue(dev.fetch);
+const signout = (s: Tab, confirm = () => true) => s.so.performSignOut({ fetch: dev.fetch, confirm });
+const dump = queueDump;
+const markers = async () => (await dump()).tombstones.map((r: any) => [r.ownerUserId, r.clientRequestId, r.decision]);
+async function snapshot(s: Tab, owner = A) {
+  const result = await s.q.readOwnedQueue(owner);
+  if (!result.ok) throw new Error('Queue snapshot unexpectedly unreadable');
+  return result;
+}
+const v2 = (owner = A) => 'offline_habit_queue_v2:' + owner;
+const damaged = (crid: string, owner = A) => ({ ...item(crid, owner), logTimestamp: 'invalid' });
+async function put(s: Tab, r: any) {
+  const db = await s.q.__openQueueDbForTests();
+  const t = db.transaction('records', 'readwrite');
+  t.objectStore('records').put(r);
+  await new Promise<void>((resolve, reject) => { t.oncomplete = () => resolve(); t.onerror = () => reject(t.error); });
+}
+function output(name: string, result: unknown) {
+  console.log(name, JSON.stringify(result));
+}
+const current = (owner = A) => logsOf(owner).map((r: any) => r.clientRequestId);
+
+async function main() {
+  await fresh();
+  {
+    const s = await tab();
+    const v = { ...damaged('nested-request') };
+    await put(s, { recordId: 'missing-index', ownerUserId: A, item: v, fmt: 'r8', queuedAt: Date.now() });
+    const sn = await snapshot(s);
+    const so = await signout(s);
+    const decisionsAtSignOut = await markers();
+    const after = await tab();
+    const sub = await submit(after, 'nested-request');
+    output('D1 missing IndexedDB index with intact nested identity', { classified: sn.corrupt, outcome: so.owned, decisionsAtSignOut, decisionsAfterSubmit: await markers(), copies: (await dump()).records.length, submit: sub.kind, rows: current() });
+  }
+  await fresh();
+  {
+    const s = await tab();
+    await s.q.enqueueOwned(item('candidate-y'));
+    await put(s, { recordId: 'contradiction', ownerUserId: A, clientRequestId: 'candidate-x', item: item('candidate-y'), fmt: 'r8', queuedAt: Date.now() });
+    const before = await snapshot(s);
+    const sub = await submit(s, 'candidate-y');
+    const good = (await dump()).records.find((r: any) => r.clientRequestId === 'candidate-y');
+    const claim = await s.q.claimForDispatch(good.recordId, 'claim-review');
+    if (claim.status === 'claimed') await s.q.releaseClaim(claim.claim);
+    output('D2 contradictory IndexedDB candidate', { activeGroups: before.groups.length, paused: before.paused, direct: sub.kind, claim: claim.status, rows: current() });
+  }
+  await fresh();
+  {
+    const s = await tab();
+    await s.q.enqueueOwned(item('race-y'));
+    const { IDBIndex } = require(require.resolve('fake-indexeddb', { paths: [WEB] }));
+    const originalGetAll = IDBIndex.prototype.getAll;
+    IDBIndex.prototype.getAll = function (...args: any[]) {
+      const req = originalGetAll.apply(this, args);
+      if (this.name === 'owner' && this.objectStore.transaction.mode === 'readonly') {
+        IDBIndex.prototype.getAll = originalGetAll;
+        req.addEventListener('success', () => {
+          const pending = this.objectStore.transaction.db.transaction('records', 'readwrite');
+          pending.objectStore('records').put({ recordId: 'late-conflict', ownerUserId: A, clientRequestId: 'race-x', item: item('race-y'), fmt: 'r8', queuedAt: Date.now() });
+        });
+      }
+      return req;
+    };
+    try {
+      const result = await replay(s);
+      output('D2 replay snapshot-to-claim', { replay: result, rows: current(), survivingConflict: (await dump()).records.some((r: any) => r.recordId === 'late-conflict') });
+    } finally { IDBIndex.prototype.getAll = originalGetAll; }
+  }
+  for (const format of ['aura_q3', 'aura_q4']) {
+    await fresh();
+    const s = await tab();
+    const key = format + ':' + A + ':wrong-owner' + (format === 'aura_q4' ? ':copy' : '');
+    const raw = JSON.stringify(damaged('wrong-owner', B));
+    storage.setItem(key, raw);
+    const before = await snapshot(s);
+    const a = await submit(s, 'wrong-owner');
+    const so = await signout(s);
+    const b = await tab(B);
+    const foreign = await snapshot(b, B);
+    output('D3 cross-account value ' + format, { pausedA: before.paused, pausedB: foreign.paused, submitA: a.kind, rowsA: current(), rowsB: current(B), outcomes: so.owned, rawPreserved: storage.getItem(key) === raw, markers: await markers() });
+  }
+  await fresh();
+  {
+    const s = await tab();
+    await put(s, { recordId: 'edited-while-confirming', ownerUserId: A, clientRequestId: 'approved', item: damaged('approved'), fmt: 'r8', queuedAt: Date.now() });
+    const sn = await snapshot(s);
+    let question = '';
+    const so = await s.so.performSignOut({
+      confirm: (message: string) => { question = message; return true; },
+      fetch: async (input: unknown, init: any) => {
+        if (String(input) === '/api/auth/logout') {
+          await put(s, { recordId: 'edited-while-confirming', ownerUserId: A, clientRequestId: 'unseen', item: damaged('unseen'), fmt: 'r8', queuedAt: Date.now() });
+        }
+        return dev.fetch(input, init);
+      },
+    });
+    output('D4 identity changed after snapshot', { approved: sn.corrupt, question, out: so.owned, message: s.so.signOutOutcomeMessage(so), remaining: (await dump()).records.map((r: any) => r.clientRequestId), markers: await markers() });
+  }
+  await fresh();
+  {
+    const s = await tab();
+    await s.q.enqueueOwned(item('possibly-sent'));
+    const rec = (await dump()).records[0];
+    const held = await s.q.claimForDispatch(rec.recordId, 'other-tab');
+    await put(s, { ...rec, item: damaged('possibly-sent', B) });
+    storage.setItem('aura_q3:' + A + ':possibly-sent', JSON.stringify(item('possibly-sent')));
+    const before = await snapshot(s);
+    const so = await signout(s);
+    output('D5 in-flight record damaged after claim', { claim: held.status, before: { total: before.total, dispatched: before.dispatched }, outcome: so.owned, message: s.so.signOutOutcomeMessage(so), marker: await markers(), claimLeft: (await dump()).claims.length });
+    if (held.status === 'claimed') await s.q.releaseClaim(held.claim);
+  }
+  await fresh();
+  {
+    const s = await tab();
+    dev.fault('POST', '/api/habit-logs', 'network-after');
+    assert.equal((await submit(s, 'already-sent')).kind, 'queued');
+    storage.setItem('aura_q3:' + A + ':already-sent', JSON.stringify(item('already-sent')));
+    storage.fail.remove = true;
+    const first = await signout(s);
+    storage.fail.remove = false;
+    const s2 = await tab();
+    const second = await signout(s2);
+    output('D6 possibly-sent attribution across cleanup retry', { first: first.owned, second: second.owned, rows: current(), message: s2.so.signOutOutcomeMessage(second) });
+  }
+  await fresh();
+  {
+    const s = await tab();
+    const raw = '{bad';
+    storage.setItem('aura_q4:' + A + ':missing-record-id-delimiter', raw);
+    const before = await snapshot(s);
+    const so = await signout(s);
+    output('D7 malformed q4 key', { source: before.quarantined[0], outcome: so.owned, markers: await markers(), sourceLeft: storage.getItem('aura_q4:' + A + ':missing-record-id-delimiter') });
+  }
+  await fresh();
+  {
+    const s = await tab();
+    await s.q.enqueueOwned(item('atomic'));
+    const raw = JSON.stringify([damaged('atomic')]);
+    storage.setItem(v2(), raw);
+    const sn = await snapshot(s);
+    const { IDBObjectStore } = require(require.resolve('fake-indexeddb', { paths: [WEB] }));
+    const originalPut = IDBObjectStore.prototype.put;
+    IDBObjectStore.prototype.put = function (...args: any[]) {
+      if (this.name === 'tombstones') throw new Error('injected after record delete request');
+      return originalPut.apply(this, args);
+    };
+    const failed = await s.q.discardOwned(A, sn, { tab: 'review' });
+    IDBObjectStore.prototype.put = originalPut;
+    const retry = await submit(s, 'atomic');
+    output('P1 atomic rollback after delete was issued', { failed, markers: await markers(), stored: (await dump()).records.length, sourceUnchanged: storage.getItem(v2()) === raw, submit: retry.kind, rows: current() });
+  }
+  await fresh();
+  {
+    const s = await tab();
+    const raw = JSON.stringify([damaged('durable')]);
+    storage.setItem(v2(), raw);
+    storage.fail.remove = true;
+    const first = await signout(s);
+    storage.fail.remove = false;
+    const b = await tab(B);
+    const cross = await submit(b, 'durable');
+    const a = await tab();
+    const same = await submit(a, 'durable');
+    const again = await replay(a);
+    const done = await signout(a);
+    const returnA = await tab();
+    const late = await submit(returnA, 'durable');
+    output('P2 durability across failed cleanup and switching', { first: first.owned, cross: cross.kind, same: same.kind, replay: again.attempted, done: done.owned, retry: late.kind, markers: await markers(), rowsA: current(), rowsB: current(B) });
+  }
+  await fresh();
+  {
+    const s = await tab();
+    await s.q.enqueueOwned(item('ack-lost'));
+    const raw = JSON.stringify([damaged('ack-lost')]);
+    storage.setItem(v2(), raw);
+    const sn = await snapshot(s);
+    const { IDBDatabase } = require(require.resolve('fake-indexeddb', { paths: [WEB] }));
+    const original = IDBDatabase.prototype.transaction;
+    IDBDatabase.prototype.transaction = function (...args: any[]) {
+      const transaction = original.apply(this, args);
+      if (transaction.mode === 'readwrite') {
+        IDBDatabase.prototype.transaction = original;
+        // Deliver an error to the caller from the real completion event.
+        // The writes have committed, but the caller sees a failed acknowledgement.
+        transaction.addEventListener('complete', () => transaction.onerror?.(new Event('error')));
+      }
+      return transaction;
+    };
+    let out;
+    try {
+      out = await s.q.discardOwned(A, sn, { tab: 'review' });
+    } finally {
+      IDBDatabase.prototype.transaction = original;
+    }
+    const survivedAtFailure = storage.getItem(v2()) === raw;
+    const a = await tab();
+    const direct = await submit(a, 'ack-lost');
+    const rp = await replay(a);
+    output('P3 committed transaction with failed acknowledgement', { out, markers: await markers(), copies: (await dump()).records.length, survivedAtFailure, submit: direct.kind, replay: rp.attempted, rows: current() });
+  }
+}
+main().catch((e) => { console.error(e); process.exitCode = 1; });
+

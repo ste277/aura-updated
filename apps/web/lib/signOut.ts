@@ -84,8 +84,10 @@ export interface OwnedDiscardReport {
   cleanupPending?: number;
   /** R10: of `cleanupPending`: already handed to the network (may have been sent and saved). */
   cleanupPendingPossiblySent?: number;
-  /** R10: NOT discarded because its identity could not be established safely; kept (paused, never sent). */
+  /** R10: NOT discarded because its identity could not be established safely; kept (paused, never sent by Aura). */
   unidentified?: number;
+  /** R11: the discard's outcome could not be established. */
+  uncertain?: number;
 }
 
 export interface SignOutDeps {
@@ -144,15 +146,18 @@ export function discardOutcomeMessage(r: SignOutResult): string | null {
       if (kept > 0) {
         const why: string[] = [];
         if (o.keptInFlight > 0) why.push(`${o.keptInFlight} still being sent from another window`);
-        if (o.failed > 0) why.push(`${o.failed} couldn't be removed because of a storage error`);
-        parts.push(`${plural(kept, '1 activity log was', '# activity logs were')} kept on this device for this account (${why.join('; ')}); kept logs sync only if you sign in to the same account again.`);
+        if (o.failed > 0) why.push(`${o.failed} couldn't be discarded because of a storage error`);
+        // R11: no claim about later syncing -- a kept log may be paused; nothing about it was decided here.
+        parts.push(`${plural(kept, '1 activity log was', '# activity logs were')} kept on this device for this account (${why.join('; ')}); nothing about ${kept === 1 ? 'it' : 'them'} was changed, and Aura will ask again the next time you sign out of this account.`);
       }
+      const unc = o.uncertain ?? 0;
+      if (unc > 0) parts.push(`Aura couldn't confirm whether ${plural(unc, '1 activity log was', '# activity logs were')} discarded; ${unc === 1 ? 'it' : 'they'} may still be on this device for this account.`);
       const cp = o.cleanupPending ?? 0;
       if (cp > 0) parts.push(`${plural(cp, '1 activity log was', '# activity logs were')} discarded and will never be sent, but Aura couldn't delete ${cp === 1 ? 'its copy' : 'their copies'} from this device's storage.`);
       const cps = o.cleanupPendingPossiblySent ?? 0;
       if (cp > 0 && cps > 0) parts.push(`${cps === cp ? (cp === 1 ? 'It' : 'They') : `${cps} of those`} may already have been sent, so ${cps === 1 ? 'it' : 'they'} may be saved to your account; discarding ${cps === 1 ? 'it' : 'them'} here doesn't undo that.`);
       const un = o.unidentified ?? 0;
-      if (un > 0) parts.push(`${plural(un, '1 activity log', '# activity logs')} from an earlier test version of Aura couldn't be identified safely, so ${un === 1 ? 'it was' : 'they were'} kept on this device (paused, never sent).`);
+      if (un > 0) parts.push(`${plural(un, '1 activity log', '# activity logs')} from an earlier test version of Aura couldn't be identified safely, so ${un === 1 ? 'it was' : 'they were'} kept on this device (paused; Aura won't send ${un === 1 ? 'it' : 'them'}).`);
     }
   }
   if (r.legacyKept === null) parts.push("Aura couldn't check this device for activity logs from an earlier version; any there were left in place.");
@@ -275,7 +280,7 @@ async function run(deps: SignOutDeps): Promise<SignOutResult> {
       // R9: one logical discard -- the decisions and every IndexedDB copy in one transaction, retired
       // localStorage entries removed only after it committed (a failure keeps everything as it was).
       const d = await discardOwned(owner, snapshot, { tab: getTabId() });
-      owned = { unknown: false, removed: d.removed, removedPossiblySent: d.removedPossiblySent, keptInFlight: d.keptInFlight, failed: d.failed, cleanupPending: d.cleanupPending, cleanupPendingPossiblySent: d.cleanupPendingPossiblySent, unidentified: d.unidentified };
+      owned = { unknown: false, removed: d.removed, removedPossiblySent: d.removedPossiblySent, keptInFlight: d.keptInFlight, failed: d.failed, cleanupPending: d.cleanupPending, cleanupPendingPossiblySent: d.cleanupPendingPossiblySent, unidentified: d.unidentified, uncertain: d.uncertain };
     }
     const legacy = readLegacySnapshot();
     transition.end('signed-out');
