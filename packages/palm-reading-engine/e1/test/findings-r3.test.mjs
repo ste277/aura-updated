@@ -4,7 +4,6 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as E from '../src/index.mjs';
 import * as compose from '../src/compose.mjs';
-import * as observations from '../src/observations.mjs';
 import * as core from '../src/engine-core.mjs';
 import * as packaged from '../src/packaged.mjs';
 import { CAT_PATH, SCHEMA_PATH, readJson, clone, rec } from './helpers.mjs';
@@ -27,8 +26,9 @@ test('F2 R2 witnesses: injected notAssessed wording and injected fallback wordin
 });
 
 test('F2 the text composer has no catalogue, schema or library override: it is pinned to the packaged library', () => {
-  assert.equal(compose.composeReading.length, 2); // (minted, opts)
-  assert.throws(() => compose.composeReading({ observations: {}, qualityAccepted: true }, { ...syn, library: E.loadLibrary(CAT, SCHEMA) }), (e) => e.code === 'invalid-input');
+  // R4: no text composer and no raw catalogue or schema object is exported from any module
+  assert.ok(!('composeReading' in compose) && !('PACKAGED_CATALOGUE' in E) && !('PACKAGED_SCHEMA' in E));
+  assert.deepEqual(Object.keys(packaged).sort(), ['C1_REV4_DIGESTS', 'pinnedLibrary']);
   assert.equal(packaged.pinnedLibrary(), E.defaultLibrary());
   assert.ok(!('composeFromObservations' in E) && !('composeReading' in E) && !('deriveObservations' in E) && !('readingFromConstruction' in E));
 });
@@ -119,27 +119,19 @@ test('F5 exact boundaries and one grid step either side, plus large in-range mag
 });
 
 // ---------------------------------------------------------------- F7 synthetic-only enforcement
-test('F7 R2 witness: importing compose.mjs directly no longer emits a reading without a synthetic declaration', () => {
-  const lib = E.defaultLibrary();
-  assert.throws(() => compose.composeReading({ 'lines.life': { provenance: 'user-confirmed', value: 'present' } }, {}), (e) => e.code === 'synthetic-required');
-  assert.throws(() => compose.composeReading(lib, { 'lines.life': { provenance: 'user-confirmed', value: 'present' } }), (e) => e.code === 'synthetic-required' || e.code === 'invalid-input');
-  // with the declaration, hand-made observations are still refused: only observations minted from one input compose
-  assert.throws(() => compose.composeReading({ observations: { 'lines.life': { provenance: 'user-confirmed', value: 'present' } }, qualityAccepted: true }, syn), (e) => e.code === 'invalid-input');
-  assert.equal(observations.isMintedObservations({ observations: {} }), false);
+test('F7 R2 witness: importing compose.mjs directly cannot emit a reading (R4: it exports no text composer)', () => {
+  assert.ok(!('composeReading' in compose));
+  assert.deepEqual(Object.keys(core).sort(), ['E1Error', 'E1_ENGINE', 'claimSyntheticReader']);
 });
 
-test('F7 every exported function able to produce a reading or a plan refuses without { synthetic: true }', () => {
+test('F7 every exported function able to produce a plan refuses without an own { synthetic: true }', () => {
   const lib = E.defaultLibrary();
   const noSyn = [undefined, null, {}, { synthetic: 'yes' }, { synthetic: 1 }, { synthetic: false }];
   for (const o of noSyn) {
-    assert.throws(() => compose.composeReading({}, o), (e) => e.code === 'synthetic-required');
     assert.throws(() => compose.planSelection(lib, {}, o), (e) => e.code === 'synthetic-required');
     assert.throws(() => E.planSelection(lib, {}, o), (e) => e.code === 'synthetic-required');
-    assert.throws(() => observations.deriveObservations(lib, {}, {}, o), (e) => e.code === 'synthetic-required');
-    assert.throws(() => core.readingFromConstruction({}, {}, o), (e) => e.code === 'synthetic-required');
   }
   // the inventory of exported functions per module is fixed; a new reading-capable export must be added here
-  assert.deepEqual(Object.keys(compose).sort(), ['composeReading', 'planSelection', 'validateObservations', 'validateReadingOutput']);
-  assert.deepEqual(Object.keys(observations).sort(), ['deriveObservations', 'isMintedObservations']);
-  assert.deepEqual(Object.keys(core).sort(), ['E1Error', 'E1_ENGINE', 'readingFromConstruction']);
+  assert.deepEqual(Object.keys(compose).sort(), ['READING_FRAME', 'concernCount', 'planSelection', 'validateObservations', 'validateReadingOutput']);
+  assert.deepEqual(Object.keys(core).sort(), ['E1Error', 'E1_ENGINE', 'claimSyntheticReader']);
 });

@@ -39,3 +39,28 @@ export const RECORD_MANIFEST = Object.freeze({
   'excluded-initial': Object.freeze(["C1-WE-ORIGIN-JOINED", "C1-WE-INDEX-LONG"]),
   'historical-context-only': Object.freeze(["C1-IN-MARK-HISTORICAL-YAVA", "C1-IN-MARK-HISTORICAL-MATSYA", "C1-IN-MARK-HISTORICAL-SHANKHA", "C1-IN-MARK-HISTORICAL-CHATRA", "C1-IN-MARK-HISTORICAL-VEDI"]),
 });
+
+/**
+ * R4 (finding F7): the explicit synthetic declaration. `options` must be a plain object (prototype Object.prototype or
+ * null) whose OWN data property `synthetic` is exactly the boolean true. Inherited, accessor, false, truthy-but-not-true
+ * and malformed declarations are refused. Every other own key must be listed in `allowed` and be a data property.
+ * Returns a frozen snapshot of the options, so nothing is read from the caller's object afterwards.
+ */
+export function requireSyntheticOptions(options, allowed) {
+  const refuse = (why) => { throw new E1Error('synthetic-required', `pass an own { synthetic: true } declaration (${why}); real input is not authorised`); };
+  if (options === null || typeof options !== 'object' || Array.isArray(options)) refuse('options must be a plain object');
+  const proto = Object.getPrototypeOf(options);
+  if (proto !== Object.prototype && proto !== null) refuse('options must be a plain object');
+  const d = Object.getOwnPropertyDescriptor(options, 'synthetic');
+  if (d === undefined) refuse('no own synthetic property');
+  if (!('value' in d)) refuse('synthetic must be a data property');
+  if (d.value !== true) refuse('synthetic must be exactly true');
+  const snap = Object.create(null);
+  for (const k of Reflect.ownKeys(options)) {
+    if (typeof k !== 'string' || !allowed.includes(k)) throw new E1Error('invalid-option', `unsupported option: ${String(k)}`);
+    const dk = Object.getOwnPropertyDescriptor(options, k);
+    if (!dk || !('value' in dk)) throw new E1Error('invalid-option', `option ${k} must be a data property`);
+    snap[k] = dk.value;
+  }
+  return Object.freeze(snap);
+}

@@ -6,7 +6,9 @@
 //   * the palm frame (port of I1 palmFrameFromLandmarks / palmGeometry), hence the finger bases (landmarks 5/9/13/17);
 //   * every recorded trace (port of I1 imageToPalm + round4), line by line, and each line's skipped/unconfirmed state;
 //   * the two measurements E1 interprets (middleToPalmRatio, indexToRingRatio; port of I1 measureHand chains + round3);
-//   * the declared hand and the quality feedback.
+//   * the declared hand and the quality feedback;
+//   * R4: palm facing (port of I1 orientation) and the two ratios' availability, status and reasons (port of the
+//     I1 measureHand status rules), so facing and measurement availability also come from the same input.
 // The ports are arithmetic copies of the frozen I1 code (same operations in the same order), NOT a modification of
 // it; tests compare them with the I1 functions across many synthetic hands. Finger bases are never caller-supplied.
 //
@@ -87,6 +89,51 @@ function ratiosFromInput(frameInfo) {
   return { middleToPalmRatio: r(chain(CHAINS.middle) / palmLength), indexToRingRatio: r(chain(CHAINS.index) / chain(CHAINS.ring)) };
 }
 
+/** Port of I1 orientation().palmFacing (quality.ts), applied as the feature builder does (features.ts). */
+function palmFacingFromInput(input, frameInfo) {
+  const label = input.handednessLabel;
+  if (!frameInfo.frame || (label !== 'Left' && label !== 'Right')) return null;
+  const p = frameInfo.px, w = p[LM.WRIST], i = p[LM.INDEX_MCP], k = p[LM.PINKY_MCP];
+  const cross = (i.x - w.x) * (k.y - w.y) - (i.y - w.y) * (k.x - w.x);
+  return cross * (label === 'Right' ? -1 : 1) > 0;
+}
+
+// Port of the I1 measureHand() status rules (measurements.ts) for the two ratios E1 interprets: availability,
+// uncertainty and reasons, in I1's order. Tests compare it with measureHand across synthetic hands.
+const BLOCKING_ISSUES = Object.freeze(['palm-not-visible', 'hand-cut-off']);
+const DEGRADING_ISSUES = Object.freeze(['hand-too-small', 'hand-rotated', 'too-dark', 'too-bright', 'low-contrast', 'blurry']);
+const PLAUSIBLE_PALM_ASPECT = Object.freeze({ min: 0.7, max: 1.8 });
+const MIN_TIP_TO_PIP_RATIO = 1.1;
+function ratioStatusFromInput(input, frameInfo, values) {
+  const unavailable = Object.freeze({ status: 'unavailable', value: null, reasons: ['depends-on-unavailable'] });
+  const all = (m) => ({ middleToPalmRatio: m, indexToRingRatio: m });
+  const q = input.qualityIssues;
+  if (q !== null && q !== undefined && !Array.isArray(q)) return all(unavailable);
+  const issues = Array.isArray(q) ? q : [];
+  if (!frameInfo.frame || BLOCKING_ISSUES.some((c) => issues.includes(c))) return all(unavailable);
+  const setReasons = DEGRADING_ISSUES.filter((c) => issues.includes(c));
+  if (!Array.isArray(q)) setReasons.push('quality-unknown');
+  const facing = palmFacingFromInput(input, frameInfo);
+  if (facing === false) return all(unavailable);
+  if (facing === null) setReasons.push('palm-facing-unknown');
+  const { frame, px } = frameInfo;
+  const palmLength = frame.palmLengthPx / frame.widthPx;
+  if (palmLength < PLAUSIBLE_PALM_ASPECT.min || palmLength > PLAUSIBLE_PALM_ASPECT.max) setReasons.push('implausible-proportions');
+  const fromWrist = (k) => Math.hypot(px[LM.WRIST].x - px[k].x, px[LM.WRIST].y - px[k].y);
+  const extended = (tip, pip) => fromWrist(tip) > fromWrist(pip) * MIN_TIP_TO_PIP_RATIO;
+  const base = setReasons.length ? 'uncertain' : 'measured';
+  const finger = (ext) => (ext ? base : 'unavailable');
+  const derive = (deps, value) => {
+    if (deps.includes('unavailable')) return unavailable;
+    if (value === null) return { status: 'unavailable', value: null, reasons: ['computation-nonfinite'] };
+    return deps.includes('uncertain') ? { status: 'uncertain', value, reasons: [...setReasons] } : { status: 'measured', value, reasons: [] };
+  };
+  return {
+    middleToPalmRatio: derive([finger(extended(12, 10)), base], values.middleToPalmRatio),
+    indexToRingRatio: derive([finger(extended(8, 6)), finger(extended(16, 14))], values.indexToRingRatio),
+  };
+}
+
 const samePoints = (a, b) => Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((p, i) => p.x === b[i].x && p.y === b[i].y);
 
 /**
@@ -120,10 +167,12 @@ export function verifyConstruction(input, featureSet) {
     else if (g.action === 'traced') { if (!(l.reason === 'frame-unavailable' || /^trace-/.test(l.reason))) fail(`line ${id} unassessed reason`); }
     else fail(`line ${id} action`);
   }
-  const ratios = ratiosFromInput(fi);
+  if (featureSet.frame.palmFacing !== palmFacingFromInput(input, fi)) fail('palm facing');
+  const ratios = ratiosFromInput(fi) ?? { middleToPalmRatio: null, indexToRingRatio: null };
+  const expected = ratioStatusFromInput(input, fi, ratios);
   for (const id of ['middleToPalmRatio', 'indexToRingRatio']) {
-    const m = featureSet.measurements.measurements[id];
-    if (m.value !== null && (!ratios || ratios[id] !== m.value)) fail(`measurement ${id} differs from the supplied landmarks`);
+    const m = featureSet.measurements.measurements[id], e = expected[id];
+    if (m.status !== e.status || m.value !== e.value || JSON.stringify([...m.reasons]) !== JSON.stringify(e.reasons)) fail(`measurement ${id} (status, value or reasons) differs from the supplied landmarks and quality`);
   }
   const marks = Array.isArray(input.marks) ? input.marks : [];
   for (const id of ['yava', 'matsya', 'shankha', 'chatra', 'vedi']) {

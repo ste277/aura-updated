@@ -38,7 +38,7 @@ const iGuide = lines.findIndex((l) => l === 'node "$SCRIPT_DIR/check-palmistry-b
 check('B1. vercel-build.sh runs the E1 guard after `next build` and before the guide guard (which stays last)', iNext >= 0 && iE1 > iNext && iGuide > iE1 && iGuide === lines.length - 1);
 check('B2. no exit-code swallowing; set -e first', lines[0] === 'set -e' && !/\|\|\s*true|set \+e|\|\|\s*:|trap /.test(lines.join('\n')));
 
-type Mode = 'clean' | 'e1-leak-static' | 'e1-leak-server' | 'e1-leak-standalone' | 'e1-leak-standalone-node_modules' | 'e1-leak-public' | 'e1-leak-binary' | 'empty';
+type Mode = 'clean' | 'e1-leak-static' | 'e1-leak-server' | 'e1-leak-standalone' | 'e1-leak-standalone-node_modules' | 'e1-leak-public' | 'e1-leak-binary' | 'empty' | 'incomplete-no-standalone' | 'incomplete-no-chunks' | 'incomplete-no-build-id' | 'incomplete-empty-static';
 function runVercel(mode: Mode, vercelEnv = 'preview') {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'palm-e1-vercel-'));
   try {
@@ -49,6 +49,8 @@ function runVercel(mode: Mode, vercelEnv = 'preview') {
     for (const f of ['vercel-build.sh', 'check-palm-e1-bundle.js', 'check-palmistry-bundle.js', 'check-db-identity.js']) fs.copyFileSync(path.join(ROOT, 'apps/web/scripts', f), path.join(web, 'scripts', f));
     fs.copyFileSync(path.join(ROOT, 'apps/web/palmistry-build-exclusion.js'), path.join(web, 'palmistry-build-exclusion.js'));
     fs.copyFileSync(path.join(ROOT, 'packages/palmistry/src/review-status.json'), path.join(tmp, 'packages/palmistry/src/review-status.json'));
+    fs.mkdirSync(path.join(web, 'public'), { recursive: true });
+    fs.writeFileSync(path.join(web, 'public/manifest.json'), '{"name":"Aura"}');
     const leak: Record<string, string> = { 'e1-leak-static': '.next/static/chunks/app/x.js', 'e1-leak-server': '.next/server/app/x.js', 'e1-leak-standalone': '.next/standalone/x.json', 'e1-leak-standalone-node_modules': '.next/standalone/node_modules/x.js', 'e1-leak-public': 'public/x.svg', 'e1-leak-binary': '.next/static/media/x.woff2' };
     fs.writeFileSync(path.join(tmp, 'bin/next'), `#!/bin/sh
 rm -rf .next/static .next/server .next/standalone
@@ -56,6 +58,21 @@ rm -rf .next/static .next/server .next/standalone
 mkdir -p .next/static/chunks/app .next/static/media .next/server/app .next/standalone/node_modules public
 echo 'console.log("app")' > .next/static/chunks/app/page.js
 echo 'module.exports={}' > .next/server/app/page.js
+# AURA-PALM-03-E1-R4: a complete Next standalone artifact (the E1 guard verifies the structure before scanning)
+mkdir -p .next/static/fakeBuild0001 .next/server/app .next/standalone/.next/server/app .next/standalone/node_modules/next
+printf fakeBuild0001 > .next/BUILD_ID && cp .next/BUILD_ID .next/standalone/.next/BUILD_ID
+echo 'self.__BUILD_MANIFEST={}' > .next/static/fakeBuild0001/_buildManifest.js
+echo 'module.exports={}' > .next/server/webpack-runtime.js
+echo '{"/page":"app/page.js"}' > .next/server/app-paths-manifest.json
+echo '{"/_app":"pages/_app.js"}' > .next/server/pages-manifest.json
+echo 'module.exports={}' > .next/standalone/.next/server/app/page.js
+echo 'require("next")' > .next/standalone/server.js
+echo '{"name":"web"}' > .next/standalone/package.json
+echo '{"name":"next"}' > .next/standalone/node_modules/next/package.json
+[ "$FAKE_NEXT_MODE" = "incomplete-no-standalone" ] && rm -rf .next/standalone
+[ "$FAKE_NEXT_MODE" = "incomplete-no-chunks" ] && rm -rf .next/static/chunks
+[ "$FAKE_NEXT_MODE" = "incomplete-no-build-id" ] && rm -f .next/BUILD_ID
+[ "$FAKE_NEXT_MODE" = "incomplete-empty-static" ] && rm -rf .next/server .next/standalone .next/BUILD_ID .next/static/* && mkdir -p .next/static
 ${leak[mode] ? `echo '{"engine":"aura.palm.e1-reading","id":"C1-WE-HEART-JUPITER"}' > ${leak[mode]}` : ''}
 exit 0
 `, { mode: 0o755 });
@@ -77,6 +94,10 @@ const prodLeak = runVercel('e1-leak-static', 'production');
 check('B5. Production build with an E1 leak FAILS (deployment never promoted)', typeof prodLeak.status === 'number' && prodLeak.status !== 0 && /\[palm-e1-bundle\] FAIL/.test(prodLeak.out), prodLeak.out);
 const empty = runVercel('empty');
 check('B6. no build output: FAILS closed', typeof empty.status === 'number' && empty.status !== 0 && /no \.next\/static found/.test(empty.out));
+for (const m of ['incomplete-no-standalone', 'incomplete-no-chunks', 'incomplete-no-build-id', 'incomplete-empty-static'] as Mode[]) {
+  const r = runVercel(m);
+  check(`B7. R4 ${m}: an incomplete build artifact FAILS the Vercel wrapper (positive artifact verification)`, typeof r.status === 'number' && r.status !== 0 && /\[palm-e1-bundle\] FAIL: SCAN ERROR -- the release artifact is incomplete/.test(r.out), r.out);
+}
 
 // ---------------------------------------------------------------- C. Docker build path
 const docker = read('deploy/Dockerfile');
@@ -89,15 +110,26 @@ check('C3. the build stage copies apps/web (so the guard script is present in th
 check('C4. no exit-code swallowing in the Docker RUN', !/check-palm-e1-bundle\.js\s*(\|\||;)/.test(docker));
 // the guard itself fails closed on a planted artifact (what the && chain propagates)
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'palm-e1-docker-'));
+const tree = fs.mkdtempSync(path.join(os.tmpdir(), 'palm-e1-tree-'));
 try {
-  fs.mkdirSync(path.join(tmp, '.next/static'), { recursive: true });
-  fs.writeFileSync(path.join(tmp, '.next/static/a.js'), 'x');
-  const ok = spawnSync('node', [path.join(ROOT, 'apps/web/scripts/check-palm-e1-bundle.js'), tmp], { encoding: 'utf8' });
-  fs.mkdirSync(path.join(tmp, '.next/standalone'), { recursive: true });
+  const put = (base: string, rel: string, body: string) => { fs.mkdirSync(path.dirname(path.join(base, rel)), { recursive: true }); fs.writeFileSync(path.join(base, rel), body); };
+  const B = 'fakeBuild0001';
+  const common: Record<string, string> = { '.next/BUILD_ID': B, [`.next/static/${B}/_buildManifest.js`]: 'x', '.next/static/chunks/a.js': 'x', '.next/server/webpack-runtime.js': 'x', '.next/server/app-paths-manifest.json': '{"/p":"p"}', '.next/server/pages-manifest.json': '{"/_app":"a"}', '.next/server/app/page.js': 'x', 'public/manifest.json': '{"name":"Aura"}' };
+  for (const [r, b] of Object.entries({ ...common, '.next/standalone/server.js': 'x', '.next/standalone/package.json': '{"name":"w"}', '.next/standalone/.next/BUILD_ID': B, '.next/standalone/.next/server/app/page.js': 'x', '.next/standalone/node_modules/next/package.json': '{"name":"next"}' })) put(tmp, r, b);
+  for (const [r, b] of Object.entries({ ...common, 'server.js': 'x', 'package.json': '{"name":"w"}', 'node_modules/next/package.json': '{"name":"next"}', 'migrations/0001_init/migration.sql': 'SELECT 1;' })) put(tree, r, b);
+  const guard = path.join(ROOT, 'apps/web/scripts/check-palm-e1-bundle.js');
+  const ok = spawnSync('node', [guard, tmp], { encoding: 'utf8' });
+  const okTree = spawnSync('node', [guard, '--tree', tree], { encoding: 'utf8' });
   fs.writeFileSync(path.join(tmp, '.next/standalone/server.js'), 'var lib="palm-03-c1-library@0.4.0-draft"');
-  const bad = spawnSync('node', [path.join(ROOT, 'apps/web/scripts/check-palm-e1-bundle.js'), tmp], { encoding: 'utf8' });
-  check('C5. the guard exits 0 on clean output and non-zero on a standalone-server leak', ok.status === 0 && bad.status === 1);
-} finally { fs.rmSync(tmp, { recursive: true, force: true }); }
+  const bad = spawnSync('node', [guard, tmp], { encoding: 'utf8' });
+  check('C5. the guard exits 0 on a complete clean artifact (web build and Docker tree) and non-zero on a standalone-server leak', ok.status === 0 && okTree.status === 0 && bad.status === 1, `${ok.stderr}${okTree.stderr}`);
+  fs.rmSync(path.join(tree, 'migrations'), { recursive: true });
+  const noMig = spawnSync('node', [guard, '--tree', tree], { encoding: 'utf8' });
+  const emptyTree = fs.mkdtempSync(path.join(os.tmpdir(), 'palm-e1-empty-'));
+  const emptyRes = spawnSync('node', [guard, '--tree', emptyTree], { encoding: 'utf8' });
+  fs.rmSync(emptyTree, { recursive: true, force: true });
+  check('C6. R4: the Docker release tree must be complete: no migrations, or an empty tree, FAILS closed', noMig.status === 1 && /no migrations|missing or unreadable migrations/.test(noMig.stderr) && emptyRes.status === 1 && /incomplete/.test(emptyRes.stderr));
+} finally { fs.rmSync(tmp, { recursive: true, force: true }); fs.rmSync(tree, { recursive: true, force: true }); }
 
 console.log(`\nPALM-03-E1 release guards: ${passed} passed, ${failures.length} failed`);
 if (failures.length) { for (const f of failures) console.log(`  FAIL ${f}`); process.exit(1); }

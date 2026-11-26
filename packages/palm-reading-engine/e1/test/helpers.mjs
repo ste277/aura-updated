@@ -84,3 +84,46 @@ export const CATALOGUE_MUTATIONS = [
   ['M24 not-read wording reveals excluded meaning', (c) => { c.globalPolicy.notAssessedReasons.find((r) => r.code === 'not-read-in-this-version').wording = 'Not read in this version (it would suggest pride).'; }],
   ['M25 capability serving only an excluded record planned', (c) => { c.e1Planning.capabilities['E1-X1'] = 'index-length descriptor'; c.e1Planning.tiers.optionalAssisted.push('E1-X1'); rec(c, 'C1-WE-INDEX-LONG').e1Capabilities.push('E1-X1'); }],
 ];
+
+/**
+ * R4: a minimal COMPLETE release artifact for the E1 guard's structural check.
+ *   'web-build'           apps/web after `next build` (output: 'standalone')
+ *   'docker-release-tree' the assembled Docker runtime tree (/app)
+ * Returns the list of required relative paths written (each one can be removed or emptied by negative tests).
+ */
+export const FIXTURE_BUILD_ID = 'fixtureBuild01';
+export function writeArtifactFixture(dir, target) {
+  const B = FIXTURE_BUILD_ID;
+  const web = {
+    '.next/BUILD_ID': B,
+    [`.next/static/${B}/_buildManifest.js`]: 'self.__BUILD_MANIFEST={}',
+    '.next/static/chunks/a.js': 'console.log("clean")',
+    '.next/server/webpack-runtime.js': 'module.exports={}',
+    '.next/server/app-paths-manifest.json': '{"/page":"app/page.js"}',
+    '.next/server/pages-manifest.json': '{"/_app":"pages/_app.js"}',
+    '.next/server/app/page.js': 'module.exports={}',
+    '.next/standalone/server.js': 'require("next")',
+    '.next/standalone/package.json': '{"name":"web"}',
+    '.next/standalone/.next/BUILD_ID': B,
+    '.next/standalone/.next/server/app/page.js': 'module.exports={}',
+    '.next/standalone/node_modules/next/package.json': '{"name":"next"}',
+    'public/manifest.json': '{"name":"Aura"}',
+  };
+  const tree = {
+    'server.js': 'require("next")',
+    'package.json': '{"name":"web"}',
+    '.next/BUILD_ID': B,
+    [`.next/static/${B}/_buildManifest.js`]: 'self.__BUILD_MANIFEST={}',
+    '.next/static/chunks/a.js': 'console.log("clean")',
+    '.next/server/webpack-runtime.js': 'module.exports={}',
+    '.next/server/app-paths-manifest.json': '{"/page":"app/page.js"}',
+    '.next/server/pages-manifest.json': '{"/_app":"pages/_app.js"}',
+    '.next/server/app/page.js': 'module.exports={}',
+    'node_modules/next/package.json': '{"name":"next"}',
+    'public/manifest.json': '{"name":"Aura"}',
+    'migrations/0001_init/migration.sql': 'CREATE TABLE t (id int);',
+  };
+  const files = target === 'web-build' ? web : tree;
+  for (const [rel, body] of Object.entries(files)) { fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true }); fs.writeFileSync(path.join(dir, rel), body); }
+  return Object.keys(files);
+}

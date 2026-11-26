@@ -120,12 +120,12 @@ check('A4-1. consistent diagnostics: every line is either read by an item or lis
   });
 })());
 check('A5-1. tentative ceiling everywhere; quality is never shown as a confidence number', rFull.tierCeiling === 'tentative' && rFull.sections.every((s: any) => s.items.every((i: any) => i.confidence.tier === 'tentative' && !Object.values(i.confidence).some((v) => typeof v === 'number'))));
-check('A5-2. synthetic-only: every function able to emit a reading refuses without an explicit synthetic declaration (R3 F7)', [undefined, null, {}, { synthetic: 'yes' }, { synthetic: 1 }].every((o) => throwsCode(() => generateSyntheticReading(input(), o as any), 'synthetic-required') && throwsCode(() => core.readingFromConstruction(input(), built(input()), o), 'synthetic-required') && throwsCode(() => e1.planSelection(e1.defaultLibrary(), {}, o), 'synthetic-required')) && !('composeReading' in e1) && !('deriveObservations' in e1) && !('composeFromObservations' in e1));
+check('A5-2. synthetic-only: the reading interface and planSelection refuse without an explicit OWN { synthetic: true } (R4 F7)', [undefined, null, {}, { synthetic: 'yes' }, { synthetic: 1 }, { synthetic: false }, Object.create({ synthetic: true }), Object.defineProperty({}, 'synthetic', { get: () => true, enumerable: true })].every((o) => throwsCode(() => generateSyntheticReading(input(), o as any), 'synthetic-required') && throwsCode(() => e1.planSelection(e1.defaultLibrary(), {}, o), 'synthetic-required')) && Object.keys(core).sort().join() === 'E1Error,E1_ENGINE,claimSyntheticReader' && !('composeReading' in e1) && !('deriveObservations' in e1) && !('composeFromObservations' in e1));
 check('A5-3. separate identity from the frozen G6 engine, which E1 never imports', e1.E1_ENGINE.id === 'aura.palm.e1-reading' && fs.readdirSync(path.join(ROOT, 'packages/palm-reading-engine/e1/src')).every((f) => !/from '[^']*prototype\//.test(fs.readFileSync(path.join(ROOT, 'packages/palm-reading-engine/e1/src', f), 'utf8'))));
 check('A5-4. the 23 Western G6 rule texts are excluded: none appears in the E1 catalogue or any reading', (() => {
   const rules = fs.readFileSync(path.join(ROOT, 'packages/palm-reading-engine/prototype/src/rules.mjs'), 'utf8');
   const texts = [...rules.matchAll(/\btext: '([^']{12,})'/g)].map((m) => m[1]);
-  const cat = JSON.stringify(e1.PACKAGED_CATALOGUE) + JSON.stringify(rFull);
+  const cat = fs.readFileSync(path.join(ROOT, 'packages/palm-reading-engine/e1/library/catalogue.json'), 'utf8') + JSON.stringify(rFull);
   return texts.length >= 15 && texts.every((t) => !cat.includes(t));
 })());
 const rBlur = reading({ qualityIssues: ['blurry'], lines: [skipped('heart'), lifeLine] });
@@ -158,30 +158,73 @@ const webFiles = (d: string): string[] => fs.readdirSync(d, { withFileTypes: tru
 check('D2. no app module imports the helper; the G5 public surface does not export it', webFiles(path.join(ROOT, 'apps/web')).every((f) => f.endsWith('fingerBases.ts') || !/fingerBases/.test(fs.readFileSync(f, 'utf8'))) && !/fingerBases/.test(fs.readFileSync(path.join(ROOT, 'apps/web/lib/palm-analysis/index.ts'), 'utf8')));
 check('D3. the E1 production-build guard is wired into CI after next build', /node scripts\/check-palm-e1-bundle\.js/.test(fs.readFileSync(path.join(ROOT, '.github/workflows/ci.yml'), 'utf8')));
 
-// ============================================================ F. coherent construction from one input (R3 finding F6)
-// The R2 witnesses (swapped finger bases, substituted trace, fabricated frame) were externally assembled, resealed
-// bundles. The reading interface no longer accepts any such bundle; the internal pipeline re-derives everything it
-// reads from the ONE input and refuses a feature set that does not derive from it.
+// ============================================================ F. one construction path (R3 F6, R4 F6)
+// R4: no function accepts a feature set separately from building it. The pipeline (engine-core.mjs) is claimed once,
+// by reading.ts, and builds the I1 feature set itself from a snapshot of the input. The internal check that a feature
+// set derives from the input (construction.mjs verifyConstruction, which returns no reading) still refuses every
+// mixed state, which also covers a pipeline claimed by other code with a builder of its own (F12).
 const XY_B = XY.map(([x, y], k) => (k === 9 ? [3, 0] : k === 13 ? [6, 0] : [x, y]));
 const inA = input({ lines: [heartTo(0.1667), upwardTo(0.3333)] });
 const inB = input({ landmarks: XY_B.map(point), lines: [heartTo(0.1667), upwardTo(0.3333)] });
 const fsA = built(inA), fsB = built(inB);
-check('F1. the reading interface has no geometry parameter: generateSyntheticReading(input, { synthetic, mode })', generateSyntheticReading.length === 2 && throwsCode(() => generateSyntheticReading(inA, { synthetic: true, fingerBases: {} } as any), 'invalid-option'));
-check('F2. swapped finger bases (witness): hand B geometry with hand A traces -> construction-mismatch', throwsCode(() => core.readingFromConstruction(inA, fsB, { synthetic: true }), 'construction-mismatch'));
-check('F3. substituted trace (witness): a feature set whose heart trace differs from the supplied trace -> construction-mismatch', throwsCode(() => core.readingFromConstruction(inA, built(input({ lines: [heartTo(-0.05), upwardTo(0.3333)] })), { synthetic: true }), 'construction-mismatch'));
-check('F4. fabricated frame (witness): a feature set claiming no frame, or another frame, for this input -> construction-mismatch', throwsCode(() => core.readingFromConstruction(inA, built(input({ landmarks: null, lines: [heartTo(0.1667), upwardTo(0.3333)] })), { synthetic: true }), 'construction-mismatch') && throwsCode(() => core.readingFromConstruction(input({ landmarks: XY_B.map(point) }), built(input()), { synthetic: true }), 'construction-mismatch'));
+const verify = (i: unknown, f: unknown) => construction.verifyConstruction(i, f);
+check('F1. the reading interface has no geometry or feature-set parameter: generateSyntheticReading(input, { synthetic, mode })', generateSyntheticReading.length === 2 && ['fingerBases', 'featureSet', 'observations', 'library'].every((k) => throwsCode(() => generateSyntheticReading(inA, { synthetic: true, [k]: {} } as any), 'invalid-option')));
+check('F1b. the pipeline is already claimed by reading.ts: no second reader, and no mixed-state entry point exists', throwsCode(() => core.claimSyntheticReader(buildPalmFeatureSet), 'pipeline-claimed') && Object.keys(core).sort().join() === 'E1Error,E1_ENGINE,claimSyntheticReader' && !fs.existsSync(path.join(ROOT, 'packages/palm-reading-engine/e1/src/observations.mjs')));
+check('F2. swapped finger bases (witness): hand B geometry with hand A traces -> construction-mismatch', throwsCode(() => verify(inA, fsB), 'construction-mismatch'));
+check('F3. substituted trace (witness): a feature set whose heart trace differs from the supplied trace -> construction-mismatch', throwsCode(() => verify(inA, built(input({ lines: [heartTo(-0.05), upwardTo(0.3333)] }))), 'construction-mismatch'));
+check('F4. fabricated frame (witness): a feature set claiming no frame, or another frame, for this input -> construction-mismatch', throwsCode(() => verify(inA, built(input({ landmarks: null, lines: [heartTo(0.1667), upwardTo(0.3333)] }))), 'construction-mismatch') && throwsCode(() => verify(input({ landmarks: XY_B.map(point) }), built(input())), 'construction-mismatch'));
 check('F5. substituted measurements: a feature set from a hand with different finger lengths (same frame and traces) -> construction-mismatch', (() => {
   const XY_C = XY.map(([x, y], k) => (k >= 10 && k <= 12 ? [x, y - 2] : [x, y]));
-  return throwsCode(() => core.readingFromConstruction(input(), built(input({ landmarks: XY_C.map(point) })), { synthetic: true }), 'construction-mismatch');
+  return throwsCode(() => verify(input(), built(input({ landmarks: XY_C.map(point) }))), 'construction-mismatch');
 })());
 check('F6. skip reasons, confirmation, quality and hand must also match the input', [
   [input({ lines: [skipped('head')] }), built(input({ lines: [skipped('head', 'user-cannot-see')] }))],
   [input({ lines: [heartTo(-0.05)] }), built(input({ lines: [traced('heart', [[0.95, 0.22], [0.5, 0.2], [-0.05, 0.15]], false)] }))],
   [input({ qualityIssues: [] }), built(input({ qualityIssues: null }))],
   [input({ hand: 'left' }), built(input({ hand: 'right' }))],
-].every(([i, f]) => throwsCode(() => core.readingFromConstruction(i, f, { synthetic: true }), 'construction-mismatch')));
-check('F7. a feature set that does derive from the input is accepted, and gives the same reading as the interface', JSON.stringify(core.readingFromConstruction(inA, fsA, { synthetic: true })) === JSON.stringify(generateSyntheticReading(inA, { synthetic: true })));
+].every(([i, f]) => throwsCode(() => verify(i, f), 'construction-mismatch')));
+check('F7. a feature set that does derive from the input is accepted', (() => { try { verify(inA, fsA); return true; } catch { return false; } })());
 check('F8. a correctly constructed hand reads both zones', ['C1-WE-HEART-BETWEEN', 'C1-IN-URDHVA-MIDDLE'].every((id) => items(generateSyntheticReading(inA, { synthetic: true })).includes(id)));
+// R4 witness: a palm-facing feature set paired with an input the public path classifies as back-facing
+const inBack = input({ handednessLabel: 'Right', lines: [heartTo(0.1667), upwardTo(0.3333)] });
+check('F9. R4 witness: back-facing input -> the public path emits nothing; pairing it with the palm-facing feature set -> construction-mismatch (palm facing)', built(inA).frame.palmFacing === true && built(inBack).frame.palmFacing === false && items(generateSyntheticReading(inBack, { synthetic: true })).length === 0 && (generateSyntheticReading(inBack, { synthetic: true }) as any).quality.detail === 'palm-not-facing' && throwsCode(() => verify(inBack, fsA), 'construction-mismatch'));
+check('F10. measurement availability and status must match the input: unknown facing, unknown or degrading quality, blocking quality', [
+  [input({ handednessLabel: undefined }), fsA], [input({ qualityIssues: null }), fsA], [input({ qualityIssues: ['blurry'] }), fsA], [input({ qualityIssues: ['hand-cut-off'] }), fsA],
+  [inA, built(input({ lines: [heartTo(0.1667), upwardTo(0.3333)], qualityIssues: ['blurry'] }))],
+].every(([i, f]) => throwsCode(() => verify(i, f), 'construction-mismatch')));
+check('F11. the facing and status ports agree with the I1 builder (no false refusal) across labels, quality and hands', (() => {
+  const labels = ['Left', 'Right', undefined, 'Unknown'];
+  const qualities: any[] = [[], null, ['blurry'], ['hand-rotated', 'too-dark'], ['hand-cut-off'], ['palm-not-visible']];
+  const hands = [XY, XY_B, XY.map(([x, y], k) => (k >= 10 && k <= 12 ? [x, y - 2] : [x, y])), XY.map(([x, y], k) => (k === 8 ? [-1, -3] : k === 16 ? [9, -6] : [x, y])), XY.map(([x, y], k) => (k === 0 ? [x, y * 2.2] : [x, y]))];
+  let n = 0;
+  for (const h of hands) for (const handednessLabel of labels) for (const qualityIssues of qualities) {
+    const i = input({ landmarks: h.map(point), handednessLabel, qualityIssues, lines: [heartTo(0.1667), upwardTo(0.3333)] });
+    const b = buildPalmFeatureSet(i);
+    if (!b.ok) continue;
+    try { verify(i, b.featureSet); n++; } catch (e) { console.log('F11 false refusal', JSON.stringify({ handednessLabel, qualityIssues }), String(e)); return false; }
+  }
+  return n >= 100;
+})());
+check('F12. fresh process: a pipeline claimed BEFORE reading.ts with builders returning another input\'s feature set refuses every mixed state, and reading.ts then fails to load', (() => {
+  const script = `
+    const W = ${JSON.stringify(ROOT)};
+    const { buildPalmFeatureSet } = require(W + '/apps/web/lib/palm-analysis/features');
+    const core = require(W + '/packages/palm-reading-engine/e1/src/engine-core.mjs');
+    const pairs = JSON.parse(process.argv[1]);
+    let k = 0;
+    const reader = core.claimSyntheticReader(() => ({ ok: true, featureSet: buildPalmFeatureSet(pairs[k][1]).featureSet }));
+    const codes = [];
+    for (; k < pairs.length; k++) { try { reader(pairs[k][0], { synthetic: true }); codes.push('reading'); } catch (e) { codes.push(e.code); } }
+    try { require(W + '/packages/palm-reading-engine/e1/src/reading'); codes.push('loaded'); } catch (e) { codes.push(e.code); }
+    console.log(JSON.stringify(codes));`;
+  const pairs = [[inBack, inA], [inA, inB], [inA, input({ lines: [heartTo(-0.05), upwardTo(0.3333)] })], [inA, input({ landmarks: null, lines: [heartTo(0.1667), upwardTo(0.3333)] })], [input({ qualityIssues: ['blurry'], lines: [heartTo(0.1667)] }), input({ lines: [heartTo(0.1667)] })]];
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { spawnSync } = require('child_process');
+  const r = spawnSync(process.execPath, ['-r', require.resolve('ts-node/register/transpile-only'), '-e', script, JSON.stringify(pairs)], { encoding: 'utf8', cwd: ROOT });
+  const codes = JSON.parse((r.stdout || '[]').trim() || '[]');
+  return r.status === 0 && JSON.stringify(codes) === JSON.stringify([...pairs.map(() => 'construction-mismatch'), 'pipeline-claimed']) || (console.log('F12', r.status, r.stdout, r.stderr.slice(0, 800)), false);
+})());
+check('F13. the input is read once, as plain data: accessor and non-plain inputs are refused', [Object.defineProperty({ ...inA }, 'landmarks', { get: () => inA.landmarks, enumerable: true }), Object.assign(Object.create({ extra: 1 }), inA), { ...inA, landmarks: inA.landmarks!.map((p, k) => (k === 0 ? Object.defineProperty({}, 'x', { get: () => p.x, enumerable: true }) : p)) }].every((i) => throwsCode(() => generateSyntheticReading(i as any, { synthetic: true }), 'invalid-input')));
 
 // ============================================================ G. generated synthetic hands (R2: V-F expanded geometry)
 // A hand is defined in palm-frame units (index knuckle (0,0), little knuckle (1,0), y toward the wrist), then placed in

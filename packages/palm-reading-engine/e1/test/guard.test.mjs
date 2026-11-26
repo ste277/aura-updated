@@ -5,8 +5,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { pathToFileURL } from 'node:url';
+import { spawnSync } from 'node:child_process';
 import { planSelection, defaultLibrary, MODES, E1_ENGINE } from '../src/index.mjs';
-import { E1, PKG, REPO, oracleDump, tmpdir } from './helpers.mjs';
+import { E1, PKG, REPO, oracleDump, tmpdir, writeArtifactFixture, FIXTURE_BUILD_ID } from './helpers.mjs';
 const composeSyn = (obs, opts = {}) => planSelection(defaultLibrary(), obs, { synthetic: true, ...opts });
 
 const read = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? (['node_modules', '.next', '.git'].includes(e.name) ? [] : read(path.join(d, e.name))) : [path.join(d, e.name)]));
@@ -23,8 +24,8 @@ test('G1 E1 bundle guard: sentinels are unique to E1; every shipped location is 
   for (const f of others) { const t = fs.readFileSync(f, 'utf8'); for (const s of SENTINELS) assert.ok(!t.includes(s), `sentinel ${s} also in ${path.relative(REPO, f)}`); }
   const fresh = () => {
     const t = tmpdir('guard');
-    for (const d of ['.next/static/chunks', '.next/server/app', '.next/standalone/node_modules/pkg/dist', '.next/standalone/.next/server', 'public/assets']) fs.mkdirSync(path.join(t, d), { recursive: true });
-    fs.writeFileSync(path.join(t, '.next/static/chunks/a.js'), 'console.log("clean")');
+    writeArtifactFixture(t, 'web-build'); // R4: a complete artifact, so only the planted content decides
+    for (const d of ['.next/standalone/node_modules/pkg/dist', '.next/standalone/.next/server', 'public/assets']) fs.mkdirSync(path.join(t, d), { recursive: true });
     fs.writeFileSync(path.join(t, 'public/assets/logo.svg'), '<svg/>');
     return t;
   };
@@ -63,16 +64,82 @@ test('G1 E1 bundle guard: sentinels are unique to E1; every shipped location is 
   // --tree mode (Docker runtime tree): everything under the directory, including migrations and node_modules
   const t4 = tmpdir('tree');
   try {
-    for (const d of ['node_modules/p', 'migrations/0001', '.next/static', 'public']) fs.mkdirSync(path.join(t4, d), { recursive: true });
-    fs.writeFileSync(path.join(t4, 'server.js'), 'x');
-    assert.deepEqual(scanAll(t4).hits, []);
-    for (const spot of ['node_modules/p/i.js', 'migrations/0001/migration.sql', 'public/x.txt', 'server.js']) {
+    writeArtifactFixture(t4, 'docker-release-tree');
+    fs.mkdirSync(path.join(t4, 'node_modules/p'), { recursive: true });
+    assert.deepEqual([scanAll(t4).hits, scanAll(t4).errors], [[], []]);
+    for (const spot of ['node_modules/p/i.js', 'migrations/0001_init/migration.sql', 'public/x.txt', 'server.js']) {
       fs.writeFileSync(path.join(t4, spot), `${SENTINELS[4]}`);
       assert.equal(scanAll(t4).hits.length, 1, spot);
       fs.writeFileSync(path.join(t4, spot), 'clean');
     }
   } finally { fs.rmSync(t4, { recursive: true, force: true }); }
   assert.match(fs.readFileSync(GUARD, 'utf8'), /UNCONDITIONAL/);
+});
+
+test('G1b R4 positive artifact verification: missing, empty, incomplete, malformed or unreadable required output fails closed', async () => {
+  const { scan, scanAll, REQUIRED, checkStructure } = await import(pathToFileURL(GUARD).href);
+  assert.deepEqual(Object.keys(REQUIRED).sort(), ['docker-release-tree', 'web-build']);
+  const errs = (target, t) => (target === 'web-build' ? scan(t) : scanAll(t)).errors;
+  for (const target of ['web-build', 'docker-release-tree']) {
+    // the independent witnesses: an empty tree, and an empty .next/static with all else missing
+    const e = tmpdir('g1b'), s0 = tmpdir('g1b');
+    try {
+      assert.ok(errs(target, e).length > 0, `${target}: empty tree must fail`);
+      fs.mkdirSync(path.join(s0, '.next/static'), { recursive: true });
+      assert.ok(errs(target, s0).length > 0, `${target}: empty .next/static only must fail`);
+    } finally { fs.rmSync(e, { recursive: true, force: true }); fs.rmSync(s0, { recursive: true, force: true }); }
+    // a complete fixture passes; removing or emptying ANY single required file makes it fail
+    const t = tmpdir('g1b');
+    const required = writeArtifactFixture(t, target);
+    try {
+      assert.deepEqual(checkStructure(t, target), [], target);
+      for (const rel of required) {
+        const full = path.join(t, rel), body = fs.readFileSync(full);
+        fs.rmSync(full);
+        assert.ok(errs(target, t).length > 0, `${target}: missing ${rel} must fail`);
+        fs.writeFileSync(full, '');
+        assert.ok(errs(target, t).length > 0, `${target}: empty ${rel} must fail`);
+        fs.writeFileSync(full, body);
+      }
+      assert.deepEqual(checkStructure(t, target), [], `${target} restored`);
+      // malformed or inconsistent content
+      const mutate = (rel, body, why) => { const full = path.join(t, rel), old = fs.readFileSync(full); fs.writeFileSync(full, body); assert.ok(checkStructure(t, target).length > 0, `${target}: ${why}`); fs.writeFileSync(full, old); };
+      mutate('.next/BUILD_ID', 'x y', 'malformed build id');
+      mutate('.next/BUILD_ID', 'otherBuild0001', 'build id without its static manifest');
+      mutate('public/manifest.json', '{not json', 'malformed manifest JSON');
+      mutate('.next/server/app-paths-manifest.json', '{}', 'empty manifest object');
+      if (target === 'web-build') mutate('.next/standalone/.next/BUILD_ID', 'otherBuild0001', 'standalone build id differs');
+      // an empty chunk directory, an empty server app tree, and (Docker) a migration without its SQL
+      fs.rmSync(path.join(t, '.next/static/chunks/a.js')); fs.writeFileSync(path.join(t, '.next/static/chunks/a.css'), 'x');
+      assert.ok(checkStructure(t, target).some((x) => /\.js file under \.next\/static\/chunks/.test(x)), `${target}: no JS chunk`);
+      fs.rmSync(path.join(t, '.next/static/chunks/a.css')); fs.writeFileSync(path.join(t, '.next/static/chunks/a.js'), 'x');
+      if (target === 'docker-release-tree') {
+        fs.mkdirSync(path.join(t, 'migrations/0002_empty'));
+        assert.ok(checkStructure(t, target).some((x) => /0002_empty/.test(x)), 'migration directory without migration.sql');
+        fs.rmSync(path.join(t, 'migrations/0002_empty'), { recursive: true });
+        fs.rmSync(path.join(t, 'migrations/0001_init'), { recursive: true });
+        assert.ok(checkStructure(t, target).some((x) => /no migrations/.test(x)), 'no migrations');
+      }
+      // an unreadable required file (skipped when running as root, which can read anything)
+      if (process.getuid?.() !== 0) {
+        const full = path.join(t, '.next/server/webpack-runtime.js');
+        fs.chmodSync(full, 0o000);
+        try { assert.ok(checkStructure(t, target).some((x) => /unreadable/.test(x)), `${target}: unreadable required file`); } finally { fs.chmodSync(full, 0o644); }
+      }
+    } finally { fs.rmSync(t, { recursive: true, force: true }); }
+  }
+  // the CLI fails closed on both witnesses (exit 1), and passes a complete tree
+  const run = (args) => spawnSync(process.execPath, [GUARD, ...args], { encoding: 'utf8' });
+  const e = tmpdir('g1b-cli'), w = tmpdir('g1b-cli'), d = tmpdir('g1b-cli');
+  try {
+    assert.equal(run(['--tree', e]).status, 1);
+    fs.mkdirSync(path.join(e, '.next/static'), { recursive: true });
+    assert.equal(run([e]).status, 1);
+    writeArtifactFixture(w, 'web-build'); writeArtifactFixture(d, 'docker-release-tree');
+    assert.equal(run([w]).status, 0, run([w]).stderr);
+    assert.equal(run(['--tree', d]).status, 0, run(['--tree', d]).stderr);
+    assert.equal(FIXTURE_BUILD_ID.length >= 8, true);
+  } finally { for (const x of [e, w, d]) fs.rmSync(x, { recursive: true, force: true }); }
 });
 
 test('G2 nothing outside the engine package imports or names E1; no manifest, alias or config resolves to it', () => {
@@ -88,11 +155,21 @@ test('G3 E1 source has no network, storage, console, camera, process, file-syste
     let s = fs.readFileSync(f, 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
     // reading.ts loads the ESM core through the CommonJS loader (one local require) -- nothing else may require
     if (path.basename(f) === 'reading.ts') s = s.replace("require('./engine-core.mjs')", '');
+    // R4 (F2): packaged.mjs reads exactly its two vendored library files once, as bytes, and checks their digests --
+    // only these two imports and this one read are allowed; no other file-system or crypto use anywhere.
+    if (path.basename(f) === 'packaged.mjs') {
+      for (const allowed of ["import { readFileSync } from 'node:fs';", "import { createHash } from 'node:crypto';", 'readFileSync(new URL(`../library/${name}.json`, import.meta.url))']) {
+        assert.equal(s.split(allowed).length, 2, `packaged.mjs: expected exactly one ${allowed}`);
+        s = s.replace(allowed, '');
+      }
+      assert.deepEqual([...s.matchAll(/readPinned\('([a-z]+)'/g)].map((m) => m[1]), ['catalogue', 'schema']);
+      assert.ok(!/readFileSync|createHash\(\)\.update\(\w+\)\.digest\('hex'\)[\s\S]*createHash/.test(s), 'packaged.mjs: one read only');
+    }
     assert.ok(!/\bfetch\s*\(|XMLHttpRequest|WebSocket|localStorage|sessionStorage|indexedDB|document\.|navigator\.|getUserMedia|console\.|process\.|node:fs|node:child_process|node:net|node:http|node:crypto|require\(|Date\.now|new Date|Math\.random|https?:\/\//.test(s), path.basename(f));
     assert.ok(!/prototype\/src/.test(s), `${path.basename(f)} imports the frozen G6 engine`);
   }
-  const obs = fs.readFileSync(path.join(E1, 'src', 'observations.mjs'), 'utf8');
-  assert.match(obs, /from '\.\.\/\.\.\/adapter\/feature-set-adapter\.mjs'/); // I1 contract validation only
+  const core = fs.readFileSync(path.join(E1, 'src', 'engine-core.mjs'), 'utf8');
+  assert.match(core, /from '\.\.\/\.\.\/adapter\/feature-set-adapter\.mjs'/); // I1 contract validation only
   assert.match(fs.readFileSync(path.join(E1, 'src', 'reading.ts'), 'utf8'), /from '\.\.\/\.\.\/\.\.\/\.\.\/apps\/web\/lib\/palm-analysis\/features'/); // the I1 builder, nothing else from apps
   assert.equal(E1_ENGINE.syntheticOnly, true);
 });

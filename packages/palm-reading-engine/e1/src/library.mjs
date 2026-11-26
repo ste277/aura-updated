@@ -12,7 +12,10 @@
 import { assertSupportedSchema, validateAgainstSchema } from './schema-validate.mjs';
 import { E1_ENGINE, E1Error, IMPLEMENTED_CAPABILITIES, RECORD_MANIFEST } from './identity.mjs';
 
-const BANNED = /\b(die|dies|death|lifespan|life span|live long|long life|longevity|rich|wealth|money|marri|husband|wife|children|sons|daughter|fertil|caste|varṇa|varna|health|illness|disease|accident|misfortune|guarantee|will become|you will|destined|fate)\w*/gi;
+// R4 (finding F2, defence in depth): medical-claim vocabulary (diagnoses, conditions, treatment). Integrity of the
+// packaged catalogue rests on its pinned bytes and immutability (packaged.mjs), never on this keyword list.
+const MEDICAL = 'cancer|tumou?r|malignan|diagnos|prognos|disorder|syndrome|symptom|medic|clinic|patholog|diabet|infect|sick|treatment|therap|surger|surgical|pregnan|depress|anxiety|heart attack|blood pressure|terminal';
+const BANNED = new RegExp(`\\b(die|dies|death|lifespan|life span|live long|long life|longevity|rich|wealth|money|marri|husband|wife|children|sons|daughter|fertil|caste|varṇa|varna|health|illness|disease|accident|misfortune|guarantee|will become|you will|destined|fate|${MEDICAL})\\w*`, 'gi');
 const FUT = /\b(you will|you'll|will (be|have|find|meet|become|get)|going to|your future|in the future|destined|fate)\b/i;
 const DET = /detect|photo|camera|scanner/i;
 const ATTRIB = /(tradition|text|treatise|palmist|Bṛhatsaṃhitā|Cheiro|guide)/i;

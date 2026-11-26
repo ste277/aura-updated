@@ -128,7 +128,9 @@ const testSources: Src[] = fs.readdirSync(testDir).filter((n) => /\.(ts|tsx|js|m
 const testConsumers = importersClosure([...realSources, ...testSources], E1_READING).filter((f) => !f.startsWith(e1Pkg));
 check('B2b. only explicitly scoped development/test consumers import the E1 reading interface', JSON.stringify(testConsumers) === JSON.stringify(E1_READING_CONSUMERS));
 if (JSON.stringify(testConsumers) !== JSON.stringify(E1_READING_CONSUMERS)) console.log('  consumers:', testConsumers);
-check('B2b. the E1 reading interface stays synthetic-only and development-only (refuses without { synthetic: true })', /\.synthetic !== true\)/.test(read(E1_READING)) && /throw new core\.E1Error\('synthetic-required'/.test(read(E1_READING)) && /DEVELOPMENT ONLY\. SYNTHETIC ONLY\./.test(read(E1_READING)));
+// R4: reading.ts delegates to the single pipeline, which requires an OWN { synthetic: true } (identity.mjs)
+const e1Src = (f: string) => read(path.posix.join(path.posix.dirname(E1_READING), f));
+check('B2b. the E1 reading interface stays synthetic-only and development-only (refuses without an own { synthetic: true })', /core\.claimSyntheticReader\(buildPalmFeatureSet\)/.test(read(E1_READING)) && /return reader\(input, options\);/.test(read(E1_READING)) && /requireSyntheticOptions\(options, \['synthetic', 'mode'\]\)/.test(e1Src('engine-core.mjs')) && /getOwnPropertyDescriptor\(options, 'synthetic'\)[\s\S]*d\.value !== true/.test(e1Src('identity.mjs')) && /DEVELOPMENT ONLY\. SYNTHETIC ONLY\./.test(read(E1_READING)));
 // B2c -- negative regressions: unauthorised imports still fail B2 / B2b
 const readingText = read(E1_READING);
 const neg: Array<[string, Src[], 'b2' | 'closure']> = [

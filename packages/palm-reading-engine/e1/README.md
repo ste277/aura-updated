@@ -10,11 +10,10 @@
 |---|---|
 | `library/catalogue.json`, `library/schema.json` | C1 rev. 4 catalogue and schema. Byte-identical to the C1 deliverables. |
 | **`src/reading.ts`** | **The reading interface:** `generateSyntheticReading(input, { synthetic: true, mode })`. It builds the I1 feature set from **one** synthetic input, using the frozen I1 builder. |
-| `src/engine-core.mjs` | Internal pipeline: verified construction → minted observations → reading |
+| `src/engine-core.mjs` | **The single pipeline** (R4). Its only callable export is `claimSyntheticReader(build)`, claimable once (`reading.ts` claims it at load). It snapshots the input, builds the feature set, verifies the construction, then derives observations and text in module-private functions. |
 | `src/construction.mjs` | Exact ports of the I1 frame, trace placement and ratio maths. They re-derive and verify everything E1 reads from the same input. |
-| `src/observations.mjs` | Observations, with RC-13 reason codes. Only a minted observation set can be composed. |
-| `src/compose.mjs` | `planSelection`: ids and codes only, never text.<br>`composeReading`: text, pinned library, minted observations, full output validation. |
-| `src/library.mjs`, `src/schema-validate.mjs`, `src/packaged.mjs` | Loader and lint; the pinned packaged library |
+| `src/compose.mjs` | `planSelection`: ids and codes only, never text.<br>`validateReadingOutput`: the full output check. No text composer is exported (R4). |
+| `src/library.mjs`, `src/schema-validate.mjs`, `src/packaged.mjs` | Loader and lint. `packaged.mjs` reads the two library files once, as bytes; checks them against the C1 rev. 4 SHA-256 digests; parses and deep-freezes them at initialization; and validates them once. No raw catalogue or schema object is exported (R4). |
 | `src/descriptors.mjs`, `src/grid.mjs` | Descriptors and the I1 numerical contract |
 | `reference/` | The C1 reference oracle and checker, corrected in R2. The originals are byte-identical in `reference/original-c1-rev4/`; see `reference/README.md`. |
 | `test/` | `node --test test/*.test.mjs`. Needs `python3`. End-to-end tests: `test/palm03E1Engine.test.ts` at the repo root. |
@@ -29,20 +28,23 @@ generateSyntheticReading(input /* one synthetic PALM-03-I1 input */, { synthetic
 - There is **no** catalogue, schema, library, feature-set, finger-base or observation parameter. Unknown options are refused.
 - The text-emitting path always uses the pinned packaged library.
 
-**Construction (F6):**
-- The I1 feature set is built inside the interface.
-- The pipeline re-derives, from the same input:
-  - the palm frame and finger bases;
-  - every trace;
-  - each line's state;
-  - the two interpreted ratios;
-  - the hand, quality and marks.
-- It refuses any mismatch (`construction-mismatch`).
+**Construction (F6; one path since R4):**
+- No function accepts a feature set separately from building it. The pipeline:
+  - takes one plain-data snapshot of the input (accessors and non-plain objects are refused);
+  - builds the I1 feature set from that snapshot;
+  - re-derives from the same snapshot, and compares field by field:
+    - the palm frame and finger bases;
+    - palm facing;
+    - every trace and each line's state;
+    - the two interpreted ratios, with their availability, status and reasons;
+    - the hand, quality and marks.
+- It refuses any mismatch (`construction-mismatch`). This also holds if other code claimed the pipeline first with a builder of its own; `reading.ts` then fails to load (`pipeline-claimed`).
 - No checksum or seal is used as proof of origin.
 
-**Synthetic-only (F7):** every function able to emit a reading or a plan requires `{ synthetic: true }`. That includes the directly importable internals `composeReading`, `planSelection`, `deriveObservations` and `readingFromConstruction`. `composeReading` also accepts only observations minted by `deriveObservations`.
+**Synthetic-only (F7):** the reading interface and `planSelection` require an **own** data property `synthetic` that is exactly `true`, on a plain options object. Omitted, inherited, accessor, `false`, non-boolean and malformed declarations are refused. No other exported function produces a reading or a plan.
 
 **Content (F2):**
+- **Integrity (R4):** the packaged catalogue and schema are immutable from initialization. They are read once from their pinned C1 rev. 4 bytes and deep-frozen before validation. Validation and reading generation use the same frozen object, and no mutable reference is exported. Altered bytes make the engine fail to load.
 - The complete output is validated before it is returned:
   - types;
   - fields;
@@ -50,6 +52,7 @@ generateSyntheticReading(input /* one synthetic PALM-03-I1 input */, { synthetic
   - the pinned disclaimer frame;
   - pinned fallback codes.
 - The loader rejects injected wording in reason texts and fallbacks.
+- Defence in depth (R4): the prohibited vocabulary also covers medical claims (diagnoses, conditions, treatment). It is never the integrity mechanism.
 - **Automated checks support, and never replace, editorial and safety review.**
 
 **Conflicts (F4):**
@@ -128,4 +131,17 @@ A symlink that leaves the scanned tree is a scan error, so the scan fails closed
 - the Docker build stage;
 - the Docker `release-tree` stage, with `--tree /app` over the exact runtime tree, which also covers `migrations/`.
 
-It is unconditional. `test/palm03E1ReleaseGuards.test.ts` and the package `guard.test.mjs` cover it.
+**Positive artifact verification (R4).** Before scanning, the guard checks that the expected artifact is there, for each build target (`REQUIRED` in the script):
+- **`web-build`** (`apps/web` after `next build`, standalone output; used by CI, Vercel and the Docker build stage):
+  - a valid `.next/BUILD_ID`, with `.next/static/<id>/_buildManifest.js` present;
+  - a non-empty `.js` chunk under `.next/static/chunks`;
+  - `.next/server/webpack-runtime.js`, plus non-empty output under `.next/server/app`;
+  - parseable `app-paths-manifest.json` and `pages-manifest.json`;
+  - `.next/standalone/server.js`, `package.json` and `node_modules/next/package.json`;
+  - a standalone `BUILD_ID` equal to the build's, and standalone server output;
+  - a parseable `public/manifest.json`.
+- **`docker-release-tree`** (`/app`): the same Next files at the tree root, plus `server.js`, `package.json`, `node_modules/next` and a non-empty `migration.sql` in every migration directory.
+
+Missing, empty, unreadable, malformed or inconsistent required output fails closed. This is a structural check, not a file count.
+
+It is unconditional. `test/palm03E1ReleaseGuards.test.ts` and the package `guard.test.mjs` (G1, G1b) cover it.

@@ -12,33 +12,24 @@
 //   not assessed RC-13 vocabulary, one code per feature, wording from the catalogue.
 // Pure and deterministic: no clock, randomness, I/O or locale dependence; output is deep-frozen.
 //
-// R3 trust boundaries:
+// Trust boundaries (R4):
 //   planSelection(library, observations, { synthetic: true })  ids and reason codes only -- NO text. Any validated
-//       library (loadLibrary) and strictly validated abstract observations. Used internally and by test fixtures.
-//   composeReading(minted, { synthetic: true })  the ONLY text-emitting function: observations must be minted by
-//       deriveObservations() (built from one synthetic input) and the library is always the pinned packaged one.
-//       The complete output is validated before it is returned (F2).
+//       library (loadLibrary) and strictly validated abstract observations. Used by the pipeline and by fixtures.
+//   Text is produced ONLY inside engine-core.mjs (module-private), from one synthetic input and the pinned library;
+//       validateReadingOutput() checks the complete reading before it is returned (F2).
 //   Mutual exclusion (F4): if more than one record qualifies for the same observed feature, none is shown and the
 //       feature is listed as 'ambiguous-in-source'.
 
-import { E1_ENGINE, E1Error, MODES, DOMAINS, RECORD_MANIFEST } from './identity.mjs';
+import { E1_ENGINE, E1Error, MODES, DOMAINS, RECORD_MANIFEST, requireSyntheticOptions } from './identity.mjs';
 import { isValidatedLibrary, BANNED_WORDING, FORECAST_WORDING } from './library.mjs';
 import { toGrid, gridStatus } from './grid.mjs';
-import { pinnedLibrary } from './packaged.mjs';
-import { isMintedObservations } from './observations.mjs';
 
 const INITIAL = new Set(RECORD_MANIFEST['eligible-initial']);
 const BANNED_1 = new RegExp(BANNED_WORDING.source, 'i');
 const FORECAST_1 = new RegExp(FORECAST_WORDING.source, 'i');
 
-const TAG = Object.freeze({
-  'indian-classical': 'Indian · classical',
-  'indian-later-treatise': 'Indian · medieval treatise',
-  'indian-diagram-tradition': 'Indian · diagram tradition',
-  'western-19c-chirognomy': 'Western · 19th c.',
-  'western-19c-chiromancy': 'Western · 19th c.',
-});
-const FRAME = 'This reading describes what palm-reading traditions said about features you traced, measured or told us about. Each item names the tradition it comes from. Where Indian and Western readings are equally suitable, the Indian one is preferred. It is not a scientific assessment and not a prediction. Please don\'t use it for decisions about health, money, work or relationships.';
+/** The pinned disclaimer frame of every reading. */
+export const READING_FRAME = 'This reading describes what palm-reading traditions said about features you traced, measured or told us about. Each item names the tradition it comes from. Where Indian and Western readings are equally suitable, the Indian one is preferred. It is not a scientific assessment and not a prediction. Please don\'t use it for decisions about health, money, work or relationships.';
 const KEY_RE = /^(lines|measurements|marks|proposed)\.[A-Za-z][A-Za-z0-9.]*$/;
 const OBS_KEYS = new Set(['provenance', 'value', 'nearEdge', 'adjacentZone', 'descriptor', 'edgeDistance', 'margin']);
 const NA_KEYS = new Set(['notAssessed', 'detail']);
@@ -104,14 +95,14 @@ function matchRecord(rec, obs) {
   return { res: boundary ? 'boundary' : 'match', used };
 }
 
-function concernCount(rec) { return Object.values(rec.suitability).filter((v) => v === 'concern').length; }
+export function concernCount(rec) { return Object.values(rec.suitability).filter((v) => v === 'concern').length; }
 
 /**
  * Selection and placement only: record ids and reason codes, never interpretation text.
  * opts: { synthetic: true, mode = 'combined', qualityAccepted = true, qualityDetail? }
  */
-export function planSelection(library, observations, opts) {
-  if (opts === null || typeof opts !== 'object' || opts.synthetic !== true) throw new E1Error('synthetic-required', 'pass { synthetic: true }; real input is not authorised');
+export function planSelection(library, observations, options) {
+  const opts = requireSyntheticOptions(options, ['synthetic', 'mode', 'qualityAccepted', 'qualityDetail']);
   const mode = opts.mode ?? 'combined';
   if (!MODES.includes(mode)) throw new E1Error('invalid-option', `mode must be one of ${MODES.join(', ')}`);
   if (typeof (opts.qualityAccepted ?? true) !== 'boolean') throw new E1Error('invalid-option', 'qualityAccepted must be boolean');
@@ -196,38 +187,6 @@ export function planSelection(library, observations, opts) {
   });
 }
 
-/**
- * The only text-emitting function. `minted` must come from deriveObservations() (one synthetic input); the library is
- * always the pinned packaged library. opts: { synthetic: true, mode = 'combined' }.
- */
-export function composeReading(minted, opts) {
-  if (opts === null || typeof opts !== 'object' || opts.synthetic !== true) throw new E1Error('synthetic-required', 'pass { synthetic: true }; real input is not authorised');
-  if (!isMintedObservations(minted)) throw new E1Error('invalid-input', 'observations must be produced by deriveObservations() from one synthetic input');
-  const library = pinnedLibrary();
-  const plan = planSelection(library, minted.observations, { synthetic: true, mode: opts.mode ?? 'combined', qualityAccepted: minted.qualityAccepted, qualityDetail: minted.qualityDetail });
-  const cat = library.catalogue;
-  const render = (it) => buildItem(library, library.byId[it.recordId], minted.observations, it.rank, it.section);
-  const reading = {
-    engine: { id: E1_ENGINE.id, version: E1_ENGINE.version, library: cat.libraryVersion, descriptors: E1_ENGINE.descriptorVersion },
-    synthetic: true,
-    contentStatus: E1_ENGINE.contentStatus,
-    publicationApproved: false,
-    mode: plan.mode,
-    tierCeiling: 'tentative',
-    frame: FRAME,
-    quality: { ...plan.quality },
-    sections: plan.sections.map((x) => ({ category: x.category, items: x.items.map(render) })),
-    moreFromYourReading: plan.moreFromYourReading.map(render),
-    domains: plan.domains.map((d) => ({ ...d, categories: [...d.categories], items: [...d.items] })),
-    notAssessed: plan.notAssessed.map((n) => ({ feature: n.feature, code: n.code, wording: library.reasons[n.code].wording, ...(n.detail !== undefined ? { detail: n.detail } : {}) })),
-    observed: Object.entries(minted.observations).filter(([, v]) => !('notAssessed' in v)).map(([feature, v]) => ({ feature, provenance: v.provenance, value: v.value, ...(v.nearEdge !== undefined ? { nearEdge: v.nearEdge } : {}), ...(v.adjacentZone ? { adjacentZone: v.adjacentZone } : {}) })).sort((x, y) => (x.feature < y.feature ? -1 : 1)),
-    historicalContextMatched: [...plan.historicalContextMatched],
-    emptyResult: plan.emptyResult,
-  };
-  validateReadingOutput(reading, library);
-  return deepFreeze(reading);
-}
-
 const READING_KEYS = ['engine', 'synthetic', 'contentStatus', 'publicationApproved', 'mode', 'tierCeiling', 'frame', 'quality', 'sections', 'moreFromYourReading', 'domains', 'notAssessed', 'observed', 'historicalContextMatched', 'emptyResult'];
 const TEXT_KEYS = ['observation', 'reading', 'reflection', 'applicationNote'];
 const isPlain = (v) => v !== null && typeof v === 'object' && !Array.isArray(v) && Object.getPrototypeOf(v) === Object.prototype;
@@ -242,7 +201,7 @@ const isPlain = (v) => v !== null && typeof v === 'object' && !Array.isArray(v) 
 export function validateReadingOutput(reading, library) {
   const fail = (m) => { throw new E1Error('content-violation', m); };
   if (!isPlain(reading) || JSON.stringify(Object.keys(reading)) !== JSON.stringify(READING_KEYS)) fail('unexpected reading structure');
-  if (reading.frame !== FRAME) fail('the disclaimer frame was altered');
+  if (reading.frame !== READING_FRAME) fail('the disclaimer frame was altered');
   const fallbacks = new Set(Object.values(library.catalogue.readingModes.modeBehaviour).map((b) => b.emptyResult));
   if (reading.emptyResult !== null && !(fallbacks.has(reading.emptyResult) && /^[a-z0-9-]+$/.test(reading.emptyResult))) fail('unexpected fallback wording');
   const walk = (v, at) => {
@@ -260,57 +219,4 @@ export function validateReadingOutput(reading, library) {
     if (!it.text.reflection.trimEnd().endsWith('?')) fail(`${it.recordId}: reflection is not a question`);
   }
   for (const n of reading.notAssessed) if (typeof n.wording !== 'string' || n.wording !== library.reasons[n.code].wording) fail(`unexpected notAssessed wording for ${n.feature}`);
-}
-
-function buildItem(library, rec, obs, rank, section) {
-  const u = rec.userFacing;
-  const disclosures = [];
-  if (rec.overallSupport === 'disputed') disclosures.push('disputed-within-tradition');
-  if (rec.requires.some((r) => r.feature === 'lines.heart')) disclosures.push('ayurlekha-meaning-not-used');
-  if (rec.requires.some((r) => r.feature.startsWith('measurements.'))) disclosures.push('not-a-scientific-measure');
-  return {
-    recordId: rec.id,
-    rank,
-    section,
-    tradition: rec.tradition,
-    traditionTag: TAG[rec.tradition],
-    supportingFeatures: rec.requires.map((r) => ({
-      feature: r.feature,
-      anatomical: r.anatomical,
-      provenance: obs[r.feature].provenance,
-      observed: obs[r.feature].value,
-      descriptor: obs[r.feature].descriptor ?? null,
-      ...(r.observation?.thresholdStatus ? { thresholdStatus: r.observation.thresholdStatus } : {}),
-    })),
-    sources: rec.sources.map((s) => ({ sourceId: s.sourceId, locator: s.locator, supportLevel: s.supportLevel, verification: s.verification, title: library.sources[s.sourceId]?.title ?? null })),
-    confidence: {
-      tier: 'tentative',
-      ceiling: rec.observationQuality.maxTier,
-      displayRule: rec.observationQuality.displayRule,
-      sourceSupport: rec.uncertainty.sourceSupport,
-      identityConfirmation: rec.uncertainty.identityConfirmation,
-      traditionalUncertainty: { level: rec.uncertainty.traditionalUncertainty.level, reasons: [...rec.uncertainty.traditionalUncertainty.reasons] },
-      measurementQuality: 'passed-gate',
-    },
-    suitability: {
-      sourceFidelity: rec.suitability.sourceFidelity,
-      observationRequirements: rec.suitability.observationRequirements,
-      culturalContext: rec.suitability.culturalContext,
-      relevanceToUser: rec.suitability.relevanceToUser,
-      harmfulAttributionRisk: rec.suitability.harmfulAttributionRisk,
-      constructiveReflection: rec.suitability.constructiveReflection,
-      band: concernCount(rec) <= 2 ? 0 : 1,
-      eligibility: rec.eligibility.status,
-    },
-    reviewStatus: rec.review.status,
-    text: {
-      observation: u.observation,
-      reading: u.reading,
-      reflection: u.reflection,
-      ...(u.applicationNote ? { applicationNote: u.applicationNote } : {}),
-    },
-    // reviewer-facing conflict notes and free-text references are never emitted; only catalogue record ids are
-    conflicts: (rec.conflicts ?? []).map((c) => ({ withId: /^C1-(IN|WE)-[A-Z0-9-]+$/.test(c.withId) ? c.withId : 'external-reference', kind: c.kind, handling: c.handling })),
-    disclosures,
-  };
 }
