@@ -1,0 +1,34 @@
+$ npx ts-node test/dayPlanPreviewItemEditingWiring.test.ts
+# job=math-core-tests step=Run day plan preview item editing wiring test env={}
+OK   1. the modal reuses the existing ModalShell primitive, never a new overlay implementation
+OK   2. the modal reuses the existing useModalA11y primitive, never a new Escape/focus-trap implementation
+OK   3. the modal calls the ONE preview-item network function, updatePreviewItemTime
+OK   4. the modal never imports or calls the acceptance network function (acceptConstructedDay)
+OK   5. the modal never references the acceptance endpoint path
+OK   6. the modal never references a database/persistence module
+OK   7. the modal has a double-submit guard before its one network call (checks `saving` before calling updatePreviewItemTime)
+OK   8. the modal reuses the existing local-wall-time -> UTC converter (localDateTimeToUTC), not a hand-rolled one
+OK   9. the controller renders the edit modal
+OK   10. editing is gated OFF while a save is in flight (SAVING)
+OK   11. editing is gated OFF once the day is already saved (SAVED)
+OK   12. the edit affordance is also gated on the parent actually supplying onPreviewReplaced
+OK   13. a successful edit applies the update via the one pure preview-state function, applyUpdatedProposedItem
+OK   14. the controller never computes a replacement preview itself (no manual proposedItems.map/splice near the modal wiring)
+OK   15. a successful edit closes the modal (editing reset to null)
+OK   16. the controller still owns exactly one DayPlanPreview render (the edit UI is a sibling, not a second preview surface)
+OK   17. ProposedItemRow accepts an optional onEditItem prop (additive, not required)
+OK   18. the clickable time only renders when onEditItem is actually supplied (an if/ternary on onEditItem around the button)
+OK   19. omitting onEditItem still renders a plain, non-interactive time (no behavior change for any caller that does not pass it)
+OK   20. the clickable time has an accessible label describing the action
+OK   21. PlanDayClient passes onPreviewReplaced to the controller
+OK   22. PlanDayClient still owns `preview` via its own useState (single source of truth unchanged by this ticket)
+OK   23. PlanDayClient never calls the raw setPreview setter directly -- every replacement goes through replacePreview so the generation bump can never be skipped
+OK   24. replacePreview bumps previewGenerationRef before calling setPreview
+OK   25. PlanDayClient passes previewGenerationRef to the controller
+OK   26. the controller captures the LIVE generation (not a stale snapshot) at apply-time before replacing the preview
+OK   27. the Escape-key handler respects the same `saving` guard as every other dismissal path (localized fix, not inside the shared useModalA11y/ModalShell primitives)
+OK   28. replacePreview is guarded by a mount-tracking ref (a stale response after real unmount can never call setPreview)
+
+ALL DAY PLAN PREVIEW ITEM EDITING WIRING CHECKS PASSED
+
+# exit=0 signal=

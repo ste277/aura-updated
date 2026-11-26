@@ -1,0 +1,49 @@
+$ npx ts-node test/myRhythmSchedulingPreferences.test.ts
+# job=math-core-tests step=Run My Rhythm scheduling preferences test env={}
+OK   W1. CURRENT on a Wednesday = today..Sunday
+OK   W2. NEXT on a Wednesday = next Monday..Sunday, capacity evaluated for next Monday
+OK   W3. NEXT on a Sunday (last day of the week) = the very next day..
+OK   W4. NEXT on a Monday skips the rest of this week
+OK   W5. CURRENT on a Sunday = just that Sunday
+OK   W6. NEXT across a year boundary (Thu 2026-12-31 -> Mon 2027-01-04..Sun 2027-01-10)
+OK   W7. NEXT across a US DST change is still 7 civil days (Sun 2027-03-14 -> 2027-03-15..2027-03-21)
+OK   W8. isRhythmPlanningWeek accepts only CURRENT/NEXT
+OK   D1. no weekday preference: every date qualifies
+OK   D2. Mon/Wed/Fri: Wednesday 2026-11-25 qualifies, Sunday 2026-11-29 does not
+OK   P1. no preferences: one engine call with timePreference ANY over today..Sunday
+OK   P1. no preferences: duration is the existing catalog default
+OK   P1. no preferences: exactly the pre-MR2 distinct-day selection
+OK   P1. no preferences: every item matched, no notes; result reports CURRENT week and no preferences
+OK   P2. NEXT: searches only next Monday..Sunday
+OK   P2. NEXT: capacity is next week's (this week's commitment ignored, next week's counted) -> 2 remaining
+OK   P2. weekday preference is strict: only Mon 2026-11-30 and Fri 2026-12-04 (Wed already committed -> no duplicate)
+OK   P2. result carries week NEXT and its bounds
+OK   P3. time-of-day goes to the engine's own timePreference first, then an ANY fallback pass
+OK   P3. Mon and Fri sessions are mornings and marked matched
+OK   P3. Wednesday falls back to the best time that day and explains the compromise
+OK   P3. the fallback never moves a session to a non-preferred day
+OK   P4. all preferred days have a morning: no fallback call
+OK   P5. duration preference (45) is used for the search and every item
+OK   P6. shortfall instead of relaxing weekdays, explained with the preferred day names
+OK   P7. the existing Daily Rhythm work-hours note is carried on the session
+OK   P8. Panchang/Aura Fit ranking decides the time within the preferred window (engine's top candidate, never re-sorted by clock time)
+OK   P9. a rhythm absent from demand (e.g. paused) -> NOT_ELIGIBLE and no engine call
+OK   H1. without MR2 extras the Home suggestions are byte-identical to the pre-MR2 mapping
+OK   H2. a non-preferred day: flagged, and no "today" handoff is offered
+OK   H3. confirmed next session and next-week remaining are attached
+OK   H4. a rhythm open only next week gets a 'Plan next week' card (this week complete)
+OK   H5. the next-session label is local time and always says Confirmed (never a suggestion)
+OK   H6. pre-MR2 card actions are unchanged when no MR2 fields are present
+OK   E1. a rhythm suggestion row sends the preferred time of day and duration as defaults
+OK   E2. the row's explicit duration wins over the preference
+OK   E3. an explicit fixed time wins: no timePreference is sent
+OK   E4. without preferences the intent is unchanged (no timePreference, no duration)
+OK   E5. a Goal handoff item carries its rhythm time-of-day preference too
+OK   E6. the preview parser accepts a FLEXIBLE intent timePreference
+OK   E7. the preview parser rejects an unknown or ANY timePreference
+OK   E8. the preview parser rejects timePreference on a FIXED intent
+OK   E9. an intent without timePreference parses exactly as before (no key added)
+
+All checks passed.
+
+# exit=0 signal=

@@ -1,0 +1,27 @@
+$ npx ts-node test/shadowReviewDelta.test.ts
+# job=math-core-tests step=Run shadow review delta test env={}
+=== Part 1: the directed shape ===
+OK   a payload is produced for a consistent same-run READY/READY pair
+OK   reason is a closed, non-pressure-vocabulary category
+OK   exactly two changed items: PROMOTED then MOVED, order preserved
+OK   PROMOTED: candidate id/title from the materialized day, baseline DEFERRED (no start/end), alternative from accepted.promoted
+OK   MOVED: owner id/title, baseline from the baseline day's own placement, alternative from accepted.relocated (with its timingFit)
+OK   the payload is frozen
+OK   NO RAW/INTERNAL DATA: no ConstructionBasis/BaselinePlacements/fingerprint/authority-shape keys anywhere in the payload
+OK   NO HIGH-CARDINALITY INTERNAL FIELD beyond the already-authorized intentId/title/instant/timingFit
+=== Part 2: multiple displaced owners, in order ===
+OK   three changed items: PROMOTED, then MOVED in displacedOwnerIds order (O1 before O2)
+=== Part 3: fail closed -- never a partial or guessed payload ===
+OK   baseline not READY -> undefined
+OK   materialized not READY -> undefined
+OK   candidate title missing in the materialized day -> undefined (never guessed)
+OK   candidate not found in baseline deferredItems -> undefined
+OK   a displaced owner with no matching relocated placement -> undefined (never half the picture)
+OK   a displaced owner missing from the baseline Proposed set -> undefined
+OK   a throwing/garbage accepted object never throws -- it yields undefined
+OK   garbage results never throw
+=== Part 4: no new scheduling interpretation ===
+OK   the alternative instants are the authority's OWN promoted/relocated placements, never re-derived from the materialized day's proposedItems (which this fixture deliberately disagrees with)
+ALL SHADOW REVIEW DELTA CHECKS PASSED
+
+# exit=0 signal=

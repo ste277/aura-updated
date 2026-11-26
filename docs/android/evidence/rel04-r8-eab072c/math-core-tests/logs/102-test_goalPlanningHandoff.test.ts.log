@@ -1,0 +1,37 @@
+$ npx ts-node test/goalPlanningHandoff.test.ts
+# job=math-core-tests step=Run Goal planning handoff test env={}
+OK   M. createIntentRowFromGoalActivity seeds the row title from GoalActivity.title
+OK   N. createIntentRowFromGoalActivity preserves a real GoalActivity.activityId
+OK   O. createIntentRowFromGoalActivity leaves activityId undefined (never fabricated) when GoalActivity.activityId is null
+OK   createIntentRowFromGoalActivity stamps goalActivityId from the GoalActivity id
+OK   createIntentRowFromGoalActivity reuses createEmptyIntentRow defaults for every other field (duration/timeMode/important/deadline)
+OK   every seeded row gets a distinct id
+OK   R. editing a seeded row's title (simulating PlanDayClient's updateRow patch) leaves goalActivityId intact -- provenance survives independent of title
+OK   P. goalActivityId survives a patch-merge update (duration change) exactly like PlanDayClient's own updateRow
+OK   P. goalActivityId survives a filter (simulating an unrelated row's removal, leaving this row untouched)
+OK   Q. removing a Goal-seeded row from the client array is a pure, synchronous filter with no side effect surface
+OK   buildGoalActivityLinksForAccept includes a Goal row that was placed
+OK   22/AD. buildGoalActivityLinksForAccept excludes a Goal row that was DEFERRED (absent from proposedItems)
+OK   AE. buildGoalActivityLinksForAccept excludes a Goal row removed before preview (absent from the rows array entirely)
+OK   23. buildGoalActivityLinksForAccept excludes a typed (non-Goal) row even when it was placed
+OK   buildGoalActivityLinksForAccept returns an empty array for an all-typed session
+OK   S/T. a Goal-seeded row, once mapped through buildRequestedIntentsForSubmission (the PREVIEW request builder), produces an intent object with no "goalActivityId"/"goalId" key at all
+OK   buildAcceptRequestBody omits goalActivityLinks entirely when none are supplied
+OK   buildAcceptRequestBody omits goalActivityLinks entirely when an empty array is supplied
+OK   buildAcceptRequestBody includes goalActivityLinks as a sibling of proposedItems/constructionWindow when non-empty
+OK   A. resolveGoalActivityHandoff selects a SUGGESTED activity
+OK   B/I. resolveGoalActivityHandoff omits a PLANNED activity (stale-PLANNED case)
+OK   C/J. resolveGoalActivityHandoff omits a COMPLETED activity (stale-COMPLETED case)
+OK   D/K. resolveGoalActivityHandoff omits a DISMISSED activity
+OK   a CANCELLED-linked activity (derived SUGGESTED) is eligible for handoff
+OK   L. an unknown/not-owned GoalActivity id is silently omitted, never fails the whole request
+OK   H. no session token -> empty result, never seeds anything
+OK   H. an invalid session token -> empty result
+OK   missing goalId -> empty result, no query even attempted
+OK   missing activities param -> empty result
+OK   an activities param with only empty/whitespace entries -> empty result
+OK   6. the returned title/activityId come only from the server-side row, never from any URL-supplied value
+OK   requested id list beyond MAX_PLAN_DAY_INTENTS is capped, never seeds an unbounded number of rows
+ALL GOAL PLANNING HANDOFF CHECKS PASSED
+
+# exit=0 signal=

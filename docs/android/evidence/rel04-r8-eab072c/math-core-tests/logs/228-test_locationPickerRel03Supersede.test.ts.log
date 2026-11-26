@@ -1,0 +1,20 @@
+$ npx ts-node --project tsconfig.jsdom-tests.json test/locationPickerRel03Supersede.test.ts
+# job=math-core-tests step=Run LocationPicker REL-03 supersede test env={"TS_NODE_COMPILER_OPTIONS":"{\"jsx\":\"react-jsx\"}"}
+OK   S1 precondition: GPS operation is running ("Still finding")
+OK   S1 confirmation card shows the picked search result
+OK   S1 late GPS fix does not replace the picked search result
+OK   S1 late GPS fix is not reverse-geocoded
+OK   S1 no timeout message appears for the superseded operation
+OK   S1 still exactly one native request (not cancelled, not duplicated)
+OK   S1 after Back, the GPS button is idle and enabled (no stuck spinner)
+OK   S1 no timers left running for the superseded operation
+OK   S2 dropdown city was saved
+OK   S2 late GPS fix does not open a GPS confirmation card
+OK   S2 GPS button idle afterwards
+OK   S3 control: an uninterrupted GPS operation still shows its result
+OK   S4 retap joins the running native request (single-flight preserved)
+OK   S4 the new operation receives the fix
+
+14 passed, 0 failed
+
+# exit=0 signal=

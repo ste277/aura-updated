@@ -1,0 +1,189 @@
+$ npx ts-node test/muhurtaRulePacks.test.ts
+# job=math-core-tests step=Run Muhurta rule packs test env={}
+OK   business-start resolves explicitly to family=BUSINESS
+OK   business-start resolves explicitly to intent=BUSINESS_START
+OK   business-start resolves explicitly to evaluationDepth=DEEP
+OK   property-purchase resolves explicitly to family=FINANCE
+OK   property-purchase resolves explicitly to intent=PROPERTY_PURCHASE
+OK   property-purchase resolves explicitly to evaluationDepth=DEEP
+OK   engagement resolves explicitly to family=RELATIONSHIP
+OK   engagement resolves explicitly to intent=ENGAGEMENT
+OK   engagement resolves explicitly to evaluationDepth=CEREMONIAL
+OK   griha-pravesh resolves explicitly to family=HOME
+OK   griha-pravesh resolves explicitly to intent=GRIHA_PRAVESH
+OK   griha-pravesh resolves explicitly to evaluationDepth=CEREMONIAL
+OK   financial-decision still resolves (backward compatible)
+OK   new-beginning still resolves (backward compatible)
+OK   AURA_MUHURTA_METHODOLOGY_ID is the documented v1 identifier
+OK   Every resolved rule pack declares the AURA_MUHURTA_V1 methodology
+OK   Griha Pravesh pack has a stable id (GRIHA_PRAVESH_V1)
+OK   Griha Pravesh pack carries at least one MuhurtaRuleSource
+OK   Every Griha Pravesh source has a sourceType and either a citation or notes (traceable, not opaque)
+OK   Griha Pravesh pack confidence is CURATED (multi-source corroborated, not primary-text-verified)
+OK   Griha Pravesh pack scope is GENERAL (not claiming a specific regional tradition)
+OK   Griha Pravesh pack records lastReviewed
+OK   No source claims sourceType CLASSICAL_TEXT (none were verified against a primary classical text)
+OK   evaluateMuhurtaWithRulePack() result carries provenance.methodology
+OK   evaluateMuhurtaWithRulePack() result carries provenance.rulePackId matching the resolved pack
+OK   MuhurtaReason objects on that evaluation carry NO source citation fields (reasons stay clean)
+OK   grihaPack.reasonNote is short (reason-text-appropriate, not a citation-length audit note)
+OK   grihaPack.reasonNote is NOT the same string as metadata.note (the two are deliberately different fields)
+OK   A live NAKSHATRA_SUPPORTIVE reason's params.note (if present) equals the short reasonNote, not the long metadata.note
+OK   The legacy evaluateMuhurta() path leaves provenance undefined (unchanged behavior)
+OK   business-start rule pack coverage is REUSABLE_BASE_RULE for Tithi/Nakshatra (unchanged from the previous PR)
+OK   business-start rule pack still reuses NEW_BEGINNING's exact nakshatra list
+OK   business-start rule pack records which legacy family it reused
+OK   griha-pravesh rule pack Tithi coverage is now IMPLEMENTED (intent-specific, sourced)
+OK   griha-pravesh rule pack Nakshatra coverage is now IMPLEMENTED
+OK   griha-pravesh rule pack Yoga coverage is still IMPLEMENTED (global, not family-dependent)
+OK   griha-pravesh rule pack Karana coverage is still IMPLEMENTED (global, not family-dependent)
+OK   griha-pravesh rule pack has a non-empty, genuinely sourced favorable nakshatra list
+OK   griha-pravesh rule pack has a non-empty avoid nakshatra list
+OK   griha-pravesh rule pack has NO reusedFromLegacyFamily (intent-specific, not a family reuse)
+OK   griha-pravesh rule pack does not populate the reserved acceptable/block tiers (not sourced, not fabricated)
+OK   engagement rule pack coverage is STILL REUSABLE_BASE_RULE (no intent-specific data was added -- the research did not clear the confidence bar)
+OK   engagement rule pack still reuses RELATIONSHIP's exact nakshatra list (unchanged from the previous PR)
+OK   griha-pravesh (CEREMONIAL, now IMPLEMENTED core coverage) computes SUPPORTED
+OK   engagement (CEREMONIAL, REUSABLE_BASE_RULE core coverage, still not dedicated) computes PARTIAL
+OK   Griha Pravesh did NOT become SUPPORTED from only one core factor -- both Tithi AND Nakshatra are IMPLEMENTED
+OK   Engagement did NOT become SUPPORTED solely because RELATIONSHIP base rules exist
+OK   A CEREMONIAL pack with only ONE factor dedicated (Tithi IMPLEMENTED, Nakshatra not) is still PARTIAL, not SUPPORTED
+OK   The SAME one-factor-only pack under a DEEP classification IS SUPPORTED (DEEP only needs "present", not "dedicated")
+OK   Support level is driven by coverage + depth together, not evaluationDepth alone
+OK   Griha Pravesh Nakshatra rule: known favorable nakshatra (Rohini) -> SUPPORT
+OK   Griha Pravesh Nakshatra rule: known favorable nakshatra (Mrigashira) -> SUPPORT
+OK   Griha Pravesh Nakshatra rule: known favorable nakshatra (Uttara Phalguni) -> SUPPORT
+OK   Griha Pravesh Nakshatra rule: known favorable nakshatra (Chitra) -> SUPPORT
+OK   Griha Pravesh Nakshatra rule: known favorable nakshatra (Anuradha) -> SUPPORT
+OK   Griha Pravesh Nakshatra rule: known favorable nakshatra (Uttara Ashadha) -> SUPPORT
+OK   Griha Pravesh Nakshatra rule: known favorable nakshatra (Revati) -> SUPPORT
+OK   Griha Pravesh Nakshatra rule: known unsuitable nakshatra (Ashlesha) -> CAUTION
+OK   Griha Pravesh Nakshatra rule: known unsuitable nakshatra (Jyeshtha) -> CAUTION
+OK   Griha Pravesh Nakshatra rule: known unsuitable nakshatra (Mula) -> CAUTION
+OK   Griha Pravesh Nakshatra rule: not confidently sourced either way (Hasta) -- correctly emits no reason -> NONE
+OK   Griha Pravesh Nakshatra rule: contradictory across sources (Shatabhisha) -- correctly excluded, no reason -> NONE
+OK   Griha Pravesh Tithi rule: known favorable tithi (Panchami) -> SUPPORT
+OK   Griha Pravesh Tithi rule: known favorable tithi (Dashami) -> SUPPORT
+OK   Griha Pravesh Tithi rule: known favorable tithi (Ekadashi) -> SUPPORT
+OK   Griha Pravesh Tithi rule: known favorable tithi (Trayodashi) -> SUPPORT
+OK   Griha Pravesh Tithi rule: known unfavorable tithi (Amavasya) -> CAUTION
+OK   Griha Pravesh Tithi rule: known unfavorable tithi (Chaturthi, a Rikta tithi) -> CAUTION
+OK   Griha Pravesh Tithi rule: known unfavorable tithi (Navami, a Rikta tithi) -> CAUTION
+OK   Griha Pravesh Tithi rule: known unfavorable tithi (Chaturdashi, a Rikta tithi) -> CAUTION
+OK   Griha Pravesh Tithi rule: known unfavorable tithi (Ashtami) -> CAUTION
+OK   Griha Pravesh Tithi rule: not sourced either way (Shasthi/6th) -- correctly emits no reason -> NONE
+OK   Griha Pravesh Tithi rule: not sourced either way (Purnima) -- correctly emits no reason -> NONE
+OK   A Griha Pravesh evaluation on Abhijit carries NAKSHATRA_SUPPORTIVE or NAKSHATRA_UNFAVORABLE reasons when applicable (real Panchanga evidence, not silence)
+OK   Engagement has NO intent-specific rule pack entry (deliberately not populated -- see completion report)
+OK   Engagement reasons come from RELATIONSHIP's existing note text (still says "supports ease and connection", not a fabricated Engagement-specific note)
+OK   Engagement (still PARTIAL) never reaches EXCEPTIONAL (>=90) across 120 sampled Abhijit instants -- the cap still applies
+OK   Griha Pravesh (now SUPPORTED) never reaches EXCEPTIONAL WITHOUT genuine Nakshatra/Tithi support evidence (generic Abhijit/window score alone is not enough)
+OK   At least one sampled day has full Nakshatra+Tithi evidence for Griha Pravesh (the rule pack is not so narrow it never fires)
+OK   Griha Pravesh (now SUPPORTED) CAN reach EXCEPTIONAL once genuine Nakshatra/Tithi evidence is present and other context factors are strong (the cap correctly lifted once fully supported)
+OK   Engagement (still PARTIAL), under the SAME strong context, is still capped below EXCEPTIONAL
+OK   Griha Pravesh during Rahu Kalam still carries a RAHU_CAUTION reason (blockers remain blockers)
+OK   Griha Pravesh during Rahu Kalam scores low (caution is not hidden behind the cap)
+OK   Engagement during Rahu Kalam still carries a RAHU_CAUTION reason
+OK   normalizeNakshatraId is case/whitespace-insensitive
+OK   normalizeNakshatraId produces the documented example mapping
+OK   normalizeNakshatraId handles multi-word names
+OK   normalizeTithiId produces the documented example mapping
+OK   normalizeTithiId handles single-word tithi names
+OK   griha-pravesh now appears in Muhurtham Finder's eligibility list automatically (no Finder code change)
+OK   engagement still does NOT appear (still PARTIAL)
+OK   Finder eligibility list is now 7 activities
+OK   A real Muhurtham Finder range search for griha-pravesh (now SUPPORTED) returns dates
+OK   Griha Pravesh Finder results carry genuine Nakshatra/Tithi-derived reasons (not just window/yoga/karana)
+OK   At least one Griha Pravesh Finder result surfaces a Nakshatra reason (the check below is not vacuously true)
+OK   Every Nakshatra reason surfaced through the real Muhurtham Finder pipeline for griha-pravesh comes from GRIHA_PRAVESH's own rule pack (never a leftover NEW_BEGINNING-only value like Ashwini/Pushya)
+OK   Passing `classification` is a no-op for every activity except griha-pravesh and marriage (Journey/Financial Decision/New Beginning/Business Start/Property Purchase/Engagement all unaffected)
+OK   evaluateMuhurta() still returns the exact requested legacy family for all 13 families (refactor is behavior-preserving)
+OK   evaluateMuhurtaWithRulePack() Yoga/Karana reasons match evaluateMuhurta()'s for the same instant (shared helper, not duplicated logic)
+OK   L3 fixture sanity: new-beginning resolves to intent=PROJECT_START, family=WORK -> FOCUSED_WORK legacy base (REUSABLE_BASE_RULE, no dedicated Tithi coverage)
+OK   L3 fixture sanity: riktaDate really is a Rikta Tithi (Shukla Chaturthi)
+OK   A. explicit START on a Rikta date: exactly one TITHI reason
+OK   A. that reason is TITHI_FAMILY_CAUTION
+OK   A. modifier reflects the -8 impact (present in the summed modifier)
+OK   A. (L3.2) real evaluateActivityFit(PROJECT_START, Rikta, START): exactly one TITHI reason
+OK   A. that reason is TITHI_FAMILY_CAUTION with impact -8
+OK   A. the no-phase baseline has NO Tithi reason at all for this fixture (clean before-state: FOCUSED_WORK/NEW_BEGINNING neither mentions Chaturthi) -- so the modifier change is attributable ONLY to the new -8
+OK   A. muhurtaSummary/summary were re-derived from the new reasons (no longer the stale no-Tithi text)
+OK   A. Aura Fit score genuinely changes, strictly lower than the no-phase baseline, through the EXISTING modifier -> muhurtaScore -> blended-score arithmetic only (no new weight, no new cap, no new label logic)
+OK   A. the score delta is a real, bounded, non-zero change consistent with a single -8 modifier flowing through the existing formula (never a huge, formula-breaking jump)
+OK   A. real BUSINESS_START (business-start) + Rikta + START reaches the rule through evaluateActivityFit: one TITHI_FAMILY_CAUTION, score strictly lower than the no-phase baseline
+OK   A. real JOURNEY_START (start-journey) + Rikta + START reaches the rule through evaluateActivityFit: one TITHI_FAMILY_CAUTION, score strictly lower than the no-phase baseline
+OK   B. actionPhase omitted: no TITHI_FAMILY_CAUTION
+OK   B. actionPhase omitted: no TITHI reason at all (the pre-L3 baseline for this fixture -- FOCUSED_WORK does not mention Chaturthi)
+OK   B. the full evaluation is deep-equal to the SAME call with actionPhase: undefined explicitly (L2's own compatibility contract, still holding)
+OK   B. Aura Fit score with actionPhase omitted equals the explicit no-phase baseline (existing pre-L3 result preserved)
+OK   C. actionPhase CONTINUE: no TITHI_FAMILY_CAUTION
+OK   C. CONTINUE evaluation is deep-equal to the no-phase baseline (CONTINUE never receives this caution)
+OK   C. actionPhase FINISH: no TITHI_FAMILY_CAUTION, evaluation deep-equal to the no-phase baseline
+OK   C. actionPhase PREPARE: no TITHI_FAMILY_CAUTION, evaluation deep-equal to the no-phase baseline
+OK   C. actionPhase REVIEW: no TITHI_FAMILY_CAUTION, evaluation deep-equal to the no-phase baseline
+OK   D. fixture sanity: griha-pravesh has dedicated (IMPLEMENTED) Tithi coverage
+OK   D. Griha Pravesh + Rikta date + START: existing dedicated TITHI_UNFAVORABLE reason remains
+OK   D. Griha Pravesh + Rikta date + START: NO TITHI_FAMILY_CAUTION appears alongside it
+OK   D. at most one TITHI factor reason
+OK   D. Griha Pravesh evaluation is completely unaffected by actionPhase (identical with START vs. omitted)
+OK   E. fixture sanity: marriage has dedicated (IMPLEMENTED) Tithi coverage
+OK   E. Marriage + Rikta date + START: existing dedicated TITHI_UNFAVORABLE reason remains, no TITHI_FAMILY_CAUTION, at most one TITHI reason
+OK   F1. free-text ADMIN + Rikta (Chaturthi) date: still TITHI_SUPPORTIVE (unchanged -- ADMIN's own favorable Chaturthi rule)
+OK   F1. free-text ADMIN: no TITHI_FAMILY_CAUTION ever appears (no classification exists for this path, so the L3.2 overlay is never even attempted)
+OK   F1. free-text ADMIN evaluation is byte-identical regardless of any actionPhase concept -- evaluateMuhurta() has no such parameter and was never modified
+OK   F2. catalog ADMIN (task-5) + Rikta + START, through the real evaluateActivityFit pipeline: existing behavior unchanged (no TITHI_FAMILY_CAUTION, score identical to the no-phase baseline)
+OK   G. every L3 integration fixture carries AT MOST ONE TITHI-factor reason: new-beginning + START=1, new-beginning + undefined=0, new-beginning + CONTINUE=0, griha-pravesh + START=1, marriage + START=1
+OK   unrelated intent (WORKOUT) + Rikta date + START: no TITHI_FAMILY_CAUTION
+OK   L4 fixture sanity: amavasyaDate really is Amavasya
+OK   L4 fixture sanity: Amavasya resolves to TithiFamily.PURNA, not RIKTA (the ordinal-mod-5 collision the exact rule exists to avoid -- see lunarExactTithiRules.ts's own doc comment)
+OK   L4 fixture sanity: the no-phase Amavasya baseline already carries a legacy TITHI_UNFAVORABLE reason (impact -8) -- the pre-existing behavior this rule must cleanly replace, not duplicate
+OK   A. explicit START on Amavasya: exactly one TITHI reason
+OK   A. that reason is TITHI_EXACT_CAUTION with impact -8 and value "Amavasya"
+OK   A. the legacy TITHI_UNFAVORABLE reason is REPLACED, not accumulated alongside the new one (modifier unchanged at -8 total contribution, reasons count unchanged, code differs from the no-phase baseline)
+OK   A. (L4) real evaluateActivityFit(PROJECT_START, Amavasya, START): exactly one TITHI_EXACT_CAUTION reason, replacing the legacy one
+OK   A. (L4) the exact reason participates in the modifier exactly like the legacy reason it replaced -- score is IDENTICAL to the no-phase baseline (both draw -8 from a single Tithi reason; a numeric coincidence that only holds because the magnitudes match, not evidence the overlay was skipped -- the code/value assertions above prove it fired)
+OK   A. (L4) real BUSINESS_START + Amavasya + START reaches the rule through evaluateActivityFit: one TITHI_EXACT_CAUTION, replacing the legacy reason
+OK   A. (L4) real JOURNEY_START + Amavasya + START reaches the rule through evaluateActivityFit: one TITHI_EXACT_CAUTION, replacing the legacy reason
+OK   B. actionPhase undefined on Amavasya: no TITHI_EXACT_CAUTION -- the legacy TITHI_UNFAVORABLE reason remains untouched
+OK   B. actionPhase CONTINUE on Amavasya: no TITHI_EXACT_CAUTION -- the legacy TITHI_UNFAVORABLE reason remains untouched
+OK   B. actionPhase FINISH on Amavasya: no TITHI_EXACT_CAUTION -- the legacy TITHI_UNFAVORABLE reason remains untouched
+OK   B. actionPhase PREPARE on Amavasya: no TITHI_EXACT_CAUTION -- the legacy TITHI_UNFAVORABLE reason remains untouched
+OK   B. actionPhase REVIEW on Amavasya: no TITHI_EXACT_CAUTION -- the legacy TITHI_UNFAVORABLE reason remains untouched
+OK   C. exact > family: Amavasya is structurally never RIKTA (confirmed above), so lunarFamilyRules.ts's resolver can never match it -- the exact resolver is the ONLY one that can fire for this Tithi, by construction, not merely by precedence order
+OK   C. existing Rikta START tests (section A above) remain green -- family-level precedence for RIKTA is unaffected by the exact-Tithi layer's addition
+OK   D. fixture sanity: griha-pravesh has dedicated (IMPLEMENTED) Tithi coverage
+OK   D. Griha Pravesh + Amavasya + START: existing dedicated TITHI_UNFAVORABLE reason remains (Griha Pravesh's own /^Amavasya$/ avoid pattern), no TITHI_EXACT_CAUTION appears alongside it
+OK   D. Marriage + Amavasya + START: NO Tithi reason at all (Marriage's own dedicated avoid list deliberately does not mention Amavasya -- neutral by omission), and critically NO TITHI_EXACT_CAUTION fills that gap -- dedicated coverage suppresses the overlay outright, even where the dedicated pack itself has nothing to say
+OK   D. this proves the ticket's own constraint directly: Marriage's stance on Amavasya (favorable/neutral/unfavorable) is completely unchanged by L4
+OK   unrelated intent (WORKOUT) + Amavasya date + START: no TITHI_EXACT_CAUTION
+OK   every L4 integration fixture carries AT MOST ONE TITHI-factor reason: new-beginning + Amavasya + START=1, new-beginning + Amavasya + no-phase=1, griha-pravesh + Amavasya + START=1, marriage + Amavasya + START=0
+OK   H. fixture sanity: nonRiktaDate is genuinely non-Rikta
+OK   H1. WITHOUT actionPhase: every swept catalog activity (33 of 42) is byte-identical whether actionPhase is omitted or explicitly undefined (reasons/modifier/muhurtaScore/final score all included via full-object equality)
+OK   H2. WITH CONTINUE/FINISH/PREPARE/REVIEW (Rikta date): every swept catalog activity is byte-identical to its own no-phase baseline -- the lunar overlay never fires for any non-START phase, for any activity
+OK   H3. WITH START on a non-Rikta date: every swept catalog activity is byte-identical to its own no-phase baseline on that date -- the lunar overlay never fires off a mismatched Tithi family, for any activity
+OK   H4. WITH CONTINUE/FINISH/PREPARE/REVIEW (Amavasya date): every swept catalog activity is byte-identical to its own no-phase Amavasya baseline -- the exact-Tithi overlay never fires for any non-START phase either, for any activity
+OK   H5. WITH START on Amavasya, for every catalog activity whose intent is NOT PROJECT_START/BUSINESS_START/JOURNEY_START: byte-identical to its own no-phase Amavasya baseline -- the exact rule never leaks beyond its 3 evidenced intents
+OK   structural: apps/web/lib/dayConstructor.ts does not reference TITHI_FAMILY_CAUTION/lunarFamilyRules/RIKTA_START_CAUTION/TITHI_EXACT_CAUTION/lunarExactTithiRules/AMAVASYA_START_CAUTION
+OK   structural: apps/web/lib/remainingDayRecomposition.ts does not reference TITHI_FAMILY_CAUTION/lunarFamilyRules/RIKTA_START_CAUTION/TITHI_EXACT_CAUTION/lunarExactTithiRules/AMAVASYA_START_CAUTION
+OK   structural: apps/web/lib/db.ts does not reference TITHI_FAMILY_CAUTION/lunarFamilyRules/RIKTA_START_CAUTION/TITHI_EXACT_CAUTION/lunarExactTithiRules/AMAVASYA_START_CAUTION
+OK   structural: apps/web/components/HomeDashboard.tsx does not reference TITHI_FAMILY_CAUTION/lunarFamilyRules/RIKTA_START_CAUTION/TITHI_EXACT_CAUTION/lunarExactTithiRules/AMAVASYA_START_CAUTION
+OK   structural: apps/web/components/ExploreView.tsx does not reference TITHI_FAMILY_CAUTION/lunarFamilyRules/RIKTA_START_CAUTION/TITHI_EXACT_CAUTION/lunarExactTithiRules/AMAVASYA_START_CAUTION
+OK   structural: prisma/schema.prisma does not reference any L3/L4 lunar symbol
+OK   structural: no migration directory's own contents reference any L3/L4 lunar symbol (no new L4 migration -- count-independent, holds regardless of how many unrelated migrations exist)
+OK   structural: lunarTithiContext.ts is untouched (no L3/L4 symbol referenced inside it)
+OK   structural: actionPhase.ts is untouched (still zero imports, still just the bare type)
+OK   I. muhurtaEngine.ts (legacy evaluateMuhurta itself) is untouched -- no L3/L3.2/L4 symbol referenced inside it
+OK   I. usesGenericRulePack's own condition is byte-identical to before L3.2 (never changed)
+OK   I. auraFitEngine.ts still selects the evaluator with the exact same ternary shape (usesGenericRulePack ? evaluateMuhurtaWithRulePack(...) : evaluateMuhurta(...))
+OK   I. no scoring-formula weight/constant changed (0.45/0.20/0.10/0.10/0.10/0.05 blend weights and the 68/1.8/0.24 muhurtaScore constants are all still present, unmodified)
+OK   I. no new MuhurtaIntent was added (still exactly the 24 values L3 already worked from)
+OK   I. LUNAR_FAMILY_RULES still has exactly one rule (no additional lunar rules introduced by L3.2/L4)
+OK   I. no TITHI_FAMILY_SUPPORT anywhere in the repo (L3.2 stays caution-only, matching L3)
+OK   I. LUNAR_EXACT_TITHI_RULES has exactly one rule (no additional exact-Tithi rules introduced by L4)
+OK   I. no TITHI_EXACT_SUPPORT anywhere in the repo (L4 stays caution-only, matching L3)
+OK   I. Griha Pravesh's and Marriage's dedicated Tithi data is byte-for-byte untouched by L4 (their avoid/favorable regex arrays still match exactly what L3/L3.2 already established)
+OK   I. no global MuhurtaEvaluation.provenance fix: the rule-pack path still sets provenance; the legacy evaluateMuhurta() path (including one that received the L3.2 overlay) still leaves it undefined -- per the explicit non-goal, never introduced into a legacy result
+
+ALL MUHURTA RULE PACK CHECKS PASSED
+
+# exit=0 signal=

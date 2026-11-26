@@ -1,13 +1,15 @@
 # AURA-ANDROID-REL-04 — Application Release Readiness
 
-**Date:** 2026-11-26 (R7) · **PR:** #392 · **Branch:** `aura-android-rel04-app-readiness`, cut from `main` `ad49e6a`
+**Date:** 2026-11-26 (R8) · **PR:** #392 · **Branch:** `aura-android-rel04-app-readiness`, cut from `main` `ad49e6a`
 
-**Revision:** **R7** — queue ownership and legacy compatibility. R7 corrects the sole remaining application finding of the R6 independent assessment of final head `8d83f1fd63799ce174a091e212736c1a3897eb57` (§R7). The R6 assessment file was not available locally; R7 works from the ticket's five reproductions, all of which are reproduced against the R6 code head.
+**Revision:** **R8** — logical request lifecycle and legacy simplification (ticket 39224). R8 addresses the four findings of the R7 independent assessment of final head `8e0a2329d2628f5c56080c0c85a7e1a86bc399d4` (mixed-format discard resurrection, premature marker retirement, unrelated foreign marker, held-entry presentation). Release history shows the R1–R7 queue formats were never released; by owner decision their automatic migration is retired (§R8-1). The R7 assessment file was not available locally; R8 works from the ticket's four reproductions, all reproduced against the R7 code head.
 
-- **R7 code commit:** `7cae58a6f7273060433388f6f1c6ddf446f46c4b`.
-- **Evidence:** `docs/android/evidence/rel04-r7-7cae58a/`.
+- **R8 code commit:** `eab072c9b3a41cae7e15d38ee2fd7ceae31989f7`.
+- **Evidence:** `docs/android/evidence/rel04-r8-eab072c/`.
 
-**§R7 supersedes R6 where they differ.** Everything below §R7 is kept as history.
+**§R8 supersedes R7 where they differ.** Everything below §R8 is kept as history.
+
+**Previous revision — R7** (queue ownership and legacy compatibility; code `7cae58a6f7273060433388f6f1c6ddf446f46c4b`, final head `8e0a232`, evidence `docs/android/evidence/rel04-r7-7cae58a/`).
 
 **Previous revision — R6** (ticket 39219). R6 is a targeted correction of the four application findings that the R5 independent assessment reproduced against `0c97d3a406bce24b5ea2490aebb7d1cd2ad66bdc` (code `a3a02b8`). The assessment is at `~/Documents/ChatGPT/Product Onboarding/AURA_ANDROID_REL_04_R5_INDEPENDENT_DISPOSITION_0c97d3a.md`.
 
@@ -24,23 +26,114 @@ R5, R4 and R3 sections are kept as history.
 - `…_INDEPENDENT_EVIDENCE_ASSESSMENT_b323d2a.md`;
 - `…_R4_INDEPENDENT_DISPOSITION_a59a934.md`;
 - `…_R5_INDEPENDENT_DISPOSITION_0c97d3a.md`;
-- the R6 independent assessment of `8d83f1f`.
+- the R6 independent assessment of `8d83f1f`;
+- the R7 independent assessment of `8e0a232`.
 
 **Not done:** no merge, deployment, hosting-setting change, Production access, credential, infrastructure, emulator, physical device, signing or Play Store activity.
 
 ## 1. Verdict
 
-**ALL SUPPORTED QUEUE FORMATS ACCOUNT-ISOLATED — NO DISCARDED ACTIVITY RESURRECTION — READY FOR FINAL FOCUSED INDEPENDENT VERIFICATION.**
+**LOGICAL REQUEST LIFECYCLE VERIFIED — NO DISCARDED ACTIVITY RESURRECTION ACROSS SUPPORTED FORMATS — READY FOR FOCUSED INDEPENDENT VERIFICATION.**
 
 | Disposition | State |
 |---|---|
-| **1. Application implementation** | **Corrected (R7)** for the remaining queue-ownership finding (§R7). It stays OPEN until focused independent verification. All other findings closed by the R6 assessment are unchanged (none reopened). |
+| **1. Application implementation** | **Corrected (R8)** for the four R7-assessment queue findings (§R8). It stays OPEN until focused independent verification. All other closed findings are unchanged (none reopened). |
 | **2. Controlled merge readiness** | **NO-GO**. Still needed: independent verification, owner approval, and deployment-boundary reconfirmation at merge time. PR #392 stays **separate from REL-05**. |
 | **3. Production activation and native acceptance** | **NO-GO / HOLD**, unchanged. The separately gated items are listed in §R5-4: A-1 to A-3, AUTH-01 dependencies, rollout criteria and telemetry, supported-client compatibility, worker rollback, and native plus REL-03 supervised acceptance. |
 
 ---
 
-## R7. Queue ownership across every supported storage format
+## R8. Logical request lifecycle and retirement of unreleased queue formats
+
+### R8-1. Compatibility requirement (release history) and owner decision
+
+**Question.** Which queue storage formats reached real users, so that automatic migration is actually needed?
+
+| Evidence (read-only, 2026-11-26) | Result |
+|---|---|
+| `main` (`3feff03`), the Production deployments `ac46fc3` (dpl_3Sst, live) and `7a9af83` (dpl_EhhkW, rollback target), the tags `v1.0.0` and `v1.1.0`: `git grep` in `apps/` for `offline_habit_queue_v2`, `aura_q3`, `aura_q4`, `aura-offline` | **0 occurrences** in every one. Only the unscoped `offline_habit_queue` is present. |
+| `git log origin/main -S<key>` for each of those keys | no commit on `main` has ever added one |
+| Remote branches containing R1 `d09449b` or R4 `fc6536e` | only `origin/aura-android-rel04-app-readiness` (PR #392, unmerged) |
+| GitHub release `v1.0.0` (the only release) | no build assets; no client build was distributed |
+| Android shell (`apps/web/capacitor.config.ts` on `main`) | remote-URL mode (`server.url` = `CAP_SERVER_URL`): a native client runs the web build it is served, so it can only hold the formats that build writes |
+
+**Conclusion.**
+
+| Format | Origin | Released? |
+|---|---|---|
+| `offline_habit_queue` (unscoped localStorage array) | pre-REL-04 `main`; in every Production build | **Released** |
+| R1 `offline_habit_queue_v2:<owner>` | PR #392 `d09449b` | development only |
+| R2 `aura_q3:<owner>:<crid>` | PR #392 `db8607e` | development only |
+| R3 `aura_q4:<owner>:<crid>:<id>`, marker `aura_q4t:<owner>:<id>` | PR #392 `b323d2a` | development only |
+| R4–R7 IndexedDB `aura-offline` records (random, owner-less, shared and account-scoped ids; `held`) and markers (bare-id, `markerKey`) | PR #392 `fc6536e`…`7cae58a` | development only |
+
+Only development devices and test harnesses can hold the R1–R7 formats. **Owner decision (ticket 39224, 2026-11-26): retire automatic migration of the unreleased R1–R7 formats**, preserving existing data without migration or replay, keeping accurate counts and explicit discard, and keeping the read-only quarantine of the released `offline_habit_queue`.
+
+### R8-2. Logical identity and lifecycle invariant
+
+| | R8 |
+|---|---|
+| **Logical activity** | `(account, clientRequestId)`. Its canonical payload separates an **equivalent** copy (same payload) from a **conflicting** request (different payload). A physical `recordId` names one stored copy only; no lifecycle decision is keyed by it. |
+| **Active record format (one)** | IndexedDB `records` row stamped `fmt: 'r8'`, written only by R8 `enqueueOwned`. |
+| **Decision marker format (one)** | IndexedDB `tombstones` row at `decisionKey(account, clientRequestId)` = `{ ownerUserId, clientRequestId, payload, decision: 'settled' \| 'discarded', at, fmt: 'r8' }`. First decision wins; never replaced, never expires, never pruned. |
+| **Quarantine** | Any record without `fmt: 'r8'` (every R4–R7 record) and every retired localStorage entry of the account (`offline_habit_queue_v2`, `aura_q3`, `aura_q4`) is **paused**: kept in place, never migrated, never sent, never shown as pending. A quarantined copy pauses its **whole** logical request. Pre-R8 markers (`aura_q4t`, bare-id, `markerKey`) stay in place, inert, never read for decisions and never deleted. |
+| **Settle** | One transaction: every **active equivalent** copy of the request is removed and the account's `settled` decision is written. A quarantined record is never settled (it was never sent). |
+| **Discard** (sign-out, confirmed) | One transaction: the confirmed records and every active equivalent copy are removed and the account's `discarded` decision is written (except a request another context is sending right now: kept). Quarantined localStorage entries are removed only if still exactly what was shown; a failed or changed removal leaves them **quarantined** (still never sent). |
+| **Create** | `enqueueOwned` consults the decision first: decided → `settled` (same payload) or `conflict`; a quarantined copy exists → `paused`; a different active payload → `conflict`. `submitActivityLog` sends nothing for any of these. |
+| **Dispatch** | `claimForDispatch` claims only an active record with no decision, no quarantined copy (IndexedDB or localStorage) and no fresh claim. |
+| **Ownership** | every read, settle and discard is bound to one account; another account's record is `foreign` and untouched; a decision applies only to its own account. |
+| **Unreadable** | IndexedDB or localStorage that cannot be inspected → `ok:false` (never "empty", never "nothing paused"); replay stops `unreadable`; sign-out keeps everything (owned unknown). |
+
+**The invariant:** *a logical activity is sent only from an active record; once its account has settled or discarded it, no record, source, cleanup failure, account order or elapsed time can make it active again; and data the account cannot reconcile is preserved, counted and discardable, but never sent.* Cleanup failures cannot invalidate a decision because the decision and the removal of every active copy commit together, and no supported path reads a retired source into the active queue.
+
+**Presentation.** Home reads the pending items and the paused count together (`readOfflineQueueView`). Paused activity is never reconstructed as a "Pending sync" entry; Home shows *"Sync paused — legacy activity could not be safely reconciled. N activity logs for this account are kept on this device but won't be sent automatically. Signing out lets you remove them."* Sign-out counts paused entries in its question ("… N of them are paused legacy activity that won't sync automatically") and in its removal report.
+
+**What R8 removed.** The migrator (`migrateOwnedSources`, `inspectSources`), alias ids (`migratedRecordId`, `legacyMigratedRecordId`), `markerKey`, the foreign-marker `held` rule, `TOMBSTONE_TTL_MS` and every marker pruning path. No schema change (database version 2), no destructive reset, no marker deletion; the released `offline_habit_queue` quarantine behaves exactly as before.
+
+### R8-3. The four R7-assessment findings: before and after
+
+All four are reproduced against the R7 code head `7cae58a` (queue, replay and sign-out vendored in `test/fixtures/rel04-r7-head`, checked against git), with historical data written by the actual R2, R3 and R6 producers. `test/rel04R8LogicalLifecycle.test.ts`:
+
+| Finding | R7 head `7cae58a` (before) | Current (after) |
+|---|---|---|
+| **A** mixed-format discard resurrection: R3 random-id IndexedDB record (written by the R6 migrator) + equivalent same-account `aura_q3` source, cleanup failing, successful sign-out discard | the record is discarded, then **recreated from `aura_q3` and replayed: 1 server row** | nothing recreated, nothing replayed, **0 server rows**; the uncleaned source stays quarantined |
+| **B** premature marker retirement: A discarded under R6, B's discard replaced the marker, 45 days, B reads first | B's read **retires the marker**; A migrates and **replays its discarded activity: 1 server row** (and the outcome depends on which account reads first) | no read retires anything (marker count unchanged) in **either** order; **0 server rows** |
+| **C** unrelated foreign marker: B's valid entry, A has a matching historical marker | B's entry is **held** only because of A's marker (not held without it) | A's markers have **no effect** on B (identical state with and without them). B's historical entry is paused because its format is retired (ticket 39224), and B's current activity with the same request id and payload is stored and sent. |
+| **D** held-entry presentation | the held entry is presented as a **"Pending sync"** entry though it is never replayed; Home has no paused status | never a pending entry; Home shows **"Sync paused — legacy activity could not be safely reconciled."** with the count (also verified in real Chromium on the production build, N4); sign-out asks about it as paused and reports its removal |
+
+**Lifecycle matrix on the current code (L1–L12):** six equivalent copies of one request (3 historical IndexedDB ids — random, account-scoped, owner-less — plus R1/R2/R3 localStorage) = one paused request, removed together at sign-out with one decision, never re-enterable; settlement removes every active equivalent copy; both account orders with identical ids and payloads in every format; decisions survive 400 days of reads by both accounts; interrupted (IndexedDB write failure) and repeated discards; distinct requests, conflicting payloads and conflicting re-enqueues; unrelated foreign markers; denied localStorage and unavailable IndexedDB; the sign-out question and report; every supported entry point (enqueue, submit, claim, settle, replay) refusing retired data; the released legacy array untouched. **Every discarded activity in the suite has 0 server rows.**
+
+**Earlier checks re-expressed for the retired formats** (their protections kept, their migration premise removed): R3 Q3/Q6/Q7, R4 M1/M2, R5 T1/T2/T3, R6 Q1/Q2 (the R5-head reproductions are unchanged), the reload-visibility seeding (active records), Chromium CH8. `test/rel04R7QueueOwnership.test.ts` is kept as the historical record of R7 (R6 head vs vendored R7 head, 38/38).
+
+### R8-4. Evidence
+
+**Evidence at code commit `eab072c`** (`docs/android/evidence/rel04-r8-eab072c/`; manifests and checksums in its README):
+
+| Run | Result |
+|---|---|
+| `rel04R8LogicalLifecycle` | **43/43**: 6 fixture-provenance checks; findings A–D reproduced on the R7 head (A 2, B 3, C 2, D 2 checks, all showing the defect) and corrected; L1–L12 (log sha256 `2b9a8b8c…6aed`) |
+| `math-core-tests`, every `npx ts-node` command | **249/249** (manifest sha256 `19c19e15…1aab`) |
+| Day Constructor DB suites (fresh isolated Postgres 16, 54 migrations) | **76/76** |
+| Chromium multi-tab (incl. re-expressed CH8, CH15) | **29/29** |
+| Real Next.js app rendering (incl. **N4**: "Sync paused" in real Chromium, never "Pending sync", no send) | **14/14** (DB and browser manifest sha256 `d9c944b7…6496`) |
+| `prisma generate`, web `tsc`, root `tsc` | exit 0, exit 0, exit 0 (log sha256 `62fb6570…5420`) |
+| CI run 45804709468 on `eab072c` (PR merge ref, `main` `3feff03`) | **8/9 success.** `REL-04 Chromium multi-tab tests` failed on ONE check: the **historical** CH15 reproduction of the R5-head worker did not reproduce its own timing race on the runner (`reloaded:false`); the CH15 correction check on the current worker passed in the same job. R8 changes no worker code or fixture; the suite passes 29/29 locally. Not rerun. The report head's own CI run is recorded in the PR. |
+
+Closed findings re-run: R6 findings suite 22/22 (unreadable storage, worker acknowledgement and reload reservation, Plan Day authentication), sign-out, account isolation (50/50), authentication coordination and replay suites, reload visibility and replay reconciliation; all pass in the sweep.
+
+### R8-5. Remaining limitations
+
+- **Development data is paused, not recovered.** Any R1–R7 data on a development device is kept, counted and discardable, but no longer sent; there is no "send anyway" (none required). Released clients never wrote these formats.
+- **Decisions are kept indefinitely.** One small row per settled or discarded request. No retirement rule is used because no positive retirement evidence exists (a stale tab could still re-enqueue a `clientRequestId`); bounding this is an activation-time decision.
+- **Mixed versions.** A tab still running a pre-R8 build of this branch can still migrate retired formats until it reloads (development builds only; part of the gated rollout, §R5-4).
+- **Not device evidence:** jsdom with fake-indexeddb, real Chromium and the real Next.js production build; not WebView or WKWebView acceptance.
+- The R6 (§R6-3) limitations are unchanged; the R7 held-entry and alias limitations (§R7-4) no longer apply.
+
+---
+
+## R7. Queue ownership across every supported storage format (R7 round, historical)
+
+> R8 retired automatic migration of these formats (§R8-1); the R7 mechanism below (aliases, `markerKey`, held) no longer exists in the code. Kept as history.
 
 ### R7-1. Finding, root cause, correction
 
@@ -735,7 +828,20 @@ RC-1…RC-8 as in R2, and RC-1 now also requires the activation plan (§R6.2).
 
 ## 13. Independent verification request
 
-### R7: final focused verification (queue ownership only)
+### R8: focused verification (logical request lifecycle only)
+
+**Scope:** `8e0a232..<R8 final head>`. Code: `apps/web/lib/offlineHabitQueue.ts`, the `settled`/`paused` handling in `activitySync.ts`, the quarantine discard and paused wording in `signOut.ts`, and the paused status in `apps/web/app/page.tsx`. Tests: `test/rel04R8LogicalLifecycle.test.ts`, `test/fixtures/rel04-r7-head`, the re-expressed checks listed in §R8-3, and N4 in `test/rel04R5NextAppRendering.test.ts`.
+
+**Questions:**
+1. Is the compatibility decision supported by the release history in §R8-1 (no R1–R7 format on `main`, in Production or in a distributed client)?
+2. Is there any supported path by which a retired-format record or localStorage entry can enter the active queue or be sent?
+3. Can a settled or discarded logical activity be recreated or replayed after a cleanup failure, an interrupted or repeated operation, either account order, or elapsed time?
+4. Do settlement and discard apply to every active equivalent copy, and are conflicting payloads preserved and never sent?
+5. Is paused activity presented truthfully (never "Pending sync"), counted accurately per account, and discardable by its own account only?
+
+**Not in scope:** findings already closed, activation, native acceptance, REL-05.
+
+### R7: final focused verification (queue ownership only) — historical
 
 **Scope:** `8d83f1f..<R7 final head>`. Code: `apps/web/lib/offlineHabitQueue.ts`, plus the owner arguments in `activitySync.ts` and `signOut.ts`. Tests: `test/rel04R7QueueOwnership.test.ts` and `test/fixtures/rel04-r6-head`.
 
