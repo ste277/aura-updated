@@ -985,6 +985,10 @@ jobs:
         env:
           TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
         run: npx ts-node --project tsconfig.jsdom-tests.json test/rel04R8LogicalLifecycle.test.ts
+      - name: Run REL-04 R9 lifecycle enforcement test (R8-assessment witnesses on eab072c vs current)
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/rel04R9LifecycleEnforcement.test.ts
       - name: Run REL-04 R3-head (b323d2a) reproduction test
         env:
           TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'

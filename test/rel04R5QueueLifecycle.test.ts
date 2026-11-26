@@ -79,10 +79,11 @@ async function main() {
     const t = await tabAs(dev, 't2');
     const shown = await t.q.readOwnedQueue(A);
     storage.data.set(key, changed); // another writer changes it after it was shown for the confirmation
-    const d = t.q.discardQuarantined(A, shown.ok ? shown.quarantined : []);
-    check('T2 (R8) a quarantined source that changed after it was shown is NOT removed (uncertain: preserved) and reported as kept', d.removed === 0 && d.failed === 1 && storage.data.get(key) === changed);
+    const d = await t.q.discardQuarantined(A, shown.ok ? shown.quarantined : []);
+    // R9: the shown request (crid-t2) is durably discarded FIRST; the changed source is then not removed.
+    check('T2 (R8/R9) a quarantined source that changed after it was shown is NOT removed (uncertain: preserved); the shown request is durably discarded and reported as not yet cleaned up', d.removed === 0 && d.cleanupPending === 1 && storage.data.get(key) === changed);
     const r = await t.q.readOwnedQueue(A);
-    check('T2 (R8) it stays quarantined: counted as paused, never in the active queue', r.ok && r.records.length === 0 && r.items.length === 0 && r.paused === 1);
+    check('T2 (R8/R9) it stays quarantined: counted as paused (its key request crid-t2 and its new content crid-t2b), never in the active queue', r.ok && r.records.length === 0 && r.items.length === 0 && r.paused === 2);
   }
 
   // ---------------------------------------------------------------- T3 one claim per logical request

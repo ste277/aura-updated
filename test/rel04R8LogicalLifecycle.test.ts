@@ -290,7 +290,7 @@ async function main() {
     check('L1 six equivalent copies of ONE logical request (3 historical IndexedDB ids: random, account-scoped, owner-less; R1/R2/R3 localStorage) = ONE paused request; never pending; repeated reads identical', reads.every((r: any) => r.ok && r.paused === 1 && r.items.length === 0 && r.records.length === 3 && r.quarantined.length === 3) && rp.attempted === 0 && rowsOf(A, crid) === 0);
     const so = await signOut(s);
     const dump = await queueDump();
-    check('L2 the sign-out discard removes every copy (3 records + 3 localStorage entries) and records ONE decision for the logical request', so.out.owned?.removed === 6 && dump.records.length === 0 && dump.tombstones.filter((t: any) => t.clientRequestId === crid).length === 1 && lsKeys(`aura_q`).length === 0 && !storage.data.has(`offline_habit_queue_v2:${A}`));
+    check('L2 the sign-out discard removes every copy (3 records + 3 localStorage entries) and records ONE decision for the logical request (R9: reported as ONE logical activity)', so.out.owned?.removed === 1 && dump.records.length === 0 && dump.tombstones.filter((t: any) => t.clientRequestId === crid).length === 1 && lsKeys(`aura_q`).length === 0 && !storage.data.has(`offline_habit_queue_v2:${A}`));
     const s2 = await asAccount(CUR, A);
     const posts0 = dev.count('POST', '/api/habit-logs');
     const again = await s2.q.enqueueOwned(x);
@@ -331,12 +331,13 @@ async function main() {
       const before = await s.q.readOwnedQueue(o);
       const sub = await s.sync.submitActivityLog(payload('fresh activity', `live-${o}`), 't', dev.fetch as any);
       const so = await signOut(s);
-      results[o] = { paused: before.ok ? before.paused : -1, live: sub.kind, removed: so.out.owned?.removed, failed: so.out.owned?.failed };
+      results[o] = { paused: before.ok ? before.paused : -1, live: sub.kind, removed: so.out.owned?.removed, failed: so.out.owned?.failed, cleanupPending: so.out.owned?.cleanupPending };
     }
     storage.fail.remove = false;
     for (const o of order) { const s = await asAccount(CUR, o); await s.sync.replayOfflineQueue(dev.fetch as any); await signOut(s); }
-    const ok = [A, B].every((o) => results[o].paused === 2 && results[o].live === 'confirmed' && results[o].removed === 0 && results[o].failed === 2 && rowsOf(o, crid) === 0 && rowsOf(o, 'v2-' + crid) === 0 && rowsOf(o, `live-${o}`) === 1);
-    check(`L4 ${order[0] === A ? 'A then B' : 'B then A'}: each account sees only its own 2 paused entries, its own live activity is sent once, its failed discard keeps its entries; nothing of either account is ever replayed`, ok && lsKeys(`aura_q3:${A}:`).length === 0 && lsKeys(`aura_q3:${B}:`).length === 0);
+    // R9: the discard decision is durable before cleanup, so a failing cleanup reports cleanupPending (never "removed", never "failed").
+    const ok = [A, B].every((o) => results[o].paused === 2 && results[o].live === 'confirmed' && results[o].removed === 0 && results[o].failed === 0 && results[o].cleanupPending === 2 && rowsOf(o, crid) === 0 && rowsOf(o, 'v2-' + crid) === 0 && rowsOf(o, `live-${o}`) === 1);
+    check(`L4 ${order[0] === A ? 'A then B' : 'B then A'}: each account sees only its own 2 paused entries, its own live activity is sent once, its discard is durable though cleanup fails (copies kept, reported cleanup-pending); nothing of either account is ever replayed`, ok && lsKeys(`aura_q3:${A}:`).length === 0 && lsKeys(`aura_q3:${B}:`).length === 0);
   }
   // L5 marker retirement: covered by B in both orders; plus: decisions are never pruned by any read
   {
@@ -365,8 +366,8 @@ async function main() {
     const d2 = await s.q.discardRecords(snap.ok ? snap.records.map((r: any) => r.recordId) : [], { tab: 't', owner: A });
     const d3 = await s.q.discardRecords(snap.ok ? snap.records.map((r: any) => r.recordId) : [], { tab: 't', owner: A });
     check('L6 repeating the discard completes it once (then alreadyGone); the decision is written once', d2.removed === 1 && d3.alreadyGone === 1 && (await queueDump()).tombstones.length === 1);
-    const q1 = s.q.discardQuarantined(A, after.ok ? after.quarantined : []);
-    const q2 = s.q.discardQuarantined(A, after.ok ? after.quarantined : []);
+    const q1 = await s.q.discardQuarantined(A, after.ok ? after.quarantined : []);
+    const q2 = await s.q.discardQuarantined(A, after.ok ? after.quarantined : []);
     check('L6 repeating a quarantine discard is safe (removed once, then nothing left to remove)', q1.removed === 1 && q2.removed === 1 && lsKeys(`aura_q3:${A}:`).length === 0);
   }
   // L7 distinct requests and conflicting payloads

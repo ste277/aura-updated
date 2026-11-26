@@ -90,10 +90,16 @@ function isQueuedHabitLog(value: unknown): value is QueuedHabitLog {
  *   release    an unresolved attempt releases ONLY its own claim (token).
  *   settle     a definitive server answer removes EVERY active equivalent copy of the request and writes the
  *              account's decision, in one transaction; the claim is cleared only if still this attempt's.
- *   discard    the account's confirmed discard removes the records (and every active equivalent copy of
- *              their request) and writes the decision, in one transaction, EXCEPT a request another context
- *              is sending right now (kept, reported). Quarantined localStorage entries of the account are
- *              removed only if unchanged since they were shown; a failed removal leaves them quarantined.
+ *   discard    (R9) the account's confirmed discard (discardOwned) is by LOGICAL activity: ONE transaction records
+ *              the 'discarded' decision of every activity it was shown -- including one that exists only in a
+ *              retired localStorage entry -- and removes every IndexedDB copy, EXCEPT a request another context
+ *              is sending right now (kept, reported). Only after that transaction committed are the retired
+ *              localStorage entries removed (each only if unchanged). A failed or unknown transaction removes
+ *              nothing; a failed removal after the commit leaves an entry that is permanently ineligible.
+ *   boundary   (R9) the ONLY way to transmit is a claim on an eligible active record (enqueueOwned with claimFor,
+ *              or claimForDispatch). Eligible = readable IndexedDB and retired sources, no decision, no
+ *              quarantined copy (a retired entry's request id is read from its key), no unidentifiable retired
+ *              entry of the account. Otherwise the write reports 'unavailable'/'failed' and nothing is sent.
  *   ownership  every read, settle and discard is bound to one account; another account's record is never
  *              touched; a decision applies only to its own account.
  *   failures   any IndexedDB or localStorage inspection failure => reads report `ok:false` (unreadable, never
@@ -130,10 +136,12 @@ export interface QueueRecord {
 
 /**
  * R8: one account's retired-format localStorage entry, exactly as read (discard removes it only if
- * unchanged). `crids` = the logical requests it carries when parseable; `unparsed` = entries whose
- * request cannot be read (each counted on its own).
+ * unchanged). `crids` = the logical requests it carries (R9: an aura_q3/aura_q4 entry's request id is
+ * also read from its KEY, so it is known even when the value cannot be parsed); `unparsed` = entries
+ * whose request cannot be identified at all (only an unparseable v2 array; each counted on its own).
+ * `payloads` = crid -> canonical payload where the value parses.
  */
-export interface QuarantinedSource { key: string; raw: string; entries: number; crids: string[]; unparsed: number }
+export interface QuarantinedSource { key: string; raw: string; entries: number; crids: string[]; unparsed: number; payloads?: Record<string, string> }
 
 export type QueueRead =
   | {
@@ -150,8 +158,14 @@ export type QueueRead =
       corruptIds: string[];
       /** R8: the account's retired-format localStorage entries (kept in place, never migrated). */
       quarantined: QuarantinedSource[];
-      /** R8: activity kept on this device that will NOT sync automatically ("sync paused"). */
+      /** R8: activity kept on this device that will NOT sync automatically ("sync paused"), per LOGICAL activity. */
       paused: number;
+      /** R9: logical activities pending automatic sync (= items.length). */
+      pending: number;
+      /** R9: every logical activity of the account on this device (pending + paused): Home and sign-out count this. */
+      total: number;
+      /** R9: of `total`: logical activities already handed to the network at least once. */
+      dispatched: number;
     }
   | { ok: false };
 
@@ -191,7 +205,8 @@ export interface ClaimToken { readonly key: string; readonly attempt: string }
 type Stored = { recordId: string; ownerUserId: string; clientRequestId: string; item: OwnedQueuedHabitLog; queuedAt: number; fmt?: string };
 type Claim = { key: string; ownerUserId: string; clientRequestId: string; tab: string; attempt: string; at: number };
 type Dispatch = { key: string; attempts: number; lastAt: number };
-type Decision = { recordId: string; ownerUserId: string; clientRequestId: string; payload: string; decision: 'settled' | 'discarded'; at: number; fmt: typeof ACTIVE_RECORD_FORMAT };
+/** `payload` null: the request was discarded from a retired entry whose payload could not be read (any payload is refused). */
+type Decision = { recordId: string; ownerUserId: string; clientRequestId: string; payload: string | null; decision: 'settled' | 'discarded'; at: number; fmt: typeof ACTIVE_RECORD_FORMAT };
 type Stores = Record<'records' | 'claims' | 'dispatches' | 'tombstones', IDBObjectStore>;
 const STORES = ['records', 'claims', 'dispatches', 'tombstones'] as const;
 
@@ -315,7 +330,7 @@ async function activeCopies(st: Stores, owner: string, crid: string, payload: st
 }
 
 /** Records `owner`'s final decision about the logical request (first decision wins; it is never replaced). */
-async function writeDecision(st: Stores, owner: string, crid: string, payload: string, decision: Decision['decision'], at: number) {
+async function writeDecision(st: Stores, owner: string, crid: string, payload: string | null, decision: Decision['decision'], at: number) {
   const key = decisionKey(owner, crid);
   if ((await asPromise(st.tombstones.get(key))) as Decision | undefined) return;
   await asPromise(st.tombstones.put({ recordId: key, ownerUserId: owner, clientRequestId: crid, payload, decision, at, fmt: ACTIVE_RECORD_FORMAT } satisfies Decision));
@@ -329,7 +344,12 @@ async function writeDecision(st: Stores, owner: string, crid: string, payload: s
  * the account named in the key (and, when the value parses, in the entry).
  * R3 localStorage markers (aura_q4t) are not activity: not counted, left in place.
  */
-type Quarantine = { state: 'unavailable' } | { state: 'ok'; sources: QuarantinedSource[]; crids: Set<string> };
+/**
+ * `opaque` (R9): some retired entry of the account carries requests that cannot be identified (an
+ * unparseable v2 array). Eligibility of ANY request of the account then cannot be established: nothing
+ * of the account is transmitted until that entry is discarded.
+ */
+type Quarantine = { state: 'unavailable' } | { state: 'ok'; sources: QuarantinedSource[]; crids: Set<string>; opaque: boolean };
 function inspectQuarantine(owner: string): Quarantine {
   let s: Storage;
   try {
@@ -347,19 +367,28 @@ function inspectQuarantine(owner: string): Quarantine {
       const a = parse(v2);
       const list = Array.isArray(a) ? a : [undefined]; // unparseable: one kept entry
       const crids = list.map(cridOf).filter((c): c is string => c !== null);
-      if (list.length > 0) sources.push({ key: QUEUE_V2_PREFIX + owner, raw: v2, entries: list.length, crids, unparsed: list.length - crids.length });
+      const payloads: Record<string, string> = {};
+      for (const v of list) if (isQueuedHabitLog(v)) payloads[v.clientRequestId] = canonicalPayload(v);
+      if (list.length > 0) sources.push({ key: QUEUE_V2_PREFIX + owner, raw: v2, entries: list.length, crids: [...new Set(crids)], unparsed: list.length - crids.length, payloads });
     }
     for (const prefix of [QUEUE_V3_PREFIX, QUEUE_V4_PREFIX]) {
-      for (const key of keysWithPrefix(s, `${prefix}${owner}:`)) {
+      const head = `${prefix}${owner}:`;
+      for (const key of keysWithPrefix(s, head)) {
         const raw = s.getItem(key);
         if (raw === null) continue;
         const v = parse(raw);
         if (v && typeof v === 'object' && typeof (v as { ownerUserId?: unknown }).ownerUserId === 'string' && (v as { ownerUserId: string }).ownerUserId !== owner) continue; // another account's (an owner id extending this one)
+        // R9: the request id is part of the key (aura_q3:<owner>:<crid>, aura_q4:<owner>:<crid>:<recordId>).
+        const rest = key.slice(head.length);
+        const fromKey = prefix === QUEUE_V4_PREFIX && rest.lastIndexOf(':') > 0 ? rest.slice(0, rest.lastIndexOf(':')) : rest;
         const c = cridOf(v);
-        sources.push({ key, raw, entries: 1, crids: c ? [c] : [], unparsed: c ? 0 : 1 });
+        const crids = [...new Set([fromKey, ...(c ? [c] : [])].filter((x) => x.length > 0))];
+        const payloads: Record<string, string> = {};
+        if (c && isQueuedHabitLog(v)) payloads[c] = canonicalPayload(v);
+        sources.push({ key, raw, entries: 1, crids, unparsed: crids.length ? 0 : 1, payloads });
       }
     }
-    return { state: 'ok', sources, crids: new Set(sources.flatMap((x) => x.crids)) };
+    return { state: 'ok', sources, crids: new Set(sources.flatMap((x) => x.crids)), opaque: sources.some((x) => x.unparsed > 0) };
   } catch {
     return { state: 'unavailable' };
   }
@@ -402,13 +431,15 @@ export async function readOwnedQueue(ownerUserId: string): Promise<QueueRead> {
     const conflicts: string[] = [];
     const pausedRequests = new Set<string>(q.crids);
     for (const [crid, rs] of byCrid) {
-      if (rs.some((r) => r.paused) || q.crids.has(crid)) { pausedRequests.add(crid); for (const r of rs) r.paused = true; }
+      // R9: an opaque retired entry means no request of the account can be shown eligible.
+      if (rs.some((r) => r.paused) || q.crids.has(crid) || q.opaque) { pausedRequests.add(crid); for (const r of rs) r.paused = true; }
       else if (new Set(rs.map((r) => canonicalPayload(r.item))).size > 1) conflicts.push(crid);
       else groups.push(rs);
     }
     // Counted per logical request (an entry with an unreadable request counts on its own).
     const paused = pausedRequests.size + conflicts.length + corruptIds.length + q.sources.reduce((n, x) => n + x.unparsed, 0);
-    return { ok: true, items: groups.map((g) => g[0].item), records, groups, conflicts, corruptIds, quarantined: q.sources, paused };
+    const dispatched = new Set(records.filter((r) => r.dispatched).map((r) => r.item.clientRequestId)).size;
+    return { ok: true, items: groups.map((g) => g[0].item), records, groups, conflicts, corruptIds, quarantined: q.sources, paused, pending: groups.length, total: groups.length + paused, dispatched };
   } catch {
     return { ok: false };
   }
@@ -440,6 +471,8 @@ export type EnqueueResult =
   | { status: 'settled' }
   /** R8: a quarantined (retired-format) copy of this request exists: never adopted, never sent. */
   | { status: 'paused' }
+  /** R9: eligibility cannot be established (localStorage unreadable, or an unidentifiable retired entry): not stored, NOT to be sent. */
+  | { status: 'unavailable' }
   | { status: 'conflict' }
   | { status: 'failed' };
 
@@ -463,11 +496,15 @@ export async function enqueueOwned(item: OwnedQueuedHabitLog, { claimFor }: { cl
     const now = Date.now();
     const owner = item.ownerUserId;
     const mine = canonicalPayload(item);
+    // R9: the retired sources are inspected BEFORE the transaction. A discard writes its decision and only then
+    // removes a source, so either this inspection still sees the source (paused) or the decision is already
+    // committed and the transaction below sees it (settled): no interleaving admits a discarded request.
     const q = inspectQuarantine(owner);
+    if (q.state !== 'ok' || q.opaque) return { status: 'unavailable' };
     return await tx('readwrite', async (st) => {
       const decided = (await asPromise(st.tombstones.get(decisionKey(owner, item.clientRequestId)))) as Decision | undefined;
-      if (decided) return decided.payload === mine ? ({ status: 'settled' } as const) : ({ status: 'conflict' } as const);
-      if (q.state === 'ok' && q.crids.has(item.clientRequestId)) return { status: 'paused' } as const; // a quarantined localStorage copy
+      if (decided) return decided.payload === null || decided.payload === mine ? ({ status: 'settled' } as const) : ({ status: 'conflict' } as const);
+      if (q.crids.has(item.clientRequestId)) return { status: 'paused' } as const; // a quarantined localStorage copy
       const same = (await asPromise(st.records.index('ownerCrid').getAll(IDBKeyRange.only([owner, item.clientRequestId])))) as Stored[];
       if (same.some((r) => !isActive(r))) return { status: 'paused' } as const;
       if (same.some((r) => !isQueuedHabitLog(r.item) || canonicalPayload(r.item) !== mine)) return { status: 'conflict' } as const;
@@ -503,7 +540,7 @@ export async function claimForDispatch(recordId: string, tab: string): Promise<C
       if (!isActive(rec)) return { status: 'paused' } as const; // R8: quarantined -- never sent
       const q = inspectQuarantine(rec.ownerUserId);
       if (q.state !== 'ok') return { status: 'failed' } as const; // the request's quarantine state is unknown: never send
-      if (q.crids.has(rec.clientRequestId)) return { status: 'paused' } as const;
+      if (q.crids.has(rec.clientRequestId) || q.opaque) return { status: 'paused' } as const;
       const siblings = (await asPromise(st.records.index('ownerCrid').getAll(IDBKeyRange.only([rec.ownerUserId, rec.clientRequestId])))) as Stored[];
       if (siblings.some((r) => !isActive(r))) return { status: 'paused' } as const; // a quarantined copy pauses the whole request
       if ((await asPromise(st.tombstones.get(decisionKey(rec.ownerUserId, rec.clientRequestId)))) as Decision | undefined) return { status: 'gone' } as const;
@@ -643,26 +680,116 @@ export async function discardRecords(recordIds: Iterable<string>, { tab, owner }
   }
 }
 
+/** R9: what one logical discard did, per LOGICAL activity (account + clientRequestId; an unidentifiable entry counts on its own). */
+export interface LogicalDiscardResult {
+  /** Discarded (decision recorded) AND every copy removed from this device. Includes `removedPossiblySent`. */
+  removed: number;
+  /** Of `removed` + `cleanupPending`: already handed to the network -- it may have been sent and saved. */
+  removedPossiblySent: number;
+  /** Discarded (decision recorded, never sent again) but a retired copy could not be deleted from this device's storage. */
+  cleanupPending: number;
+  /** Another context was sending it at that moment: kept, nothing decided. */
+  keptInFlight: number;
+  /** The discard could not be recorded (storage failure or unknown outcome): kept exactly as before, nothing removed. */
+  failed: number;
+  alreadyGone: number;
+}
+
+export interface DiscardSnapshot { records: Array<{ recordId: string; item: { clientRequestId: string } }>; corruptIds: string[]; quarantined: QuarantinedSource[] }
+
 /**
- * R8 -- the account's CONFIRMED discard of exactly these quarantined
- * localStorage entries (as read for the confirmation). An entry is removed only
- * if it is still exactly what was shown; a changed entry or a failed removal is
- * kept (and stays quarantined: it can never be sent).
+ * R9 -- the account's CONFIRMED discard of exactly the activity it was shown (sign-out), by LOGICAL identity.
+ *
+ *   1. ONE IndexedDB transaction records the 'discarded' decision of every logical activity of the
+ *      snapshot -- including those that exist ONLY in a retired localStorage entry -- and removes every
+ *      IndexedDB copy of it (a request another context is sending right now is kept, undecided).
+ *   2. Only after that transaction COMMITTED are the retired localStorage entries removed (each only if
+ *      still exactly what was shown). If the transaction fails or its outcome is unknown, nothing is
+ *      removed. If a removal fails after the commit, the surviving entry is permanently ineligible (its
+ *      decision exists) and is reported as `cleanupPending`.
  */
-export function discardQuarantined(owner: string, sources: QuarantinedSource[]): { removed: number; failed: number } {
-  const out = { removed: 0, failed: 0 };
+export async function discardOwned(owner: string, snap: DiscardSnapshot, { tab }: { tab: string }): Promise<LogicalDiscardResult> {
+  const out: LogicalDiscardResult = { removed: 0, removedPossiblySent: 0, cleanupPending: 0, keptInFlight: 0, failed: 0, alreadyGone: 0 };
+  const own = (key: string) => QUARANTINED_PREFIXES.some((p) => key === `${p}${owner}` || key.startsWith(`${p}${owner}:`));
+  const sources = snap.quarantined.filter((x) => own(x.key));
+  const sourceCrids = new Set(sources.flatMap((x) => x.crids));
+  const snapCrids = new Set([...snap.records.map((r) => r.item.clientRequestId), ...sourceCrids]);
+  const opaqueUnits = sources.reduce((n, x) => n + x.unparsed, 0);
+  let committed: { decided: Set<string>; possiblySent: Set<string>; units: number } | null = null;
+  try {
+    const now = Date.now();
+    committed = await tx('readwrite', async (st) => {
+      const decided = new Set<string>();
+      const possiblySent = new Set<string>();
+      const payloadOf = new Map<string, string | null>();
+      let units = 0;
+      // Unreadable records of the snapshot: each its own unit, removed (it has no readable request to decide).
+      for (const id of snap.corruptIds) {
+        const rec = (await asPromise(st.records.get(id))) as Stored | undefined;
+        if (!rec || rec.ownerUserId !== owner) { out.alreadyGone++; continue; }
+        await asPromise(st.records.delete(id));
+        units++; out.removed++;
+      }
+      // The logical activities of the snapshot: from its records and from its retired entries.
+      const crids = snapCrids;
+      for (const src of sources) for (const c of src.crids) if (src.payloads?.[c] && !payloadOf.has(c)) payloadOf.set(c, src.payloads[c]);
+      for (const crid of crids) {
+        const key = requestKey(owner, crid);
+        const all = (await asPromise(st.records.index('ownerCrid').getAll(IDBKeyRange.only([owner, crid])))) as Stored[];
+        const c = (await asPromise(st.claims.get(key))) as Claim | undefined;
+        if (all.some(isActive) && fresh(c, now) && c!.tab !== tab) { out.keptInFlight++; continue; }
+        if (all.length === 0 && !sourceCrids.has(crid)) { out.alreadyGone++; continue; }
+        for (const r of all) if (isQueuedHabitLog(r.item) && !payloadOf.has(crid)) payloadOf.set(crid, canonicalPayload(r.item));
+        if (await asPromise(st.dispatches.get(key))) possiblySent.add(crid);
+        for (const r of all) await asPromise(st.records.delete(r.recordId));
+        await writeDecision(st, owner, crid, payloadOf.get(crid) ?? null, 'discarded', now);
+        await asPromise(st.dispatches.delete(key));
+        await asPromise(st.claims.delete(key));
+        decided.add(crid);
+        units++;
+      }
+      return { decided, possiblySent, units };
+    });
+  } catch {
+    committed = null;
+  }
+  if (!committed) {
+    // Nothing was recorded or removed (the transaction is atomic): every logical activity is kept as it was.
+    out.removed = 0;
+    out.keptInFlight = 0;
+    out.failed = snapCrids.size + snap.corruptIds.length + opaqueUnits;
+    out.alreadyGone = 0;
+    return out;
+  }
+  // Committed: now, and only now, remove the retired entries whose every request is decided.
+  const pendingCleanup = new Set<string>();
+  let opaqueRemoved = 0;
   const s = storageOrNull();
   for (const src of sources) {
-    const own = QUARANTINED_PREFIXES.some((p) => src.key === `${p}${owner}` || src.key.startsWith(`${p}${owner}:`));
-    if (!own || !s) { out.failed += src.entries; continue; }
-    try {
-      if (s.getItem(src.key) === src.raw) s.removeItem(src.key);
-      if (s.getItem(src.key) === null) out.removed += src.entries; else out.failed += src.entries;
-    } catch {
-      out.failed += src.entries;
+    if (!src.crids.every((c) => committed!.decided.has(c))) { // a request of it was kept (in flight): leave the entry
+      for (const c of src.crids) pendingCleanup.add(c);
+      out.failed += src.unparsed;
+      continue;
     }
+    let gone = false;
+    try {
+      if (s && s.getItem(src.key) === src.raw) s.removeItem(src.key);
+      gone = Boolean(s) && s!.getItem(src.key) === null;
+    } catch { gone = false; }
+    if (gone) opaqueRemoved += src.unparsed;
+    else { for (const c of src.crids) pendingCleanup.add(c); out.failed += src.unparsed; }
   }
+  for (const crid of committed.decided) {
+    if (pendingCleanup.has(crid)) out.cleanupPending++; else out.removed++;
+    if (committed.possiblySent.has(crid)) out.removedPossiblySent++;
+  }
+  out.removed += opaqueRemoved;
   return out;
+}
+
+/** R9: the durable discard of the account's quarantined localStorage entries alone (decision first, then cleanup). */
+export async function discardQuarantined(owner: string, sources: QuarantinedSource[]): Promise<LogicalDiscardResult> {
+  return discardOwned(owner, { records: [], corruptIds: [], quarantined: sources }, { tab: 'discard-quarantined' });
 }
 
 // ------------------------------------------------------------------ legacy quarantine (read-only)

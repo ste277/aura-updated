@@ -212,7 +212,7 @@ async function main() {
     const read = await t1.q.readOwnedQueue(A);
     const rp = await t1.sync.replayOfflineQueue(dev.fetch as any);
     idbFault.open = false;
-    check('F1 with IndexedDB unavailable an unresolved write is reported NOT STORED (never "queued")', r.kind === 'not-stored');
+    check('F1 with IndexedDB unavailable a write is reported NOT STORED (never "queued") and, R9, is NOT SENT (storage-unavailable; no direct-network fallback)', r.kind === 'storage-unavailable' && dev.count('POST', '/api/habit-logs') === 0);
     check('F1 nothing silently falls back to localStorage or memory', lsQueueKeys().length === 0 && (await queuedCrids(A)).length === 0);
     check('F1 reads are UNREADABLE (not empty) and replay sends nothing', read.ok === false && rp.stoppedBecause === 'unreadable');
   }

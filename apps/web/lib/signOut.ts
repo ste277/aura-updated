@@ -51,7 +51,7 @@ import {
   settleActivityOperations,
   withAuthLock,
 } from './accountSession';
-import { discardQuarantined, discardRecords, readLegacySnapshot, readOwnedQueue } from './offlineHabitQueue';
+import { discardOwned, readLegacySnapshot, readOwnedQueue } from './offlineHabitQueue';
 
 export type SignOutOutcome =
   | 'signed-out'
@@ -80,6 +80,8 @@ export interface OwnedDiscardReport {
   keptInFlight: number;
   /** Could not be removed (storage failure): still stored for that account. */
   failed: number;
+  /** R9: discarded (will never be sent) but a copy could not be deleted from this device's storage. */
+  cleanupPending?: number;
 }
 
 export interface SignOutDeps {
@@ -140,6 +142,8 @@ export function discardOutcomeMessage(r: SignOutResult): string | null {
         if (o.failed > 0) why.push(`${o.failed} couldn't be removed because of a storage error`);
         parts.push(`${plural(kept, '1 activity log was', '# activity logs were')} kept on this device for this account (${why.join('; ')}); kept logs sync only if you sign in to the same account again.`);
       }
+      const cp = o.cleanupPending ?? 0;
+      if (cp > 0) parts.push(`${plural(cp, '1 activity log was', '# activity logs were')} discarded and will never be sent, but Aura couldn't delete ${cp === 1 ? 'its copy' : 'their copies'} from this device's storage.`);
     }
   }
   if (r.legacyKept === null) parts.push("Aura couldn't check this device for activity logs from an earlier version; any there were left in place.");
@@ -244,8 +248,9 @@ async function run(deps: SignOutDeps): Promise<SignOutResult> {
   const snapshot = await readOwnedQueue(owner);
   const pending: PendingWork = snapshot.ok
     ? {
-        owned: snapshot.records.length + snapshot.corruptIds.length + snapshot.quarantined.reduce((n, q) => n + q.entries, 0),
-        ownedSent: snapshot.records.filter((r) => r.dispatched).length,
+        // R9: LOGICAL activities (account + request id), the same classification Home shows -- never physical copies.
+        owned: snapshot.total,
+        ownedSent: snapshot.dispatched,
         paused: snapshot.paused,
       }
     : { owned: null };
@@ -256,12 +261,12 @@ async function run(deps: SignOutDeps): Promise<SignOutResult> {
   if (ack === 'acknowledged') {
     // Only now, after the confirmation and the server's acknowledgement, and
     // only EXACTLY the confirmed records (never anything added later).
-    let owned: OwnedDiscardReport = { unknown: true, removed: 0, removedPossiblySent: 0, keptInFlight: 0, failed: 0 };
+    let owned: OwnedDiscardReport = { unknown: true, removed: 0, removedPossiblySent: 0, keptInFlight: 0, failed: 0, cleanupPending: 0 };
     if (snapshot.ok) {
-      const d = await discardRecords([...snapshot.records.map((r) => r.recordId), ...snapshot.corruptIds], { tab: getTabId(), owner });
-      // R8: the account's quarantined retired-format entries, exactly as confirmed (a failed removal keeps them paused).
-      const q = discardQuarantined(owner, snapshot.quarantined);
-      owned = { unknown: false, removed: d.removed + q.removed, removedPossiblySent: d.removedPossiblySent, keptInFlight: d.keptInFlight, failed: d.failed + q.failed };
+      // R9: one logical discard -- the decisions and every IndexedDB copy in one transaction, retired
+      // localStorage entries removed only after it committed (a failure keeps everything as it was).
+      const d = await discardOwned(owner, snapshot, { tab: getTabId() });
+      owned = { unknown: false, removed: d.removed, removedPossiblySent: d.removedPossiblySent, keptInFlight: d.keptInFlight, failed: d.failed, cleanupPending: d.cleanupPending };
     }
     const legacy = readLegacySnapshot();
     transition.end('signed-out');

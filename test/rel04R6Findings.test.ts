@@ -194,7 +194,7 @@ async function main() {
   dev.signIn(B);
   await tabB.acct.fetchVerifiedSession(dev.fetch as any);
   const rbB = await tabB.q.readOwnedQueue(B);
-  const dB = tabB.q.discardQuarantined(B, rbB.ok ? rbB.quarantined : []);
+  const dB = await tabB.q.discardQuarantined(B, rbB.ok ? rbB.quarantined : []);
   check('Q1 (R8) B\'s discard removes exactly B\'s entry; A\'s identical entry is unaffected', rbB.ok && rbB.quarantined.length === 1 && dB.removed === 1 && !storage.data.has(key(B, 'same-id')) && storage.data.has(key(A, 'same-id')));
   storage.data.set(key(B, 'same-id'), JSON.stringify(item(B, 'same-id', 'same-payload')));
   const again = [await tab.q.readOwnedQueue(A), await tabB.q.readOwnedQueue(B)];

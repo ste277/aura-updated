@@ -44,6 +44,11 @@ export type ActivityWriteResult =
   | { kind: 'account-changed'; keptForAccount: boolean }
   /** Unresolved and could not be stored on this device. */
   | { kind: 'not-stored' }
+  /**
+   * R9: this device's activity storage could not be read reliably, so the activity's eligibility could not be
+   * established: NOTHING was stored or sent. Recoverable -- the user can try again.
+   */
+  | { kind: 'storage-unavailable' }
   /** The server says this bundle is out of date; the entry is kept. */
   | { kind: 'upgrade-required' };
 
@@ -80,16 +85,20 @@ async function isUpgradeRefusal(res: Response): Promise<boolean> {
 export async function submitActivityLog(payload: HabitLogPayload, tempId: string, fetchImpl: typeof fetch = (i, n) => fetch(i, n), binding?: AccountBinding): Promise<ActivityWriteResult> {
   return runActivityOperation(async (lease) => {
     const tab = getTabId();
+    // R9 -- THE transmission boundary: an activity is sent only after enqueueOwned stored it AND, in the same
+    // transaction, established its eligibility (no decision, no quarantined copy, readable retired sources) and
+    // claimed it. There is no direct-network fallback: if storage cannot be read, nothing is sent.
     const stored = await enqueueOwned({ ...payload, tempId, ownerUserId: lease.account }, { claimFor: tab });
+    if (stored.status === 'failed' || stored.status === 'unavailable') return { kind: 'storage-unavailable' };
     if (stored.status === 'conflict') return { kind: 'not-stored' }; // never send a second payload under one identity
     // R8: this account already settled/discarded the request, or a quarantined copy of it exists: never sent again.
     if (stored.status === 'settled' || stored.status === 'paused') return { kind: 'not-stored' };
     // The identical request is already queued and another attempt is sending it: never send it twice at once.
-    if (stored.status === 'stored' && !stored.claim) return lease.isCurrent() ? { kind: 'queued' } : { kind: 'account-changed', keptForAccount: true };
-    const outbox = stored.status === 'stored' ? stored.recordId : null;
-    const token = stored.status === 'stored' ? stored.claim : null;
+    if (!stored.claim) return lease.isCurrent() ? { kind: 'queued' } : { kind: 'account-changed', keptForAccount: true };
+    const outbox: string | null = stored.recordId;
+    const token = stored.claim;
     // R5: release and settlement are fenced by THIS attempt's token.
-    const settle = async () => { if (outbox) await settleRecords([outbox], token ?? undefined, { owner: lease.account }); };
+    const settle = async () => { if (outbox) await settleRecords([outbox], token, { owner: lease.account }); };
     const release = async () => { if (token) await releaseClaim(token); };
     // Final checks with no await before the send.
     if (!lease.isCurrent() || isTransitionActive()) {

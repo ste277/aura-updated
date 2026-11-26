@@ -213,7 +213,8 @@ async function main() {
     idbFault.write = true;
     dev.fault('POST', '/api/habit-logs', 'network-before');
     const r = await tab.sync.submitActivityLog(payload('cannot store', 'crid-f1'), 't', dev.fetch as any);
-    check('C7a write fails AND storage write fails -> not-stored (reported, never claimed pending)', r.kind === 'not-stored');
+    // R9: no direct-network fallback -- with storage unwritable the activity is neither stored nor SENT.
+    check('C7a write fails AND storage write fails -> not stored and NOT sent (R9: storage-unavailable, never claimed pending, no POST)', r.kind === 'storage-unavailable' && dev.count('POST', '/api/habit-logs') === 0);
     idbFault.write = false;
     await queueOffline(tab, dev, 'stored 1', 'crid-f2');
     await queueOffline(tab, dev, 'stored 2', 'crid-f3');

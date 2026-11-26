@@ -1541,6 +1541,8 @@ function DashboardPageInner() {
         setLogEntries((prev) => prev.filter((item) => item.id !== tempId));
         if (outcome.kind === 'rejected') throw new Error(`Unable to log this activity (server responded ${outcome.status}).`);
         if (outcome.kind === 'not-stored') throw new Error("You're offline and this device couldn't keep the activity. Try again when you're back online.");
+        // R9: storage could not be read, so the activity's eligibility was not established: nothing was stored or sent.
+        if (outcome.kind === 'storage-unavailable') throw new Error("Aura couldn't safely read this device's storage, so this activity wasn't saved or sent. Try again in a moment.");
         if (outcome.kind === 'upgrade-required') throw new Error(UPGRADE_MESSAGE);
         // account-changed: kept (if stored) in the ORIGINAL account's queue.
         throw new AccountUnavailableError('stale');
