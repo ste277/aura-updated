@@ -9,7 +9,7 @@
  *   R-P3-2  explicit secret formats; hex-lexical exclusivity; canonical
  *           decoding and decoded lengths; material never transformed
  */
-import { randomBytes } from 'crypto';
+import { createHash, randomBytes } from 'crypto';
 import { EventEmitter } from 'events';
 import { validateAuthorizationRedirect } from '../packages/mcp-tools/src/auth/authorizationServer';
 import { assessConfiguredSecret, assessSecret, loadOAuthKeysFromEnv } from '../packages/mcp-tools/src/auth/keys';
@@ -280,19 +280,46 @@ async function main() {
     const below = build(thr - 1);
     const at = build(thr);
     check(`P3-corr boundary (n=43): ${thr - 1} hex-alphabet chars accepted, ${thr} refused as ambiguous_encoding`, !!below && below.ok === true && !!at && at.reason === 'ambiguous_encoding', { thr, below, at });
-    // Legitimate secrets: no false refusals from the new checks.
-    for (const [label, gen, f] of [
-      ['declared base64: 16 B', () => `base64:${randomBytes(16).toString('base64')}`, assessConfiguredSecret],
-      ['declared base64url: 16 B', () => `base64url:${randomBytes(16).toString('base64url')}`, assessConfiguredSecret],
-      ['declared base64url: 32 B', () => `base64url:${randomBytes(32).toString('base64url')}`, assessConfiguredSecret],
-      ['untagged retained base64url 32 B', () => randomBytes(32).toString('base64url'), assessSecret],
-      ['untagged retained base64 24 B', () => randomBytes(24).toString('base64'), assessSecret],
-      ['untagged retained hex 16 B', () => randomBytes(16).toString('hex'), assessSecret],
-    ] as [string, () => string, (v: string) => { ok: boolean }][]) {
-      let refused = 0;
-      for (let k = 0; k < 10_000; k += 1) if (!f(gen()).ok) refused += 1;
-      check(`P3-corr no false refusal: ${label} (10,000 CSPRNG samples)`, refused === 0, refused);
+    // Legitimate secrets: no false refusals from the new checks (AURA-MCP-CI-01).
+    // Samples come from a FIXED seed, so the same 10,000 values are used on
+    // every run, and each verdict is checked against the documented policy:
+    // an untagged hex value with no a-f letter (probability ~2.9e-7 per
+    // 16-byte sample) is judged as legacy text and refused BY POLICY, so
+    // "never refused" was not a valid assertion for fresh CSPRNG draws.
+    const seeded = (tag: string, i: number, len: number) => {
+      let out = Buffer.alloc(0);
+      for (let b = 0; out.length < len; b += 1) out = Buffer.concat([out, createHash('sha256').update(`aura-ci01-s12:${tag}:${i}:${b}`).digest()]);
+      return out.subarray(0, len);
+    };
+    const always = () => true;
+    // Untagged hex policy: hex credit needs >= 1 a-f letter; a digits-only value
+    // is legacy text judged by the S8 rule, which ALWAYS refuses 32 digits
+    // (at most 32 * log2(10) ~= 106 bits < 128). Only 16-byte hex is sampled here.
+    const hexPolicy = (v: string) => /[a-f]/i.test(v);
+    for (const [label, gen, f, expectOk] of [
+      ['declared base64: 16 B', (i) => `base64:${seeded('db64-16', i, 16).toString('base64')}`, assessConfiguredSecret, always],
+      ['declared base64url: 16 B', (i) => `base64url:${seeded('db64u-16', i, 16).toString('base64url')}`, assessConfiguredSecret, always],
+      ['declared base64url: 32 B', (i) => `base64url:${seeded('db64u-32', i, 32).toString('base64url')}`, assessConfiguredSecret, always],
+      ['untagged retained base64url 32 B', (i) => seeded('b64u-32', i, 32).toString('base64url'), assessSecret, always],
+      ['untagged retained base64 24 B', (i) => seeded('b64-24', i, 24).toString('base64'), assessSecret, always],
+      ['untagged retained hex 16 B', (i) => seeded('hex16', i, 16).toString('hex'), assessSecret, hexPolicy],
+    ] as [string, (i: number) => string, (v: string) => { ok: boolean }, (v: string) => boolean][]) {
+      let mismatches = 0;
+      let byPolicy = 0;
+      for (let k = 0; k < 10_000; k += 1) {
+        const v = gen(k);
+        const want = expectOk(v);
+        if (!want) byPolicy += 1;
+        if (f(v).ok !== want) mismatches += 1;
+      }
+      check(`P3-corr no false refusal: ${label} (10,000 fixed-seed samples; verdicts match policy; ${byPolicy} refused by policy)`, mismatches === 0, { mismatches, byPolicy });
     }
+    // Reproduction (CI-01): a digits-only untagged hex value, as a fresh CSPRNG
+    // draw occasionally yields, is refused by policy, so the previous
+    // "refused === 0 over random samples" assertion failed on it by chance.
+    const digitsOnly = '64976964540383724985906370631171';
+    check('P3-corr CI-01 reproduction: digits-only untagged hex is refused by policy (the old random-sample assertion fails on it)', assessSecret(digitsOnly).ok === false);
+    check('P3-corr CI-01: the same value declared "hex:" is accepted', assessConfiguredSecret(`hex:${digitsOnly}`).ok === true);
     // Loader: refusals never echo the value; a legitimate retained key passes unchanged.
     const jwks = JSON.stringify(sharedKeys().jwks);
     const tagged = () => `base64url:${randomBytes(32).toString('base64url')}`;
