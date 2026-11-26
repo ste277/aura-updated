@@ -1,0 +1,4657 @@
+{
+  "libraryVersion": "palm-03-c1-library@0.4.0-draft",
+  "status": "UNREVIEWED_RESEARCH_CONTENT",
+  "generatedBy": {
+    "ticket": "AURA-PALM-03-C1",
+    "author": "Claude (AI) — draft for human scholarly and editorial review",
+    "date": "2026-11-25",
+    "aiGenerated": true,
+    "revision": "v0.4: C1 final refinements 2026-11-25 (mode behaviour, domain map, placement and not-assessed vocabulary, e1Capabilities, heart-zone boundary, e1Planning with I1 M4/E1-A1..A5 carry-forward; no record reworded, no eligibility changed); v0.3: final content direction 2026-11-24 (suitability + eligibility; ORIGIN-JOINED and INDEX-LONG excluded-initial); v0.2: owner decisions C1-D1..D4"
+  },
+  "featureSetVersion": "palm-03-i1-feature-set@0.1.0",
+  "readingModes": {
+    "supported": [
+      "indian-only",
+      "western-only",
+      "combined"
+    ],
+    "default": "combined",
+    "composition": {
+      "onePerReading": true,
+      "selectionOrder": [
+        "eligibility",
+        "relevance",
+        "observation-quality",
+        "source-support",
+        "content-suitability",
+        "tradition-preference"
+      ],
+      "preferIndianWhenComparablySuitable": true,
+      "noForcedTraditionSlots": true,
+      "westernEligibility": "suitable-additional-coverage",
+      "noRatio": true,
+      "noMerging": true,
+      "unsupportedCategories": "show-as-not-assessed",
+      "comparablySuitable": {
+        "definition": "Two candidates are comparably suitable when they have the same source-support level and the same suitability band (band 0: at most 2 'concern' criteria; band 1: 3 or more). Only then does tradition preference decide.",
+        "supportRank": [
+          "direct",
+          "inferred",
+          "disputed"
+        ]
+      }
+    },
+    "modeBehaviour": {
+      "combined": {
+        "traditions": [
+          "indian-classical",
+          "indian-later-treatise",
+          "indian-diagram-tradition",
+          "western-19c-chirognomy",
+          "western-19c-chiromancy"
+        ],
+        "rule": "All eligible records of either tradition compete under selectionOrder. A Western record is used where it gives suitable additional coverage (its complementsIndianGap states why no comparably suitable Indian reading exists for that feature). No tradition quota, slot or ratio.",
+        "emptyResult": "say-nothing-emittable-list-not-assessed-point-to-guide"
+      },
+      "indian-only": {
+        "traditions": [
+          "indian-classical",
+          "indian-later-treatise",
+          "indian-diagram-tradition"
+        ],
+        "rule": "Only Indian records. A category with no Indian record is listed as not assessed with reason 'no-supported-content'. Western content is never substituted and no Indian equivalent is generated.",
+        "emptyResult": "say-indian-tradition-has-no-supported-reading-for-what-was-shared-point-to-guide"
+      },
+      "western-only": {
+        "traditions": [
+          "western-19c-chirognomy",
+          "western-19c-chiromancy"
+        ],
+        "rule": "Only Western records. Excluded Western meanings (life line as lifespan, fate line as destiny, marriage/children lines, health) stay excluded. Cross-tradition conflict notes (e.g. the āyurlekhā note) are still shown because they are safety disclosures, not interpretations.",
+        "emptyResult": "say-nothing-emittable-list-not-assessed-point-to-guide"
+      }
+    },
+    "domains": {
+      "personality": [
+        "personality",
+        "strengths"
+      ],
+      "relationships": [
+        "emotional-relational"
+      ],
+      "career": [
+        "career-working-style"
+      ],
+      "life-direction": [
+        "life-direction",
+        "growth"
+      ]
+    },
+    "placement": {
+      "sectionOrder": [
+        "personality",
+        "strengths",
+        "emotional-relational",
+        "career-working-style",
+        "life-direction",
+        "growth"
+      ],
+      "rule": "first-listed-category-with-room",
+      "description": "Candidates are ranked by selectionOrder (comparablySuitable decides when tradition preference applies). In rank order, each item goes into the first category in its own 'categories' list that has fewer than maxInterpretationsPerCategory items; an item with no room goes under 'More from your reading'. An item appears once. Within a section, items are shown in rank order.",
+      "overflowSection": "more-from-your-reading"
+    }
+  },
+  "globalPolicy": {
+    "traceConfidenceCap": "tentative",
+    "interpretationCeiling": "tentative",
+    "markPolicy": "unreported-is-unknown",
+    "selfReportPolicy": "distinct-provenance-disclosed",
+    "absentFeaturePolicy": "omit-and-list-as-not-assessed",
+    "conflictPolicy": "never-resolve-to-certainty",
+    "maxInterpretationsPerCategory": 2,
+    "tierFrames": {
+      "tentative": "Shown as tradition-attributed text with the note: 'This is what a palm-reading tradition said, not a finding about you.'",
+      "clear": "NOT USED: owner decision C1-D3 (2026-11-24) sets tentative as the ceiling for every record, including automatic measurements."
+    },
+    "thresholdNote": "All numeric ranges are placeholders. None is source-defined; the sources give qualitative descriptions only. E1 must calibrate on synthetic data and the reviewer must accept that no threshold carries traditional authority.",
+    "futureLanguage": "questions-only-never-forecasts",
+    "notAssessedReasons": [
+      {
+        "code": "user-skipped",
+        "wording": "You chose to skip this.",
+        "carries": "E1-A1"
+      },
+      {
+        "code": "user-cannot-see",
+        "wording": "You said you couldn't make this out.",
+        "carries": "E1-A1"
+      },
+      {
+        "code": "not-traced",
+        "wording": "Not traced (optional).",
+        "carries": "E1-A2"
+      },
+      {
+        "code": "not-requested",
+        "wording": "Not asked about in this version.",
+        "carries": "E1-A2"
+      },
+      {
+        "code": "trace-unusable",
+        "wording": "Your trace for this couldn't be used.",
+        "carries": "E1-A2"
+      },
+      {
+        "code": "frame-unavailable",
+        "wording": "Aura couldn't locate your hand points well enough for this.",
+        "carries": "E1-A2"
+      },
+      {
+        "code": "quality-gated",
+        "wording": "The photo didn't allow this to be read. Retaking it may help.",
+        "carries": "E1-A2, D3 (never shown as a confidence score)"
+      },
+      {
+        "code": "measurement-unavailable",
+        "wording": "This couldn't be measured in your photo (for example, a folded finger).",
+        "carries": "E1-A2"
+      },
+      {
+        "code": "boundary",
+        "wording": "This fell between two readings, so neither is shown.",
+        "carries": "RC-7"
+      },
+      {
+        "code": "ambiguous-in-source",
+        "wording": "The texts give this more than one meaning, so none is shown.",
+        "carries": "RC-6/RC-7"
+      },
+      {
+        "code": "mark-unknown",
+        "wording": "Not reported, so unknown. Aura doesn't assume it is absent.",
+        "carries": "D2 markPolicy"
+      },
+      {
+        "code": "observed-absent",
+        "wording": "You said you don't see this. The traditions give no reading for an absence, so nothing is read from it.",
+        "carries": "E1-A2 (absence is never interpreted)"
+      },
+      {
+        "code": "no-supported-content",
+        "wording": "This tradition has no supported reading for this.",
+        "carries": "modes"
+      },
+      {
+        "code": "not-read-in-this-version",
+        "wording": "Not read in this version.",
+        "carries": "RC-11 (never reveals the excluded meaning)"
+      },
+      {
+        "code": "detector-missing",
+        "wording": "Not detected in the photo.",
+        "carries": "E1-A1: reserved for detector sources; never used for user-trace, user-report or self-report input"
+      }
+    ]
+  },
+  "sources": [
+    {
+      "id": "zysk-2025",
+      "author": "Kenneth G. Zysk",
+      "title": "Early Indian Palmistry. Śārdūlakarṇāvadāna: Pāṇilekhā",
+      "tradition": "indian-classical",
+      "edition": "HSSA 13 (2025) 240–275, DOI 10.18732/hssa128",
+      "licensing": "CC BY-SA 4.0",
+      "verification": "read-directly",
+      "registerRef": "SR-SC-01"
+    },
+    {
+      "id": "sardulakarnavadana",
+      "author": "anonymous (Buddhist)",
+      "title": "Śārdūlakarṇāvadāna, Pāṇilekhā",
+      "tradition": "indian-classical",
+      "edition": "ed. & tr. Zysk 2025",
+      "licensing": "text PD; translation CC BY-SA 4.0",
+      "verification": "read-via-secondary",
+      "registerRef": "SR-IN-02"
+    },
+    {
+      "id": "brhatsamhita",
+      "author": "Varāhamihira",
+      "title": "Bṛhatsaṃhitā chs. 68, 70 (Iyer numbering)",
+      "tradition": "indian-classical",
+      "edition": "tr. N. C. Iyer 1884 (wisdomlib)",
+      "licensing": "public domain",
+      "verification": "read-directly",
+      "registerRef": "SR-IN-01"
+    },
+    {
+      "id": "samudrikatilaka",
+      "author": "Durlabharāja and Jagaddeva",
+      "title": "Sāmudrikatilaka (excerpts)",
+      "tradition": "indian-later-treatise",
+      "edition": "tr. Zysk 2025 App. I",
+      "licensing": "text PD; translation CC BY-SA 4.0",
+      "verification": "read-via-secondary",
+      "registerRef": "SR-IN-03"
+    },
+    {
+      "id": "hastasanjivana",
+      "author": "Meghavijaya Gaṇi",
+      "title": "Hastasañjīvana (excerpts)",
+      "tradition": "indian-later-treatise",
+      "edition": "tr. Zysk 2025 App. I",
+      "licensing": "text PD; translation CC BY-SA 4.0",
+      "verification": "read-via-secondary",
+      "registerRef": "SR-IN-04"
+    },
+    {
+      "id": "garuda-dutt",
+      "author": "anonymous (Purāṇa)",
+      "title": "Garuḍa Purāṇa 1.63–65",
+      "tradition": "indian-classical",
+      "edition": "tr. M. N. Dutt 1908",
+      "licensing": "probably PD (translator death date unverified)",
+      "verification": "read-via-secondary",
+      "registerRef": "SR-IN-05"
+    },
+    {
+      "id": "hand-diagrams-18c",
+      "author": "anonymous",
+      "title": "Indian hand diagrams (Zysk 2025 figs. 1–5)",
+      "tradition": "indian-diagram-tradition",
+      "edition": "described in Zysk 2025",
+      "licensing": "not reproduced",
+      "verification": "read-via-secondary",
+      "registerRef": "SR-IN-08"
+    },
+    {
+      "id": "approved-guide",
+      "author": "Aura (AURA-PALM-01)",
+      "title": "Approved Palmistry educational guide (packages/palmistry/src/content.ts @ main)",
+      "tradition": "indian-classical",
+      "edition": "fd4a187",
+      "licensing": "Aura; G3 governance records",
+      "verification": "read-directly",
+      "registerRef": "n/a"
+    },
+    {
+      "id": "cheiro-pfa-1916",
+      "author": "Cheiro (W. J. Warner)",
+      "title": "Palmistry for All",
+      "tradition": "western-19c-chiromancy",
+      "edition": "Putnam 1916; Gutenberg #20480",
+      "licensing": "public domain (US; UK)",
+      "verification": "read-directly",
+      "registerRef": "SR-WE-01"
+    },
+    {
+      "id": "cheiro-loth-c1900",
+      "author": "Cheiro (W. J. Warner)",
+      "title": "Cheiro's Language of the Hand, 9th ed.",
+      "tradition": "western-19c-chiromancy",
+      "edition": "Nichols / Rand McNally c.1900 (©1897)",
+      "licensing": "public domain (US; UK)",
+      "verification": "read-directly",
+      "registerRef": "SR-WE-02"
+    },
+    {
+      "id": "benham-1900",
+      "author": "William G. Benham",
+      "title": "The Laws of Scientific Hand Reading",
+      "tradition": "western-19c-chiromancy",
+      "edition": "Putnam ©1900",
+      "licensing": "public domain (US); UK depends on unverified death year",
+      "verification": "read-directly",
+      "registerRef": "SR-WE-03"
+    },
+    {
+      "id": "darpentigny-1886",
+      "author": "C. S. d'Arpentigny, tr. E. Heron-Allen",
+      "title": "The Science of the Hand",
+      "tradition": "western-19c-chirognomy",
+      "edition": "Ward, Lock 1886",
+      "licensing": "public domain",
+      "verification": "read-directly",
+      "registerRef": "SR-WE-04"
+    },
+    {
+      "id": "heron-allen-1885",
+      "author": "Ed. Heron-Allen",
+      "title": "A Manual of Cheirosophy, 10th ed.",
+      "tradition": "western-19c-chiromancy",
+      "edition": "Ward, Lock (1st ed. 1885)",
+      "licensing": "public domain",
+      "verification": "read-directly",
+      "registerRef": "SR-WE-05"
+    }
+  ],
+  "interpretations": [
+    {
+      "id": "C1-IN-PITR-KNOWLEDGE",
+      "tradition": "indian-classical",
+      "featureIdentity": {
+        "anatomicalName": "thenar crease",
+        "traditionalTerm": "pitṛlekhā (later diagrams); jñāna line (Śārdūlakarṇāvadāna)",
+        "traditionalTermTranslation": "father line; line of knowledge"
+      },
+      "requires": [
+        {
+          "feature": "lines.life",
+          "anatomical": "thenar",
+          "provenanceAllowed": [
+            "user-confirmed"
+          ],
+          "observation": {
+            "descriptor": "presence of a confirmed trace",
+            "thresholdStatus": "placeholder",
+            "categorical": "present"
+          }
+        }
+      ],
+      "categories": [
+        "strengths",
+        "growth"
+      ],
+      "sources": [
+        {
+          "sourceId": "sardulakarnavadana",
+          "locator": "v. 2 with comment (Zysk 2025, p. 243)",
+          "supportLevel": "direct",
+          "verification": "read-via-secondary",
+          "originalTerm": "jñāna",
+          "translationOfTerm": "knowledge",
+          "note": "Editor's variant reading also names the line 'knowledge'."
+        },
+        {
+          "sourceId": "hand-diagrams-18c",
+          "locator": "figs. 1–3 labels pitṛ- / Sarasvatī (Zysk 2025, p. 243)",
+          "supportLevel": "direct",
+          "verification": "read-via-secondary",
+          "originalTerm": "pitṛrekhā; Sarasvatī",
+          "translationOfTerm": "father line; goddess of learning"
+        }
+      ],
+      "overallSupport": "inferred",
+      "traditionalInterpretation": "An early Buddhist palmistry chapter (after the mid-9th c.) describes a second line rising from the base of the thumb as existing 'for the sake of knowledge'; later Indian hand diagrams label the line the father's line, and one names it after Sarasvatī, goddess of learning. The texts do not say how the line's shape changes the reading.",
+      "userFacing": {
+        "observation": "You traced the line that curves from the base of your thumb.",
+        "reading": "In Indian palm-reading tradition this is the pitṛlekhā, which an early text calls a line of knowledge, and which later diagrams link with Sarasvatī, the goddess of learning.",
+        "reflection": "What are you learning at the moment purely because it interests you?",
+        "applicationNote": "The texts name this line after knowledge for everyone who has it; tracing it does not say anything about how much you know. The reflection is Aura's, not the text's."
+      },
+      "observationQuality": {
+        "minFrameProperties": [
+          "scale"
+        ],
+        "blockingQualityIssues": [
+          "palm-not-visible",
+          "hand-cut-off",
+          "hand-rotated",
+          "blurry",
+          "too-dark",
+          "too-bright",
+          "low-contrast"
+        ],
+        "maxTier": "tentative",
+        "displayRule": "never-as-confidence"
+      },
+      "conflicts": [
+        {
+          "withId": "WE-X (life line = lifespan)",
+          "kind": "same-feature-other-tradition",
+          "handling": "prefer-none-note-disagreement",
+          "note": "The Western 'life line' reading of this crease is lifespan/health and is never used."
+        }
+      ],
+      "traditionNotes": "Western palmistry calls a crease in this position the 'life line'. The Indian longevity line is a different crease (the uppermost).",
+      "exclusions": {
+        "claimsNeverMade": [
+          "lifespan-or-death",
+          "health-or-medical",
+          "wealth-or-financial-outcome",
+          "marriage-partner-or-divorce",
+          "fertility-or-children",
+          "event-dates-or-timing",
+          "accident-disaster-misfortune",
+          "caste-varna-class",
+          "gender-or-sex-characteristics",
+          "skin-colour-or-complexion",
+          "moral-character-judgement",
+          "career-success-or-failure",
+          "scientific-validity",
+          "meaning-from-absence",
+          "consequential-decision-advice"
+        ],
+        "doNotEmitWhen": [
+          "feature unassessed or skipped",
+          "required observation outside quality gate",
+          "trace confirmed as 'life' but user also reports it is not the thumb-base line"
+        ],
+        "droppedSourceContent": "Shape, length and breaks of this line are not read: no source read in C1 assigns them meaning, and Western life-line meanings (lifespan, illness) are prohibited."
+      },
+      "licensing": {
+        "status": "cc-by-sa-source-original-paraphrase-pending-adaptation-review",
+        "basis": "Zysk 2025 translation CC BY-SA 4.0; paraphrase only; adaptation question open (G3 L1/L2).",
+        "attributionRequired": true,
+        "aiAuthorship": true
+      },
+      "review": {
+        "status": "UNREVIEWED_RESEARCH_CONTENT",
+        "scholarlyReviewer": null,
+        "editorialReviewer": null,
+        "decisionRef": null,
+        "notes": "Unreviewed per C1-D4: Zysk 2016, Sanskrit checks, Western OCR/page-image verification and licensing remain separate approval requirements. Final content direction 2026-11-24: eligibility assessed; source support necessary but not sufficient."
+      },
+      "readingModes": [
+        "indian-only",
+        "combined"
+      ],
+      "wordingFidelity": {
+        "status": "faithful"
+      },
+      "uncertainty": {
+        "measurementQuality": "runtime-from-observationQuality",
+        "identityConfirmation": "user-confirmed-identity",
+        "sourceSupport": "inferred",
+        "traditionalUncertainty": {
+          "level": "moderate",
+          "reasons": [
+            "inferred-application",
+            "textual-corruption-or-emendation"
+          ]
+        }
+      },
+      "suitability": {
+        "sourceFidelity": "pass",
+        "observationRequirements": "pass",
+        "culturalContext": "pass",
+        "relevanceToUser": "concern",
+        "harmfulAttributionRisk": "pass",
+        "constructiveReflection": "pass",
+        "rationale": "Faithful to ŚKA v. 2 and the diagrams. Presence-only: nearly everyone has a thenar crease, so the reading does not differentiate users."
+      },
+      "eligibility": {
+        "status": "eligible-initial",
+        "decisionRef": "C1 assessment 2026-11-24 (unreviewed)",
+        "conditions": [
+          "Shown at most once per reading, framed as what the tradition says about this line for everyone (applicationNote), never as a personal trait."
+        ]
+      },
+      "e1Capabilities": [
+        "E1-E1",
+        "E1-E2",
+        "E1-E4"
+      ]
+    },
+    {
+      "id": "C1-IN-URDHVA-MIDDLE",
+      "tradition": "indian-later-treatise",
+      "featureIdentity": {
+        "anatomicalName": "central longitudinal crease",
+        "traditionalTerm": "ūrdhvarekhā",
+        "traditionalTermTranslation": "upward(-going) line"
+      },
+      "observationQuality": {
+        "minFrameProperties": [
+          "scale",
+          "axis",
+          "direction"
+        ],
+        "blockingQualityIssues": [
+          "palm-not-visible",
+          "hand-cut-off",
+          "hand-rotated",
+          "blurry",
+          "too-dark",
+          "too-bright",
+          "low-contrast"
+        ],
+        "maxTier": "tentative",
+        "boundaryMargin": 0.08,
+        "displayRule": "never-as-confidence"
+      },
+      "traditionNotes": "Western palmistry calls similar vertical lines the 'fate' and 'sun' lines and reads them as destiny; those meanings are not used.",
+      "licensing": {
+        "status": "cc-by-sa-source-original-paraphrase-pending-adaptation-review",
+        "basis": "Zysk 2025 Appendix I translation CC BY-SA 4.0; paraphrase only.",
+        "attributionRequired": true,
+        "aiAuthorship": true
+      },
+      "requires": [
+        {
+          "feature": "lines.upward",
+          "anatomical": "central-longitudinal",
+          "provenanceAllowed": [
+            "user-confirmed"
+          ],
+          "observation": {
+            "descriptor": "proposed.urdhva.terminationFinger (trace distal endpoint nearest finger base, from landmarks 5/9/13/17 in palm frame)",
+            "thresholdStatus": "placeholder",
+            "categorical": "middle"
+          }
+        }
+      ],
+      "categories": [
+        "career-working-style",
+        "life-direction"
+      ],
+      "sources": [
+        {
+          "sourceId": "samudrikatilaka",
+          "locator": "1.152 (Zysk 2025, p. 265)",
+          "supportLevel": "direct",
+          "verification": "read-via-secondary",
+          "originalTerm": "ācārya",
+          "translationOfTerm": "preceptor, teacher"
+        },
+        {
+          "sourceId": "hastasanjivana",
+          "locator": "3.2.81 (Zysk 2025, p. 264)",
+          "supportLevel": "direct",
+          "verification": "read-via-secondary"
+        }
+      ],
+      "overallSupport": "inferred",
+      "traditionalInterpretation": "Sāmudrikatilaka 1.152: a line from the wrist reaching the middle finger indicates a king, army commander or preceptor; Hastasañjīvana 3.2.81: a renowned army leader.",
+      "userFacing": {
+        "observation": "You traced an upward line that ends toward your middle finger.",
+        "reading": "In the medieval Indian treatises, an upward line reaching the middle finger was linked with roles of leading and guiding others: commanders, rulers and teachers.",
+        "reflection": "Where do people tend to look to you for direction, and how do you feel about that?",
+        "applicationNote": "The treatises describe roles in medieval society. Aura presents them as kinds of activity the tradition linked to this line, not as a prediction about your work or status."
+      },
+      "conflicts": [],
+      "exclusions": {
+        "claimsNeverMade": [
+          "lifespan-or-death",
+          "health-or-medical",
+          "wealth-or-financial-outcome",
+          "marriage-partner-or-divorce",
+          "fertility-or-children",
+          "event-dates-or-timing",
+          "accident-disaster-misfortune",
+          "caste-varna-class",
+          "gender-or-sex-characteristics",
+          "skin-colour-or-complexion",
+          "moral-character-judgement",
+          "career-success-or-failure",
+          "scientific-validity",
+          "meaning-from-absence",
+          "consequential-decision-advice"
+        ],
+        "doNotEmitWhen": [
+          "feature unassessed or skipped",
+          "required observation outside quality gate",
+          "termination within boundary margin of two fingers",
+          "INC-6 not closed (upward identity lost as MINOR)"
+        ],
+        "droppedSourceContent": "Kingship, military command and status are not presented as outcomes; varṇa-graded readings (ST 1.154) excluded."
+      },
+      "review": {
+        "status": "UNREVIEWED_RESEARCH_CONTENT",
+        "scholarlyReviewer": null,
+        "editorialReviewer": null,
+        "decisionRef": null,
+        "notes": "Unreviewed per C1-D4: Zysk 2016, Sanskrit checks, Western OCR/page-image verification and licensing remain separate approval requirements. Final content direction 2026-11-24: eligibility assessed; source support necessary but not sufficient."
+      },
+      "readingModes": [
+        "indian-only",
+        "combined"
+      ],
+      "wordingFidelity": {
+        "status": "faithful"
+      },
+      "uncertainty": {
+        "measurementQuality": "runtime-from-observationQuality",
+        "identityConfirmation": "user-confirmed-identity",
+        "sourceSupport": "inferred",
+        "traditionalUncertainty": {
+          "level": "moderate",
+          "reasons": [
+            "later-tradition-only",
+            "inferred-application"
+          ]
+        }
+      },
+      "suitability": {
+        "sourceFidelity": "pass",
+        "observationRequirements": "concern",
+        "culturalContext": "concern",
+        "relevanceToUser": "pass",
+        "harmfulAttributionRisk": "concern",
+        "constructiveReflection": "pass",
+        "rationale": "Names the roles the treatises give (commanders, rulers, preceptors); nothing softened. Medieval status context must stay visible; no prediction."
+      },
+      "eligibility": {
+        "status": "eligible-initial",
+        "decisionRef": "C1 assessment 2026-11-24 (unreviewed)",
+        "conditions": [
+          "Requires E1-E5 descriptor + INC-6.",
+          "Roles stated as historical associations, never as forecasts of status."
+        ]
+      },
+      "e1Capabilities": [
+        "E1-E1",
+        "E1-E2",
+        "E1-E4",
+        "E1-E5"
+      ]
+    },
+    {
+      "id": "C1-IN-URDHVA-INDEX",
+      "tradition": "indian-later-treatise",
+      "featureIdentity": {
+        "anatomicalName": "central longitudinal crease",
+        "traditionalTerm": "ūrdhvarekhā",
+        "traditionalTermTranslation": "upward(-going) line"
+      },
+      "observationQuality": {
+        "minFrameProperties": [
+          "scale",
+          "axis",
+          "direction"
+        ],
+        "blockingQualityIssues": [
+          "palm-not-visible",
+          "hand-cut-off",
+          "hand-rotated",
+          "blurry",
+          "too-dark",
+          "too-bright",
+          "low-contrast"
+        ],
+        "maxTier": "tentative",
+        "boundaryMargin": 0.08,
+        "displayRule": "never-as-confidence"
+      },
+      "traditionNotes": "Western palmistry calls similar vertical lines the 'fate' and 'sun' lines and reads them as destiny; those meanings are not used.",
+      "licensing": {
+        "status": "cc-by-sa-source-original-paraphrase-pending-adaptation-review",
+        "basis": "Zysk 2025 Appendix I translation CC BY-SA 4.0; paraphrase only.",
+        "attributionRequired": true,
+        "aiAuthorship": true
+      },
+      "requires": [
+        {
+          "feature": "lines.upward",
+          "anatomical": "central-longitudinal",
+          "provenanceAllowed": [
+            "user-confirmed"
+          ],
+          "observation": {
+            "descriptor": "proposed.urdhva.terminationFinger (trace distal endpoint nearest finger base, from landmarks 5/9/13/17 in palm frame)",
+            "thresholdStatus": "placeholder",
+            "categorical": "index"
+          }
+        }
+      ],
+      "categories": [
+        "career-working-style",
+        "life-direction"
+      ],
+      "sources": [
+        {
+          "sourceId": "hastasanjivana",
+          "locator": "3.2.81 (Zysk 2025, p. 264)",
+          "supportLevel": "direct",
+          "verification": "read-via-secondary"
+        },
+        {
+          "sourceId": "samudrikatilaka",
+          "locator": "1.155 (Zysk 2025, p. 265)",
+          "supportLevel": "disputed",
+          "verification": "read-via-secondary",
+          "originalTerm": "anāmikā",
+          "translationOfTerm": "ring finger (Sanskrit) vs 'forefinger' (Zysk's English)"
+        }
+      ],
+      "overallSupport": "disputed",
+      "traditionalInterpretation": "Hastasañjīvana 3.2.81: reaching the forefinger, a king or king's minister. Sāmudrikatilaka 1.155 may describe the forefinger (Zysk's English) or the ring finger (Sanskrit anāmikā): a caravan trader respected by the king.",
+      "userFacing": {
+        "observation": "You traced an upward line that ends toward your index finger.",
+        "reading": "In one medieval treatise, an upward line reaching the forefinger was linked with counsel and governance, the role of a king's minister. Another treatise may describe this ending differently; the texts disagree.",
+        "reflection": "Whose decisions do you help shape, formally or informally?",
+        "applicationNote": "The treatises describe roles in medieval society. Aura presents them as kinds of activity the tradition linked to this line, not as a prediction about your work or status."
+      },
+      "conflicts": [
+        {
+          "withId": "C1-IN-URDHVA-RING",
+          "kind": "textual-variant",
+          "handling": "show-both-attributed",
+          "note": "ST 1.155 anāmikā vs forefinger unresolved; Aura does not choose."
+        }
+      ],
+      "exclusions": {
+        "claimsNeverMade": [
+          "lifespan-or-death",
+          "health-or-medical",
+          "wealth-or-financial-outcome",
+          "marriage-partner-or-divorce",
+          "fertility-or-children",
+          "event-dates-or-timing",
+          "accident-disaster-misfortune",
+          "caste-varna-class",
+          "gender-or-sex-characteristics",
+          "skin-colour-or-complexion",
+          "moral-character-judgement",
+          "career-success-or-failure",
+          "scientific-validity",
+          "meaning-from-absence",
+          "consequential-decision-advice"
+        ],
+        "doNotEmitWhen": [
+          "feature unassessed or skipped",
+          "required observation outside quality gate",
+          "termination within boundary margin of two fingers",
+          "INC-6 not closed (upward identity lost as MINOR)"
+        ],
+        "droppedSourceContent": "Royal status not presented as an outcome."
+      },
+      "review": {
+        "status": "UNREVIEWED_RESEARCH_CONTENT",
+        "scholarlyReviewer": null,
+        "editorialReviewer": null,
+        "decisionRef": null,
+        "notes": "Unreviewed per C1-D4: Zysk 2016, Sanskrit checks, Western OCR/page-image verification and licensing remain separate approval requirements. Final content direction 2026-11-24: eligibility assessed; source support necessary but not sufficient."
+      },
+      "readingModes": [
+        "indian-only",
+        "combined"
+      ],
+      "wordingFidelity": {
+        "status": "faithful"
+      },
+      "uncertainty": {
+        "measurementQuality": "runtime-from-observationQuality",
+        "identityConfirmation": "user-confirmed-identity",
+        "sourceSupport": "disputed",
+        "traditionalUncertainty": {
+          "level": "high",
+          "reasons": [
+            "sources-disagree",
+            "translation-dependent",
+            "later-tradition-only"
+          ]
+        }
+      },
+      "suitability": {
+        "sourceFidelity": "concern",
+        "observationRequirements": "concern",
+        "culturalContext": "concern",
+        "relevanceToUser": "pass",
+        "harmfulAttributionRisk": "concern",
+        "constructiveReflection": "pass",
+        "rationale": "Disputed (ST 1.155). Eligible only with the disagreement shown."
+      },
+      "eligibility": {
+        "status": "eligible-initial",
+        "decisionRef": "C1 assessment 2026-11-24 (unreviewed)",
+        "conditions": [
+          "Requires E1-E5 + INC-6.",
+          "Disagreement text mandatory (checklist C-3, S-2)."
+        ]
+      },
+      "e1Capabilities": [
+        "E1-E1",
+        "E1-E2",
+        "E1-E4",
+        "E1-E5"
+      ]
+    },
+    {
+      "id": "C1-IN-URDHVA-RING",
+      "tradition": "indian-later-treatise",
+      "featureIdentity": {
+        "anatomicalName": "central longitudinal crease",
+        "traditionalTerm": "ūrdhvarekhā",
+        "traditionalTermTranslation": "upward(-going) line"
+      },
+      "observationQuality": {
+        "minFrameProperties": [
+          "scale",
+          "axis",
+          "direction"
+        ],
+        "blockingQualityIssues": [
+          "palm-not-visible",
+          "hand-cut-off",
+          "hand-rotated",
+          "blurry",
+          "too-dark",
+          "too-bright",
+          "low-contrast"
+        ],
+        "maxTier": "tentative",
+        "boundaryMargin": 0.08,
+        "displayRule": "never-as-confidence"
+      },
+      "traditionNotes": "Western palmistry calls similar vertical lines the 'fate' and 'sun' lines and reads them as destiny; those meanings are not used.",
+      "licensing": {
+        "status": "cc-by-sa-source-original-paraphrase-pending-adaptation-review",
+        "basis": "Zysk 2025 Appendix I translation CC BY-SA 4.0; paraphrase only.",
+        "attributionRequired": true,
+        "aiAuthorship": true
+      },
+      "requires": [
+        {
+          "feature": "lines.upward",
+          "anatomical": "central-longitudinal",
+          "provenanceAllowed": [
+            "user-confirmed"
+          ],
+          "observation": {
+            "descriptor": "proposed.urdhva.terminationFinger (trace distal endpoint nearest finger base, from landmarks 5/9/13/17 in palm frame)",
+            "thresholdStatus": "placeholder",
+            "categorical": "ring"
+          }
+        }
+      ],
+      "categories": [
+        "career-working-style",
+        "life-direction"
+      ],
+      "sources": [
+        {
+          "sourceId": "hastasanjivana",
+          "locator": "3.2.82 (Zysk 2025, p. 264)",
+          "supportLevel": "direct",
+          "verification": "read-via-secondary",
+          "originalTerm": "śivāśritā",
+          "translationOfTerm": "'refuge of Śiva' = ring finger"
+        }
+      ],
+      "overallSupport": "inferred",
+      "traditionalInterpretation": "Hastasañjīvana 3.2.82: reaching the ring finger, a rich merchant or military leader.",
+      "userFacing": {
+        "observation": "You traced an upward line that ends toward your ring finger.",
+        "reading": "A 17th-century treatise linked an upward line reaching the ring finger with enterprise: the merchant who organises trade, or the leader in the field.",
+        "reflection": "What would you build or organise if you had a free hand?",
+        "applicationNote": "The treatises describe roles in medieval society. Aura presents them as kinds of activity the tradition linked to this line, not as a prediction about your work or status."
+      },
+      "conflicts": [],
+      "exclusions": {
+        "claimsNeverMade": [
+          "lifespan-or-death",
+          "health-or-medical",
+          "wealth-or-financial-outcome",
+          "marriage-partner-or-divorce",
+          "fertility-or-children",
+          "event-dates-or-timing",
+          "accident-disaster-misfortune",
+          "caste-varna-class",
+          "gender-or-sex-characteristics",
+          "skin-colour-or-complexion",
+          "moral-character-judgement",
+          "career-success-or-failure",
+          "scientific-validity",
+          "meaning-from-absence",
+          "consequential-decision-advice"
+        ],
+        "doNotEmitWhen": [
+          "feature unassessed or skipped",
+          "required observation outside quality gate",
+          "termination within boundary margin of two fingers",
+          "INC-6 not closed (upward identity lost as MINOR)"
+        ],
+        "droppedSourceContent": "'Rich' dropped (financial outcome); military leadership kept only as part of 'leader in the field'."
+      },
+      "review": {
+        "status": "UNREVIEWED_RESEARCH_CONTENT",
+        "scholarlyReviewer": null,
+        "editorialReviewer": null,
+        "decisionRef": null,
+        "notes": "Unreviewed per C1-D4: Zysk 2016, Sanskrit checks, Western OCR/page-image verification and licensing remain separate approval requirements. Final content direction 2026-11-24: eligibility assessed; source support necessary but not sufficient."
+      },
+      "readingModes": [
+        "indian-only",
+        "combined"
+      ],
+      "wordingFidelity": {
+        "status": "faithful"
+      },
+      "uncertainty": {
+        "measurementQuality": "runtime-from-observationQuality",
+        "identityConfirmation": "user-confirmed-identity",
+        "sourceSupport": "inferred",
+        "traditionalUncertainty": {
+          "level": "moderate",
+          "reasons": [
+            "single-source",
+            "later-tradition-only",
+            "inferred-application"
+          ]
+        }
+      },
+      "suitability": {
+        "sourceFidelity": "pass",
+        "observationRequirements": "concern",
+        "culturalContext": "concern",
+        "relevanceToUser": "pass",
+        "harmfulAttributionRisk": "concern",
+        "constructiveReflection": "pass",
+        "rationale": "Merchant / military leader kept; only the prohibited 'rich' is removed (exclusion, not softening)."
+      },
+      "eligibility": {
+        "status": "eligible-initial",
+        "decisionRef": "C1 assessment 2026-11-24 (unreviewed)",
+        "conditions": [
+          "Requires E1-E5 + INC-6."
+        ]
+      },
+      "e1Capabilities": [
+        "E1-E1",
+        "E1-E2",
+        "E1-E4",
+        "E1-E5"
+      ]
+    },
+    {
+      "id": "C1-IN-URDHVA-LITTLE",
+      "tradition": "indian-later-treatise",
+      "featureIdentity": {
+        "anatomicalName": "central longitudinal crease",
+        "traditionalTerm": "ūrdhvarekhā",
+        "traditionalTermTranslation": "upward(-going) line"
+      },
+      "observationQuality": {
+        "minFrameProperties": [
+          "scale",
+          "axis",
+          "direction"
+        ],
+        "blockingQualityIssues": [
+          "palm-not-visible",
+          "hand-cut-off",
+          "hand-rotated",
+          "blurry",
+          "too-dark",
+          "too-bright",
+          "low-contrast"
+        ],
+        "maxTier": "tentative",
+        "boundaryMargin": 0.08,
+        "displayRule": "never-as-confidence"
+      },
+      "traditionNotes": "Western palmistry calls similar vertical lines the 'fate' and 'sun' lines and reads them as destiny; those meanings are not used.",
+      "licensing": {
+        "status": "cc-by-sa-source-original-paraphrase-pending-adaptation-review",
+        "basis": "Zysk 2025 Appendix I translation CC BY-SA 4.0; paraphrase only.",
+        "attributionRequired": true,
+        "aiAuthorship": true
+      },
+      "requires": [
+        {
+          "feature": "lines.upward",
+          "anatomical": "central-longitudinal",
+          "provenanceAllowed": [
+            "user-confirmed"
+          ],
+          "observation": {
+            "descriptor": "proposed.urdhva.terminationFinger (trace distal endpoint nearest finger base, from landmarks 5/9/13/17 in palm frame)",
+            "thresholdStatus": "placeholder",
+            "categorical": "little"
+          }
+        }
+      ],
+      "categories": [
+        "career-working-style",
+        "life-direction"
+      ],
+      "sources": [
+        {
+          "sourceId": "hastasanjivana",
+          "locator": "3.2.82 (Zysk 2025, p. 264)",
+          "supportLevel": "direct",
+          "verification": "read-via-secondary"
+        },
+        {
+          "sourceId": "samudrikatilaka",
+          "locator": "1.156 (Zysk 2025, p. 266)",
+          "supportLevel": "direct",
+          "verification": "read-via-secondary"
+        }
+      ],
+      "overallSupport": "inferred",
+      "traditionalInterpretation": "Hastasañjīvana 3.2.82: reaching the little finger, supported and famous. Sāmudrikatilaka 1.156: a high-ranking man rich in wealth and gold, intent on glory.",
+      "userFacing": {
+        "observation": "You traced an upward line that ends toward your little finger.",
+        "reading": "The medieval treatises linked an upward line reaching the little finger with recognition: being known for what one does, and being supported by others.",
+        "reflection": "What would you most like to be known for?",
+        "applicationNote": "The treatises describe roles in medieval society. Aura presents them as kinds of activity the tradition linked to this line, not as a prediction about your work or status."
+      },
+      "conflicts": [],
+      "exclusions": {
+        "claimsNeverMade": [
+          "lifespan-or-death",
+          "health-or-medical",
+          "wealth-or-financial-outcome",
+          "marriage-partner-or-divorce",
+          "fertility-or-children",
+          "event-dates-or-timing",
+          "accident-disaster-misfortune",
+          "caste-varna-class",
+          "gender-or-sex-characteristics",
+          "skin-colour-or-complexion",
+          "moral-character-judgement",
+          "career-success-or-failure",
+          "scientific-validity",
+          "meaning-from-absence",
+          "consequential-decision-advice"
+        ],
+        "doNotEmitWhen": [
+          "feature unassessed or skipped",
+          "required observation outside quality gate",
+          "termination within boundary margin of two fingers",
+          "INC-6 not closed (upward identity lost as MINOR)"
+        ],
+        "droppedSourceContent": "Wealth and gold dropped (financial outcome); fame not promised."
+      },
+      "review": {
+        "status": "UNREVIEWED_RESEARCH_CONTENT",
+        "scholarlyReviewer": null,
+        "editorialReviewer": null,
+        "decisionRef": null,
+        "notes": "Unreviewed per C1-D4: Zysk 2016, Sanskrit checks, Western OCR/page-image verification and licensing remain separate approval requirements. Final content direction 2026-11-24: eligibility assessed; source support necessary but not sufficient."
+      },
+      "readingModes": [
+        "indian-only",
+        "combined"
+      ],
+      "wordingFidelity": {
+        "status": "faithful"
+      },
+      "uncertainty": {
+        "measurementQuality": "runtime-from-observationQuality",
+        "identityConfirmation": "user-confirmed-identity",
+        "sourceSupport": "inferred",
+        "traditionalUncertainty": {
+          "level": "moderate",
+          "reasons": [
+            "later-tradition-only",
+            "inferred-application"
+          ]
+        }
+      },
+      "suitability": {
+        "sourceFidelity": "pass",
+        "observationRequirements": "concern",
+        "culturalContext": "concern",
+        "relevanceToUser": "pass",
+        "harmfulAttributionRisk": "concern",
+        "constructiveReflection": "pass",
+        "rationale": "Recognition and being supported kept; wealth and gold removed as prohibited claims."
+      },
+      "eligibility": {
+        "status": "eligible-initial",
+        "decisionRef": "C1 assessment 2026-11-24 (unreviewed)",
+        "conditions": [
+          "Requires E1-E5 + INC-6."
+        ]
+      },
+      "e1Capabilities": [
+        "E1-E1",
+        "E1-E2",
+        "E1-E4",
+        "E1-E5"
+      ]
+    },
+    {
+      "id": "C1-IN-URDHVA-UNBROKEN",
+      "tradition": "indian-later-treatise",
+      "featureIdentity": {
+        "anatomicalName": "central longitudinal crease",
+        "traditionalTerm": "ūrdhvarekhā"
+      },
+      "requires": [
+        {
+          "feature": "lines.upward",
+          "anatomical": "central-longitudinal",
+          "provenanceAllowed": [
+            "user-confirmed"
+          ]
+        },
+        {
+          "feature": "proposed.line.continuity.upward",
+          "anatomical": "central-longitudinal",
+          "provenanceAllowed": [
+            "user-self-reported"
+          ],
+          "observation": {
+            "descriptor": "user answers that the line is unbroken and unbranched",
+            "thresholdStatus": "placeholder",
+            "categorical": "unbroken-unbranched"
+          }
+        }
+      ],
+      "categories": [
+        "strengths"
+      ],
+      "sources": [
+        {
+          "sourceId": "samudrikatilaka",
+          "locator": "1.153 (Zysk 2025, p. 265)",
+          "supportLevel": "direct",
+          "verification": "read-via-secondary"
+        }
+      ],
+      "overallSupport": "inferred",
+      "traditionalInterpretation": "Sāmudrikatilaka 1.153: an upward line that is unbroken, very long, complete and without branches means the man supports a thousand people.",
+      "userFacing": {
+        "observation": "You traced an upward line and told Aura it looks unbroken. (This comes from your answer, not from an automatic check.)",
+        "reading": "A 12th-century treatise associated a long, unbroken upward line with providing for many people.",
+        "reflection": "Who relies on you, and who do you rely on?",
+        "applicationNote": "The text's 'supports a thousand people' is a status image; Aura presents it as a theme for reflection only."
+      },
+      "observationQuality": {
+        "minFrameProperties": [
+          "scale",
+          "axis",
+          "direction"
+        ],
+        "blockingQualityIssues": [
+          "palm-not-visible",
+          "hand-cut-off",
+          "hand-rotated",
+          "blurry",
+          "too-dark",
+          "too-bright",
+          "low-contrast"
+        ],
+        "maxTier": "tentative",
+        "displayRule": "never-as-confidence"
+      },
+      "exclusions": {
+        "claimsNeverMade": [
+          "lifespan-or-death",
+          "health-or-medical",
+          "wealth-or-financial-outcome",
+          "marriage-partner-or-divorce",
+          "fertility-or-children",
+          "event-dates-or-timing",
+          "accident-disaster-misfortune",
+          "caste-varna-class",
+          "gender-or-sex-characteristics",
+          "skin-colour-or-complexion",
+          "moral-character-judgement",
+          "career-success-or-failure",
+          "scientific-validity",
+          "meaning-from-absence",
+          "consequential-decision-advice"
+        ],
+        "doNotEmitWhen": [
+          "feature unassessed or skipped",
+          "required observation outside quality gate",
+          "NOT EMITTED in C1: continuity is not representable (INC-7) and the inference needs reviewer approval"
+        ],
+        "droppedSourceContent": "Breaks are never given a negative reading."
+      },
+      "licensing": {
+        "status": "cc-by-sa-source-original-paraphrase-pending-adaptation-review",
+        "basis": "Zysk 2025 translation CC BY-SA 4.0.",
+        "attributionRequired": true,
+        "aiAuthorship": true
+      },
+      "review": {
+        "status": "UNREVIEWED_RESEARCH_CONTENT",
+        "scholarlyReviewer": null,
+        "editorialReviewer": null,
+        "decisionRef": null,
+        "notes": "Unreviewed per C1-D4: Zysk 2016, Sanskrit checks, Western OCR/page-image verification and licensing remain separate approval requirements. Final content direction 2026-11-24: eligibility assessed; source support necessary but not sufficient."
+      },
+      "readingModes": [
+        "indian-only",
+        "combined"
+      ],
+      "selfReport": {
+        "subject": "hand-feature",
+        "question": "Along the upward line you traced, does it look unbroken, or broken or branched in places?",
+        "answers": [
+          "unbroken",
+          "broken or branched",
+          "not sure"
+        ],
+        "presentation": "This comes from your answer about your trace, not from an automatic check."
+      },
+      "wordingFidelity": {
+        "status": "faithful"
+      },
+      "uncertainty": {
+        "measurementQuality": "runtime-from-observationQuality",
+        "identityConfirmation": "user-self-reported",
+        "sourceSupport": "inferred",
+        "traditionalUncertainty": {
+          "level": "high",
+          "reasons": [
+            "single-source",
+            "inferred-application"
+          ]
+        }
+      },
+      "suitability": {
+        "sourceFidelity": "concern",
+        "observationRequirements": "fail",
+        "culturalContext": "concern",
+        "relevanceToUser": "concern",
+        "harmfulAttributionRisk": "concern",
+        "constructiveReflection": "pass",
+        "rationale": "Inferred status image; continuity not observable; reviewer approval of the inference outstanding (C-4)."
+      },
+      "eligibility": {
+        "status": "held",
+        "decisionRef": "C1 assessment 2026-11-24 (unreviewed)"
+      },
+      "e1Capabilities": [
+        "E1-E1",
+        "E1-E2",
+        "E1-E4",
+        "E1-L4"
+      ]
+    },
+    {
+      "id": "C1-IN-PALM-RAISED-GENEROUS",
+      "tradition": "indian-classical",
+      "featureIdentity": {
+        "anatomicalName": "palm (central hollow vs raised)",
+        "traditionalTerm": "unnata pāṇi (ŚKA v. 27); 'high' palm (BS, Iyer)",
+        "traditionalTermTranslation": "upraised / high hand"
+      },
+      "requires": [
+        {
+          "feature": "proposed.selfReported.palmRaised",
+          "anatomical": "palm",
+          "provenanceAllowed": [
+            "user-self-reported"
+          ],
+          "observation": {
+            "descriptor": "user answers that the centre of the palm is full/raised rather than hollow",
+            "thresholdStatus": "placeholder",
+            "categorical": "raised"
+          }
+        }
+      ],
+      "categories": [
+        "personality",
+        "strengths"
+      ],
+      "sources": [
+        {
+          "sourceId": "sardulakarnavadana",
+          "locator": "v. 27 (Zysk 2025, pp. 257–258)",
+          "supportLevel": "direct",
+          "verification": "read-via-secondary",
+          "originalTerm": "unnata",
+          "translationOfTerm": "upraised"
+        },
+        {
+          "sourceId": "brhatsamhita",
+          "locator": "Iyer tr. 68.39",
+          "supportLevel": "direct",
+          "verification": "read-directly",
+          "note": "Translation-dependent: Sanskrit for 'high' not checked in C1."
+        }
+      ],
+      "overallSupport": "direct",
+      "traditionalInterpretation": "Two independent Indian texts link a raised palm with generosity: the Bṛhatsaṃhitā (a 'high' palm means the person will be generous) and the Śārdūlakarṇāvadāna (an upraised hand 'always gives').",
+      "userFacing": {
+        "observation": "You told Aura the centre of your palm is full rather than hollow. (This comes from your answer, not from your photo.)",
+        "reading": "Two early Indian texts, the Bṛhatsaṃhitā and a Buddhist palmistry chapter, associate a raised palm with a generous, giving nature.",
+        "reflection": "What do you give most freely: time, attention, help, or something else?"
+      },
+      "observationQuality": {
+        "minFrameProperties": [],
+        "blockingQualityIssues": [],
+        "maxTier": "tentative",
+        "displayRule": "never-as-confidence"
+      },
+      "conflicts": [
+        {
+          "withId": "BS 68.39 hollow-palm clauses",
+          "kind": "within-tradition-disagreement",
+          "handling": "show-neither",
+          "note": "The hollow-palm clauses (inheritance, wealth) are excluded; a hollow answer produces no reading."
+        }
+      ],
+      "exclusions": {
+        "claimsNeverMade": [
+          "lifespan-or-death",
+          "health-or-medical",
+          "wealth-or-financial-outcome",
+          "marriage-partner-or-divorce",
+          "fertility-or-children",
+          "event-dates-or-timing",
+          "accident-disaster-misfortune",
+          "caste-varna-class",
+          "gender-or-sex-characteristics",
+          "skin-colour-or-complexion",
+          "moral-character-judgement",
+          "career-success-or-failure",
+          "scientific-validity",
+          "meaning-from-absence",
+          "consequential-decision-advice"
+        ],
+        "doNotEmitWhen": [
+          "feature unassessed or skipped",
+          "required observation outside quality gate",
+          "user answers 'hollow' or 'not sure' (no reading; never the inheritance/wealth clauses)",
+          "self-report input (E1-L1) not implemented"
+        ],
+        "droppedSourceContent": "BS 68.39 hollow → no paternal inheritance; round-hollow → rich: excluded (financial)."
+      },
+      "licensing": {
+        "status": "cc-by-sa-source-original-paraphrase-pending-adaptation-review",
+        "basis": "BS Iyer 1884 public domain + Zysk 2025 CC BY-SA 4.0 (attribution required for the ŚKA citation); paraphrase only.",
+        "attributionRequired": true,
+        "aiAuthorship": true
+      },
+      "review": {
+        "status": "UNREVIEWED_RESEARCH_CONTENT",
+        "scholarlyReviewer": null,
+        "editorialReviewer": null,
+        "decisionRef": null,
+        "notes": "Unreviewed per C1-D4: Zysk 2016, Sanskrit checks, Western OCR/page-image verification and licensing remain separate approval requirements. Final content direction 2026-11-24: eligibility assessed; source support necessary but not sufficient."
+      },
+      "readingModes": [
+        "indian-only",
+        "combined"
+      ],
+      "selfReport": {
+        "subject": "hand-feature",
+        "question": "Look at the centre of your open palm. Is it full and slightly raised, or does it dip into a hollow?",
+        "answers": [
+          "full / raised",
+          "hollow",
+          "not sure"
+        ],
+        "presentation": "This comes from your answer, not from your photo. Aura did not measure it."
+      },
+      "wordingFidelity": {
+        "status": "faithful"
+      },
+      "uncertainty": {
+        "measurementQuality": "runtime-from-observationQuality",
+        "identityConfirmation": "user-self-reported",
+        "sourceSupport": "direct",
+        "traditionalUncertainty": {
+          "level": "moderate",
+          "reasons": [
+            "translation-dependent",
+            "sanskrit-unchecked"
+          ]
+        }
+      },
+      "suitability": {
+        "sourceFidelity": "concern",
+        "observationRequirements": "concern",
+        "culturalContext": "pass",
+        "relevanceToUser": "pass",
+        "harmfulAttributionRisk": "pass",
+        "constructiveReflection": "pass",
+        "rationale": "Two converging Indian sources; translation-dependent (S-2). Needs the self-report input."
+      },
+      "eligibility": {
+        "status": "eligible-later",
+        "decisionRef": "C1 assessment 2026-11-24 (unreviewed)",
+        "conditions": [
+          "E1-L1 self-report with disclosure."
+        ]
+      },
+      "e1Capabilities": [
+        "E1-E1",
+        "E1-E2",
+        "E1-L1"
+      ]
+    },
+    {
+      "id": "C1-IN-MATSYA-PAIR-HOSPITALITY",
+      "tradition": "indian-classical",
+      "featureIdentity": {
+        "anatomicalName": "palm mark (user-reported)",
+        "traditionalTerm": "matsya (pair)",
+        "traditionalTermTranslation": "fish"
+      },
+      "requires": [
+        {
+          "feature": "marks.matsya",
+          "anatomical": "mark",
+          "provenanceAllowed": [
+            "user-reported"
+          ]
+        },
+        {
+          "feature": "proposed.marks.matsya.count",
+          "anatomical": "mark",
+          "provenanceAllowed": [
+            "user-reported"
+          ],
+          "observation": {
+            "descriptor": "user reports two fish shapes",
+            "thresholdStatus": "placeholder",
+            "categorical": "2"
+          }
+        }
+      ],
+      "categories": [
+        "strengths"
+      ],
+      "sources": [
+        {
+          "sourceId": "brhatsamhita",
+          "locator": "Iyer tr. 68.44",
+          "supportLevel": "direct",
+          "verification": "read-directly"
+        },
+        {
+          "sourceId": "sardulakarnavadana",
+          "locator": "vv. 15, 22 (Zysk 2025, pp. 250–254)",
+          "supportLevel": "direct",
+          "verification": "read-via-secondary",
+          "note": "Fish → food/drink/wealth (single fish)."
+        }
+      ],
+      "overallSupport": "inferred",
+      "traditionalInterpretation": "Bṛhatsaṃhitā (Iyer 68.44): two fish marks in the middle of the palm mean the person will daily feed many people. The Buddhist chapter links the fish with food and drink.",
+      "userFacing": {
+        "observation": "You said you see two fish-shaped marks on your palm. Aura has not checked this.",
+        "reading": "The Bṛhatsaṃhitā linked a pair of fish marks with feeding many people every day, an image of hospitality.",
+        "reflection": "When did you last make someone feel welcome, and what did it take?",
+        "applicationNote": "The text pictures a household rich enough to feed many; Aura keeps only the hospitality image and makes no claim about resources."
+      },
+      "observationQuality": {
+        "minFrameProperties": [],
+        "blockingQualityIssues": [],
+        "maxTier": "tentative",
+        "displayRule": "never-as-confidence"
+      },
+      "exclusions": {
+        "claimsNeverMade": [
+          "lifespan-or-death",
+          "health-or-medical",
+          "wealth-or-financial-outcome",
+          "marriage-partner-or-divorce",
+          "fertility-or-children",
+          "event-dates-or-timing",
+          "accident-disaster-misfortune",
+          "caste-varna-class",
+          "gender-or-sex-characteristics",
+          "skin-colour-or-complexion",
+          "moral-character-judgement",
+          "career-success-or-failure",
+          "scientific-validity",
+          "meaning-from-absence",
+          "consequential-decision-advice"
+        ],
+        "doNotEmitWhen": [
+          "feature unassessed or skipped",
+          "required observation outside quality gate",
+          "only one fish reported (single-fish readings are wealth/food: historical context only)",
+          "count field not implemented",
+          "mark not reported or skipped: treated as UNKNOWN, never as absent"
+        ],
+        "droppedSourceContent": "Wealth readings of the fish dropped."
+      },
+      "licensing": {
+        "status": "cc-by-sa-source-original-paraphrase-pending-adaptation-review",
+        "basis": "Iyer 1884 public domain; ŚKA citation via Zysk 2025 CC BY-SA (context only). Cites a CC BY-SA 4.0 translation (Zysk 2025): attribution + adaptation review apply.",
+        "attributionRequired": true,
+        "aiAuthorship": true
+      },
+      "review": {
+        "status": "UNREVIEWED_RESEARCH_CONTENT",
+        "scholarlyReviewer": null,
+        "editorialReviewer": null,
+        "decisionRef": null,
+        "notes": "Unreviewed per C1-D4: Zysk 2016, Sanskrit checks, Western OCR/page-image verification and licensing remain separate approval requirements. Final content direction 2026-11-24: eligibility assessed; source support necessary but not sufficient."
+      },
+      "readingModes": [
+        "indian-only",
+        "combined"
+      ],
+      "wordingFidelity": {
+        "status": "faithful"
+      },
+      "uncertainty": {
+        "measurementQuality": "runtime-from-observationQuality",
+        "identityConfirmation": "user-reported-unchecked",
+        "sourceSupport": "inferred",
+        "traditionalUncertainty": {
+          "level": "moderate",
+          "reasons": [
+            "single-source",
+            "inferred-application"
+          ]
+        }
+      },
+      "suitability": {
+        "sourceFidelity": "concern",
+        "observationRequirements": "concern",
+        "culturalContext": "pass",
+        "relevanceToUser": "pass",
+        "harmfulAttributionRisk": "pass",
+        "constructiveReflection": "pass",
+        "rationale": "'Daily feed many people' rendered as hospitality: inferred; resource claim not made."
+      },
+      "eligibility": {
+        "status": "eligible-later",
+        "decisionRef": "C1 assessment 2026-11-24 (unreviewed)",
+        "conditions": [
+          "E1-L2 mark count; user-reported, unchecked."
+        ]
+      },
+      "e1Capabilities": [
+        "E1-E1",
+        "E1-E2",
+        "E1-L2"
+      ]
+    },
+    {
+      "id": "C1-IN-MARK-FISHTAIL-LEARNING",
+      "tradition": "indian-classical",
+      "featureIdentity": {
+        "anatomicalName": "palm line pattern (user-reported)",
+        "traditionalTerm": "fish-tail-shaped line (BS, Iyer)",
+        "traditionalTermTranslation": "fish's tail"
+      },
+      "requires": [
+        {
+          "feature": "proposed.marks.fishTail",
+          "anatomical": "mark",
+          "provenanceAllowed": [
+            "user-reported"
+          ]
+        }
+      ],
+      "categories": [
+        "strengths"
+      ],
+      "sources": [
+        {
+          "sourceId": "brhatsamhita",
+          "locator": "Iyer tr. 68.45",
+          "supportLevel": "direct",
+          "verification": "read-directly"
+        },
+        {
+          "sourceId": "garuda-dutt",
+          "locator": "Dutt 1908 ch. LXV (no verse numbers online)",
+          "supportLevel": "direct",
+          "verification": "read-via-secondary",
+          "note": "Corroboration only: 'fish's tail' → intellect; translation unreliable (Zysk 2019)."
+        }
+      ],
+      "overallSupport": "direct",
+      "traditionalInterpretation": "Bṛhatsaṃhitā (Iyer 68.45): lines shaped like a fish's tail indicate a learned person; the Garuḍa Purāṇa's derivative chapter repeats it.",
+      "userFacing": {
+        "observation": "You said you see a line shaped like a fish's tail. Aura has not checked this.",
+        "reading": "The Bṛhatsaṃhitā associated a fish-tail-shaped line with learning and scholarship.",
+        "reflection": "What subject could you happily study for years?"
+      },
+      "observationQuality": {
+        "minFrameProperties": [],
+        "blockingQualityIssues": [],
+        "maxTier": "tentative",
+        "displayRule": "never-as-confidence"
+      },
+      "exclusions": {
+        "claimsNeverMade": [
+          "lifespan-or-death",
+          "health-or-medical",
+          "wealth-or-financial-outcome",
+          "marriage-partner-or-divorce",
+          "fertility-or-children",
+          "event-dates-or-timing",
+          "accident-disaster-misfortune",
+          "caste-varna-class",
+          "gender-or-sex-characteristics",
+          "skin-colour-or-complexion",
+          "moral-character-judgement",
+          "career-success-or-failure",
+          "scientific-validity",
+          "meaning-from-absence",
+          "consequential-decision-advice"
+        ],
+        "doNotEmitWhen": [
+          "feature unassessed or skipped",
+          "required observation outside quality gate",
+          "new mark id not implemented in I1/E1",
+          "mark not reported or skipped: treated as UNKNOWN, never as absent"
+        ]
+      },
+      "licensing": {
+        "status": "public-domain-source-original-paraphrase",
+        "basis": "Iyer 1884 and Dutt 1908 translations public domain (Dutt death date unverified).",
+        "attributionRequired": false,
+        "aiAuthorship": true
+      },
+      "review": {
+        "status": "UNREVIEWED_RESEARCH_CONTENT",
+        "scholarlyReviewer": null,
+        "editorialReviewer": null,
+        "decisionRef": null,
+        "notes": "Unreviewed per C1-D4: Zysk 2016, Sanskrit checks, Western OCR/page-image verification and licensing remain separate approval requirements. Final content direction 2026-11-24: eligibility assessed; source support necessary but not sufficient."
+      },
+      "readingModes": [
+        "indian-only",
+        "combined"
+      ],
+      "wordingFidelity": {
+        "status": "faithful"
+      },
+      "uncertainty": {
+        "measurementQuality": "runtime-from-observationQuality",
+        "identityConfirmation": "user-reported-unchecked",
+        "sourceSupport": "direct",
+        "traditionalUncertainty": {
+          "level": "low",
+          "reasons": []
+        }
+      },
+      "suitability": {
+        "sourceFidelity": "pass",
+        "observationRequirements": "concern",
+        "culturalContext": "pass",
+        "relevanceToUser": "pass",
+        "harmfulAttributionRisk": "pass",
+        "constructiveReflection": "pass",
+        "rationale": "Direct (BS 68.45, GP corroborates). Shape recognition by users is unreliable."
+      },
+      "eligibility": {
+        "status": "eligible-later",
+        "decisionRef": "C1 assessment 2026-11-24 (unreviewed)",
+        "conditions": [
+          "E1-L2 new mark id."
+        ]
+      },
+      "e1Capabilities": [
+        "E1-E1",
+        "E1-E2",
+        "E1-L2"
+      ]
+    },
+    {
+      "id": "C1-IN-MARK-CHARITY",
+      "tradition": "indian-classical",
+      "featureIdentity": {
+        "anatomicalName": "palm line pattern (user-reported)",
+        "traditionalTerm": "tank / temple shapes (BS, Iyer); triangle not read (ambiguous)"
+      },
+      "requires": [
+        {
+          "feature": "proposed.marks.tankTemple",
+          "anatomical": "mark",
+          "provenanceAllowed": [
+            "user-reported"
+          ]
+        }
+      ],
+      "categories": [
+        "strengths",
+        "personality"
+      ],
+      "sources": [
+        {
+          "sourceId": "brhatsamhita",
+          "locator": "Iyer tr. 68.49",
+          "supportLevel": "direct",
+          "verification": "read-directly"
+        },
+        {
+          "sourceId": "garuda-dutt",
+          "locator": "Dutt 1908 ch. LXV",
+          "supportLevel": "direct",
+          "verification": "read-via-secondary",
+          "note": "Corroboration: tank/triangle → righteousness."
+        }
+      ],
+      "overallSupport": "direct",
+      "traditionalInterpretation": "Bṛhatsaṃhitā (Iyer 68.49): lines shaped like a tank, a temple and the like, or triangular, mean the person will do acts of charity.",
+      "userFacing": {
+        "observation": "You said you see a shape like a water tank or a temple among your palm lines. Aura has not checked this.",
+        "reading": "The Bṛhatsaṃhitā linked lines shaped like a tank or a temple with charitable acts.",
+        "reflection": "Which cause or community would you give to, if giving were easy?"
+      },
+      "observationQuality": {
+        "minFrameProperties": [],
+        "blockingQualityIssues": [],
+        "maxTier": "tentative",
+        "displayRule": "never-as-confidence"
+      },
+      "conflicts": [
+        {
+          "withId": "BS 68.46 (triangle → rich)",
+          "kind": "within-tradition-disagreement",
+          "handling": "show-neither",
+          "note": "BS gives 'triangular' two meanings (68.46 rich; 68.49 charity). Emit only when the user reports a tank or temple shape; a triangle alone produces no reading."
+        }
+      ],
+      "exclusions": {
+        "claimsNeverMade": [
+          "lifespan-or-death",
+          "health-or-medical",
+          "wealth-or-financial-outcome",
+          "marriage-partner-or-divorce",
+          "fertility-or-children",
+          "event-dates-or-timing",
+          "accident-disaster-misfortune",
+          "caste-varna-class",
+          "gender-or-sex-characteristics",
+          "skin-colour-or-complexion",
+          "moral-character-judgement",
+          "career-success-or-failure",
+          "scientific-validity",
+          "meaning-from-absence",
+          "consequential-decision-advice"
+        ],
+        "doNotEmitWhen": [
+          "feature unassessed or skipped",
+          "required observation outside quality gate",
+          "user reports only a triangle (ambiguous between 68.46 wealth and 68.49 charity)",
+          "new mark id not implemented",
+          "mark not reported or skipped: treated as UNKNOWN, never as absent"
+        ]
+      },
+      "licensing": {
+        "status": "public-domain-source-original-paraphrase",
+        "basis": "Iyer 1884 public domain.",
+        "attributionRequired": false,
+        "aiAuthorship": true
+      },
+      "review": {
+        "status": "UNREVIEWED_RESEARCH_CONTENT",
+        "scholarlyReviewer": null,
+        "editorialReviewer": null,
+        "decisionRef": null,
+        "notes": "Unreviewed per C1-D4: Zysk 2016, Sanskrit checks, Western OCR/page-image verification and licensing remain separate approval requirements. Final content direction 2026-11-24: eligibility assessed; source support necessary but not sufficient. v0.4 (2026-11-25): triangle removed from the feature id and user-facing text to match the record's show-neither conflict rule; a reported triangle is listed as not assessed ('ambiguous-in-source')."
+      },
+      "readingModes": [
+        "indian-only",
+        "combined"
+      ],
+      "wordingFidelity": {
+        "status": "faithful"
+      },
+      "uncertainty": {
+        "measurementQuality": "runtime-from-observationQuality",
+        "identityConfirmation": "user-reported-unchecked",
+        "sourceSupport": "direct",
+        "traditionalUncertainty": {
+          "level": "moderate",
+          "reasons": [
+            "sources-disagree"
+          ]
+        }
+      },
+      "suitability": {
+        "sourceFidelity": "pass",
+        "observationRequirements": "concern",
+        "culturalContext": "pass",
+        "relevanceToUser": "pass",
+        "harmfulAttributionRisk": "pass",
+        "constructiveReflection": "pass",
+        "rationale": "Direct (BS 68.49); triangle-only ambiguity handled by show-neither."
+      },
+      "eligibility": {
+        "status": "eligible-later",
+        "decisionRef": "C1 assessment 2026-11-24 (unreviewed)",
+        "conditions": [
+          "E1-L2 new mark id."
+        ]
+      },
+      "e1Capabilities": [
+        "E1-E1",
+        "E1-E2",
+        "E1-L2"
+      ]
+    },
+    {
+      "id": "C1-IN-FINGER-FINE",
+      "tradition": "indian-classical",
+      "featureIdentity": {
+        "anatomicalName": "fingers relative to palm",
+        "traditionalTerm": "'small' fingers (Iyer)"
+      },
+      "requires": [
+        {
+          "feature": "measurements.middleToPalmRatio",
+          "anatomical": "finger",
+          "provenanceAllowed": [
+            "automatic-measured"
+          ],
+          "observation": {
+            "descriptor": "ratio",
+            "thresholdStatus": "placeholder",
+            "range": {
+              "min": null,
+              "max": 0.8
+            }
+          }
+        }
+      ],
+      "categories": [
+        "personality"
+      ],
+      "sources": [
+        {
+          "sourceId": "brhatsamhita",
+          "locator": "Iyer tr. 68.36",
+          "supportLevel": "disputed",
+          "verification": "read-directly",
+          "note": "Translation-dependent: Iyer's 'small' may render a Sanskrit word meaning thin or fine; Sanskrit not checked. GP (Dutt) says thin fingers → poverty."
+        }
+      ],
+      "overallSupport": "disputed",
+      "traditionalInterpretation": "Iyer's translation of Bṛhatsaṃhitā 68.36: small fingers → intelligent; long fingers → lives in comfort; flat fingers → serves others.",
+      "userFacing": {
+        "observation": "Your fingers are short relative to your palm.",
+        "reading": "NOT FOR EMISSION. Placeholder pending Sanskrit verification."
+      },
+      "observationQuality": {
+        "minFrameProperties": [
+          "scale"
+        ],
+        "blockingQualityIssues": [
+          "palm-not-visible",
+          "hand-cut-off"
+        ],
+        "measurementStatusRequired": "measured",
+        "maxTier": "tentative",
+        "boundaryMargin": 0.03,
+        "displayRule": "never-as-confidence"
+      },
+      "conflicts": [
+        {
+          "withId": "C1-WE-FINGER-SHORT",
+          "kind": "same-feature-other-tradition",
+          "handling": "show-both-attributed",
+          "note": "Only if a reviewer approves this entry; never merged."
+        },
+        {
+          "withId": "Garuḍa Purāṇa (Dutt) thin fingers → poverty",
+          "kind": "within-tradition-disagreement",
+          "handling": "show-neither"
+        }
+      ],
+      "exclusions": {
+        "claimsNeverMade": [
+          "lifespan-or-death",
+          "health-or-medical",
+          "wealth-or-financial-outcome",
+          "marriage-partner-or-divorce",
+          "fertility-or-children",
+          "event-dates-or-timing",
+          "accident-disaster-misfortune",
+          "caste-varna-class",
+          "gender-or-sex-characteristics",
+          "skin-colour-or-complexion",
+          "moral-character-judgement",
+          "career-success-or-failure",
+          "scientific-validity",
+          "meaning-from-absence",
+          "consequential-decision-advice"
+        ],
+        "doNotEmitWhen": [
+          "feature unassessed or skipped",
+          "required observation outside quality gate",
+          "ALWAYS in C1: disputed translation"
+        ],
+        "droppedSourceContent": "Comfort and servitude clauses excluded."
+      },
+      "licensing": {
+        "status": "public-domain-source-original-paraphrase",
+        "basis": "Iyer 1884 public domain.",
+        "attributionRequired": false,
+        "aiAuthorship": true
+      },
+      "review": {
+        "status": "UNREVIEWED_RESEARCH_CONTENT",
+        "scholarlyReviewer": null,
+        "editorialReviewer": null,
+        "decisionRef": null,
+        "notes": "Documented to show the conflict; not emittable. Unreviewed per C1-D4: Zysk 2016, Sanskrit checks, Western OCR/page-image verification and licensing remain separate approval requirements. Final content direction 2026-11-24: eligibility assessed; source support necessary but not sufficient."
+      },
+      "readingModes": [
+        "indian-only",
+        "combined"
+      ],
+      "wordingFidelity": {
+        "status": "faithful"
+      },
+      "uncertainty": {
+        "measurementQuality": "runtime-from-observationQuality",
+        "identityConfirmation": "measured-no-identity-claim",
+        "sourceSupport": "disputed",
+        "traditionalUncertainty": {
+          "level": "high",
+          "reasons": [
+            "translation-dependent",
+            "sanskrit-unchecked",
+            "sources-disagree"
+          ]
+        }
+      },
+      "suitability": {
+        "sourceFidelity": "fail",
+        "observationRequirements": "pass",
+        "culturalContext": "concern",
+        "relevanceToUser": "concern",
+        "harmfulAttributionRisk": "concern",
+        "constructiveReflection": "concern",
+        "rationale": "Translation-dependent and contradicted by GP; not emittable until S-2."
+      },
+      "eligibility": {
+        "status": "held",
+        "decisionRef": "C1 assessment 2026-11-24 (unreviewed)"
+      },
+      "e1Capabilities": [
+        "E1-E1",
+        "E1-E2",
+        "E1-E3"
+      ]
+    },
+    {
+      "id": "C1-IN-JOINTS-POPULAR",
+      "tradition": "indian-classical",
+      "featureIdentity": {
+        "anatomicalName": "finger phalanges",
+        "traditionalTerm": "long finger joints (Iyer)"
+      },
+      "requires": [
+        {
+          "feature": "proposed.measurements.phalanxProportion",
+          "anatomical": "finger",
+          "provenanceAllowed": [
+            "automatic-measured"
+          ],
+          "observation": {
+            "descriptor": "phalanx length relative to finger (needs definition)",
+            "thresholdStatus": "placeholder"
+          }
+        }
+      ],
+      "categories": [
+        "personality"
+      ],
+      "sources": [
+        {
+          "sourceId": "brhatsamhita",
+          "locator": "Iyer tr. 68.42 (second sentence)",
+          "supportLevel": "direct",
+          "verification": "read-directly",
+          "note": "Single apodosis: 'popular and will live long'. GP repeats only 'long life'."
+        }
+      ],
+      "overallSupport": "disputed",
+      "traditionalInterpretation": "Bṛhatsaṃhitā (Iyer 68.42): long finger joints → popular and long-lived.",
+      "userFacing": {
+        "observation": "The joints of your fingers are long.",
+        "reading": "NOT FOR EMISSION. Reviewer decision required (source clause is bound to an excluded claim)."
+      },
+      "observationQuality": {
+        "minFrameProperties": [
+          "scale"
+        ],
+        "blockingQualityIssues": [
+          "palm-not-visible",
+          "hand-cut-off"
+        ],
+        "measurementStatusRequired": "measured",
+        "maxTier": "tentative",
+        "boundaryMargin": 0.03,
+        "displayRule": "never-as-confidence"
+      },
+      "exclusions": {
+        "claimsNeverMade": [
+          "lifespan-or-death",
+          "health-or-medical",
+          "wealth-or-financial-outcome",
+          "marriage-partner-or-divorce",
+          "fertility-or-children",
+          "event-dates-or-timing",
+          "accident-disaster-misfortune",
+          "caste-varna-class",
+          "gender-or-sex-characteristics",
+          "skin-colour-or-complexion",
+          "moral-character-judgement",
+          "career-success-or-failure",
+          "scientific-validity",
+          "meaning-from-absence",
+          "consequential-decision-advice"
+        ],
+        "doNotEmitWhen": [
+          "feature unassessed or skipped",
+          "required observation outside quality gate",
+          "ALWAYS in C1: longevity-linked; GP version is longevity-only"
+        ],
+        "droppedSourceContent": "Longevity clause excluded."
+      },
+      "licensing": {
+        "status": "public-domain-source-original-paraphrase",
+        "basis": "Iyer 1884 public domain.",
+        "attributionRequired": false,
+        "aiAuthorship": true
+      },
+      "review": {
+        "status": "UNREVIEWED_RESEARCH_CONTENT",
+        "scholarlyReviewer": null,
+        "editorialReviewer": null,
+        "decisionRef": null,
+        "notes": "Unreviewed per C1-D4: Zysk 2016, Sanskrit checks, Western OCR/page-image verification and licensing remain separate approval requirements. Final content direction 2026-11-24: eligibility assessed; source support necessary but not sufficient."
+      },
+      "readingModes": [
+        "indian-only",
+        "combined"
+      ],
+      "wordingFidelity": {
+        "status": "faithful"
+      },
+      "uncertainty": {
+        "measurementQuality": "runtime-from-observationQuality",
+        "identityConfirmation": "measured-no-identity-claim",
+        "sourceSupport": "disputed",
+        "traditionalUncertainty": {
+          "level": "high",
+          "reasons": [
+            "single-source"
+          ]
+        }
+      },
+      "suitability": {
+        "sourceFidelity": "concern",
+        "observationRequirements": "fail",
+        "culturalContext": "concern",
+        "relevanceToUser": "concern",
+        "harmfulAttributionRisk": "concern",
+        "constructiveReflection": "concern",
+        "rationale": "Clause bound to a longevity apodosis (C-2); phalanx representation not planned."
+      },
+      "eligibility": {
+        "status": "held",
+        "decisionRef": "C1 assessment 2026-11-24 (unreviewed)"
+      },
+      "e1Capabilities": [
+        "E1-E1",
+        "E1-E2",
+        "not-planned"
+      ]
+    },
+    {
+      "id": "C1-IN-MARK-HISTORICAL-YAVA",
+      "tradition": "indian-classical",
+      "featureIdentity": {
+        "anatomicalName": "palm mark (user-reported)",
+        "traditionalTerm": "yava",
+        "traditionalTermTranslation": "barleycorn"
+      },
+      "requires": [
+        {
+          "feature": "marks.yava",
+          "anatomical": "mark",
+          "provenanceAllowed": [
+            "user-reported"
+          ]
+        }
+      ],
+      "categories": [
+        "historical-context-only"
+      ],
+      "sources": [
+        {
+          "sourceId": "approved-guide",
+          "locator": "PalmistryEntry 'yava' (sources: BS Iyer 68.42; ŚKA vv. 9–15, 22)",
+          "supportLevel": "direct",
+          "verification": "read-directly",
+          "note": "Reuses the approved guide entry by reference; guide text is not modified and its approval does not extend to this use."
+        }
+      ],
+      "overallSupport": "direct",
+      "traditionalInterpretation": "See the approved guide entry; meanings are royal status, wealth, sons, birth-time omens or ritual.",
+      "userFacing": {
+        "observation": "You said you see a barleycorn shape. Aura has not checked this, and no hand needs to show it.",
+        "reading": "You can read what historical Indian texts said about the barleycorn mark in the Palmistry guide. Aura does not apply those meanings to you."
+      },
+      "observationQuality": {
+        "minFrameProperties": [],
+        "blockingQualityIssues": [],
+        "maxTier": "tentative",
+        "displayRule": "never-as-confidence"
+      },
+      "exclusions": {
+        "claimsNeverMade": [
+          "lifespan-or-death",
+          "health-or-medical",
+          "wealth-or-financial-outcome",
+          "marriage-partner-or-divorce",
+          "fertility-or-children",
+          "event-dates-or-timing",
+          "accident-disaster-misfortune",
+          "caste-varna-class",
+          "gender-or-sex-characteristics",
+          "skin-colour-or-complexion",
+          "moral-character-judgement",
+          "career-success-or-failure",
+          "scientific-validity",
+          "meaning-from-absence",
+          "consequential-decision-advice"
+        ],
+        "doNotEmitWhen": [
+          "feature unassessed or skipped",
+          "required observation outside quality gate",
+          "never phrased as about the user"
+        ],
+        "droppedSourceContent": "All personal outcomes (kingship, wealth, sons, ritual role)."
+      },
+      "licensing": {
+        "status": "public-domain-source-original-paraphrase",
+        "basis": "Link to the approved guide only; no new text derived.",
+        "attributionRequired": false,
+        "aiAuthorship": true
+      },
+      "review": {
+        "status": "UNREVIEWED_RESEARCH_CONTENT",
+        "scholarlyReviewer": null,
+        "editorialReviewer": null,
+        "decisionRef": null,
+        "notes": "Unreviewed per C1-D4: Zysk 2016, Sanskrit checks, Western OCR/page-image verification and licensing remain separate approval requirements. Final content direction 2026-11-24: eligibility assessed; source support necessary but not sufficient."
+      },
+      "readingModes": [
+        "indian-only",
+        "combined"
+      ],
+      "wordingFidelity": {
+        "status": "faithful"
+      },
+      "uncertainty": {
+        "measurementQuality": "runtime-from-observationQuality",
+        "identityConfirmation": "user-reported-unchecked",
+        "sourceSupport": "direct",
+        "traditionalUncertainty": {
+          "level": "low",
+          "reasons": []
+        }
+      },
+      "suitability": {
+        "sourceFidelity": "pass",
+        "observationRequirements": "pass",
+        "culturalContext": "pass",
+        "relevanceToUser": "concern",
+        "harmfulAttributionRisk": "pass",
+        "constructiveReflection": "not-applicable",
+        "rationale": "Links to the approved guide entry; meanings (royal status, wealth, sons, ritual) are never applied to the user."
+      },
+      "eligibility": {
+        "status": "historical-context-only",
+        "decisionRef": "C1 assessment 2026-11-24 (unreviewed)"
+      },
+      "e1Capabilities": [
+        "E1-E1",
+        "E1-E2"
+      ]
+    },
+    {
+      "id": "C1-IN-MARK-HISTORICAL-MATSYA",
+      "tradition": "indian-classical",
+      "featureIdentity": {
+        "anatomicalName": "palm mark (user-reported)",
+        "traditionalTerm": "matsya",
+        "traditionalTermTranslation": "fish"
+      },
+      "requires": [
+        {
+          "feature": "marks.matsya",
+          "anatomical": "mark",
+          "provenanceAllowed": [
+            "user-reported"
+          ]
+        }
+      ],
+      "categories": [
+        "historical-context-only"
+      ],
+      "sources": [
+        {
+          "sourceId": "approved-guide",
+          "locator": "PalmistryEntry 'matsya' (sources: BS Iyer 68.44; ŚKA vv. 15, 22)",
+          "supportLevel": "direct",
+          "verification": "read-directly",
+          "note": "Reuses the approved guide entry by reference; guide text is not modified and its approval does not extend to this use."
+        }
+      ],
+      "overallSupport": "direct",
+      "traditionalInterpretation": "See the approved guide entry; meanings are royal status, wealth, sons, birth-time omens or ritual.",
+      "userFacing": {
+        "observation": "You said you see a fish shape. Aura has not checked this, and no hand needs to show it.",
+        "reading": "You can read what historical Indian texts said about the fish mark in the Palmistry guide. Aura does not apply those meanings to you."
+      },
+      "observationQuality": {
+        "minFrameProperties": [],
+        "blockingQualityIssues": [],
+        "maxTier": "tentative",
+        "displayRule": "never-as-confidence"
+      },
+      "exclusions": {
+        "claimsNeverMade": [
+          "lifespan-or-death",
+          "health-or-medical",
+          "wealth-or-financial-outcome",
+          "marriage-partner-or-divorce",
+          "fertility-or-children",
+          "event-dates-or-timing",
+          "accident-disaster-misfortune",
+          "caste-varna-class",
+          "gender-or-sex-characteristics",
+          "skin-colour-or-complexion",
+          "moral-character-judgement",
+          "career-success-or-failure",
+          "scientific-validity",
+          "meaning-from-absence",
+          "consequential-decision-advice"
+        ],
+        "doNotEmitWhen": [
+          "feature unassessed or skipped",
+          "required observation outside quality gate",
+          "never phrased as about the user"
+        ],
+        "droppedSourceContent": "All personal outcomes (kingship, wealth, sons, ritual role)."
+      },
+      "licensing": {
+        "status": "public-domain-source-original-paraphrase",
+        "basis": "Link to the approved guide only; no new text derived.",
+        "attributionRequired": false,
+        "aiAuthorship": true
+      },
+      "review": {
+        "status": "UNREVIEWED_RESEARCH_CONTENT",
+        "scholarlyReviewer": null,
+        "editorialReviewer": null,
+        "decisionRef": null,
+        "notes": "Unreviewed per C1-D4: Zysk 2016, Sanskrit checks, Western OCR/page-image verification and licensing remain separate approval requirements. Final content direction 2026-11-24: eligibility assessed; source support necessary but not sufficient."
+      },
+      "readingModes": [
+        "indian-only",
+        "combined"
+      ],
+      "wordingFidelity": {
+        "status": "faithful"
+      },
+      "uncertainty": {
+        "measurementQuality": "runtime-from-observationQuality",
+        "identityConfirmation": "user-reported-unchecked",
+        "sourceSupport": "direct",
+        "traditionalUncertainty": {
+          "level": "low",
+          "reasons": []
+        }
+      },
+      "suitability": {
+        "sourceFidelity": "pass",
+        "observationRequirements": "pass",
+        "culturalContext": "pass",
+        "relevanceToUser": "concern",
+        "harmfulAttributionRisk": "pass",
+        "constructiveReflection": "not-applicable",
+        "rationale": "Links to the approved guide entry; meanings (royal status, wealth, sons, ritual) are never applied to the user."
+      },
+      "eligibility": {
+        "status": "historical-context-only",
+        "decisionRef": "C1 assessment 2026-11-24 (unreviewed)"
+      },
+      "e1Capabilities": [
+        "E1-E1",
+        "E1-E2"
+      ]
+    },
+    {
+      "id": "C1-IN-MARK-HISTORICAL-SHANKHA",
+      "tradition": "indian-classical",
+      "featureIdentity": {
+        "anatomicalName": "palm mark (user-reported)",
+        "traditionalTerm": "śaṅkha",
+        "traditionalTermTranslation": "conch"
+      },
+      "requires": [
+        {
+          "feature": "marks.shankha",
+          "anatomical": "mark",
+          "provenanceAllowed": [
+            "user-reported"
+          ]
+        }
+      ],
+      "categories": [
+        "historical-context-only"
+      ],
+      "sources": [
+        {
+          "sourceId": "approved-guide",
+          "locator": "PalmistryEntry 'shankha' (sources: BS Iyer 68.45; 70.10; ŚKA v. 21)",
+          "supportLevel": "direct",
+          "verification": "read-directly",
+          "note": "Reuses the approved guide entry by reference; guide text is not modified and its approval does not extend to this use."
+        }
+      ],
+      "overallSupport": "direct",
+      "traditionalInterpretation": "See the approved guide entry; meanings are royal status, wealth, sons, birth-time omens or ritual.",
+      "userFacing": {
+        "observation": "You said you see a conch shape. Aura has not checked this, and no hand needs to show it.",
+        "reading": "You can read what historical Indian texts said about the conch mark in the Palmistry guide. Aura does not apply those meanings to you."
+      },
+      "observationQuality": {
+        "minFrameProperties": [],
+        "blockingQualityIssues": [],
+        "maxTier": "tentative",
+        "displayRule": "never-as-confidence"
+      },
+      "exclusions": {
+        "claimsNeverMade": [
+          "lifespan-or-death",
+          "health-or-medical",
+          "wealth-or-financial-outcome",
+          "marriage-partner-or-divorce",
+          "fertility-or-children",
+          "event-dates-or-timing",
+          "accident-disaster-misfortune",
+          "caste-varna-class",
+          "gender-or-sex-characteristics",
+          "skin-colour-or-complexion",
+          "moral-character-judgement",
+          "career-success-or-failure",
+          "scientific-validity",
+          "meaning-from-absence",
+          "consequential-decision-advice"
+        ],
+        "doNotEmitWhen": [
+          "feature unassessed or skipped",
+          "required observation outside quality gate",
+          "never phrased as about the user"
+        ],
+        "droppedSourceContent": "All personal outcomes (kingship, wealth, sons, ritual role)."
+      },
+      "licensing": {
+        "status": "public-domain-source-original-paraphrase",
+        "basis": "Link to the approved guide only; no new text derived.",
+        "attributionRequired": false,
+        "aiAuthorship": true
+      },
+      "review": {
+        "status": "UNREVIEWED_RESEARCH_CONTENT",
+        "scholarlyReviewer": null,
+        "editorialReviewer": null,
+        "decisionRef": null,
+        "notes": "Unreviewed per C1-D4: Zysk 2016, Sanskrit checks, Western OCR/page-image verification and licensing remain separate approval requirements. Final content direction 2026-11-24: eligibility assessed; source support necessary but not sufficient."
+      },
+      "readingModes": [
+        "indian-only",
+        "combined"
+      ],
+      "wordingFidelity": {
+        "status": "faithful"
+      },
+      "uncertainty": {
+        "measurementQuality": "runtime-from-observationQuality",
+        "identityConfirmation": "user-reported-unchecked",
+        "sourceSupport": "direct",
+        "traditionalUncertainty": {
+          "level": "low",
+          "reasons": []
+        }
+      },
+      "suitability": {
+        "sourceFidelity": "pass",
+        "observationRequirements": "pass",
+        "culturalContext": "pass",
+        "relevanceToUser": "concern",
+        "harmfulAttributionRisk": "pass",
+        "constructiveReflection": "not-applicable",
+        "rationale": "Links to the approved guide entry; meanings (royal status, wealth, sons, ritual) are never applied to the user."
+      },
+      "eligibility": {
+        "status": "historical-context-only",
+        "decisionRef": "C1 assessment 2026-11-24 (unreviewed)"
+      },
+      "e1Capabilities": [
+        "E1-E1",
+        "E1-E2"
+      ]
+    },
+    {
+      "id": "C1-IN-MARK-HISTORICAL-CHATRA",
+      "tradition": "indian-classical",
+      "featureIdentity": {
+        "anatomicalName": "palm mark (user-reported)",
+        "traditionalTerm": "chatra",
+        "traditionalTermTranslation": "parasol / umbrella"
+      },
+      "requires": [
+        {
+          "feature": "marks.chatra",
+          "anatomical": "mark",
+          "provenanceAllowed": [
+            "user-reported"
+          ]
+        }
+      ],
+      "categories": [
+        "historical-context-only"
+      ],
+      "sources": [
+        {
+          "sourceId": "approved-guide",
+          "locator": "PalmistryEntry 'chatra' (sources: BS Iyer 68.45; 70.10; ŚKA v. 21)",
+          "supportLevel": "direct",
+          "verification": "read-directly",
+          "note": "Reuses the approved guide entry by reference; guide text is not modified and its approval does not extend to this use."
+        }
+      ],
+      "overallSupport": "direct",
+      "traditionalInterpretation": "See the approved guide entry; meanings are royal status, wealth, sons, birth-time omens or ritual.",
+      "userFacing": {
+        "observation": "You said you see a parasol / umbrella shape. Aura has not checked this, and no hand needs to show it.",
+        "reading": "You can read what historical Indian texts said about the parasol / umbrella mark in the Palmistry guide. Aura does not apply those meanings to you."
+      },
+      "observationQuality": {
+        "minFrameProperties": [],
+        "blockingQualityIssues": [],
+        "maxTier": "tentative",
+        "displayRule": "never-as-confidence"
+      },
+      "exclusions": {
+        "claimsNeverMade": [
+          "lifespan-or-death",
+          "health-or-medical",
+          "wealth-or-financial-outcome",
+          "marriage-partner-or-divorce",
+          "fertility-or-children",
+          "event-dates-or-timing",
+          "accident-disaster-misfortune",
+          "caste-varna-class",
+          "gender-or-sex-characteristics",
+          "skin-colour-or-complexion",
+          "moral-character-judgement",
+          "career-success-or-failure",
+          "scientific-validity",
+          "meaning-from-absence",
+          "consequential-decision-advice"
+        ],
+        "doNotEmitWhen": [
+          "feature unassessed or skipped",
+          "required observation outside quality gate",
+          "never phrased as about the user"
+        ],
+        "droppedSourceContent": "All personal outcomes (kingship, wealth, sons, ritual role)."
+      },
+      "licensing": {
+        "status": "public-domain-source-original-paraphrase",
+        "basis": "Link to the approved guide only; no new text derived.",
+        "attributionRequired": false,
+        "aiAuthorship": true
+      },
+      "review": {
+        "status": "UNREVIEWED_RESEARCH_CONTENT",
+        "scholarlyReviewer": null,
+        "editorialReviewer": null,
+        "decisionRef": null,
+        "notes": "Unreviewed per C1-D4: Zysk 2016, Sanskrit checks, Western OCR/page-image verification and licensing remain separate approval requirements. Final content direction 2026-11-24: eligibility assessed; source support necessary but not sufficient."
+      },
+      "readingModes": [
+        "indian-only",
+        "combined"
+      ],
+      "wordingFidelity": {
+        "status": "faithful"
+      },
+      "uncertainty": {
+        "measurementQuality": "runtime-from-observationQuality",
+        "identityConfirmation": "user-reported-unchecked",
+        "sourceSupport": "direct",
+        "traditionalUncertainty": {
+          "level": "low",
+          "reasons": []
+        }
+      },
+      "suitability": {
+        "sourceFidelity": "pass",
+        "observationRequirements": "pass",
+        "culturalContext": "pass",
+        "relevanceToUser": "concern",
+        "harmfulAttributionRisk": "pass",
+        "constructiveReflection": "not-applicable",
+        "rationale": "Links to the approved guide entry; meanings (royal status, wealth, sons, ritual) are never applied to the user."
+      },
+      "eligibility": {
+        "status": "historical-context-only",
+        "decisionRef": "C1 assessment 2026-11-24 (unreviewed)"
+      },
+      "e1Capabilities": [
+        "E1-E1",
+        "E1-E2"
+      ]
+    },
+    {
+      "id": "C1-IN-MARK-HISTORICAL-VEDI",
+      "tradition": "indian-classical",
+      "featureIdentity": {
+        "anatomicalName": "palm mark (user-reported)",
+        "traditionalTerm": "vedī",
+        "traditionalTermTranslation": "altar"
+      },
+      "requires": [
+        {
+          "feature": "marks.vedi",
+          "anatomical": "mark",
+          "provenanceAllowed": [
+            "user-reported"
+          ]
+        }
+      ],
+      "categories": [
+        "historical-context-only"
+      ],
+      "sources": [
+        {
+          "sourceId": "approved-guide",
+          "locator": "PalmistryEntry 'vedi' (sources: BS Iyer 68.48; ŚKA v. 22)",
+          "supportLevel": "direct",
+          "verification": "read-directly",
+          "note": "Reuses the approved guide entry by reference; guide text is not modified and its approval does not extend to this use."
+        }
+      ],
+      "overallSupport": "direct",
+      "traditionalInterpretation": "See the approved guide entry; meanings are royal status, wealth, sons, birth-time omens or ritual.",
+      "userFacing": {
+        "observation": "You said you see a altar shape. Aura has not checked this, and no hand needs to show it.",
+        "reading": "You can read what historical Indian texts said about the altar mark in the Palmistry guide. Aura does not apply those meanings to you."
+      },
+      "observationQuality": {
+        "minFrameProperties": [],
+        "blockingQualityIssues": [],
+        "maxTier": "tentative",
+        "displayRule": "never-as-confidence"
+      },
+      "exclusions": {
+        "claimsNeverMade": [
+          "lifespan-or-death",
+          "health-or-medical",
+          "wealth-or-financial-outcome",
+          "marriage-partner-or-divorce",
+          "fertility-or-children",
+          "event-dates-or-timing",
+          "accident-disaster-misfortune",
+          "caste-varna-class",
+          "gender-or-sex-characteristics",
+          "skin-colour-or-complexion",
+          "moral-character-judgement",
+          "career-success-or-failure",
+          "scientific-validity",
+          "meaning-from-absence",
+          "consequential-decision-advice"
+        ],
+        "doNotEmitWhen": [
+          "feature unassessed or skipped",
+          "required observation outside quality gate",
+          "never phrased as about the user"
+        ],
+        "droppedSourceContent": "All personal outcomes (kingship, wealth, sons, ritual role)."
+      },
+      "licensing": {
+        "status": "public-domain-source-original-paraphrase",
+        "basis": "Link to the approved guide only; no new text derived.",
+        "attributionRequired": false,
+        "aiAuthorship": true
+      },
+      "review": {
+        "status": "UNREVIEWED_RESEARCH_CONTENT",
+        "scholarlyReviewer": null,
+        "editorialReviewer": null,
+        "decisionRef": null,
+        "notes": "Unreviewed per C1-D4: Zysk 2016, Sanskrit checks, Western OCR/page-image verification and licensing remain separate approval requirements. Final content direction 2026-11-24: eligibility assessed; source support necessary but not sufficient."
+      },
+      "readingModes": [
+        "indian-only",
+        "combined"
+      ],
+      "wordingFidelity": {
+        "status": "faithful"
+      },
+      "uncertainty": {
+        "measurementQuality": "runtime-from-observationQuality",
+        "identityConfirmation": "user-reported-unchecked",
+        "sourceSupport": "direct",
+        "traditionalUncertainty": {
+          "level": "low",
+          "reasons": []
+        }
+      },
+      "suitability": {
+        "sourceFidelity": "pass",
+        "observationRequirements": "pass",
+        "culturalContext": "pass",
+        "relevanceToUser": "concern",
+        "harmfulAttributionRisk": "pass",
+        "constructiveReflection": "not-applicable",
+        "rationale": "Links to the approved guide entry; meanings (royal status, wealth, sons, ritual) are never applied to the user."
+      },
+      "eligibility": {
+        "status": "historical-context-only",
+        "decisionRef": "C1 assessment 2026-11-24 (unreviewed)"
+      },
+      "e1Capabilities": [
+        "E1-E1",
+        "E1-E2"
+      ]
+    },
+    {
+      "id": "C1-WE-HEAD-STRAIGHT",
+      "tradition": "western-19c-chiromancy",
+      "featureIdentity": {
+        "anatomicalName": "proximal transverse crease",
+        "traditionalTerm": "head line"
+      },
+      "requires": [
+        {
+          "feature": "lines.head",
+          "anatomical": "proximal-transverse",
+          "provenanceAllowed": [
+            "user-confirmed"
+          ],
+          "observation": {
+            "descriptor": "slope: ulnar-end drop toward wrist (palm widths)",
+            "thresholdStatus": "placeholder",
+            "range": {
+              "min": null,
+              "max": 0.05
+            }
+          }
+        }
+      ],
+      "categories": [
+        "personality",
+        "career-working-style"
+      ],
+      "sources": [
+        {
+          "sourceId": "cheiro-pfa-1916",
+          "locator": "Part I, Ch. II",
+          "supportLevel": "direct",
+          "verification": "read-directly"
+        },
+        {
+          "sourceId": "cheiro-loth-c1900",
+          "locator": "Part II, Ch. VII (p. 87)",
+          "supportLevel": "direct",
+          "verification": "read-directly"
+        },
+        {
+          "sourceId": "heron-allen-1885",
+          "locator": "Sec. II, Sub-sec. IV, §3 (p. 247)",
+          "supportLevel": "direct",
+          "verification": "read-directly"
+        }
+      ],
+      "overallSupport": "direct",
+      "traditionalInterpretation": "Cheiro and Heron-Allen read a straight head line as practical common sense.",
+      "userFacing": {
+        "observation": "Your traced head line runs fairly straight across the palm.",
+        "reading": "Nineteenth-century Western palmists read a straight head line as a practical, matter-of-fact way of thinking.",
+        "reflection": "Which problems do you most enjoy solving step by step?"
+      },
+      "observationQuality": {
+        "minFrameProperties": [
+          "scale",
+          "axis",
+          "direction"
+        ],
+        "blockingQualityIssues": [
+          "palm-not-visible",
+          "hand-cut-off",
+          "hand-rotated",
+          "blurry",
+          "too-dark",
+          "too-bright",
+          "low-contrast"
+        ],
+        "maxTier": "tentative",
+        "boundaryMargin": 0.03,
+        "displayRule": "never-as-confidence"
+      },
+      "conflicts": [
+        {
+          "withId": "dhanamātṛlekhā (Indian: wealth)",
+          "kind": "same-feature-other-tradition",
+          "handling": "prefer-none-note-disagreement",
+          "note": "Indian meaning is financial and not used."
+        }
+      ],
+      "traditionNotes": "This is a 19th-century Western reading. Indian texts give this feature a different name and meaning, or none.",
+      "exclusions": {
+        "claimsNeverMade": [
+          "lifespan-or-death",
+          "health-or-medical",
+          "wealth-or-financial-outcome",
+          "marriage-partner-or-divorce",
+          "fertility-or-children",
+          "event-dates-or-timing",
+          "accident-disaster-misfortune",
+          "caste-varna-class",
+          "gender-or-sex-characteristics",
+          "skin-colour-or-complexion",
+          "moral-character-judgement",
+          "career-success-or-failure",
+          "scientific-validity",
+          "meaning-from-absence",
+          "consequential-decision-advice"
+        ],
+        "doNotEmitWhen": [
+          "feature unassessed or skipped",
+          "required observation outside quality gate",
+          "slope within boundary margin (0.03)"
+        ],
+        "droppedSourceContent": "Insanity/illness passages in the same chapters excluded."
+      },
+      "licensing": {
+        "status": "public-domain-source-original-paraphrase",
+        "basis": "Pre-1930 publication (US public domain); UK status per register SR-WE-*; original paraphrase only.",
+        "attributionRequired": false,
+        "aiAuthorship": true
+      },
+      "review": {
+        "status": "UNREVIEWED_RESEARCH_CONTENT",
+        "scholarlyReviewer": null,
+        "editorialReviewer": null,
+        "decisionRef": null,
+        "notes": "Unreviewed per C1-D4: Zysk 2016, Sanskrit checks, Western OCR/page-image verification and licensing remain separate approval requirements. Final content direction 2026-11-24: eligibility assessed; source support necessary but not sufficient."
+      },
+      "readingModes": [
+        "western-only",
+        "combined"
+      ],
+      "complementsIndianGap": {
+        "feature": "lines.head",
+        "indianStatus": "indian-meaning-excluded",
+        "reason": "Indian name dhanamātṛlekhā; its only attested meaning is wealth (ŚKA v. 6), a prohibited financial claim."
+      },
+      "wordingFidelity": {
+        "status": "faithful"
+      },
+      "uncertainty": {
+        "measurementQuality": "runtime-from-observationQuality",
+        "identityConfirmation": "user-confirmed-identity",
+        "sourceSupport": "direct",
+        "traditionalUncertainty": {
+          "level": "low",
+          "reasons": [
+            "ocr-unverified"
+          ]
+        }
+      },
+      "suitability": {
+        "sourceFidelity": "pass",
+        "observationRequirements": "pass",
+        "culturalContext": "pass",
+        "relevanceToUser": "pass",
+        "harmfulAttributionRisk": "pass",
+        "constructiveReflection": "pass",
+        "rationale": "Three sources agree; neutral, balanced trait description."
+      },
+      "eligibility": {
+        "status": "eligible-initial",
+        "decisionRef": "C1 assessment 2026-11-24 (unreviewed)",
+        "conditions": [
+          "S-4 OCR verification."
+        ]
+      },
+      "e1Capabilities": [
+        "E1-E1",
+        "E1-E2",
+        "E1-E4"
+      ]
+    },
+    {
+      "id": "C1-WE-HEAD-SLOPING",
+      "tradition": "western-19c-chiromancy",
+      "featureIdentity": {
+        "anatomicalName": "proximal transverse crease",
+        "traditionalTerm": "head line"
+      },
+      "requires": [
+        {
+          "feature": "lines.head",
+          "anatomical": "proximal-transverse",
+          "provenanceAllowed": [
+            "user-confirmed"
+          ],
+          "observation": {
+            "descriptor": "slope: ulnar-end drop toward wrist (palm widths)",
+            "thresholdStatus": "placeholder",
+            "range": {
+              "min": 0.11,
+              "max": null
+            }
+          }
+        }
+      ],
+      "categories": [
+        "personality",
+        "strengths"
+      ],
+      "sources": [
+        {
+          "sourceId": "cheiro-pfa-1916",
+          "locator": "Part I, Ch. II",
+          "supportLevel": "direct",
+          "verification": "read-directly"
+        },
+        {
+          "sourceId": "cheiro-loth-c1900",
+          "locator": "Part II, Ch. VII (p. 87)",
+          "supportLevel": "direct",
+          "verification": "read-directly"
+        },
+        {
+          "sourceId": "heron-allen-1885",
+          "locator": "Sec. II, Sub-sec. IV, §3 (p. 247)",
+          "supportLevel": "direct",
+          "verification": "read-directly"
+        }
+      ],
+      "overallSupport": "direct",
+      "traditionalInterpretation": "Sloping head line → imagination; very sloping → romance (Cheiro); onto the Mount of the Moon → poetry, literary bent (Heron-Allen).",
+      "userFacing": {
+        "observation": "Your traced head line slopes noticeably toward the wrist.",
+        "reading": "Nineteenth-century Western palmists read a sloping head line as imagination and a creative turn of mind.",
+        "reflection": "Where does your imagination get room to work?"
+      },
+      "observationQuality": {
+        "minFrameProperties": [
+          "scale",
+          "axis",
+          "direction"
+        ],
+        "blockingQualityIssues": [
+          "palm-not-visible",
+          "hand-cut-off",
+          "hand-rotated",
+          "blurry",
+          "too-dark",
+          "too-bright",
+          "low-contrast"
+        ],
+        "maxTier": "tentative",
+        "boundaryMargin": 0.03,
+        "displayRule": "never-as-confidence"
+      },
+      "conflicts": [],
+      "traditionNotes": "This is a 19th-century Western reading. Indian texts give this feature a different name and meaning, or none.",
+      "exclusions": {
+        "claimsNeverMade": [
+          "lifespan-or-death",
+          "health-or-medical",
+          "wealth-or-financial-outcome",
+          "marriage-partner-or-divorce",
+          "fertility-or-children",
+          "event-dates-or-timing",
+          "accident-disaster-misfortune",
+          "caste-varna-class",
+          "gender-or-sex-characteristics",
+          "skin-colour-or-complexion",
+          "moral-character-judgement",
+          "career-success-or-failure",
+          "scientific-validity",
+          "meaning-from-absence",
+          "consequential-decision-advice"
+        ],
+        "doNotEmitWhen": [
+          "feature unassessed or skipped",
+          "required observation outside quality gate",
+          "slope within boundary margin (0.03)"
+        ],
+        "droppedSourceContent": "'Bohemianism' and suicide/mental-illness passages excluded."
+      },
+      "licensing": {
+        "status": "public-domain-source-original-paraphrase",
+        "basis": "Pre-1930 publication (US public domain); UK status per register SR-WE-*; original paraphrase only.",
+        "attributionRequired": false,
+        "aiAuthorship": true
+      },
+      "review": {
+        "status": "UNREVIEWED_RESEARCH_CONTENT",
+        "scholarlyReviewer": null,
+        "editorialReviewer": null,
+        "decisionRef": null,
+        "notes": "Unreviewed per C1-D4: Zysk 2016, Sanskrit checks, Western OCR/page-image verification and licensing remain separate approval requirements. Final content direction 2026-11-24: eligibility assessed; source support necessary but not sufficient."
+      },
+      "readingModes": [
+        "western-only",
+        "combined"
+      ],
+      "complementsIndianGap": {
+        "feature": "lines.head",
+        "indianStatus": "indian-meaning-excluded",
+        "reason": "Indian name dhanamātṛlekhā; its only attested meaning is wealth (ŚKA v. 6)."
+      },
+      "wordingFidelity": {
+        "status": "faithful"
+      },
+      "uncertainty": {
+        "measurementQuality": "runtime-from-observationQuality",
+        "identityConfirmation": "user-confirmed-identity",
+        "sourceSupport": "direct",
+        "traditionalUncertainty": {
+          "level": "low",
+          "reasons": [
+            "ocr-unverified"
+          ]
+        }
+      },
+      "suitability": {
+        "sourceFidelity": "pass",
+        "observationRequirements": "pass",
+        "culturalContext": "pass",
+        "relevanceToUser": "pass",
+        "harmfulAttributionRisk": "pass",
+        "constructiveReflection": "pass",
+        "rationale": "Three sources agree; extreme-slope pejoratives excluded as separate claims."
+      },
+      "eligibility": {
+        "status": "eligible-initial",
+        "decisionRef": "C1 assessment 2026-11-24 (unreviewed)",
+        "conditions": [
+          "S-4."
+        ]
+      },
+      "e1Capabilities": [
+        "E1-E1",
+        "E1-E2",
+        "E1-E4"
+      ]
+    },
+    {
+      "id": "C1-WE-ORIGIN-JOINED",
+      "tradition": "western-19c-chiromancy",
+      "featureIdentity": {
+        "anatomicalName": "proximal transverse + thenar creases (start)",
+        "traditionalTerm": "head line joined to life line"
+      },
+      "requires": [
+        {
+          "feature": "lines.head",
+          "anatomical": "proximal-transverse",
+          "provenanceAllowed": [
+            "user-confirmed"
+          ]
+        },
+        {
+          "feature": "lines.life",
+          "anatomical": "thenar",
+          "provenanceAllowed": [
+            "user-confirmed"
+          ]
+        },
+        {
+          "feature": "proposed.origin.gap",
+          "anatomical": "proximal-transverse",
+          "provenanceAllowed": [
+            "user-confirmed"
+          ],
+          "observation": {
+            "descriptor": "distance between head-line radial end and life-line distal end (palm widths)",
+            "thresholdStatus": "placeholder",
+            "range": {
+              "min": null,
+              "max": 0.05
+            }
+          }
+        }
+      ],
+      "categories": [
+        "personality",
+        "career-working-style"
+      ],
+      "sources": [
+        {
+          "sourceId": "cheiro-pfa-1916",
+          "locator": "Part I, Ch. II, 'The Line of Head joined to the Line of Life'",
+          "supportLevel": "direct",
+          "verification": "read-directly"
+        },
+        {
+          "sourceId": "benham-1900",
+          "locator": "Part Second, Ch. VI (p. 423)",
+          "supportLevel": "direct",
+          "verification": "read-directly"
+        },
+        {
+          "sourceId": "heron-allen-1885",
+          "locator": "¶580",
+          "supportLevel": "direct",
+          "verification": "read-directly",
+          "note": "Timidity and want of confidence; caution and circumspection only 'in a really strong and clever hand' (a whole-hand judgement Aura cannot make, so not used)."
+        }
+      ],
+      "overallSupport": "direct",
+      "traditionalInterpretation": "Cheiro (1916): a highly sensitive disposition, inclined to caution and lacking self-confidence, apt to undervalue its abilities. Benham: the longer the lines are tied, the less self-confidence and the more reliance on advice. Heron-Allen ¶580: timidity and want of confidence.",
+      "userFacing": {
+        "observation": "Your traced head and life lines start close together.",
+        "reading": "NOT FOR EMISSION. Excluded from the initial personalised catalogue (owner decision 2026-11-24). Research record only."
+      },
+      "observationQuality": {
+        "minFrameProperties": [
+          "scale",
+          "axis",
+          "direction"
+        ],
+        "blockingQualityIssues": [
+          "palm-not-visible",
+          "hand-cut-off",
+          "hand-rotated",
+          "blurry",
+          "too-dark",
+          "too-bright",
+          "low-contrast"
+        ],
+        "maxTier": "tentative",
+        "boundaryMargin": 0.02,
+        "displayRule": "never-as-confidence"
+      },
+      "conflicts": [],
+      "traditionNotes": "This is a 19th-century Western reading. Indian texts give this feature a different name and meaning, or none.",
+      "exclusions": {
+        "claimsNeverMade": [
+          "lifespan-or-death",
+          "health-or-medical",
+          "wealth-or-financial-outcome",
+          "marriage-partner-or-divorce",
+          "fertility-or-children",
+          "event-dates-or-timing",
+          "accident-disaster-misfortune",
+          "caste-varna-class",
+          "gender-or-sex-characteristics",
+          "skin-colour-or-complexion",
+          "moral-character-judgement",
+          "career-success-or-failure",
+          "scientific-validity",
+          "meaning-from-absence",
+          "consequential-decision-advice"
+        ],
+        "doNotEmitWhen": [
+          "ALWAYS in the initial personalised reading version (eligibility: excluded-initial)",
+          "feature unassessed or skipped",
+          "required observation outside quality gate",
+          "gap within boundary margin"
+        ],
+        "droppedSourceContent": "Heron-Allen 'dulness and apathy', 'serious obstacle to success' excluded (career judgement, pejorative)."
+      },
+      "licensing": {
+        "status": "public-domain-source-original-paraphrase",
+        "basis": "Pre-1930 publication (US public domain); UK status per register SR-WE-*; original paraphrase only.",
+        "attributionRequired": false,
+        "aiAuthorship": true
+      },
+      "review": {
+        "status": "UNREVIEWED_RESEARCH_CONTENT",
+        "scholarlyReviewer": null,
+        "editorialReviewer": null,
+        "decisionRef": null,
+        "notes": "Unreviewed per C1-D4: Zysk 2016, Sanskrit checks, Western OCR/page-image verification and licensing remain separate approval requirements. Final content direction 2026-11-24: eligibility assessed; source support necessary but not sufficient."
+      },
+      "readingModes": [
+        "western-only",
+        "combined"
+      ],
+      "complementsIndianGap": {
+        "feature": "proposed.origin.gap",
+        "indianStatus": "no-indian-source",
+        "reason": "No Indian source read reads the junction of these two lines."
+      },
+      "wordingFidelity": {
+        "status": "faithful-neutral-rewording",
+        "sourceWording": "Cheiro 1916: sensitive, inclines to caution, lacks self-confidence",
+        "note": "The C1 v0.1 wording ('careful, considered temperament') omitted sensitivity and self-doubt and was not faithful; withdrawn. The new wording keeps all three elements in neutral language; 'apathy' and 'dulness' (Heron-Allen) are not used. Reviewer may still exclude the record."
+      },
+      "uncertainty": {
+        "measurementQuality": "runtime-from-observationQuality",
+        "identityConfirmation": "user-confirmed-identity",
+        "sourceSupport": "direct",
+        "traditionalUncertainty": {
+          "level": "low",
+          "reasons": [
+            "ocr-unverified"
+          ]
+        }
+      },
+      "suitability": {
+        "sourceFidelity": "pass",
+        "observationRequirements": "concern",
+        "culturalContext": "concern",
+        "relevanceToUser": "concern",
+        "harmfulAttributionRisk": "fail",
+        "constructiveReflection": "concern",
+        "rationale": "Source-faithful meaning is sensitivity, caution and lack of self-confidence. A self-doubt attribution from a crease junction carries real risk of harmful personality attribution; the softened v0.1 wording was unsupported. Excluded by owner decision; research record retained."
+      },
+      "eligibility": {
+        "status": "excluded-initial",
+        "decisionRef": "owner final content direction 2026-11-24"
+      },
+      "researchHistory": {
+        "note": "v0.1 softened wording ('a careful, considered temperament') withdrawn as unsupported (rev 2). v0.2 faithful-neutral wording retained below as research history only. Excluded from initial personalised readings by owner decision 2026-11-24; do not restore the softened wording.",
+        "retainedUserFacingDraft": {
+          "observation": "Your traced head and life lines start close together.",
+          "reading": "Nineteenth-century Western palmists read head and life lines that begin together as a sensitive temperament that leans toward caution and can be slow to credit its own abilities.",
+          "reflection": "Which of your strengths do you tend to underrate?"
+        }
+      },
+      "e1Capabilities": [
+        "E1-E1",
+        "E1-E2",
+        "E1-E4",
+        "E1-L5"
+      ]
+    },
+    {
+      "id": "C1-WE-ORIGIN-SEPARATE",
+      "tradition": "western-19c-chiromancy",
+      "featureIdentity": {
+        "anatomicalName": "proximal transverse + thenar creases (start)",
+        "traditionalTerm": "head line separated from life line"
+      },
+      "requires": [
+        {
+          "feature": "lines.head",
+          "anatomical": "proximal-transverse",
+          "provenanceAllowed": [
+            "user-confirmed"
+          ]
+        },
+        {
+          "feature": "lines.life",
+          "anatomical": "thenar",
+          "provenanceAllowed": [
+            "user-confirmed"
+          ]
+        },
+        {
+          "feature": "proposed.origin.gap",
+          "anatomical": "proximal-transverse",
+          "provenanceAllowed": [
+            "user-confirmed"
+          ],
+          "observation": {
+            "descriptor": "gap (palm widths)",
+            "thresholdStatus": "placeholder",
+            "range": {
+              "min": 0.1,
+              "max": null
+            }
+          }
+        }
+      ],
+      "categories": [
+        "personality",
+        "career-working-style"
+      ],
+      "sources": [
+        {
+          "sourceId": "cheiro-pfa-1916",
+          "locator": "Part I, Ch. II, 'The Line of Head separated from the Line of Life'",
+          "supportLevel": "direct",
+          "verification": "read-directly"
+        },
+        {
+          "sourceId": "benham-1900",
+          "locator": "Part Second, Ch. VI (p. 423)",
+          "supportLevel": "direct",
+          "verification": "read-directly"
+        },
+        {
+          "sourceId": "heron-allen-1885",
+          "locator": "Sec. II, Sub-sec. IV, §3",
+          "supportLevel": "disputed",
+          "verification": "read-directly",
+          "note": "Reads separation as impulsiveness and lack of tact."
+        }
+      ],
+      "overallSupport": "direct",
+      "traditionalInterpretation": "A small gap → independence of thought, quick judgement (Cheiro); self-reliance (Benham); Heron-Allen: impulsiveness, lack of tact.",
+      "userFacing": {
+        "observation": "Your traced head and life lines start apart from each other.",
+        "reading": "Western palmists of the 19th century read a gap between the head and life lines as independent thinking and quick judgement, though one writer saw the same sign as impulsiveness.",
+        "reflection": "Where do you trust your own judgement most, and where do you check with others?"
+      },
+      "observationQuality": {
+        "minFrameProperties": [
+          "scale",
+          "axis",
+          "direction"
+        ],
+        "blockingQualityIssues": [
+          "palm-not-visible",
+          "hand-cut-off",
+          "hand-rotated",
+          "blurry",
+          "too-dark",
+          "too-bright",
+          "low-contrast"
+        ],
+        "maxTier": "tentative",
+        "boundaryMargin": 0.02,
+        "displayRule": "never-as-confidence"
+      },
+      "conflicts": [
+        {
+          "withId": "heron-allen-1885 §3",
+          "kind": "within-tradition-disagreement",
+          "handling": "show-both-attributed"
+        }
+      ],
+      "traditionNotes": "This is a 19th-century Western reading. Indian texts give this feature a different name and meaning, or none.",
+      "exclusions": {
+        "claimsNeverMade": [
+          "lifespan-or-death",
+          "health-or-medical",
+          "wealth-or-financial-outcome",
+          "marriage-partner-or-divorce",
+          "fertility-or-children",
+          "event-dates-or-timing",
+          "accident-disaster-misfortune",
+          "caste-varna-class",
+          "gender-or-sex-characteristics",
+          "skin-colour-or-complexion",
+          "moral-character-judgement",
+          "career-success-or-failure",
+          "scientific-validity",
+          "meaning-from-absence",
+          "consequential-decision-advice"
+        ],
+        "doNotEmitWhen": [
+          "feature unassessed or skipped",
+          "required observation outside quality gate",
+          "gap within boundary margin"
+        ],
+        "droppedSourceContent": "'Power over others', 'drifting without purpose' and public-life promises excluded."
+      },
+      "licensing": {
+        "status": "public-domain-source-original-paraphrase",
+        "basis": "Pre-1930 publication (US public domain); UK status per register SR-WE-*; original paraphrase only.",
+        "attributionRequired": false,
+        "aiAuthorship": true
+      },
+      "review": {
+        "status": "UNREVIEWED_RESEARCH_CONTENT",
+        "scholarlyReviewer": null,
+        "editorialReviewer": null,
+        "decisionRef": null,
+        "notes": "Unreviewed per C1-D4: Zysk 2016, Sanskrit checks, Western OCR/page-image verification and licensing remain separate approval requirements. Final content direction 2026-11-24: eligibility assessed; source support necessary but not sufficient."
+      },
+      "readingModes": [
+        "western-only",
+        "combined"
+      ],
+      "complementsIndianGap": {
+        "feature": "proposed.origin.gap",
+        "indianStatus": "no-indian-source",
+        "reason": "No Indian source read reads the junction of these two lines."
+      },
+      "wordingFidelity": {
+        "status": "faithful"
+      },
+      "uncertainty": {
+        "measurementQuality": "runtime-from-observationQuality",
+        "identityConfirmation": "user-confirmed-identity",
+        "sourceSupport": "direct",
+        "traditionalUncertainty": {
+          "level": "moderate",
+          "reasons": [
+            "sources-disagree",
+            "ocr-unverified"
+          ]
+        }
+      },
+      "suitability": {
+        "sourceFidelity": "pass",
+        "observationRequirements": "concern",
+        "culturalContext": "pass",
+        "relevanceToUser": "pass",
+        "harmfulAttributionRisk": "concern",
+        "constructiveReflection": "pass",
+        "rationale": "Faithful and balanced (independence vs. impulsiveness disclosed). With ORIGIN-JOINED excluded only this pole of the sign is emittable, so the origin-gap descriptor no longer qualifies as essential (one record)."
+      },
+      "eligibility": {
+        "status": "eligible-later",
+        "decisionRef": "C1 assessment 2026-11-24 (unreviewed)",
+        "conditions": [
+          "E1-L5 origin-gap descriptor.",
+          "Reviewer to confirm one-pole emission is not misleading (checklist C-9)."
+        ]
+      },
+      "e1Capabilities": [
+        "E1-E1",
+        "E1-E2",
+        "E1-E4",
+        "E1-L5"
+      ]
+    },
+    {
+      "id": "C1-WE-FINGER-LONG",
+      "tradition": "western-19c-chirognomy",
+      "featureIdentity": {
+        "anatomicalName": "fingers relative to palm",
+        "traditionalTerm": "long fingers"
+      },
+      "requires": [
+        {
+          "feature": "measurements.middleToPalmRatio",
+          "anatomical": "finger",
+          "provenanceAllowed": [
+            "automatic-measured"
+          ],
+          "observation": {
+            "descriptor": "middle finger length ÷ palm length",
+            "thresholdStatus": "placeholder",
+            "range": {
+              "min": 0.95,
+              "max": null
+            }
+          }
+        }
+      ],
+      "categories": [
+        "personality",
+        "career-working-style",
+        "strengths"
+      ],
+      "sources": [
+        {
+          "sourceId": "cheiro-loth-c1900",
+          "locator": "Part I, Ch. XI (p. 53)",
+          "supportLevel": "direct",
+          "verification": "read-directly"
+        },
+        {
+          "sourceId": "benham-1900",
+          "locator": "Part First, Ch. XV (p. 122)",
+          "supportLevel": "direct",
+          "verification": "read-directly"
+        },
+        {
+          "sourceId": "heron-allen-1885",
+          "locator": "Sec. I, Sub-sec. I, §3 (p. 106)",
+          "supportLevel": "direct",
+          "verification": "read-directly"
+        },
+        {
+          "sourceId": "darpentigny-1886",
+          "locator": "Sub-section III",
+          "supportLevel": "disputed",
+          "verification": "read-directly",
+          "note": "Ties detail vs synthesis to hand size and knotted vs smooth fingers, not finger length."
+        }
+      ],
+      "overallSupport": "direct",
+      "traditionalInterpretation": "Long fingers → love of detail and careful, accurate work (Cheiro, Benham, Heron-Allen).",
+      "userFacing": {
+        "observation": "Your fingers are long relative to your palm (measured from the photo's hand points).",
+        "reading": "Several 19th-century Western palmists read long fingers as an eye for detail and a liking for careful, precise work, along with a tendency to worry over small things.",
+        "reflection": "Where does your attention to detail help most, and where does it cost you?"
+      },
+      "observationQuality": {
+        "minFrameProperties": [
+          "scale"
+        ],
+        "blockingQualityIssues": [
+          "palm-not-visible",
+          "hand-cut-off"
+        ],
+        "measurementStatusRequired": "measured",
+        "maxTier": "tentative",
+        "boundaryMargin": 0.03,
+        "displayRule": "never-as-confidence"
+      },
+      "conflicts": [
+        {
+          "withId": "darpentigny-1886",
+          "kind": "within-tradition-disagreement",
+          "handling": "show-both-attributed"
+        },
+        {
+          "withId": "C1-IN-FINGER-FINE",
+          "kind": "same-feature-other-tradition",
+          "handling": "prefer-none-note-disagreement"
+        }
+      ],
+      "traditionNotes": "This is a 19th-century Western reading. Indian texts give this feature a different name and meaning, or none.",
+      "exclusions": {
+        "claimsNeverMade": [
+          "lifespan-or-death",
+          "health-or-medical",
+          "wealth-or-financial-outcome",
+          "marriage-partner-or-divorce",
+          "fertility-or-children",
+          "event-dates-or-timing",
+          "accident-disaster-misfortune",
+          "caste-varna-class",
+          "gender-or-sex-characteristics",
+          "skin-colour-or-complexion",
+          "moral-character-judgement",
+          "career-success-or-failure",
+          "scientific-validity",
+          "meaning-from-absence",
+          "consequential-decision-advice"
+        ],
+        "doNotEmitWhen": [
+          "feature unassessed or skipped",
+          "required observation outside quality gate",
+          "measurement status uncertain",
+          "middle finger not extended"
+        ],
+        "droppedSourceContent": "Benham: 'bores', 'selfish', 'suspicious' excluded; WE-01 ideality 'unsuited to business' excluded (career judgement)."
+      },
+      "licensing": {
+        "status": "public-domain-source-original-paraphrase",
+        "basis": "Pre-1930 publication (US public domain); UK status per register SR-WE-*; original paraphrase only.",
+        "attributionRequired": false,
+        "aiAuthorship": true
+      },
+      "review": {
+        "status": "UNREVIEWED_RESEARCH_CONTENT",
+        "scholarlyReviewer": null,
+        "editorialReviewer": null,
+        "decisionRef": null,
+        "notes": "Unreviewed per C1-D4: Zysk 2016, Sanskrit checks, Western OCR/page-image verification and licensing remain separate approval requirements. Final content direction 2026-11-24: eligibility assessed; source support necessary but not sufficient."
+      },
+      "readingModes": [
+        "western-only",
+        "combined"
+      ],
+      "complementsIndianGap": {
+        "feature": "measurements.middleToPalmRatio",
+        "indianStatus": "indian-meaning-excluded",
+        "reason": "BS 68.36 long fingers → comfort (material outcome, excluded)."
+      },
+      "wordingFidelity": {
+        "status": "faithful",
+        "sourceWording": "Cheiro c.1900: \"Long fingers give love of detail in everything\"; they worry over little things",
+        "note": "v0.3 restores the downside Cheiro and Benham attach to the same sign; Benham's 'bores, selfish' remain excluded as moral judgements."
+      },
+      "uncertainty": {
+        "measurementQuality": "runtime-from-observationQuality",
+        "identityConfirmation": "measured-no-identity-claim",
+        "sourceSupport": "direct",
+        "traditionalUncertainty": {
+          "level": "moderate",
+          "reasons": [
+            "sources-disagree",
+            "ocr-unverified"
+          ]
+        }
+      },
+      "suitability": {
+        "sourceFidelity": "pass",
+        "observationRequirements": "pass",
+        "culturalContext": "pass",
+        "relevanceToUser": "pass",
+        "harmfulAttributionRisk": "pass",
+        "constructiveReflection": "pass",
+        "rationale": "v0.3 wording restores the source's own downside ('worry over little things'), so the reading is balanced rather than flattering."
+      },
+      "eligibility": {
+        "status": "eligible-initial",
+        "decisionRef": "C1 assessment 2026-11-24 (unreviewed)",
+        "conditions": [
+          "S-4."
+        ]
+      },
+      "e1Capabilities": [
+        "E1-E1",
+        "E1-E2",
+        "E1-E3"
+      ]
+    },
+    {
+      "id": "C1-WE-FINGER-SHORT",
+      "tradition": "western-19c-chirognomy",
+      "featureIdentity": {
+        "anatomicalName": "fingers relative to palm",
+        "traditionalTerm": "short fingers"
+      },
+      "requires": [
+        {
+          "feature": "measurements.middleToPalmRatio",
+          "anatomical": "finger",
+          "provenanceAllowed": [
+            "automatic-measured"
+          ],
+          "observation": {
+            "descriptor": "middle finger length ÷ palm length",
+            "thresholdStatus": "placeholder",
+            "range": {
+              "min": null,
+              "max": 0.8
+            }
+          }
+        }
+      ],
+      "categories": [
+        "personality",
+        "career-working-style"
+      ],
+      "sources": [
+        {
+          "sourceId": "cheiro-loth-c1900",
+          "locator": "Part I, Ch. XI (p. 53)",
+          "supportLevel": "direct",
+          "verification": "read-directly"
+        },
+        {
+          "sourceId": "benham-1900",
+          "locator": "Part First, Ch. XVI (p. 129)",
+          "supportLevel": "direct",
+          "verification": "read-directly"
+        },
+        {
+          "sourceId": "heron-allen-1885",
+          "locator": "Sec. I, Sub-sec. I, §3 (p. 106)",
+          "supportLevel": "direct",
+          "verification": "read-directly"
+        }
+      ],
+      "overallSupport": "direct",
+      "traditionalInterpretation": "Short fingers → quick, impulsive thinking that takes things as a whole and jumps at conclusions too hastily (Cheiro c.1900; Benham Ch. XVI).",
+      "userFacing": {
+        "observation": "Your fingers are short relative to your palm (measured from the photo's hand points).",
+        "reading": "Several 19th-century Western palmists read shorter fingers as quick thinking that takes things as a whole, with a tendency to jump to conclusions too fast.",
+        "reflection": "When does seeing the big picture help you, and when do details catch up with you?"
+      },
+      "observationQuality": {
+        "minFrameProperties": [
+          "scale"
+        ],
+        "blockingQualityIssues": [
+          "palm-not-visible",
+          "hand-cut-off"
+        ],
+        "measurementStatusRequired": "measured",
+        "maxTier": "tentative",
+        "boundaryMargin": 0.03,
+        "displayRule": "never-as-confidence"
+      },
+      "conflicts": [],
+      "traditionNotes": "This is a 19th-century Western reading. Indian texts give this feature a different name and meaning, or none.",
+      "exclusions": {
+        "claimsNeverMade": [
+          "lifespan-or-death",
+          "health-or-medical",
+          "wealth-or-financial-outcome",
+          "marriage-partner-or-divorce",
+          "fertility-or-children",
+          "event-dates-or-timing",
+          "accident-disaster-misfortune",
+          "caste-varna-class",
+          "gender-or-sex-characteristics",
+          "skin-colour-or-complexion",
+          "moral-character-judgement",
+          "career-success-or-failure",
+          "scientific-validity",
+          "meaning-from-absence",
+          "consequential-decision-advice"
+        ],
+        "doNotEmitWhen": [
+          "feature unassessed or skipped",
+          "required observation outside quality gate",
+          "measurement status uncertain",
+          "middle finger not extended"
+        ],
+        "droppedSourceContent": "'Animal nature' (WE-01) and 'cruelty' with thick short fingers (WE-05) excluded."
+      },
+      "licensing": {
+        "status": "public-domain-source-original-paraphrase",
+        "basis": "Pre-1930 publication (US public domain); UK status per register SR-WE-*; original paraphrase only.",
+        "attributionRequired": false,
+        "aiAuthorship": true
+      },
+      "review": {
+        "status": "UNREVIEWED_RESEARCH_CONTENT",
+        "scholarlyReviewer": null,
+        "editorialReviewer": null,
+        "decisionRef": null,
+        "notes": "Unreviewed per C1-D4: Zysk 2016, Sanskrit checks, Western OCR/page-image verification and licensing remain separate approval requirements. Final content direction 2026-11-24: eligibility assessed; source support necessary but not sufficient."
+      },
+      "readingModes": [
+        "western-only",
+        "combined"
+      ],
+      "complementsIndianGap": {
+        "feature": "measurements.middleToPalmRatio",
+        "indianStatus": "indian-meaning-disputed",
+        "reason": "BS 68.36 'small' fingers → intelligent is translation-dependent and not emitted (C1-IN-FINGER-FINE)."
+      },
+      "wordingFidelity": {
+        "status": "faithful",
+        "sourceWording": "Cheiro c.1900: quick and impulsive, take everything en masse, jump at conclusions too hastily",
+        "note": "v0.3 restores the impulsiveness the sources attach to the same sign."
+      },
+      "uncertainty": {
+        "measurementQuality": "runtime-from-observationQuality",
+        "identityConfirmation": "measured-no-identity-claim",
+        "sourceSupport": "direct",
+        "traditionalUncertainty": {
+          "level": "low",
+          "reasons": [
+            "ocr-unverified"
+          ]
+        }
+      },
+      "suitability": {
+        "sourceFidelity": "pass",
+        "observationRequirements": "pass",
+        "culturalContext": "pass",
+        "relevanceToUser": "pass",
+        "harmfulAttributionRisk": "pass",
+        "constructiveReflection": "pass",
+        "rationale": "v0.3 wording restores 'jump to conclusions too hastily'; balanced."
+      },
+      "eligibility": {
+        "status": "eligible-initial",
+        "decisionRef": "C1 assessment 2026-11-24 (unreviewed)",
+        "conditions": [
+          "S-4."
+        ]
+      },
+      "e1Capabilities": [
+        "E1-E1",
+        "E1-E2",
+        "E1-E3"
+      ]
+    },
+    {
+      "id": "C1-WE-INDEX-LONG",
+      "tradition": "western-19c-chirognomy",
+      "featureIdentity": {
+        "anatomicalName": "index vs ring finger",
+        "traditionalTerm": "long index (Jupiter) finger"
+      },
+      "requires": [
+        {
+          "feature": "measurements.indexToRingRatio",
+          "anatomical": "finger",
+          "provenanceAllowed": [
+            "automatic-measured"
+          ],
+          "observation": {
+            "descriptor": "index ÷ ring length",
+            "thresholdStatus": "placeholder",
+            "range": {
+              "min": 1.06,
+              "max": null
+            }
+          }
+        }
+      ],
+      "categories": [
+        "personality",
+        "career-working-style"
+      ],
+      "sources": [
+        {
+          "sourceId": "cheiro-pfa-1916",
+          "locator": "Part II, Ch. III ('The Finger of Jupiter, when long…')",
+          "supportLevel": "direct",
+          "verification": "read-directly"
+        },
+        {
+          "sourceId": "cheiro-loth-c1900",
+          "locator": "Part I, Ch. XI",
+          "supportLevel": "direct",
+          "verification": "read-directly",
+          "note": "Stronger variant for an excessively long index: great pride, tendency to rule and domineer."
+        },
+        {
+          "sourceId": "heron-allen-1885",
+          "locator": "¶221",
+          "supportLevel": "direct",
+          "verification": "read-directly",
+          "note": "Long index → pride."
+        }
+      ],
+      "overallSupport": "direct",
+      "traditionalInterpretation": "Cheiro (1916): a long index finger gives love of power and command over others. Earlier Cheiro (c. 1900) and Heron-Allen add pride; for an excessively long index, a tendency to domineer.",
+      "userFacing": {
+        "observation": "Your index finger measured noticeably longer than your ring finger.",
+        "reading": "NOT FOR EMISSION. Excluded from the initial personalised catalogue (owner decision 2026-11-24). Research record only."
+      },
+      "observationQuality": {
+        "minFrameProperties": [
+          "scale"
+        ],
+        "blockingQualityIssues": [
+          "palm-not-visible",
+          "hand-cut-off"
+        ],
+        "measurementStatusRequired": "measured",
+        "maxTier": "tentative",
+        "boundaryMargin": 0.03,
+        "displayRule": "never-as-confidence"
+      },
+      "conflicts": [],
+      "traditionNotes": "This is a 19th-century Western reading. Indian texts give this feature a different name and meaning, or none.",
+      "exclusions": {
+        "claimsNeverMade": [
+          "lifespan-or-death",
+          "health-or-medical",
+          "wealth-or-financial-outcome",
+          "marriage-partner-or-divorce",
+          "fertility-or-children",
+          "event-dates-or-timing",
+          "accident-disaster-misfortune",
+          "caste-varna-class",
+          "gender-or-sex-characteristics",
+          "skin-colour-or-complexion",
+          "moral-character-judgement",
+          "career-success-or-failure",
+          "scientific-validity",
+          "meaning-from-absence",
+          "consequential-decision-advice"
+        ],
+        "doNotEmitWhen": [
+          "ALWAYS in the initial personalised reading version (eligibility: excluded-initial)",
+          "feature unassessed or skipped",
+          "required observation outside quality gate",
+          "measurement status uncertain",
+          "either finger not extended"
+        ],
+        "droppedSourceContent": "Excluded-initial: no wording is emitted. Historical note: the v0.1 softened wording ('wish to lead') was withdrawn in rev 2; the source meaning (love of power, command over others, pride) is preserved in traditionalInterpretation. Never cite 2D:4D research."
+      },
+      "licensing": {
+        "status": "public-domain-source-original-paraphrase",
+        "basis": "Pre-1930 publication (US public domain); UK status per register SR-WE-*; original paraphrase only.",
+        "attributionRequired": false,
+        "aiAuthorship": true
+      },
+      "review": {
+        "status": "UNREVIEWED_RESEARCH_CONTENT",
+        "scholarlyReviewer": null,
+        "editorialReviewer": null,
+        "decisionRef": null,
+        "notes": "Unreviewed per C1-D4: Zysk 2016, Sanskrit checks, Western OCR/page-image verification and licensing remain separate approval requirements. Final content direction 2026-11-24: eligibility assessed; source support necessary but not sufficient."
+      },
+      "readingModes": [
+        "western-only",
+        "combined"
+      ],
+      "complementsIndianGap": {
+        "feature": "measurements.indexToRingRatio",
+        "indianStatus": "no-indian-source",
+        "reason": "No Indian source read compares index and ring fingers."
+      },
+      "wordingFidelity": {
+        "status": "faithful-neutral-rewording",
+        "sourceWording": "Cheiro 1916: \"love of power and command over others\"",
+        "note": "The v0.1 wording ('wish to lead', pride omitted) is withdrawn. The new wording renders the 1916 text directly and discloses the pride variant. Never cite 2D:4D research."
+      },
+      "uncertainty": {
+        "measurementQuality": "runtime-from-observationQuality",
+        "identityConfirmation": "measured-no-identity-claim",
+        "sourceSupport": "direct",
+        "traditionalUncertainty": {
+          "level": "low",
+          "reasons": [
+            "ocr-unverified"
+          ]
+        }
+      },
+      "suitability": {
+        "sourceFidelity": "pass",
+        "observationRequirements": "pass",
+        "culturalContext": "concern",
+        "relevanceToUser": "concern",
+        "harmfulAttributionRisk": "fail",
+        "constructiveReflection": "concern",
+        "rationale": "Source-faithful meaning is love of power, command over others and pride (domineering when excessive). Power/pride attribution from a finger ratio is a harmful-attribution risk and invites confusion with 2D:4D science. Excluded by owner decision; research record retained."
+      },
+      "eligibility": {
+        "status": "excluded-initial",
+        "decisionRef": "owner final content direction 2026-11-24"
+      },
+      "researchHistory": {
+        "note": "v0.1 softened wording ('a wish to lead and take charge') withdrawn (rev 2). v0.2 faithful wording retained below as research history only. Excluded from initial personalised readings by owner decision 2026-11-24.",
+        "retainedUserFacingDraft": {
+          "observation": "Your index finger measured noticeably longer than your ring finger.",
+          "reading": "Cheiro, a 19th–20th-century Western palmist, read a long index finger as a liking for being in charge and directing others; other Western writers added pride to that reading.",
+          "reflection": "In which situations do you naturally take charge, and how do others respond?"
+        }
+      },
+      "e1Capabilities": [
+        "E1-E1",
+        "E1-E2",
+        "E1-E3"
+      ]
+    },
+    {
+      "id": "C1-WE-RING-LONG",
+      "tradition": "western-19c-chirognomy",
+      "featureIdentity": {
+        "anatomicalName": "index vs ring finger",
+        "traditionalTerm": "ring (Apollo) finger near index length or longer"
+      },
+      "requires": [
+        {
+          "feature": "measurements.indexToRingRatio",
+          "anatomical": "finger",
+          "provenanceAllowed": [
+            "automatic-measured"
+          ],
+          "observation": {
+            "descriptor": "index ÷ ring length",
+            "thresholdStatus": "placeholder",
+            "range": {
+              "min": null,
+              "max": 0.94
+            }
+          }
+        }
+      ],
+      "categories": [
+        "strengths",
+        "career-working-style"
+      ],
+      "sources": [
+        {
+          "sourceId": "cheiro-loth-c1900",
+          "locator": "Part I, Ch. XI",
+          "supportLevel": "direct",
+          "verification": "read-directly"
+        },
+        {
+          "sourceId": "heron-allen-1885",
+          "locator": "¶233",
+          "supportLevel": "direct",
+          "verification": "read-directly"
+        }
+      ],
+      "overallSupport": "direct",
+      "traditionalInterpretation": "Ring finger as long as the index → ambition through art (Cheiro, Heron-Allen); as long as the middle finger → gambling (excluded).",
+      "userFacing": {
+        "observation": "Your ring finger measured longer than your index finger.",
+        "reading": "Some 19th-century Western palmists read a ring finger that rivals the index finger as ambition expressed through art and creative work.",
+        "reflection": "What creative work would you like to be recognised for?"
+      },
+      "observationQuality": {
+        "minFrameProperties": [
+          "scale"
+        ],
+        "blockingQualityIssues": [
+          "palm-not-visible",
+          "hand-cut-off"
+        ],
+        "measurementStatusRequired": "measured",
+        "maxTier": "tentative",
+        "boundaryMargin": 0.03,
+        "displayRule": "never-as-confidence"
+      },
+      "conflicts": [],
+      "traditionNotes": "This is a 19th-century Western reading. Indian texts give this feature a different name and meaning, or none.",
+      "exclusions": {
+        "claimsNeverMade": [
+          "lifespan-or-death",
+          "health-or-medical",
+          "wealth-or-financial-outcome",
+          "marriage-partner-or-divorce",
+          "fertility-or-children",
+          "event-dates-or-timing",
+          "accident-disaster-misfortune",
+          "caste-varna-class",
+          "gender-or-sex-characteristics",
+          "skin-colour-or-complexion",
+          "moral-character-judgement",
+          "career-success-or-failure",
+          "scientific-validity",
+          "meaning-from-absence",
+          "consequential-decision-advice"
+        ],
+        "doNotEmitWhen": [
+          "feature unassessed or skipped",
+          "required observation outside quality gate",
+          "measurement status uncertain",
+          "ring finger approaches middle-finger length (gambling variant: never emitted)"
+        ],
+        "droppedSourceContent": "Gambling/speculation variant excluded. Never cite 2D:4D research."
+      },
+      "licensing": {
+        "status": "public-domain-source-original-paraphrase",
+        "basis": "Pre-1930 publication (US public domain); UK status per register SR-WE-*; original paraphrase only.",
+        "attributionRequired": false,
+        "aiAuthorship": true
+      },
+      "review": {
+        "status": "UNREVIEWED_RESEARCH_CONTENT",
+        "scholarlyReviewer": null,
+        "editorialReviewer": null,
+        "decisionRef": null,
+        "notes": "Unreviewed per C1-D4: Zysk 2016, Sanskrit checks, Western OCR/page-image verification and licensing remain separate approval requirements. Final content direction 2026-11-24: eligibility assessed; source support necessary but not sufficient."
+      },
+      "readingModes": [
+        "western-only",
+        "combined"
+      ],
+      "complementsIndianGap": {
+        "feature": "measurements.indexToRingRatio",
+        "indianStatus": "no-indian-source",
+        "reason": "No Indian source read compares index and ring fingers."
+      },
+      "wordingFidelity": {
+        "status": "faithful"
+      },
+      "uncertainty": {
+        "measurementQuality": "runtime-from-observationQuality",
+        "identityConfirmation": "measured-no-identity-claim",
+        "sourceSupport": "direct",
+        "traditionalUncertainty": {
+          "level": "low",
+          "reasons": [
+            "ocr-unverified"
+          ]
+        }
+      },
+      "suitability": {
+        "sourceFidelity": "pass",
+        "observationRequirements": "pass",
+        "culturalContext": "pass",
+        "relevanceToUser": "pass",
+        "harmfulAttributionRisk": "pass",
+        "constructiveReflection": "pass",
+        "rationale": "Artistic ambition; gambling variant stays excluded by threshold."
+      },
+      "eligibility": {
+        "status": "eligible-initial",
+        "decisionRef": "C1 assessment 2026-11-24 (unreviewed)",
+        "conditions": [
+          "S-4.",
+          "Never cite 2D:4D research."
+        ]
+      },
+      "e1Capabilities": [
+        "E1-E1",
+        "E1-E2",
+        "E1-E3"
+      ]
+    },
+    {
+      "id": "C1-WE-THUMB-WILL",
+      "tradition": "western-19c-chirognomy",
+      "featureIdentity": {
+        "anatomicalName": "thumb phalanges",
+        "traditionalTerm": "thumb: long nail phalanx"
+      },
+      "requires": [
+        {
+          "feature": "proposed.measurements.thumbDistalToProximalRatio",
+          "anatomical": "thumb",
+          "provenanceAllowed": [
+            "automatic-measured"
+          ],
+          "observation": {
+            "descriptor": "len(3→4) ÷ len(2→3)",
+            "thresholdStatus": "placeholder",
+            "range": {
+              "min": 1.1,
+              "max": null
+            }
+          }
+        }
+      ],
+      "categories": [
+        "personality",
+        "strengths"
+      ],
+      "sources": [
+        {
+          "sourceId": "cheiro-pfa-1916",
+          "locator": "Part II, Ch. II",
+          "supportLevel": "direct",
+          "verification": "read-directly"
+        },
+        {
+          "sourceId": "cheiro-loth-c1900",
+          "locator": "Part I, Ch. IX (p. 45)",
+          "supportLevel": "direct",
+          "verification": "read-directly"
+        },
+        {
+          "sourceId": "benham-1900",
+          "locator": "Part First, Ch. XVII (p. 142)",
+          "supportLevel": "direct",
+          "verification": "read-directly"
+        },
+        {
+          "sourceId": "heron-allen-1885",
+          "locator": "Sec. I, Sub-sec. I, §8 (p. 116)",
+          "supportLevel": "direct",
+          "verification": "read-directly"
+        },
+        {
+          "sourceId": "darpentigny-1886",
+          "locator": "Sub-section IV ¶189 (reverse numbering)",
+          "supportLevel": "direct",
+          "verification": "read-directly"
+        }
+      ],
+      "overallSupport": "direct",
+      "traditionalInterpretation": "The nail phalanx of the thumb shows will and decision; the middle phalanx shows logic and reasoning. Benham's norm: the nail phalanx slightly shorter than the middle.",
+      "userFacing": {
+        "observation": "The top section of your thumb measured long compared with the middle section.",
+        "reading": "Western palmists consistently read the top section of the thumb as willpower and decisiveness, so a long top section was taken as a strong will.",
+        "reflection": "What have you followed through on when it would have been easier to stop?"
+      },
+      "observationQuality": {
+        "minFrameProperties": [
+          "scale"
+        ],
+        "blockingQualityIssues": [
+          "palm-not-visible",
+          "hand-cut-off"
+        ],
+        "measurementStatusRequired": "measured",
+        "maxTier": "tentative",
+        "boundaryMargin": 0.03,
+        "displayRule": "never-as-confidence"
+      },
+      "conflicts": [],
+      "traditionNotes": "This is a 19th-century Western reading. Indian texts give this feature a different name and meaning, or none.",
+      "exclusions": {
+        "claimsNeverMade": [
+          "lifespan-or-death",
+          "health-or-medical",
+          "wealth-or-financial-outcome",
+          "marriage-partner-or-divorce",
+          "fertility-or-children",
+          "event-dates-or-timing",
+          "accident-disaster-misfortune",
+          "caste-varna-class",
+          "gender-or-sex-characteristics",
+          "skin-colour-or-complexion",
+          "moral-character-judgement",
+          "career-success-or-failure",
+          "scientific-validity",
+          "meaning-from-absence",
+          "consequential-decision-advice"
+        ],
+        "doNotEmitWhen": [
+          "feature unassessed or skipped",
+          "required observation outside quality gate",
+          "thumb not extended (tip/IP ratio < 1.05)",
+          "descriptor not implemented"
+        ],
+        "droppedSourceContent": "'Murderer's thumb', 'coarseness', 'congenital idiots' passages excluded."
+      },
+      "licensing": {
+        "status": "public-domain-source-original-paraphrase",
+        "basis": "Pre-1930 publication (US public domain); UK status per register SR-WE-*; original paraphrase only.",
+        "attributionRequired": false,
+        "aiAuthorship": true
+      },
+      "review": {
+        "status": "UNREVIEWED_RESEARCH_CONTENT",
+        "scholarlyReviewer": null,
+        "editorialReviewer": null,
+        "decisionRef": null,
+        "notes": "Unreviewed per C1-D4: Zysk 2016, Sanskrit checks, Western OCR/page-image verification and licensing remain separate approval requirements. Final content direction 2026-11-24: eligibility assessed; source support necessary but not sufficient."
+      },
+      "readingModes": [
+        "western-only",
+        "combined"
+      ],
+      "complementsIndianGap": {
+        "feature": "proposed.measurements.thumbDistalToProximalRatio",
+        "indianStatus": "no-indian-source",
+        "reason": "Indian texts read marks on the thumb, never its proportions."
+      },
+      "wordingFidelity": {
+        "status": "faithful"
+      },
+      "uncertainty": {
+        "measurementQuality": "runtime-from-observationQuality",
+        "identityConfirmation": "measured-no-identity-claim",
+        "sourceSupport": "direct",
+        "traditionalUncertainty": {
+          "level": "low",
+          "reasons": [
+            "ocr-unverified"
+          ]
+        }
+      },
+      "suitability": {
+        "sourceFidelity": "pass",
+        "observationRequirements": "concern",
+        "culturalContext": "pass",
+        "relevanceToUser": "pass",
+        "harmfulAttributionRisk": "pass",
+        "constructiveReflection": "pass",
+        "rationale": "Five sources agree; blocked on thumb landmark accuracy."
+      },
+      "eligibility": {
+        "status": "eligible-later",
+        "decisionRef": "C1 assessment 2026-11-24 (unreviewed)",
+        "conditions": [
+          "E1-L3 with accuracy validation."
+        ]
+      },
+      "e1Capabilities": [
+        "E1-E1",
+        "E1-E2",
+        "E1-L3"
+      ]
+    },
+    {
+      "id": "C1-WE-THUMB-LOGIC",
+      "tradition": "western-19c-chirognomy",
+      "featureIdentity": {
+        "anatomicalName": "thumb phalanges",
+        "traditionalTerm": "thumb: long middle phalanx"
+      },
+      "requires": [
+        {
+          "feature": "proposed.measurements.thumbDistalToProximalRatio",
+          "anatomical": "thumb",
+          "provenanceAllowed": [
+            "automatic-measured"
+          ],
+          "observation": {
+            "descriptor": "len(3→4) ÷ len(2→3)",
+            "thresholdStatus": "placeholder",
+            "range": {
+              "min": null,
+              "max": 0.8
+            }
+          }
+        }
+      ],
+      "categories": [
+        "personality",
+        "strengths"
+      ],
+      "sources": [
+        {
+          "sourceId": "cheiro-loth-c1900",
+          "locator": "Part I, Ch. IX (p. 45)",
+          "supportLevel": "direct",
+          "verification": "read-directly"
+        },
+        {
+          "sourceId": "benham-1900",
+          "locator": "Part First, Ch. XVII (p. 142)",
+          "supportLevel": "direct",
+          "verification": "read-directly"
+        },
+        {
+          "sourceId": "heron-allen-1885",
+          "locator": "Sec. I, Sub-sec. I, §8",
+          "supportLevel": "direct",
+          "verification": "read-directly"
+        }
+      ],
+      "overallSupport": "direct",
+      "traditionalInterpretation": "A middle phalanx much longer than the nail phalanx → reasoning stronger than will (Cheiro).",
+      "userFacing": {
+        "observation": "The middle section of your thumb measured long compared with the top section.",
+        "reading": "Western palmists read the middle section of the thumb as logic and reasoning, so a long middle section was taken as a mind that reasons things through before acting.",
+        "reflection": "Which decision are you still reasoning through?"
+      },
+      "observationQuality": {
+        "minFrameProperties": [
+          "scale"
+        ],
+        "blockingQualityIssues": [
+          "palm-not-visible",
+          "hand-cut-off"
+        ],
+        "measurementStatusRequired": "measured",
+        "maxTier": "tentative",
+        "boundaryMargin": 0.03,
+        "displayRule": "never-as-confidence"
+      },
+      "conflicts": [],
+      "traditionNotes": "This is a 19th-century Western reading. Indian texts give this feature a different name and meaning, or none.",
+      "exclusions": {
+        "claimsNeverMade": [
+          "lifespan-or-death",
+          "health-or-medical",
+          "wealth-or-financial-outcome",
+          "marriage-partner-or-divorce",
+          "fertility-or-children",
+          "event-dates-or-timing",
+          "accident-disaster-misfortune",
+          "caste-varna-class",
+          "gender-or-sex-characteristics",
+          "skin-colour-or-complexion",
+          "moral-character-judgement",
+          "career-success-or-failure",
+          "scientific-validity",
+          "meaning-from-absence",
+          "consequential-decision-advice"
+        ],
+        "doNotEmitWhen": [
+          "feature unassessed or skipped",
+          "required observation outside quality gate",
+          "thumb not extended",
+          "descriptor not implemented"
+        ],
+        "droppedSourceContent": "'Reason without enough will' framed neutrally."
+      },
+      "licensing": {
+        "status": "public-domain-source-original-paraphrase",
+        "basis": "Pre-1930 publication (US public domain); UK status per register SR-WE-*; original paraphrase only.",
+        "attributionRequired": false,
+        "aiAuthorship": true
+      },
+      "review": {
+        "status": "UNREVIEWED_RESEARCH_CONTENT",
+        "scholarlyReviewer": null,
+        "editorialReviewer": null,
+        "decisionRef": null,
+        "notes": "Unreviewed per C1-D4: Zysk 2016, Sanskrit checks, Western OCR/page-image verification and licensing remain separate approval requirements. Final content direction 2026-11-24: eligibility assessed; source support necessary but not sufficient."
+      },
+      "readingModes": [
+        "western-only",
+        "combined"
+      ],
+      "complementsIndianGap": {
+        "feature": "proposed.measurements.thumbDistalToProximalRatio",
+        "indianStatus": "no-indian-source",
+        "reason": "Indian texts read marks on the thumb, never its proportions."
+      },
+      "wordingFidelity": {
+        "status": "faithful"
+      },
+      "uncertainty": {
+        "measurementQuality": "runtime-from-observationQuality",
+        "identityConfirmation": "measured-no-identity-claim",
+        "sourceSupport": "direct",
+        "traditionalUncertainty": {
+          "level": "low",
+          "reasons": [
+            "ocr-unverified"
+          ]
+        }
+      },
+      "suitability": {
+        "sourceFidelity": "pass",
+        "observationRequirements": "concern",
+        "culturalContext": "pass",
+        "relevanceToUser": "pass",
+        "harmfulAttributionRisk": "pass",
+        "constructiveReflection": "pass",
+        "rationale": "As THUMB-WILL."
+      },
+      "eligibility": {
+        "status": "eligible-later",
+        "decisionRef": "C1 assessment 2026-11-24 (unreviewed)",
+        "conditions": [
+          "E1-L3 with accuracy validation."
+        ]
+      },
+      "e1Capabilities": [
+        "E1-E1",
+        "E1-E2",
+        "E1-L3"
+      ]
+    },
+    {
+      "id": "C1-WE-HEART-JUPITER",
+      "tradition": "western-19c-chiromancy",
+      "featureIdentity": {
+        "anatomicalName": "distal transverse crease (radial end)",
+        "traditionalTerm": "heart line rising under the index finger"
+      },
+      "requires": [
+        {
+          "feature": "lines.heart",
+          "anatomical": "distal-transverse",
+          "provenanceAllowed": [
+            "user-confirmed"
+          ],
+          "observation": {
+            "descriptor": "proposed.heart.radialEndFinger (radial endpoint zone in palm-frame x: index | between-index-middle | middle | other; zone edges from landmarks 5/9; placeholder)",
+            "thresholdStatus": "placeholder",
+            "categorical": "index"
+          }
+        }
+      ],
+      "categories": [
+        "emotional-relational"
+      ],
+      "sources": [
+        {
+          "sourceId": "cheiro-pfa-1916",
+          "locator": "Part I, Ch. VII",
+          "supportLevel": "direct",
+          "verification": "read-directly"
+        },
+        {
+          "sourceId": "cheiro-loth-c1900",
+          "locator": "Part II, Ch. X (p. 98)",
+          "supportLevel": "direct",
+          "verification": "read-directly"
+        },
+        {
+          "sourceId": "heron-allen-1885",
+          "locator": "Sec. II, Sub-sec. IV, §2 (p. 242)",
+          "supportLevel": "direct",
+          "verification": "read-directly"
+        }
+      ],
+      "overallSupport": "direct",
+      "traditionalInterpretation": "Heart line rising from the centre of the Mount of Jupiter → idealistic, firm, reliable affection.",
+      "userFacing": {
+        "observation": "Your traced heart line ends below your index finger.",
+        "reading": "Nineteenth-century Western palmists read a heart line reaching toward the index finger as idealistic, steady affection.",
+        "reflection": "What does loyalty look like to you in practice?"
+      },
+      "observationQuality": {
+        "minFrameProperties": [
+          "scale",
+          "axis",
+          "direction"
+        ],
+        "blockingQualityIssues": [
+          "palm-not-visible",
+          "hand-cut-off",
+          "hand-rotated",
+          "blurry",
+          "too-dark",
+          "too-bright",
+          "low-contrast"
+        ],
+        "maxTier": "tentative",
+        "displayRule": "never-as-confidence",
+        "boundaryMargin": 0.08
+      },
+      "conflicts": [
+        {
+          "withId": "āyurlekhā (Indian: lifespan)",
+          "kind": "same-feature-other-tradition",
+          "handling": "prefer-none-note-disagreement",
+          "note": "Indian meaning of this crease is length of life and is never used or reframed."
+        }
+      ],
+      "traditionNotes": "This is a 19th-century Western reading. Indian texts give this feature a different name and meaning, or none.",
+      "exclusions": {
+        "claimsNeverMade": [
+          "lifespan-or-death",
+          "health-or-medical",
+          "wealth-or-financial-outcome",
+          "marriage-partner-or-divorce",
+          "fertility-or-children",
+          "event-dates-or-timing",
+          "accident-disaster-misfortune",
+          "caste-varna-class",
+          "gender-or-sex-characteristics",
+          "skin-colour-or-complexion",
+          "moral-character-judgement",
+          "career-success-or-failure",
+          "scientific-validity",
+          "meaning-from-absence",
+          "consequential-decision-advice"
+        ],
+        "doNotEmitWhen": [
+          "feature unassessed or skipped",
+          "required observation outside quality gate",
+          "endpoint within boundary margin between index and middle finger bases",
+          "descriptor not implemented"
+        ],
+        "droppedSourceContent": "'Fatality' / breaks under Saturn, violent death excluded."
+      },
+      "licensing": {
+        "status": "public-domain-source-original-paraphrase",
+        "basis": "Pre-1930 publication (US public domain); UK status per register SR-WE-*; original paraphrase only.",
+        "attributionRequired": false,
+        "aiAuthorship": true
+      },
+      "review": {
+        "status": "UNREVIEWED_RESEARCH_CONTENT",
+        "scholarlyReviewer": null,
+        "editorialReviewer": null,
+        "decisionRef": null,
+        "notes": "Unreviewed per C1-D4: Zysk 2016, Sanskrit checks, Western OCR/page-image verification and licensing remain separate approval requirements. Final content direction 2026-11-24: eligibility assessed; source support necessary but not sufficient."
+      },
+      "readingModes": [
+        "western-only",
+        "combined"
+      ],
+      "complementsIndianGap": {
+        "feature": "lines.heart",
+        "indianStatus": "indian-meaning-excluded",
+        "reason": "Indian name āyurlekhā; its only attested meaning is length of life (prohibited; no repurposing)."
+      },
+      "wordingFidelity": {
+        "status": "faithful"
+      },
+      "uncertainty": {
+        "measurementQuality": "runtime-from-observationQuality",
+        "identityConfirmation": "user-confirmed-identity",
+        "sourceSupport": "direct",
+        "traditionalUncertainty": {
+          "level": "low",
+          "reasons": [
+            "ocr-unverified"
+          ]
+        }
+      },
+      "suitability": {
+        "sourceFidelity": "pass",
+        "observationRequirements": "concern",
+        "culturalContext": "pass",
+        "relevanceToUser": "pass",
+        "harmfulAttributionRisk": "pass",
+        "constructiveReflection": "pass",
+        "rationale": "Cheiro 1916: firm, reliable, idealistic affection. Needs the ending descriptor."
+      },
+      "eligibility": {
+        "status": "eligible-initial",
+        "decisionRef": "C1 assessment 2026-11-24 (unreviewed)",
+        "conditions": [
+          "E1-E5.",
+          "āyurlekhā note shown."
+        ]
+      },
+      "e1Capabilities": [
+        "E1-E1",
+        "E1-E2",
+        "E1-E4",
+        "E1-E5"
+      ]
+    },
+    {
+      "id": "C1-WE-HEART-BETWEEN",
+      "tradition": "western-19c-chiromancy",
+      "featureIdentity": {
+        "anatomicalName": "distal transverse crease (radial end)",
+        "traditionalTerm": "heart line rising between index and middle fingers"
+      },
+      "requires": [
+        {
+          "feature": "lines.heart",
+          "anatomical": "distal-transverse",
+          "provenanceAllowed": [
+            "user-confirmed"
+          ],
+          "observation": {
+            "descriptor": "proposed.heart.radialEndFinger (radial endpoint zone in palm-frame x: index | between-index-middle | middle | other; zone edges from landmarks 5/9; placeholder)",
+            "thresholdStatus": "placeholder",
+            "categorical": "between-index-middle"
+          }
+        }
+      ],
+      "categories": [
+        "emotional-relational"
+      ],
+      "sources": [
+        {
+          "sourceId": "cheiro-pfa-1916",
+          "locator": "Part I, Ch. VII",
+          "supportLevel": "direct",
+          "verification": "read-directly"
+        },
+        {
+          "sourceId": "cheiro-loth-c1900",
+          "locator": "Part II, Ch. X (p. 98)",
+          "supportLevel": "direct",
+          "verification": "read-directly"
+        }
+      ],
+      "overallSupport": "direct",
+      "traditionalInterpretation": "Rising between the first and second fingers → a calm, deep nature in affection (Cheiro).",
+      "userFacing": {
+        "observation": "Your traced heart line ends between your index and middle fingers.",
+        "reading": "Cheiro read a heart line ending between the index and middle fingers as a calm, deep way of caring.",
+        "reflection": "How do you show care when words are not enough?"
+      },
+      "observationQuality": {
+        "minFrameProperties": [
+          "scale",
+          "axis",
+          "direction"
+        ],
+        "blockingQualityIssues": [
+          "palm-not-visible",
+          "hand-cut-off",
+          "hand-rotated",
+          "blurry",
+          "too-dark",
+          "too-bright",
+          "low-contrast"
+        ],
+        "maxTier": "tentative",
+        "displayRule": "never-as-confidence",
+        "boundaryMargin": 0.08
+      },
+      "conflicts": [],
+      "traditionNotes": "This is a 19th-century Western reading. Indian texts give this feature a different name and meaning, or none.",
+      "exclusions": {
+        "claimsNeverMade": [
+          "lifespan-or-death",
+          "health-or-medical",
+          "wealth-or-financial-outcome",
+          "marriage-partner-or-divorce",
+          "fertility-or-children",
+          "event-dates-or-timing",
+          "accident-disaster-misfortune",
+          "caste-varna-class",
+          "gender-or-sex-characteristics",
+          "skin-colour-or-complexion",
+          "moral-character-judgement",
+          "career-success-or-failure",
+          "scientific-validity",
+          "meaning-from-absence",
+          "consequential-decision-advice"
+        ],
+        "doNotEmitWhen": [
+          "feature unassessed or skipped",
+          "required observation outside quality gate",
+          "descriptor not implemented"
+        ],
+        "droppedSourceContent": "Saturn-origin 'selfish' variant not emitted."
+      },
+      "licensing": {
+        "status": "public-domain-source-original-paraphrase",
+        "basis": "Pre-1930 publication (US public domain); UK status per register SR-WE-*; original paraphrase only.",
+        "attributionRequired": false,
+        "aiAuthorship": true
+      },
+      "review": {
+        "status": "UNREVIEWED_RESEARCH_CONTENT",
+        "scholarlyReviewer": null,
+        "editorialReviewer": null,
+        "decisionRef": null,
+        "notes": "Unreviewed per C1-D4: Zysk 2016, Sanskrit checks, Western OCR/page-image verification and licensing remain separate approval requirements. Final content direction 2026-11-24: eligibility assessed; source support necessary but not sufficient."
+      },
+      "readingModes": [
+        "western-only",
+        "combined"
+      ],
+      "complementsIndianGap": {
+        "feature": "lines.heart",
+        "indianStatus": "indian-meaning-excluded",
+        "reason": "Indian name āyurlekhā; its only attested meaning is length of life (prohibited; no repurposing)."
+      },
+      "wordingFidelity": {
+        "status": "faithful"
+      },
+      "uncertainty": {
+        "measurementQuality": "runtime-from-observationQuality",
+        "identityConfirmation": "user-confirmed-identity",
+        "sourceSupport": "direct",
+        "traditionalUncertainty": {
+          "level": "moderate",
+          "reasons": [
+            "single-source",
+            "ocr-unverified"
+          ]
+        }
+      },
+      "suitability": {
+        "sourceFidelity": "pass",
+        "observationRequirements": "concern",
+        "culturalContext": "pass",
+        "relevanceToUser": "pass",
+        "harmfulAttributionRisk": "pass",
+        "constructiveReflection": "pass",
+        "rationale": "Single source (Cheiro); calm, deep affection."
+      },
+      "eligibility": {
+        "status": "eligible-initial",
+        "decisionRef": "C1 assessment 2026-11-24 (unreviewed)",
+        "conditions": [
+          "E1-E5."
+        ]
+      },
+      "e1Capabilities": [
+        "E1-E1",
+        "E1-E2",
+        "E1-E4",
+        "E1-E5"
+      ]
+    }
+  ],
+  "e1Planning": {
+    "capabilities": {
+      "E1-E1": "Library loader + runtime lint",
+      "E1-E2": "Reading composer (modes, RC-1..RC-13, not-assessed list)",
+      "E1-E3": "Measurements input block (I1 measurement set with status)",
+      "E1-E4": "User-trace source + user-confirmed basis, incl. user-confirmed central-longitudinal class",
+      "E1-E5": "Line-ending-to-finger descriptor (upward distal end, heart radial end) with boundary margin",
+      "E1-L1": "Self-report input (user-self-reported), first palmRaised",
+      "E1-L2": "User-reported mark extensions (matsya count; fishTail; tankTemple)",
+      "E1-L3": "Thumb phalanx ratio (needs landmark-accuracy validation)",
+      "E1-L4": "Line-continuity self-report (record held)",
+      "E1-L5": "Origin-gap descriptor (single later record)"
+    },
+    "tiers": {
+      "essential": [
+        "E1-E1",
+        "E1-E2",
+        "E1-E3",
+        "E1-E4",
+        "E1-E5"
+      ],
+      "optionalAssisted": [
+        "E1-L1",
+        "E1-L2",
+        "E1-L5"
+      ],
+      "futureResearch": [
+        "E1-L3",
+        "E1-L4"
+      ]
+    },
+    "originGapDecision": "Not essential. After the ORIGIN-JOINED exclusion it serves only C1-WE-ORIGIN-SEPARATE (eligible-later, one pole of a two-sided sign, checklist C-9). Optional assisted enhancement E1-L5. No measurement is built solely for excluded records.",
+    "notPlanned": [
+      "Any extraction solely for excluded-initial records (ORIGIN-JOINED, INDEX-LONG)",
+      "Phalanx-joint proportion (C1-IN-JOINTS-POPULAR, held under the mixed-apodosis rule)",
+      "Fingertip shape and hand types; mounts; line depth, colour or gloss (scanner capabilities, out of scope)"
+    ],
+    "carriedForwardFromI1": {
+      "M4": "Skipped-feature diagnostics: a user-skipped line must not decline with the detector-miss reason or wording.",
+      "E1-A1": "User-skipped vs detector-missing: own reason and wording; never 'not detected' or a photo/detector limitation.",
+      "E1-A2": "Unassessed vs absent: distinguishable; neither produces an interpretation; absence stays meaningless.",
+      "E1-A3": "Unknown branches, forks and breaks: a user-trace source expresses them as unknown (never zero/false), or those families are excluded for that source.",
+      "E1-A4": "Consistent diagnostics: each line's observation status and every dependent decline reason agree.",
+      "E1-A5": "Tentative ceiling; quality, confirmation and confidence kept separate; synthetic-only gate; frozen G6 preserved until the new identity is authorised; 23 Western G6 texts excluded."
+    }
+  }
+}

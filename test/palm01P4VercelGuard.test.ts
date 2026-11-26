@@ -61,12 +61,17 @@ function runVercelBuild(opts: { nextMode: NextMode; vercelEnv?: string; approval
     // Real guard code, copied (never symlinked).
     fs.copyFileSync(path.join(ROOT, VERCEL_BUILD), path.join(web, 'scripts/vercel-build.sh'));
     fs.copyFileSync(path.join(ROOT, 'apps/web/scripts/check-palmistry-bundle.js'), path.join(web, 'scripts/check-palmistry-bundle.js'));
+    // AURA-PALM-03-E1-R2: vercel-build.sh also runs the E1 exclusion guard after `next build`.
+    fs.copyFileSync(path.join(ROOT, 'apps/web/scripts/check-palm-e1-bundle.js'), path.join(web, 'scripts/check-palm-e1-bundle.js'));
     fs.copyFileSync(path.join(ROOT, 'apps/web/palmistry-build-exclusion.js'), path.join(web, 'palmistry-build-exclusion.js'));
     // AURA-MCP-02-I1.5-D: vercel-build.sh runs the DB identity guard before migrating.
     fs.copyFileSync(path.join(ROOT, 'apps/web/scripts/check-db-identity.js'), path.join(web, 'scripts/check-db-identity.js'));
     if (opts.approval !== null) {
       fs.writeFileSync(path.join(tmp, 'packages/palmistry/src/review-status.json'), opts.approval ?? '{"status":"PENDING_HUMAN_REVIEW","approvedBy":null}');
     }
+    // AURA-PALM-03-E1-R4: the web app's public/ source directory (its web manifest ships in every build).
+    fs.mkdirSync(path.join(web, 'public'), { recursive: true });
+    fs.writeFileSync(path.join(web, 'public/manifest.json'), '{"name":"Aura"}');
     const log = path.join(tmp, 'calls.log');
     // Fake `next`: mimics next build clearing its own output (keeping cache),
     // then writes a production-shaped artifact set.
@@ -82,6 +87,20 @@ rm -rf .next/static .next/server .next/standalone
 mkdir -p .next/static/chunks/app .next/server/app .next/standalone
 echo 'console.log("app")' > .next/static/chunks/app/page-abc.js
 echo 'module.exports={}' > .next/server/app/page.js
+# AURA-PALM-03-E1-R4: a complete Next standalone artifact (the E1 guard verifies the structure before scanning)
+mkdir -p .next/static/fakeBuild0001 .next/server/app .next/standalone/.next/server/app .next/standalone/node_modules/next
+printf fakeBuild0001 > .next/BUILD_ID && cp .next/BUILD_ID .next/standalone/.next/BUILD_ID
+echo 'self.__BUILD_MANIFEST={}' > .next/static/fakeBuild0001/_buildManifest.js
+echo 'module.exports={}' > .next/server/webpack-runtime.js
+echo '{"/page":"app/page.js"}' > .next/server/app-paths-manifest.json
+echo '{"/_app":"pages/_app.js"}' > .next/server/pages-manifest.json
+echo 'module.exports={}' > .next/standalone/.next/server/app/page.js
+printf "require('next')\\nrequire('next/dist/server/lib/start-server')\\n" > .next/standalone/server.js
+echo '{"name":"web"}' > .next/standalone/package.json
+echo '{"name":"next","main":"./dist/server/next.js"}' > .next/standalone/node_modules/next/package.json
+mkdir -p .next/standalone/node_modules/next/dist/server/lib
+echo 'module.exports={}' > .next/standalone/node_modules/next/dist/server/next.js
+echo 'exports.startServer=function(){}' > .next/standalone/node_modules/next/dist/server/lib/start-server.js
 if [ "$FAKE_NEXT_MODE" = "leak" ]; then
   echo 'var c={status:"PENDING_HUMAN_REVIEW",id:"zysk-2025"};' > .next/static/chunks/app/leak-def.js
 fi

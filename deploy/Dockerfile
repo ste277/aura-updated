@@ -24,7 +24,36 @@ RUN cd apps/web && npx prisma generate \
  && NEXT_TELEMETRY_DISABLED=1 \
     DATABASE_URL=postgresql://build:build@localhost:5432/build \
     AUTH_SECRET=build-time-placeholder-never-used-at-runtime \
-    npm run build
+    npm run build \
+ && node scripts/check-palm-e1-bundle.js
+# AURA-PALM-03-E1-R2 -- the line above fails this stage (and so the image build)
+# if the development-only personalised interpretation engine or its unreviewed
+# catalogue reached .next/static, .next/server, .next/standalone (incl. its
+# node_modules) or public/. Unconditional.
+
+# ---- release-tree: exactly the files the runtime image ships -----------------
+# AURA-PALM-03-E1-R3 -- the E1 exclusion guard scans EVERY file of the assembled
+# runtime tree (standalone server and its node_modules, .next/static, public,
+# migrations) before the runtime stage copies it. The runtime stage depends on
+# this stage, so a leak fails the image build. The guard script itself is not
+# shipped (it lives outside /app and is removed).
+FROM node:24-alpine AS release-tree
+WORKDIR /app
+# Next's standalone output puts server.js at the root of the tracing root
+# (apps/web here — verified in the built image), and expects .next/static
+# and public/ beside it.
+COPY --from=build /repo/apps/web/.next/standalone ./
+COPY --from=build /repo/apps/web/.next/static ./.next/static
+COPY --from=build /repo/apps/web/public ./public
+# migrations ship in the image so `deploy.sh` can apply them from a one-off container
+COPY --from=build /repo/apps/web/prisma/migrations ./migrations
+COPY --from=build /repo/apps/web/scripts/check-palm-e1-bundle.js /opt/guard/check-palm-e1-bundle.js
+COPY --from=build /repo/apps/web/scripts/check-artifact-startup.js /opt/guard/check-artifact-startup.js
+# R6: exclusion and structure scan of the exact runtime tree, then an isolated startup smoke of that same tree
+# (a copy of /app is started; /app itself is never modified)
+RUN node /opt/guard/check-palm-e1-bundle.js --tree /app \
+ && node /opt/guard/check-artifact-startup.js --tree /app \
+ && rm -rf /opt/guard
 
 # ---- runtime: only the standalone server output -----------------------------
 FROM node:24-alpine AS runtime
@@ -34,14 +63,7 @@ ENV NODE_ENV=production \
     PORT=3000 \
     HOSTNAME=0.0.0.0
 RUN addgroup -S aura && adduser -S aura -G aura
-# Next's standalone output puts server.js at the root of the tracing root
-# (apps/web here — verified in the built image), and expects .next/static
-# and public/ beside it.
-COPY --from=build --chown=aura:aura /repo/apps/web/.next/standalone ./
-COPY --from=build --chown=aura:aura /repo/apps/web/.next/static ./.next/static
-COPY --from=build --chown=aura:aura /repo/apps/web/public ./public
-# migrations ship in the image so `deploy.sh` can apply them from a one-off container
-COPY --from=build --chown=aura:aura /repo/apps/web/prisma/migrations ./migrations
+COPY --from=release-tree --chown=aura:aura /app ./
 USER aura
 EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \

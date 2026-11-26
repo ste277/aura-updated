@@ -64,7 +64,92 @@ const sources = [...walk(WEB), ...walk(path.join(ROOT, 'packages'))];
 const importersOf = (re: RegExp) => sources.filter((f) => re.test(strip(fs.readFileSync(f, 'utf8')))).map((f) => path.relative(ROOT, f).replace(/\\/g, '/')).sort();
 check('B1. only PalmistryView imports the Upload Photo component', JSON.stringify(importersOf(/from\s+['"][^'"]*palm-scan\/PalmImageInput['"]/)) === JSON.stringify(['apps/web/components/PalmistryView.tsx']));
 const libImporters = importersOf(/from\s+['"][^'"]*lib\/palm-analysis\//);
-check('B2. only palm-scan components import lib/palm-analysis (from outside the lib)', libImporters.length > 0 && libImporters.every((f) => f.startsWith(`${UI_DIR}/`)));
+// AURA-PALM-03-E1-R3 -- EXPLICIT DEVELOPMENT-ONLY PRIVACY-GATE EXCEPTION (owner-authorised 2026-11-26).
+// Exactly one file outside palm-scan may import from lib/palm-analysis: the development-only, synthetic-only E1 reading
+// interface, which builds the I1 feature set from one synthetic input. The exception is limited to ONE import
+// statement of the I1 builder (buildPalmFeatureSet and the PalmFeatureSetInput type) from lib/palm-analysis/features.
+// Every other B2 restriction is unchanged, and B2b/B2c below compensate: nothing in apps/web or packages may reach the
+// E1 interface, directly or indirectly, and only explicitly listed development/test consumers may import it. The E1
+// release guard (apps/web/scripts/check-palm-e1-bundle.js) keeps it out of every shipped artifact.
+const E1_READING = 'packages/palm-reading-engine/e1/src/reading.ts';
+const E1_BUILDER_IMPORT = "import { buildPalmFeatureSet, type PalmFeatureSetInput } from '../../../../apps/web/lib/palm-analysis/features';";
+const E1_READING_CONSUMERS = ['test/palm03E1Engine.test.ts']; // explicitly scoped development/test consumers
+const LIB_REF = /(?:from\s+|import\s*\(\s*|require\s*\(\s*)['"][^'"]*lib\/palm-analysis\/[^'"]*['"]/g;
+type Src = { rel: string; text: string };
+/** B2 with the E1-R3 exception: files outside palm-scan that reference lib/palm-analysis (static, dynamic or require). */
+const LIB_ROOT = 'apps/web/lib/palm-analysis/';
+/** Every import / dynamic import / require specifier in `text` that resolves (relatively) into lib/palm-analysis or names it. */
+function libRefs(rel: string, text: string): string[] {
+  const specs = [...strip(text).matchAll(/(?:from\s+|import\s*\(\s*|require\s*\(\s*)['"]([^'"]+)['"]/g)].map((m) => m[1]);
+  return specs.filter((sp) => /lib\/palm-analysis\//.test(sp) || (sp.startsWith('.') && `${path.posix.normalize(path.posix.join(path.posix.dirname(rel), sp))}/`.startsWith(LIB_ROOT)));
+}
+function b2Violations(files: Src[]): string[] {
+  const out: string[] = [];
+  for (const f of files) {
+    if (f.rel.startsWith(LIB_ROOT)) continue; // inside the lib itself
+    const refs = libRefs(f.rel, f.text);
+    if (!refs.length || f.rel.startsWith(`${UI_DIR}/`)) continue;
+    if (f.rel === E1_READING) {
+      const stmts = f.text.split('\n').filter((l) => /lib\/palm-analysis\//.test(l) && !/^\s*(\/\/|\*)/.test(l));
+      if (refs.length === 1 && stmts.length === 1 && stmts[0].trim() === E1_BUILDER_IMPORT) continue;
+    }
+    out.push(f.rel);
+  }
+  return out;
+}
+const realSources: Src[] = sources.map((f) => ({ rel: path.relative(ROOT, f).replace(/\\/g, '/'), text: fs.readFileSync(f, 'utf8') }));
+check('B2. only palm-scan components import lib/palm-analysis (from outside the lib), except the one scoped E1-R3 development builder import', libImporters.length > 0 && libImporters.some((f) => f.startsWith(`${UI_DIR}/`)) && libImporters.every((f) => f.startsWith(`${UI_DIR}/`) || f === E1_READING) && b2Violations(realSources).length === 0);
+if (b2Violations(realSources).length) console.log('  B2 violations:', b2Violations(realSources));
+
+/** Files (by repo-relative path) that import `target`, directly or transitively, among `files` (relative specifiers resolved). */
+function importersClosure(files: Src[], target: string): string[] {
+  const byRel = new Map(files.map((f) => [f.rel, f]));
+  const resolve = (from: string, spec: string): string | null => {
+    if (!spec.startsWith('.')) return null;
+    const base = path.posix.normalize(path.posix.join(path.posix.dirname(from), spec));
+    for (const c of [base, `${base}.ts`, `${base}.tsx`, `${base}.mjs`, `${base}.js`, `${base}/index.ts`, `${base}/index.mjs`]) if (byRel.has(c) || c === target) return c;
+    return base;
+  };
+  const deps = new Map<string, string[]>();
+  for (const f of files) deps.set(f.rel, [...strip(f.text).matchAll(/(?:from\s+|import\s*\(\s*|require\s*\(\s*)['"]([^'"]+)['"]/g)].map((m) => resolve(f.rel, m[1])).filter((x): x is string => !!x));
+  const reached = new Set<string>([target]);
+  let grew = true;
+  while (grew) { grew = false; for (const [k, ds] of deps) if (!reached.has(k) && ds.some((d) => reached.has(d))) { reached.add(k); grew = true; } }
+  reached.delete(target);
+  return [...reached].sort();
+}
+const e1Pkg = 'packages/palm-reading-engine/e1/';
+const productionReachers = importersClosure(realSources, E1_READING).filter((f) => !f.startsWith(e1Pkg));
+check('B2b. compensating: no application or other production-facing module in apps/web or packages imports the E1 reading interface, directly or indirectly', productionReachers.length === 0);
+if (productionReachers.length) console.log('  reachers:', productionReachers);
+const testDir = path.join(ROOT, 'test');
+// this file's own negative fixtures contain import strings, so it is excluded from the consumer scan
+const testSources: Src[] = fs.readdirSync(testDir).filter((n) => /\.(ts|tsx|js|mjs|cjs)$/.test(n) && n !== path.basename(__filename)).map((n) => ({ rel: `test/${n}`, text: fs.readFileSync(path.join(testDir, n), 'utf8') }));
+const testConsumers = importersClosure([...realSources, ...testSources], E1_READING).filter((f) => !f.startsWith(e1Pkg));
+check('B2b. only explicitly scoped development/test consumers import the E1 reading interface', JSON.stringify(testConsumers) === JSON.stringify(E1_READING_CONSUMERS));
+if (JSON.stringify(testConsumers) !== JSON.stringify(E1_READING_CONSUMERS)) console.log('  consumers:', testConsumers);
+// R5/R6: reading.ts IS the single pipeline -- it binds the I1 builder at load and requires an OWN data property
+// { synthetic: true }, captured once and then validated (identity.mjs), before any work
+const e1Src = (f: string) => read(path.posix.join(path.posix.dirname(E1_READING), f));
+check('B2b. the E1 reading interface stays synthetic-only and development-only (refuses without an own { synthetic: true })', /^const BUILD: \(input: PalmFeatureSetInput\) => Any = buildPalmFeatureSet;$/m.test(read(E1_READING)) && /const opts = requireSyntheticOptions\(options, \['synthetic', 'mode'\]\); \/\/ 1\. before any work/.test(read(E1_READING)) && /snap = captureOwnData\(options, \{ code: 'synthetic-required'[\s\S]*if \(snap\.synthetic !== true\) refuse\('synthetic must be exactly true'\);/.test(e1Src('identity.mjs')) && /DEVELOPMENT ONLY\. SYNTHETIC ONLY\./.test(read(E1_READING)) && !require('fs').existsSync(require('path').join(ROOT, path.posix.dirname(E1_READING), 'engine-core.mjs')));
+// B2c -- negative regressions: unauthorised imports still fail B2 / B2b
+const readingText = read(E1_READING);
+const neg: Array<[string, Src[], 'b2' | 'closure']> = [
+  ['another package imports lib/palm-analysis', [{ rel: 'packages/other/x.ts', text: "import { measureHand } from '../../apps/web/lib/palm-analysis/measurements';" }], 'b2'],
+  ['an app module dynamically imports lib/palm-analysis', [{ rel: 'apps/web/lib/other.ts', text: "const m = await import('./palm-analysis/features');" }], 'b2'],
+  ['a module requires lib/palm-analysis', [{ rel: 'apps/web/app/x.ts', text: "const f = require('../lib/palm-analysis/quality');" }], 'b2'],
+  ['the E1 interface imports a different lib module', [{ rel: E1_READING, text: readingText.replace("lib/palm-analysis/features'", "lib/palm-analysis/measurements'") }], 'b2'],
+  ['the E1 interface imports more than the builder', [{ rel: E1_READING, text: readingText.replace('import { buildPalmFeatureSet, type PalmFeatureSetInput }', 'import { buildPalmFeatureSet, palmFrameFromLandmarks, type PalmFeatureSetInput }') }], 'b2'],
+  ['the E1 interface adds a second lib reference', [{ rel: E1_READING, text: `${readingText}\nconst q = require('../../../../apps/web/lib/palm-analysis/quality');` }], 'b2'],
+  ['an app module imports the E1 interface', [{ rel: 'apps/web/app/page.tsx', text: "import { generateSyntheticReading } from '../../../packages/palm-reading-engine/e1/src/reading';" }], 'closure'],
+  ['an app module reaches it indirectly', [{ rel: 'apps/web/lib/helper.ts', text: "export * from '../../../packages/palm-reading-engine/e1/src/reading';" }, { rel: 'apps/web/app/page.tsx', text: "import { x } from '../lib/helper';" }], 'closure'],
+  ['an unlisted test imports it', [{ rel: 'test/other.test.ts', text: "import { generateSyntheticReading } from '../packages/palm-reading-engine/e1/src/reading';" }], 'closure'],
+];
+for (const [name, files, kind] of neg) {
+  const all = [...realSources.filter((f) => !files.some((g) => g.rel === f.rel)), ...files];
+  const failed = kind === 'b2' ? b2Violations(all).length > 0 : importersClosure([...all, ...testSources], E1_READING).filter((f) => !f.startsWith(e1Pkg) && !E1_READING_CONSUMERS.includes(f)).length > 0;
+  check(`B2c. negative: ${name} -> fails`, failed);
+}
 check('B3. @mediapipe/tasks-vision is imported in exactly one module, lazily (dynamic import)', JSON.stringify(importersOf(/(from|import\(|require\()\s*['"]@mediapipe\/tasks-vision['"]/)) === JSON.stringify([`${LIB_DIR}/mediapipeDetector.ts`]) && /await import\('@mediapipe\/tasks-vision'\)/.test(read(`${LIB_DIR}/mediapipeDetector.ts`)) && !/^import .*@mediapipe/m.test(read(`${LIB_DIR}/mediapipeDetector.ts`)));
 check('B4. the build exclusion still swaps exactly components/PalmistryView (which roots the whole image-input subtree)', (() => { const { PALMISTRY_VIEW_REQUEST } = require('../apps/web/palmistry-build-exclusion'); return PALMISTRY_VIEW_REQUEST.test('../components/PalmistryView') && !PALMISTRY_VIEW_REQUEST.test('./palm-scan/PalmImageInput'); })());
 check('B5. the production stand-in is unchanged and imports nothing image-related', !/palm-scan|palm-analysis|mediapipe/.test(read('apps/web/components/PalmistryView.unpublished.tsx')));
