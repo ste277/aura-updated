@@ -148,7 +148,7 @@ export function AvailabilitySettings() {
 
   return (
     <SurfaceCard>
-      <p style={{ ...typography.body, marginTop: 0, marginBottom: spacing.xs, color: colors.textSecondary }}>When can Aura usually plan things for you?</p>
+      <p style={{ ...typography.body, marginTop: 0, marginBottom: spacing.xs, color: colors.textSecondary }}>When can Aura usually plan things for you? Optional. Find a Time only suggests times inside these hours, and Plan My Day uses them to plan tomorrow. Without them, Aura considers your whole day. Changing them never moves plans you&apos;ve already confirmed.</p>
       {load.kind === 'READY' && <p style={{ fontSize: 12, color: colors.textFaint, marginTop: 0, marginBottom: spacing.md }}>Times use your timezone: {load.timezone}</p>}
       {load.kind === 'ERROR' && <FieldError>{load.message}</FieldError>}
 
@@ -164,6 +164,7 @@ export function AvailabilitySettings() {
                 key={day.weekday}
                 weekday={day.weekday}
                 periods={day.periods}
+                notSetYet={!load.configured}
                 disabled={saving || resetting}
                 expanded={expandedWeekdays.has(day.weekday)}
                 showCopy={day.weekday === 1 && day.periods.length > 0}
@@ -218,6 +219,7 @@ export function AvailabilitySettings() {
 function WeekdayRow({
   weekday,
   periods,
+  notSetYet = false,
   disabled,
   expanded,
   showCopy,
@@ -229,6 +231,9 @@ function WeekdayRow({
 }: {
   weekday: Weekday;
   periods: WeekAvailabilityDraft[number]['periods'];
+  /** AURA-PREF-01: nothing saved yet -- an empty day means "not set" (Aura
+   * considers the whole day), not "unavailable". */
+  notSetYet?: boolean;
   disabled: boolean;
   expanded: boolean;
   showCopy: boolean;
@@ -250,7 +255,7 @@ function WeekdayRow({
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm }}>
         <div>
           <div style={{ fontSize: 13, fontWeight: 800, color: colors.textPrimary }}>{label}</div>
-          <div style={{ fontSize: 13, color: colors.textSecondary, marginTop: 2 }}>{formatWeekdaySummary(periods)}</div>
+          <div style={{ fontSize: 13, color: colors.textSecondary, marginTop: 2 }}>{notSetYet && periods.length === 0 ? 'Not set' : formatWeekdaySummary(periods)}</div>
         </div>
         <SecondaryButton onClick={onToggleExpanded} disabled={disabled} ariaLabel={`Edit ${label} availability`}>
           Edit
@@ -269,7 +274,7 @@ function WeekdayRow({
     <div>
       <div style={{ fontSize: 13, fontWeight: 800, color: colors.textPrimary, marginBottom: spacing.xs }}>{label}</div>
       {periods.length === 0 ? (
-        <div style={{ fontSize: 12, color: colors.textFaint, marginBottom: spacing.xs }}>Not available</div>
+        <div style={{ fontSize: 12, color: colors.textFaint, marginBottom: spacing.xs }}>{notSetYet ? 'Not set' : 'Not available'}</div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.xs, marginBottom: spacing.xs }}>
           {periods.map((period, index) => {

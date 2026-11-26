@@ -221,7 +221,7 @@ async function main() {
     const requestsSeen: Omit<TimingSearchRequest, 'context'>[] = [];
     const intent = requestedIntent({ id: 'meeting-unwidened', activityId: 'task-1', durationMinutes: 30 });
     await orchestrateConstructDay(baseRequest({ intents: [intent] }), noopDeps({ searchTiming: makeLimitAwareSearchTiming(pool, requestsSeen), loadDailyRhythmPreferences: async () => CONFIGURED }));
-    check('8. a WORK activity\'s search request carries no `limit` override, even with Daily Rhythm configured', requestsSeen.length > 0 && requestsSeen.every((r) => r.limit === undefined));
+    check('8. a WORK activity\'s search request is widened like a personal one when Daily Rhythm is configured (re-baselined by AURA-PREF-01: work activities now prefer working hours)', requestsSeen.length > 0 && requestsSeen.every((r) => r.limit === 12));
   }
 
   if (!allPassed) {
