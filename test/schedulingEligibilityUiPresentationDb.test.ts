@@ -24,6 +24,7 @@ import type { AcceptConstructedDayRequest } from '../apps/web/lib/dayConstructor
 import { parseAcceptResponseBody } from '../apps/web/lib/acceptConstructedDay';
 import { classifyAcceptanceUiState } from '../apps/web/lib/dayPlanAcceptancePresentation';
 import { isKnownSchedulingEligibilityCode, presentSchedulingEligibilityError } from '../apps/web/lib/schedulingEligibilityPresentation';
+import { fixtureAnchorMonday, addCivilDays, realClockReferenceForFixture } from './lifecycleFixtureCalendar';
 
 let allPassed = true;
 function check(label: string, condition: boolean) {
@@ -47,10 +48,18 @@ async function sql(t: string, p: unknown[] = []): Promise<any[]> {
   try { const r = await c.query(t, p); await c.query('COMMIT'); return r.rows; } catch (e) { await c.query('ROLLBACK').catch(() => {}); throw e; } finally { c.release(); }
 }
 
-// 2026-12-16T06:30:00Z = 2026-12-16 12:00 IST -- a distinct anchor from
+// <Wednesday>T06:30:00Z = <Wednesday> 12:00 IST -- a distinct anchor from
 // HPG3-A3a's own test file so the two can run against the same disposable
 // DB without colliding on (user, date).
-const ANCHOR_MS = Date.parse('2026-12-16T06:30:00Z');
+//
+// AURA-CI-07 -- this was the hard-coded 2026-12-16T06:30Z, which Move (future
+// destinations only) would have rejected from that date. It is now the
+// Wednesday two weeks after the shared lifecycleFixtureCalendar Monday
+// (always >= 28 days ahead): still a Wednesday, still the day after HPG3-A3a's
+// Tuesday anchor, offsets 0..+3 days within one Monday-start week. Set
+// LIFECYCLE_FIXTURE_REFERENCE_NOW to simulate a run date.
+const ANCHOR_WEDNESDAY = addCivilDays(fixtureAnchorMonday(realClockReferenceForFixture(), TZ), 16);
+const ANCHOR_MS = Date.parse(`${ANCHOR_WEDNESDAY}T06:30:00Z`);
 const HOUR = 3600_000;
 const DAY = 24 * HOUR;
 function plan(title: string, offsetMs: number, durationMin = 30) {
