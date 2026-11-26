@@ -36,32 +36,32 @@ function palmGeometry(wrist, indexMcp, pinkyMcp, middleMcp) {
   const palmLengthPx = Math.hypot(wrist.x - middleMcp.x, wrist.y - middleMcp.y);
   const cross = (pinkyMcp.x - indexMcp.x) * (wrist.y - indexMcp.y) - (pinkyMcp.y - indexMcp.y) * (wrist.x - indexMcp.x);
   const signedOffset = cross / (widthPx || 1);
-  if (!(widthPx > 1e-6) || !(palmLengthPx > 1e-6) || !(Math.abs(signedOffset) > 1e-6 * widthPx)) return { ok: false };
-  if (!isNum(widthPx) || !isNum(palmLengthPx) || !isNum(signedOffset)) return { ok: false };
-  return { ok: true, widthPx, palmLengthPx, signedOffset };
+  if (!(widthPx > 1e-6) || !(palmLengthPx > 1e-6) || !(Math.abs(signedOffset) > 1e-6 * widthPx)) return rec({ ok: false });
+  if (!isNum(widthPx) || !isNum(palmLengthPx) || !isNum(signedOffset)) return rec({ ok: false });
+  return rec({ ok: true, widthPx, palmLengthPx, signedOffset });
 }
 
 /** Port of I1 palmFrameFromLandmarks (features.ts). Returns { frame, px } or { frame: null }. */
 export function frameFromInput(input) {
   const w = input?.imageWidth, h = input?.imageHeight, lm = input?.landmarks;
-  if (!isNum(w) || !isNum(h) || w <= 0 || h <= 0 || w > MAX_IMAGE_SIDE_PX || h > MAX_IMAGE_SIDE_PX) return { frame: null };
-  if (!Array.isArray(lm) || lm.length !== 21) return { frame: null };
+  if (!isNum(w) || !isNum(h) || w <= 0 || h <= 0 || w > MAX_IMAGE_SIDE_PX || h > MAX_IMAGE_SIDE_PX) return rec({ frame: null });
+  if (!Array.isArray(lm) || lm.length !== 21) return rec({ frame: null });
   const pts = [];
   for (let k = 0; k < 21; k++) {
-    if (!own(lm, k)) return { frame: null };
+    if (!own(lm, k)) return rec({ frame: null });
     const p = readPoint(lm[k]);
     const z = lm[k] === null || typeof lm[k] !== 'object' ? undefined : lm[k].z;
-    if (!p || (z !== undefined && !isNum(z))) return { frame: null };
+    if (!p || (z !== undefined && !isNum(z))) return rec({ frame: null });
     pts.push(p);
   }
-  if (pts.some((p) => p.x < 0 || p.x > 1 || p.y < 0 || p.y > 1)) return { frame: null };
+  if (pts.some((p) => p.x < 0 || p.x > 1 || p.y < 0 || p.y > 1)) return rec({ frame: null });
   const px = pts.map((p) => ({ x: p.x * w, y: p.y * h }));
   const I = px[LM.INDEX_MCP], P = px[LM.PINKY_MCP];
   const geo = palmGeometry(px[LM.WRIST], I, P, px[LM.MIDDLE_MCP]);
-  if (!geo.ok) return { frame: null };
+  if (!geo.ok) return rec({ frame: null });
   const ex = { x: (P.x - I.x) / geo.widthPx, y: (P.y - I.y) / geo.widthPx };
   const ey = geo.signedOffset > 0 ? { x: -ex.y, y: ex.x } : { x: ex.y, y: -ex.x };
-  return { frame: { origin: I, ex, ey, widthPx: geo.widthPx, palmLengthPx: geo.palmLengthPx, w, h }, px };
+  return rec({ frame: rec({ origin: I, ex, ey, widthPx: geo.widthPx, palmLengthPx: geo.palmLengthPx, w, h }), px });
 }
 
 /** Port of I1 imageToPalm followed by round4 (the recorded precision). */
@@ -178,19 +178,23 @@ function problemInOrder(pts) {
 function traceGeometryProblem(points) { const c = canonical(withoutConsecutiveDuplicates(points)); return problemInOrder(c) ?? problemInOrder([...c].reverse()); }
 /** Port of I1 placeTrace: { ok, palmPoints } or { ok: false, reason }. */
 export function placeTraceFromInput(points, frame) {
-  if (!Array.isArray(points) || points.length < TRACE_LIMITS.minPoints) return { ok: false, reason: 'trace-too-few-points' };
-  if (points.length > TRACE_LIMITS.maxPoints) return { ok: false, reason: 'trace-too-many-points' };
+  if (!Array.isArray(points) || points.length < TRACE_LIMITS.minPoints) return rec({ ok: false, reason: 'trace-too-few-points' });
+  if (points.length > TRACE_LIMITS.maxPoints) return rec({ ok: false, reason: 'trace-too-many-points' });
   const pts = [];
-  for (let k = 0; k < points.length; k++) { if (!own(points, k)) return { ok: false, reason: 'trace-point-invalid' }; const p = readPoint(points[k]); if (!p) return { ok: false, reason: 'trace-point-invalid' }; pts.push(p); }
-  if (!pts.every((p) => p.x >= 0 && p.x <= 1 && p.y >= 0 && p.y <= 1)) return { ok: false, reason: 'trace-outside-image' };
+  for (let k = 0; k < points.length; k++) { if (!own(points, k)) return rec({ ok: false, reason: 'trace-point-invalid' }); const p = readPoint(points[k]); if (!p) return rec({ ok: false, reason: 'trace-point-invalid' }); pts.push(p); }
+  if (!pts.every((p) => p.x >= 0 && p.x <= 1 && p.y >= 0 && p.y <= 1)) return rec({ ok: false, reason: 'trace-outside-image' });
   const rounded = pts.map((p) => toPalm4(frame, p));
-  if (!rounded.every((p) => isNum(p.x) && isNum(p.y))) return { ok: false, reason: 'trace-point-invalid' };
-  if (!rounded.every(inBounds)) return { ok: false, reason: 'trace-outside-palm-frame' };
+  if (!rounded.every((p) => isNum(p.x) && isNum(p.y))) return rec({ ok: false, reason: 'trace-point-invalid' });
+  if (!rounded.every(inBounds)) return rec({ ok: false, reason: 'trace-outside-palm-frame' });
   const problem = traceGeometryProblem(rounded);
-  if (problem) return { ok: false, reason: problem };
-  return { ok: true, palmPoints: rounded };
+  if (problem) return rec({ ok: false, reason: problem });
+  return rec({ ok: true, palmPoints: rounded });
 }
 
+/** R6: tagged, null-prototype expected line state (only the fields of its kind exist). */
+const expectedState = (kind, x) => Object.freeze(Object.assign(Object.create(null), kind === 'placed' ? { kind, palmPoints: x } : { kind, reason: x }));
+/** R6: intermediate results are null-prototype records: an absent field reads as undefined, never as an inherited value. */
+const rec = (o) => Object.freeze(Object.assign(Object.create(null), o));
 const samePoints = (a, b) => Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((p, i) => p.x === b[i].x && p.y === b[i].y);
 
 /**
@@ -214,15 +218,17 @@ export function verifyConstruction(input, featureSet) {
     const l = featureSet.lines[id];
     if (given.length > 1) fail(`line ${id} given twice`);
     const g = given[0];
+    // R6: the expected state is an explicitly tagged record ({ kind: 'placed', palmPoints } | { kind: 'unassessed',
+    // reason }); no optional field is ever probed, so nothing inherited can turn one kind into the other
     let want;
-    if (!g) want = { reason: 'not-requested' };
-    else if (g.action === 'skipped') want = { reason: g.reason };
+    if (!g) want = expectedState('unassessed', 'not-requested');
+    else if (g.action === 'skipped') want = expectedState('unassessed', g.reason);
     else if (g.action !== 'traced') fail(`line ${id} action`);
-    else if (g.confirmed !== true) want = { reason: 'not-confirmed' };
-    else if (!fi.frame) want = { reason: 'frame-unavailable' };
-    else { const placed = placeTraceFromInput(g.points, fi.frame); want = placed.ok ? { palmPoints: placed.palmPoints } : { reason: placed.reason }; }
-    if (want.palmPoints) { if (l.provenance !== 'user-confirmed' || !samePoints(want.palmPoints, l.palmPoints)) fail(`line ${id} trace differs from the supplied trace`); }
-    else if (l.provenance !== 'unassessed' || l.reason !== want.reason) fail(`line ${id} state (${l.provenance}/${l.reason ?? '-'}) differs from the supplied input (${want.reason})`);
+    else if (g.confirmed !== true) want = expectedState('unassessed', 'not-confirmed');
+    else if (!fi.frame) want = expectedState('unassessed', 'frame-unavailable');
+    else { const placed = placeTraceFromInput(g.points, fi.frame); want = placed.ok === true ? expectedState('placed', placed.palmPoints) : expectedState('unassessed', placed.reason); }
+    if (want.kind === 'placed') { if (l.provenance !== 'user-confirmed' || !samePoints(want.palmPoints, l.palmPoints)) fail(`line ${id} trace differs from the supplied trace`); }
+    else if (l.provenance !== 'unassessed' || l.reason !== want.reason) fail(`line ${id} state (${l.provenance}/${own(l, 'reason') ? l.reason : '-'}) differs from the supplied input (${want.reason})`);
   }
   if (featureSet.frame.palmFacing !== palmFacingFromInput(input, fi)) fail('palm facing');
   const ratios = ratiosFromInput(fi) ?? { middleToPalmRatio: null, indexToRingRatio: null };

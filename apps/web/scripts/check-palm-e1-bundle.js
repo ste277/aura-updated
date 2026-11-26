@@ -159,6 +159,26 @@ function checkStartup(root, appRel, boundaryRel, errs) {
   }
 }
 
+/**
+ * Locate standalone app roots under `root/<standaloneRel>`: directories (outside node_modules, at most 4 levels deep)
+ * holding server.js and .next; `matching` are those whose .next/BUILD_ID equals `id`. Shared with
+ * check-artifact-startup.js so both use one rule.
+ */
+function findStandaloneApps(root, standaloneRel, id) {
+  const found = [], unreadable = [];
+  const walk = (dir, depth) => {
+    let ents;
+    try { ents = fs.readdirSync(dir, { withFileTypes: true }); } catch (e) { unreadable.push(`missing or unreadable ${path.relative(root, dir) || '.'}: ${e.code || e.message}`); return; }
+    const has = (n) => ents.some((x) => x.name === n);
+    if (has('server.js') && has('.next')) found.push(dir);
+    if (depth >= 4) return;
+    for (const x of ents) if (x.isDirectory() && x.name !== 'node_modules' && x.name !== '.next') walk(path.join(dir, x.name), depth + 1);
+  };
+  walk(path.join(root, standaloneRel), 0);
+  const matching = found.filter((d) => { try { return fs.readFileSync(path.join(d, '.next/BUILD_ID'), 'utf8').trim() === id; } catch { return false; } });
+  return { found, matching, unreadable };
+}
+
 /** Verify the required structure of `root` for `target`. Returns a list of problems (empty when complete). */
 function checkStructure(root, target) {
   const spec = REQUIRED[target];
@@ -204,18 +224,8 @@ function checkStructure(root, target) {
     if (!found) errs.push(`no non-empty ${ext || 'output'} file under ${rel}`);
   }
   if (spec.standalone && id !== null && BUILD_ID_RE.test(id)) {
-    const sa = path.join(root, spec.standalone);
-    const found = [];
-    const walk = (dir, depth) => {
-      let ents;
-      try { ents = fs.readdirSync(dir, { withFileTypes: true }); } catch (e) { errs.push(`missing or unreadable ${path.relative(root, dir) || '.'}: ${e.code || e.message}`); return; }
-      const has = (n) => ents.some((x) => x.name === n);
-      if (has('server.js') && has('.next')) found.push(dir);
-      if (depth >= 4) return;
-      for (const x of ents) if (x.isDirectory() && x.name !== 'node_modules' && x.name !== '.next') walk(path.join(dir, x.name), depth + 1);
-    };
-    walk(sa, 0);
-    const matching = found.filter((d) => { try { return fs.readFileSync(path.join(d, '.next/BUILD_ID'), 'utf8').trim() === id; } catch { return false; } });
+    const { found, matching, unreadable } = findStandaloneApps(root, spec.standalone, id);
+    for (const u of unreadable) errs.push(u);
     if (matching.length !== 1) errs.push(`expected exactly one standalone app root (server.js beside .next/BUILD_ID = ${id}) under ${spec.standalone}; found ${matching.length}${found.length ? ` (candidates: ${found.map((d) => path.relative(root, d) || '.').join(', ')})` : ''}`);
     else {
       const app = path.relative(root, matching[0]);
@@ -294,4 +304,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { SENTINELS, SCAN_DIRS, REQUIRED, checkStructure, scan, scanAll };
+module.exports = { SENTINELS, SCAN_DIRS, REQUIRED, BUILD_ID_RE, checkStructure, findStandaloneApps, scan, scanAll };

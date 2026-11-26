@@ -72,7 +72,7 @@ function matchRecord(rec, obs) {
     const x = obs[r.feature];
     if (!x || 'notAssessed' in x) return { res: 'no', used };
     if (!r.provenanceAllowed.includes(x.provenance)) return { res: 'no', used };
-    const ob = r.observation ?? {};
+    const ob = r.observation ?? Object.create(null);
     if ('categorical' in ob) {
       const want = String(ob.categorical);
       if (String(x.value) === want) { if (x.nearEdge === true) boundary = true; }
@@ -125,15 +125,15 @@ export function planSelection(library, observationsInput, options) {
   const notAssessed = new Map();
   for (const [k, v] of Object.entries(observations)) if ('notAssessed' in v) notAssessed.set(k, reason(v.notAssessed, k, v.detail));
 
-  const sections = {};
+  const sections = Object.create(null); // R6: maps keyed by data are null-prototype
   const overflow = [];
   const historical = [];
   if (opts.qualityAccepted === false) {
     for (const k of observed) notAssessed.set(k, reason('quality-gated', k, opts.qualityDetail));
   } else {
-    const status = Object.fromEntries(observed.map((k) => [k, null]));
+    const status = Object.assign(Object.create(null), Object.fromEntries(observed.map((k) => [k, null])));
     let cands = [];
-    const boundaryFeatures = {};
+    const boundaryFeatures = Object.create(null);
     for (const id of library.order) {
       const rec = library.byId[id];
       if (!trads.has(rec.tradition)) continue;
@@ -154,7 +154,7 @@ export function planSelection(library, observationsInput, options) {
     cands = cands.filter((rec) => { const hit = rec.requires.filter((r) => ambiguous.has(r.feature)); for (const r of hit) status[r.feature] = 'boundary'; return hit.length === 0; });
     // R3 (finding F4): mutual exclusion. Two or more qualifying records reading the same feature are incompatible
     // interpretations of one observation; none is shown and the feature is listed as ambiguous.
-    const readers = {};
+    const readers = Object.create(null);
     for (const rec of cands) for (const r of rec.requires) (readers[r.feature] ??= []).push(rec.id);
     const conflicted = new Set(Object.keys(readers).filter((f) => readers[f].length > 1));
     cands = cands.filter((rec) => { const hit = rec.requires.filter((r) => conflicted.has(r.feature)); for (const r of hit) status[r.feature] = 'conflict'; return hit.length === 0; });

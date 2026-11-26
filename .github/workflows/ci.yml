@@ -1037,6 +1037,12 @@ jobs:
       - name: Verify the personalised interpretation engine is excluded from the build
         working-directory: apps/web
         run: node scripts/check-palm-e1-bundle.js
+      # AURA-PALM-03-E1-R6 -- the shipped standalone artifact actually starts: the located app root (+ static,
+      # public) is copied to an isolated temp dir, its generated server.js is started with no database or secrets on
+      # 127.0.0.1, every module must resolve inside the copy, and it must serve its build manifest; then terminated.
+      - name: Verify the standalone server artifact starts in isolation
+        working-directory: apps/web
+        run: node scripts/check-artifact-startup.js
       # AURA-MCP-02-I2a-R2 (B1) -- runs the DEPLOYABLE standalone server the
       # way deploy/Dockerfile does (`node server.js` from an isolated copy of
       # .next/standalone, outside any node_modules tree) with Docker defaults,

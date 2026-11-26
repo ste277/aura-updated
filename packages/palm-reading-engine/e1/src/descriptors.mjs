@@ -42,7 +42,7 @@ function gridPoints(points) {
 export function checkFingerBases(fb) {
   if (fb === null || fb === undefined) return { ok: false, detail: 'finger-bases-unavailable' };
   if (typeof fb !== 'object') return { ok: false, detail: 'finger-bases-invalid' };
-  const g = {};
+  const g = Object.create(null); // R6: keyed by finger name; never inherits
   for (const k of ['index', 'middle', 'ring', 'little']) {
     if (!Object.prototype.hasOwnProperty.call(fb, k)) return { ok: false, detail: 'finger-bases-invalid' };
     g[k] = gridPoint(fb[k]);

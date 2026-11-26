@@ -210,6 +210,66 @@ test('G1c R5 executable runtime completeness: the Next startup modules named by 
   }
 });
 
+test('G1d R6 isolated startup smoke: the generated server must start from its own artifact and serve its manifest', () => {
+  const SMOKE = path.join(REPO, 'apps', 'web', 'scripts', 'check-artifact-startup.js');
+  const B = FIXTURE_BUILD_ID;
+  // a runnable miniature of a Next standalone artifact: server.js -> next -> require-hook, and start-server
+  const runnable = (base) => {
+    const put = (rel, body) => { fs.mkdirSync(path.dirname(path.join(base, rel)), { recursive: true }); fs.writeFileSync(path.join(base, rel), body); };
+    put('server.js', "require('next')\nconst { startServer } = require('next/dist/server/lib/start-server')\nstartServer()\n");
+    put('.next/BUILD_ID', B);
+    put('node_modules/next/package.json', '{"name":"next","main":"./dist/server/next.js"}');
+    put('node_modules/next/dist/server/next.js', "require('./require-hook')\nmodule.exports = {}\n");
+    put('node_modules/next/dist/server/require-hook.js', 'module.exports = 1\n');
+    put('node_modules/next/dist/server/lib/start-server.js', "require('../next')\nexports.startServer = () => { const fs = require('fs'), path = require('path'); const id = fs.readFileSync(path.join(process.cwd(), '.next/BUILD_ID'), 'utf8').trim(); require('http').createServer((q, s) => { if (q.url === '/_next/static/' + id + '/_buildManifest.js') s.end('self.__BUILD_MANIFEST={}'); else { s.statusCode = 404; s.end(); } }).listen(+process.env.PORT, process.env.HOSTNAME); }\n");
+  };
+  const run = (args, env = {}) => spawnSync(process.execPath, [SMOKE, ...args], { encoding: 'utf8', env: { ...process.env, AURA_STARTUP_TIMEOUT_MS: '8000', ...env } });
+  // Docker-tree layout
+  const t = tmpdir('g1d');
+  try {
+    runnable(t);
+    let r = run(['--tree', t]);
+    assert.equal(r.status, 0, r.stderr); assert.match(r.stdout, /\[artifact-startup\] OK/);
+    assert.ok(!fs.existsSync(path.join(t, '.next/cache')), 'the artifact itself is never modified');
+    // the R5 independent witness: a transitive startup module missing while both direct entries remain
+    fs.renameSync(path.join(t, 'node_modules/next/dist/server/require-hook.js'), path.join(t, 'rh.bak'));
+    r = run(['--tree', t]);
+    assert.equal(r.status, 1); assert.match(r.stderr, /the server exited/); assert.match(r.stderr, /require-hook/);
+    fs.renameSync(path.join(t, 'rh.bak'), path.join(t, 'node_modules/next/dist/server/require-hook.js'));
+    // a module that resolves OUTSIDE the artifact (symlinked from elsewhere) is refused by the resolution hook
+    const outside = tmpdir('g1d-out');
+    fs.writeFileSync(path.join(outside, 'require-hook.js'), 'module.exports = 1\n');
+    fs.rmSync(path.join(t, 'node_modules/next/dist/server/require-hook.js'));
+    fs.symlinkSync(path.join(outside, 'require-hook.js'), path.join(t, 'node_modules/next/dist/server/require-hook.js'));
+    r = run(['--tree', t]);
+    assert.equal(r.status, 1); assert.match(r.stderr, /resolved outside the artifact/);
+    fs.rmSync(path.join(t, 'node_modules/next/dist/server/require-hook.js')); fs.rmSync(outside, { recursive: true, force: true });
+    fs.writeFileSync(path.join(t, 'node_modules/next/dist/server/require-hook.js'), 'module.exports = 1\n');
+    // a server that crashes, and one that never becomes ready
+    fs.writeFileSync(path.join(t, 'server.js'), "require('next'); throw new Error('startup failed')\n");
+    r = run(['--tree', t]); assert.equal(r.status, 1); assert.match(r.stderr, /startup failed/);
+    fs.writeFileSync(path.join(t, 'server.js'), "require('next'); setInterval(() => {}, 1000)\n");
+    r = run(['--tree', t], { AURA_STARTUP_TIMEOUT_MS: '1500' }); assert.equal(r.status, 1); assert.match(r.stderr, /no readiness within/);
+  } finally { fs.rmSync(t, { recursive: true, force: true }); }
+  // web-build layouts: flat (CI, Docker build stage) and nested (Vercel-style), with node_modules at the standalone root
+  for (const nested of [false, true]) {
+    const w = tmpdir('g1d-web');
+    try {
+      fs.mkdirSync(path.join(w, '.next/static', B), { recursive: true });
+      fs.writeFileSync(path.join(w, '.next/BUILD_ID'), B);
+      fs.writeFileSync(path.join(w, `.next/static/${B}/_buildManifest.js`), 'x');
+      const sa = path.join(w, '.next/standalone');
+      runnable(sa);
+      if (nested) { fs.mkdirSync(path.join(sa, 'apps/web'), { recursive: true }); for (const n of ['server.js', '.next']) fs.renameSync(path.join(sa, n), path.join(sa, 'apps/web', n)); }
+      let r = run([w]);
+      assert.equal(r.status, 0, `${nested ? 'nested' : 'flat'}: ${r.stderr}`);
+      fs.rmSync(path.join(sa, 'node_modules/next/dist/server/require-hook.js'));
+      r = run([w]);
+      assert.equal(r.status, 1, nested ? 'nested witness' : 'flat witness'); assert.match(r.stderr, /require-hook/);
+    } finally { fs.rmSync(w, { recursive: true, force: true }); }
+  }
+});
+
 test('G2 nothing outside the engine package imports or names E1; no manifest, alias or config resolves to it', () => {
   const outside = code(['apps', 'packages'].flatMap((d) => read(path.join(REPO, d)))).filter((f) => !path.resolve(f).startsWith(PKG + path.sep) && path.resolve(f) !== GUARD);
   const hits = outside.filter((f) => /palm-reading-engine\/e1|aura\.palm\.e1|composeFromObservations|generateE1Reading/.test(fs.readFileSync(f, 'utf8')));

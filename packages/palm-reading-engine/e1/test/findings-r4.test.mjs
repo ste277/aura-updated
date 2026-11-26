@@ -116,7 +116,8 @@ test('F7 an own data property exactly true is required; omitted, inherited, fals
   assert.doesNotThrow(() => requireSyntheticOptions({ synthetic: true }, ['synthetic']));
   assert.doesNotThrow(() => requireSyntheticOptions(Object.assign(Object.create(null), { synthetic: true }), ['synthetic']));
   assert.throws(() => requireSyntheticOptions({ synthetic: true, library: {} }, ['synthetic']), (e) => e.code === 'invalid-option');
-  assert.throws(() => requireSyntheticOptions({ synthetic: true, [Symbol('x')]: 1 }, ['synthetic']), (e) => e.code === 'invalid-option');
+  // R6: a symbol key makes the options uncapturable (refused at the snapshot boundary)
+  assert.throws(() => requireSyntheticOptions({ synthetic: true, [Symbol('x')]: 1 }, ['synthetic']), (e) => e.code === 'invalid-option' || e.code === 'synthetic-required');
 });
 
 test('F7 witness, fresh process: a polluted Object.prototype does not make {} -- or an accessor -- a synthetic declaration', () => {

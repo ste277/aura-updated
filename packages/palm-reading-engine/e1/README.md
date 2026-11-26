@@ -27,6 +27,8 @@ generateSyntheticReading(input /* one synthetic PALM-03-I1 input */, { synthetic
 - There is **no** catalogue, schema, library, feature-set, finger-base or observation parameter. Unknown options are refused.
 - The text-emitting path always uses the pinned packaged library.
 
+**One authoritative snapshot (R6):** `identity.mjs` `captureOwnData` is the single capture primitive. Everything the pipeline consumes passes through it exactly once: the options, the caller's input, the builder's feature set (captured *before* it is validated), every construction and descriptor result, the observations and the plan. It reads each object's prototype, keys and own descriptors once, accepts own data properties only, and returns a new deep-frozen null-prototype structure. Validation and composition then use only that captured structure, so a getter, proxy or later mutation cannot show one state to validation and another to composition. Data-keyed maps in the planner and linter are null-prototype, and intermediate records are tagged (no optional-field probing). Anything that cannot be captured fails closed.
+
 **Construction (F6; one path since R4, no external authority since R5):**
 - No exported function accepts a builder, a feature set or derived observations. The pipeline in `reading.ts`:
   - takes one plain-data snapshot of the input (accessors and non-plain objects are refused);
@@ -141,6 +143,8 @@ A symlink that leaves the scanned tree is a scan error, so the scan fails closed
   - `package.json` and `node_modules/next` in that root or an ancestor within `.next/standalone`;
   - a parseable `public/manifest.json`.
 - **`docker-release-tree`** (`/app`): the same Next files at the tree root, plus `server.js`, `package.json`, `node_modules/next` and a non-empty `migration.sql` in every migration directory.
+
+**Startup smoke (R6):** `apps/web/scripts/check-artifact-startup.js` copies the artifact into an isolated temp directory with no `node_modules` above it. The artifact is the located standalone root plus `.next/static` and `public/`, or the Docker `/app` tree. It then starts the generated `server.js` with no database or secrets on 127.0.0.1, under a hook that aborts if any module resolves outside the copy. It requires the server to serve `/_next/static/<BUILD_ID>/_buildManifest.js` within the timeout, then terminates it. This catches missing transitive startup files (for example `require-hook.js`) without any list of Next file names. It runs in the CI web-build job and the Docker release-tree stage. Vercel deploys its own serverless output, not this server, so hosted runtime completeness is not claimed from it.
 
 **Executable runtime (R5):** every package that `server.js` requires (Next 14: `next` and `next/dist/server/lib/start-server`) must resolve. Resolution searches only `node_modules` from the app root up to the artifact boundary, never the workspace or the host, and the resolved entry file must be non-empty, readable and inside the shipped artifact.
 

@@ -48,28 +48,76 @@ export const RECORD_MANIFEST = Object.freeze({
 export const isOwnDataDescriptor = (d) => d !== undefined && Object.prototype.hasOwnProperty.call(d, 'value') && !Object.prototype.hasOwnProperty.call(d, 'get') && !Object.prototype.hasOwnProperty.call(d, 'set');
 
 /**
- * R4/R5 (finding F7): the explicit synthetic declaration -- the ONE validation used by every reading and planning
+ * R6: THE authoritative snapshot primitive for everything entering or passing through the reading pipeline
+ * (caller options, caller input, the builder's feature set, intermediate construction and descriptor results, plans).
+ * Every object is read exactly ONCE: its prototype once, its own keys once (Reflect.ownKeys), and each key's own
+ * descriptor once; only own DATA properties are accepted (accessors, symbol keys, non-plain objects, functions and
+ * non-JSON values fail closed). The result is a new deep, frozen, null-prototype structure: later reads cannot see
+ * inherited values, and nothing the caller (or a proxy) does afterwards can change it. Validation and composition
+ * then use this one captured structure. `holes: 'preserve'` keeps sparse-array holes (the I1 contract refuses them
+ * itself); `'refuse'` fails on them.
+ */
+export function captureOwnData(value, { code = 'invalid-input', holes = 'refuse', maxDepth = 12, maxArray = 100000, at = '$' } = {}) {
+  const fail = (where, why) => { throw new E1Error(code, `${where}: ${why} (no trustworthy snapshot)`); };
+  const copy = (v, where, depth) => {
+    if (v === null || v === undefined || typeof v === 'string' || typeof v === 'boolean' || typeof v === 'number') return v; // primitives are values, not references
+    if (typeof v !== 'object') fail(where, `unsupported value type ${typeof v}`);
+    if (depth > maxDepth) fail(where, 'nested too deeply');
+    let proto, keys;
+    try { proto = Object.getPrototypeOf(v); keys = Reflect.ownKeys(v); } catch (e) { fail(where, `unreadable (${String(e?.message ?? e)})`); }
+    const isArr = Array.isArray(v);
+    if (isArr ? proto !== Array.prototype : proto !== Object.prototype && proto !== null) fail(where, isArr ? 'not a plain array' : 'not a plain object');
+    const descs = new Map();
+    for (const k of keys) {
+      if (typeof k !== 'string') fail(where, 'symbol keys are not accepted');
+      let d;
+      try { d = Object.getOwnPropertyDescriptor(v, k); } catch (e) { fail(`${where}.${k}`, `unreadable (${String(e?.message ?? e)})`); }
+      if (d === undefined) fail(`${where}.${k}`, 'listed key without a property');
+      descs.set(k, d);
+    }
+    if (isArr) {
+      const lenD = descs.get('length');
+      const len = lenD && isOwnDataDescriptor(lenD) ? lenD.value : -1;
+      if (!Number.isSafeInteger(len) || len < 0 || len > maxArray) fail(where, 'invalid array length');
+      const out = new Array(len);
+      for (const [k, d] of descs) {
+        if (k === 'length') continue;
+        const i = Number(k);
+        if (!(Number.isInteger(i) && i >= 0 && i < len && String(i) === k)) fail(where, `unexpected array property ${k}`);
+        if (!isOwnDataDescriptor(d)) fail(`${where}[${k}]`, 'accessor properties are not accepted');
+        out[i] = copy(d.value, `${where}[${k}]`, depth + 1);
+      }
+      if (holes === 'refuse') for (let i = 0; i < len; i++) if (!descs.has(String(i))) fail(where, `hole at [${i}]`);
+      return Object.freeze(out);
+    }
+    const out = Object.create(null);
+    for (const [k, d] of descs) {
+      if (!isOwnDataDescriptor(d)) fail(`${where}.${k}`, 'accessor properties are not accepted');
+      if (k === '__proto__') fail(where, 'the key __proto__ is not accepted');
+      out[k] = copy(d.value, `${where}.${k}`, depth + 1);
+    }
+    return Object.freeze(out);
+  };
+  return copy(value, at, 0);
+}
+
+/**
+ * R4/R5/R6 (finding F7): the explicit synthetic declaration -- the ONE validation used by every reading and planning
  * entry point (reading.ts generateSyntheticReading, compose.mjs planSelection), before any work begins.
- * `options` must be a plain object (prototype Object.prototype or null) whose OWN DATA property `synthetic` is
- * exactly the primitive boolean true. Omitted, inherited, accessor (including an accessor paired with an inherited
- * descriptor `value`), false, boxed, non-boolean and malformed declarations are refused. Every other own key must be
- * listed in `allowed` and be an own data property. Returns a frozen null-prototype snapshot of the options.
+ * R6: the options are CAPTURED ONCE (captureOwnData: one read of keys and of each descriptor) and the captured
+ * snapshot is what is validated and what is returned; a proxy or getter cannot validate one value and supply another.
+ * The captured `synthetic` must be an own data property exactly equal to the primitive boolean true. Omitted,
+ * inherited, accessor (including accessor + inherited descriptor `value`), false, boxed, non-boolean and malformed
+ * declarations are refused; every other own key must be listed in `allowed`.
  */
 export function requireSyntheticOptions(options, allowed) {
   const refuse = (why) => { throw new E1Error('synthetic-required', `pass an own { synthetic: true } declaration (${why}); real input is not authorised`); };
   if (options === null || typeof options !== 'object' || Array.isArray(options)) refuse('options must be a plain object');
-  const proto = Object.getPrototypeOf(options);
-  if (proto !== Object.prototype && proto !== null) refuse('options must be a plain object');
-  const d = Object.getOwnPropertyDescriptor(options, 'synthetic');
-  if (d === undefined) refuse('no own synthetic property');
-  if (!isOwnDataDescriptor(d)) refuse('synthetic must be a data property');
-  if (d.value !== true) refuse('synthetic must be exactly true');
-  const snap = Object.create(null);
-  for (const k of Reflect.ownKeys(options)) {
-    if (typeof k !== 'string' || !allowed.includes(k)) throw new E1Error('invalid-option', `unsupported option: ${String(k)}`);
-    const dk = Object.getOwnPropertyDescriptor(options, k);
-    if (!isOwnDataDescriptor(dk)) throw new E1Error('invalid-option', `option ${k} must be a data property`);
-    snap[k] = dk.value;
-  }
-  return Object.freeze(snap);
+  let snap;
+  try { snap = captureOwnData(options, { code: 'synthetic-required', maxDepth: 1, at: 'options' }); } catch (e) { refuse(`options could not be captured: ${String(e?.message ?? e)}`); }
+  if (Array.isArray(snap)) refuse('options must be a plain object');
+  if (!Object.prototype.hasOwnProperty.call(snap, 'synthetic')) refuse('no own synthetic property');
+  if (snap.synthetic !== true) refuse('synthetic must be exactly true');
+  for (const k of Object.keys(snap)) if (!allowed.includes(k)) throw new E1Error('invalid-option', `unsupported option: ${k}`);
+  return snap;
 }

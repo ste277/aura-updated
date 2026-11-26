@@ -48,7 +48,12 @@ COPY --from=build /repo/apps/web/public ./public
 # migrations ship in the image so `deploy.sh` can apply them from a one-off container
 COPY --from=build /repo/apps/web/prisma/migrations ./migrations
 COPY --from=build /repo/apps/web/scripts/check-palm-e1-bundle.js /opt/guard/check-palm-e1-bundle.js
-RUN node /opt/guard/check-palm-e1-bundle.js --tree /app && rm -rf /opt/guard
+COPY --from=build /repo/apps/web/scripts/check-artifact-startup.js /opt/guard/check-artifact-startup.js
+# R6: exclusion and structure scan of the exact runtime tree, then an isolated startup smoke of that same tree
+# (a copy of /app is started; /app itself is never modified)
+RUN node /opt/guard/check-palm-e1-bundle.js --tree /app \
+ && node /opt/guard/check-artifact-startup.js --tree /app \
+ && rm -rf /opt/guard
 
 # ---- runtime: only the standalone server output -----------------------------
 FROM node:24-alpine AS runtime

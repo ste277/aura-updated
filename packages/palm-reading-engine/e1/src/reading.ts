@@ -10,8 +10,10 @@
  * G5 B2 exception lets import the frozen I1 builder -- binds the builder when it loads, and every step runs in
  * module-private functions here:
  *   1. the explicit own { synthetic: true } declaration (identity.mjs requireSyntheticOptions), before any work;
- *   2. ONE plain-data snapshot of the caller's input (own data properties only, deep-frozen);
- *   3. the I1 feature set, built HERE from that snapshot by the bound builder (never supplied from outside);
+ *   2. ONE authoritative snapshot of the caller's input (R6: identity.mjs captureOwnData -- each property read once,
+ *      own data only, deep-frozen null-prototype);
+ *   3. the I1 feature set, built HERE from that snapshot by the bound builder (never supplied from outside), and
+ *      captured the same way BEFORE it is validated; descriptor results and the plan are captured too;
  *   4. the construction check (construction.mjs verifyConstruction) against the same snapshot, as defence in depth;
  *   5. observations, the selection plan and the text, from the pinned packaged library; the complete output is
  *      validated (compose.mjs validateReadingOutput) before it is returned.
@@ -37,52 +39,29 @@ const adapter = require('../../adapter/feature-set-adapter.mjs');
 type Any = any; // eslint-disable-line @typescript-eslint/no-explicit-any
 export type ReadingMode = 'combined' | 'indian-only' | 'western-only';
 
-const { E1Error: E1ErrorClass, E1_ENGINE: ENGINE, MODES, requireSyntheticOptions, isOwnDataDescriptor } = identity;
+const { E1Error: E1ErrorClass, E1_ENGINE: ENGINE, MODES, requireSyntheticOptions, captureOwnData } = identity;
 /** Bound once, at load: the feature-set builder is never a parameter. */
 const BUILD: (input: PalmFeatureSetInput) => Any = buildPalmFeatureSet;
 
 const deepFreeze = (o: Any): Any => { if (o && typeof o === 'object' && !Object.isFrozen(o)) { Object.freeze(o); for (const v of Object.values(o)) deepFreeze(v); } return o; };
 
-// ---------------------------------------------------------------- 2. input snapshot
-const MAX_DEPTH = 8;
-const MAX_ARRAY = 100000;
+// ---------------------------------------------------------------- 2. the authoritative snapshot boundary (R6)
+// Everything the pipeline consumes is captured ONCE by identity.mjs captureOwnData: own data properties only, each
+// read a single time, into new deep-frozen null-prototype structures. The caller's input, the builder's result
+// (before it is validated), every descriptor result and the selection plan are captured, and every later step --
+// I1 contract validation, construction check, derivation, eligibility, diagnostics, text -- reads only those
+// captured structures. Live objects are never re-read; inherited properties never exist on them.
+const capture = (v: unknown, at: string, code = 'invalid-input', holes = 'refuse'): Any => captureOwnData(v, { code, holes, at });
 
-/** A deep, frozen, plain-data copy of `input` (own data properties only). */
+/** The caller's input: one capture (sparse holes preserved: the I1 contract refuses them itself). */
 function snapshotInput(input: unknown): Any {
-  const refuse = (at: string, why: string): never => { throw new E1ErrorClass('invalid-input', `input ${at}: ${why}`); };
-  const copy = (v: Any, at: string, depth: number): Any => {
-    if (v === null || v === undefined || typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') return v;
-    if (typeof v !== 'object') return refuse(at, `unsupported value type ${typeof v}`);
-    if (depth > MAX_DEPTH) refuse(at, 'nested too deeply');
-    if (Array.isArray(v)) {
-      if (Object.getPrototypeOf(v) !== Array.prototype) refuse(at, 'not a plain array');
-      const len = v.length;
-      if (!Number.isSafeInteger(len) || len > MAX_ARRAY) refuse(at, 'array too long');
-      const out = new Array(len); // holes are preserved: the I1 contract refuses sparse arrays itself
-      for (let i = 0; i < len; i++) {
-        const d = Object.getOwnPropertyDescriptor(v, i);
-        if (d === undefined) continue;
-        if (!isOwnDataDescriptor(d)) refuse(`${at}[${i}]`, 'accessor properties are not accepted');
-        out[i] = copy(d.value, `${at}[${i}]`, depth + 1);
-      }
-      return Object.freeze(out);
-    }
-    const proto = Object.getPrototypeOf(v);
-    if (proto !== Object.prototype && proto !== null) refuse(at, 'not a plain object');
-    const out: Any = Object.create(null); // R5: own data only -- nothing can be inherited by later reads
-    for (const k of Reflect.ownKeys(v)) {
-      if (typeof k !== 'string') refuse(at, 'symbol keys are not accepted');
-      const key = k as string;
-      const d = Object.getOwnPropertyDescriptor(v, key);
-      if (!isOwnDataDescriptor(d)) refuse(`${at}.${key}`, 'accessor properties are not accepted');
-      if (key === '__proto__') refuse(at, 'the key __proto__ is not accepted');
-      out[key] = copy((d as PropertyDescriptor).value, `${at}.${key}`, depth + 1);
-    }
-    return Object.freeze(out);
-  };
-  if (input === null || typeof input !== 'object' || Array.isArray(input)) refuse('', 'must be an object');
-  return copy(input, '$', 0);
+  if (input === null || typeof input !== 'object' || Array.isArray(input)) throw new E1ErrorClass('invalid-input', 'input: must be an object');
+  return capture(input, 'input', 'invalid-input', 'preserve');
 }
+
+const own = (o: Any, k: string): boolean => o !== null && typeof o === 'object' && Object.prototype.hasOwnProperty.call(o, k);
+/** R6: a null-prototype record -- every intermediate observation entry is one, so absent fields never inherit. */
+const rec = (o: Any): Any => Object.assign(Object.create(null), o);
 
 // ---------------------------------------------------------------- 5a. observations (module-private)
 // Observations are keyed by the catalogue's feature ids. Each is either
@@ -101,10 +80,10 @@ const MEASUREMENT_KEYS = ['middleToPalmRatio', 'indexToRingRatio'];
 const MARKS = ['yava', 'matsya', 'shankha', 'chatra', 'vedi'];
 
 function lineReason(id: string, reason: string): Any {
-  if (reason === 'user-skipped' || reason === 'user-cannot-see') return { notAssessed: reason, detail: reason };
-  if (reason === 'not-requested') return { notAssessed: id === 'upward' ? 'not-traced' : 'not-requested', detail: reason };
-  if (reason === 'frame-unavailable') return { notAssessed: 'frame-unavailable', detail: reason };
-  return { notAssessed: 'trace-unusable', detail: reason }; // not-confirmed, trace-* geometry reasons
+  if (reason === 'user-skipped' || reason === 'user-cannot-see') return rec({ notAssessed: reason, detail: reason });
+  if (reason === 'not-requested') return rec({ notAssessed: id === 'upward' ? 'not-traced' : 'not-requested', detail: reason });
+  if (reason === 'frame-unavailable') return rec({ notAssessed: 'frame-unavailable', detail: reason });
+  return rec({ notAssessed: 'trace-unusable', detail: reason }); // not-confirmed, trace-* geometry reasons
 }
 
 /** Boundary margin the catalogue sets for a zone descriptor (all records reading that line agree; checked). */
@@ -126,14 +105,14 @@ function deriveObservations(library: Any, snap: Any, fs: Any): Any {
     if (err instanceof adapter.AdapterError) throw new E1ErrorClass('invalid-input', `feature set rejected by the I1 contract: ${err.code}: ${err.message}`);
     throw new E1ErrorClass('invalid-input', `feature set could not be validated: ${String(err?.message ?? err)}`);
   }
-  const built = construction.verifyConstruction(snap, fs);
+  const built = capture(construction.verifyConstruction(snap, fs), 'construction');
   const frame = fs.frame;
   const qualityAccepted = frame.qualityStatus === 'accepted' && frame.palmFacing !== false;
   const qualityDetail = qualityAccepted ? 'accepted' : frame.palmFacing === false ? 'palm-not-facing' : `quality-${frame.qualityStatus}`;
 
   let bases: Any = null, basesDetail: Any = null;
   if (frame.available) {
-    const fb = descriptors.checkFingerBases(built.fingerBases);
+    const fb = capture(descriptors.checkFingerBases(built.fingerBases), 'fingerBases');
     if (fb.ok) bases = fb.bases; else basesDetail = fb.detail;
   } else basesDetail = 'frame-unavailable';
 
@@ -144,12 +123,12 @@ function deriveObservations(library: Any, snap: Any, fs: Any): Any {
     const pts = l.palmPoints;
     if (id === 'life') { obs[key] = { provenance: 'user-confirmed', value: 'present', descriptor: 'presence' }; continue; }
     if (id === 'head') {
-      const s = descriptors.headSlope(pts);
+      const s = capture(descriptors.headSlope(pts), 'headSlope');
       obs[key] = s.ok ? { provenance: 'user-confirmed', value: s.value, descriptor: 'head-slope' } : { notAssessed: 'trace-unusable', detail: s.detail };
       continue;
     }
     if (!bases) { obs[key] = { notAssessed: 'frame-unavailable', detail: basesDetail }; continue; }
-    const z = id === 'upward' ? descriptors.upwardEndingZone(pts, bases, zoneMargin(library, 'upward')) : descriptors.heartEndingZone(pts, bases, zoneMargin(library, 'heart'));
+    const z = capture(id === 'upward' ? descriptors.upwardEndingZone(pts, bases, zoneMargin(library, 'upward')) : descriptors.heartEndingZone(pts, bases, zoneMargin(library, 'heart')), 'zone');
     obs[key] = z.ok
       ? { provenance: 'user-confirmed', value: z.zone, nearEdge: z.nearEdge, adjacentZone: z.adjacentZone, descriptor: id === 'upward' ? 'upward-ending-zone' : 'heart-ending-zone', edgeDistance: z.edgeDistance, margin: z.margin }
       : { notAssessed: 'trace-unusable', detail: z.detail };
@@ -172,8 +151,10 @@ function deriveObservations(library: Any, snap: Any, fs: Any): Any {
   }
   // The head/life origin is not measured in this milestone (C1: not necessary; its only consumers are excluded or
   // later). When both lines were traced the user gave the input, so it is listed, revealing nothing (RC-11).
-  if (obs['lines.head'].provenance && obs['lines.life'].provenance) obs['proposed.origin.gap'] = { notAssessed: 'not-read-in-this-version', detail: 'origin-gap-not-measured' };
-  return deepFreeze({ observations: obs, qualityAccepted, qualityDetail });
+  // R6: every observation entry becomes a null-prototype record before any optional field is read from it
+  for (const k of Object.keys(obs)) obs[k] = rec(obs[k]);
+  if (own(obs['lines.head'], 'provenance') && own(obs['lines.life'], 'provenance')) obs['proposed.origin.gap'] = rec({ notAssessed: 'not-read-in-this-version', detail: 'origin-gap-not-measured' });
+  return capture({ observations: obs, qualityAccepted, qualityDetail }, 'observations');
 }
 
 // ---------------------------------------------------------------- 5b. text (module-private)
@@ -184,7 +165,6 @@ const TAG: Record<string, string> = {
   'western-19c-chirognomy': 'Western · 19th c.',
   'western-19c-chiromancy': 'Western · 19th c.',
 };
-const own = (o: Any, k: string): boolean => o !== null && typeof o === 'object' && Object.prototype.hasOwnProperty.call(o, k);
 
 function buildItem(library: Any, rec: Any, obs: Any, rank: number, section: string): Any {
   // Records are null-prototype normalized records (library.mjs normalizeRecord): only their own fields exist.
@@ -241,7 +221,7 @@ function buildItem(library: Any, rec: Any, obs: Any, rank: number, section: stri
 }
 
 function composeReading(library: Any, derived: Any, mode: string): Any {
-  const plan = compose.planSelection(library, derived.observations, { synthetic: true, mode, qualityAccepted: derived.qualityAccepted, qualityDetail: derived.qualityDetail });
+  const plan = capture(compose.planSelection(library, derived.observations, { synthetic: true, mode, qualityAccepted: derived.qualityAccepted, qualityDetail: derived.qualityDetail }), 'plan');
   const cat = library.catalogue;
   const render = (it: Any) => buildItem(library, library.byId[it.recordId], derived.observations, it.rank, it.section);
   const reading = {
@@ -278,12 +258,15 @@ export function generateSyntheticReading(input: PalmFeatureSetInput, options: { 
   } catch (err: Any) {
     throw new E1ErrorClass('invalid-input', `the I1 builder refused the input: ${String(err?.message ?? err)}`);
   }
-  if (built === null || typeof built !== 'object' || built.ok !== true) {
-    const errors = Array.isArray(built?.errors) ? built.errors.map(String).join('; ') : 'no feature set';
+  // R6: the builder's result is captured BEFORE anything validates it; validation and composition use only the
+  // captured feature set (a getter or proxy cannot show validation one frame and composition another)
+  const result = capture(built, 'featureSet');
+  if (result === null || typeof result !== 'object' || Array.isArray(result) || result.ok !== true) {
+    const errors = result && Array.isArray(result.errors) ? result.errors.map(String).join('; ') : 'no feature set';
     throw new E1ErrorClass('invalid-input', `the I1 builder refused the input: ${errors}`);
   }
   const library = packaged.pinnedLibrary();
-  return composeReading(library, deriveObservations(library, snap, built.featureSet), mode); // 4. + 5.
+  return composeReading(library, deriveObservations(library, snap, result.featureSet), mode); // 4. + 5.
 }
 
 export const E1Error = E1ErrorClass;

@@ -286,6 +286,77 @@ check('F12e. R5 F2 witness, fresh processes: an inherited Object.prototype value
 })());
 check('F13. the input is read once, as plain data: accessor and non-plain inputs are refused', [Object.defineProperty({ ...inA }, 'landmarks', { get: () => inA.landmarks, enumerable: true }), Object.assign(Object.create({ extra: 1 }), inA), { ...inA, landmarks: inA.landmarks!.map((p, k) => (k === 0 ? Object.defineProperty({}, 'x', { get: () => p.x, enumerable: true }) : p)) }].every((i) => throwsCode(() => generateSyntheticReading(i as any, { synthetic: true }), 'invalid-input')));
 
+// ============================================================ R6: one authoritative captured snapshot
+// Witnesses from the R5 independent verification, generalised. Each runs in a fresh process (pollution and builder
+// substitution are installed before reading.ts loads) and compares with a clean process.
+const R6_SCRIPT = `
+  const W = ${JSON.stringify(ROOT)};
+  const [mode, arg, casesJson] = process.argv.slice(1);
+  const cases = JSON.parse(casesJson);
+  const features = require(W + '/apps/web/lib/palm-analysis/features');
+  const real = features.buildPalmFeatureSet;
+  if (mode === 'pollute') Object.defineProperty(Object.prototype, arg, { value: JSON.parse(process.argv[4]), configurable: true, writable: true });
+  if (mode === 'flip') {
+    // the builder returns a proxy whose top-level field arg alternates, per read, between the real value and the
+    // same field of the feature set built from the palm-facing twin (the R5 changing-frame witness, generalised)
+    let k = 0;
+    features.buildPalmFeatureSet = (snap) => {
+      const a = real(snap).featureSet, b = real(cases[k].twin).featureSet;
+      let reads = 0;
+      return { ok: true, featureSet: new Proxy(structuredClone(a), { get(t, key, r0) { if (key !== arg) return Reflect.get(t, key, r0); return (reads++ % 2 ? b : t)[key]; }, getOwnPropertyDescriptor(t, key) { const d = Reflect.getOwnPropertyDescriptor(t, key); if (key !== arg || !d) return d; return { ...d, value: (reads++ % 2 ? b : t)[key] }; } }) };
+    };
+  }
+  if (mode === 'nested-accessor') {
+    features.buildPalmFeatureSet = (snap) => { const fs = structuredClone(real(snap).featureSet); let n = 0; Object.defineProperty(fs.lines.heart, 'provenance', { get: () => (n++ ? 'unassessed' : 'user-confirmed'), enumerable: true }); return { ok: true, featureSet: fs }; };
+  }
+  const { generateSyntheticReading } = require(W + '/packages/palm-reading-engine/e1/src/reading');
+  const out = [];
+  for (let k = 0; k < cases.length; k++) {
+    try { const r = generateSyntheticReading(cases[k].input, { synthetic: true }); out.push({ ids: r.sections.flatMap((x) => x.items).concat(r.moreFromYourReading).map((x) => x.recordId), reading: JSON.stringify(r) }); }
+    catch (e) { out.push({ code: e.code }); }
+  }
+  if (mode === 'pollute') delete Object.prototype[arg];
+  console.log(JSON.stringify(out));`;
+const r6run = (mode: string, arg: string, cases: unknown[], extra = 'null'): any[] => {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { spawnSync } = require('child_process');
+  const r = spawnSync(process.execPath, ['-r', require.resolve('ts-node/register/transpile-only'), '-e', R6_SCRIPT, mode, arg, JSON.stringify(cases), extra], { encoding: 'utf8', cwd: ROOT });
+  if (r.status !== 0) { console.log('R6 run failed', mode, arg, r.status, r.stderr.slice(0, 600)); return []; }
+  return JSON.parse(r.stdout.trim());
+};
+const r6inputs = [{ input: inA }, { input: input({ lines: [skipped('heart'), upwardTo(0.3333)] }) }, { input: inBack }, { input: input({ qualityIssues: null, handednessLabel: undefined, lines: [heartTo(0.1667)] }) }];
+const r6clean = r6run('clean', '', r6inputs);
+check('F14. R6 F2 witness generalised: an inherited value for any intermediate construction / descriptor / observation / plan field leaves every reading byte-identical (skipped, confirmed, back-facing, unknown-quality inputs)', r6clean.length === 4 && r6clean.every((x) => x.reading) && [
+  ['palmPoints', '[{"x":0.2,"y":0.2},{"x":0.3,"y":0.3}]'], ['kind', '"placed"'], ['ok', 'true'], ['reason', '"trace-too-few-points"'], ['frame', 'null'], ['px', '[]'], ['bases', '{}'], ['zone', '"jupiter"'],
+  ['nearEdge', 'true'], ['adjacentZone', '"jupiter"'], ['detail', '"You have melanoma."'], ['value', '"present"'], ['status', '"measured"'], ['reasons', '[]'], ['provenance', '"user-confirmed"'],
+  ['notAssessed', '"boundary"'], ['lines.heart', '"matched"'], ['personality', '[]'], ['applicationNote', '"You have melanoma."'], ['emptyResult', '"x"'],
+].every(([f, v]) => { const got = r6run('pollute', f, r6inputs, v); const ok = got.length === 4 && got.every((x, k) => x.reading === r6clean[k].reading); if (!ok) console.log('F14', f, JSON.stringify(got.map((x) => x.code ?? x.ids))); return ok; }));
+const r6flipCases = [{ input: inBack, twin: inA }];
+check('F15. R6 F6 witness generalised: a builder whose frame / lines / measurements / marks change between reads never yields content for a back-facing hand (one captured state is validated and composed)', ['frame', 'lines', 'measurements', 'marks', 'hand'].every((f) => { const got = r6run('flip', f, r6flipCases); const ok = got.length === 1 && !(got[0].ids ?? []).length && (got[0].code === 'construction-mismatch' || got[0].ids?.length === 0); if (!ok) console.log('F15', f, JSON.stringify(got)); return ok; }));
+check('F15b. ... and a builder exposing a nested accessor is refused at the snapshot boundary (fail closed)', (() => { const got = r6run('nested-accessor', '', [{ input: inA }]); return got.length === 1 && got[0].code === 'invalid-input'; })());
+check('F16. R6 F7 witness: a changing options proxy is read once; the declaration validated is the declaration retained (reader and planner); a first read of false is refused before any work', (() => {
+  const varying = (first: boolean) => { const reads = { n: 0 }; return { reads, o: new Proxy({ synthetic: false }, { getOwnPropertyDescriptor(t, k) { const d = Reflect.getOwnPropertyDescriptor(t, k); if (k !== 'synthetic' || !d) return d; reads.n++; return { ...d, value: reads.n === 1 ? first : !first }; } }) }; };
+  const run = (first: boolean) => {
+    const a = varying(first), b = varying(first); // one fresh proxy per entry point
+    let reader: string, planner: string;
+    try { generateSyntheticReading(inA, a.o as any); reader = 'reading'; } catch (e: any) { reader = e.code; }
+    try { e1.planSelection(e1.defaultLibrary(), {}, b.o); planner = 'plan'; } catch (e: any) { planner = e.code; }
+    return { reader, planner, readerReads: a.reads.n, plannerReads: b.reads.n };
+  };
+  const t = run(true), f = run(false);
+  return t.reader === 'reading' && t.planner === 'plan' && t.readerReads === 1 && t.plannerReads === 1 && f.reader === 'synthetic-required' && f.planner === 'synthetic-required' && f.readerReads === 1 && f.plannerReads === 1;
+})());
+check('F17. R6: the caller\'s input is read once per property (a counting proxy over every nested object) and later changes to it cannot affect the reading', (() => {
+  let reads = 0;
+  const wrap = (v: any): any => (v && typeof v === 'object' ? new Proxy(Array.isArray(v) ? v.map(wrap) : Object.fromEntries(Object.entries(v).map(([k, x]) => [k, wrap(x)])), { getOwnPropertyDescriptor(t, k) { reads++; return Reflect.getOwnPropertyDescriptor(t, k); } }) : v);
+  const live: any = JSON.parse(JSON.stringify(inA));
+  const proxied = wrap(live);
+  const r1 = JSON.stringify(generateSyntheticReading(proxied, { synthetic: true }));
+  const once = reads;
+  const keys = (v: any): number => (v && typeof v === 'object' ? (Array.isArray(v) ? v.length + 1 + v.reduce((a: number, x: any) => a + keys(x), 0) : Object.keys(v).length + Object.values(v).reduce((a: number, x: any) => a + keys(x), 0)) : 0);
+  return r1 === JSON.stringify(generateSyntheticReading(inA, { synthetic: true })) && once === keys(live);
+})());
+
 // ============================================================ G. generated synthetic hands (R2: V-F expanded geometry)
 // A hand is defined in palm-frame units (index knuckle (0,0), little knuckle (1,0), y toward the wrist), then placed in
 // a 1000 x 1000 image by a similarity transform (rotation, scale, translation, optional mirror). Traces are defined in

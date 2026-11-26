@@ -162,7 +162,7 @@ export function lintCatalogue(cat, schema) {
   const gpol = cat.globalPolicy;
   if (gpol.futureLanguage !== 'questions-only-never-forecasts') F('futureLanguage');
   if (!Number.isInteger(gpol.maxInterpretationsPerCategory) || gpol.maxInterpretationsPerCategory < 1) F('maxInterpretationsPerCategory must be a positive integer');
-  const nar = Object.fromEntries((gpol.notAssessedReasons ?? []).map((r) => [r.code, r]));
+  const nar = Object.assign(Object.create(null), Object.fromEntries((gpol.notAssessedReasons ?? []).map((r) => [r.code, r]))); // R6: data-keyed maps are null-prototype
   for (const code of REQUIRED_REASONS) if (!nar[code]) F(`notAssessedReasons lacks ${code}`);
   for (const code of ['user-skipped', 'user-cannot-see']) if (nar[code] && DET.test(nar[code].wording)) F(`E1-A1: ${code} wording reads as a detector/photo limitation`);
   if (nar['detector-missing'] && !nar['detector-missing'].carries.includes('never used for user')) F('E1-A1: detector-missing must be reserved for detector sources');
@@ -204,7 +204,7 @@ export function lintCatalogue(cat, schema) {
   // R3 (finding F4): incompatible interpretations of the same observation must not overlap. For eligible-initial
   // records reading one feature, categorical values must differ, and range records' clean regions (inside the range
   // and farther than the margin from every threshold, on the 0.0001 grid) must be disjoint.
-  const byFeature = {};
+  const byFeature = Object.create(null);
   for (const e of cat.interpretations.filter((x) => x.eligibility?.status === 'eligible-initial')) for (const r of e.requires) (byFeature[r.feature] ??= []).push({ id: e.id, ob: r.observation ?? {}, m: e.observationQuality?.boundaryMargin ?? 0 });
   const g4 = (v) => (v === null || v === undefined ? null : Math.round(v * 10000));
   for (const [f, rs] of Object.entries(byFeature)) {
@@ -215,7 +215,7 @@ export function lintCatalogue(cat, schema) {
     const clean = rs.map((x) => { const m = g4(x.m), lo = g4(x.ob.range.min), hi = g4(x.ob.range.max); return { id: x.id, a: lo === null ? -Infinity : lo + m + 1, b: hi === null ? Infinity : hi - m - 1 }; });
     for (let i = 0; i < clean.length; i++) for (let j = i + 1; j < clean.length; j++) if (Math.max(clean[i].a, clean[j].a) <= Math.min(clean[i].b, clean[j].b)) F(`${f}: ${clean[i].id} and ${clean[j].id} can both match one value (incompatible range overlap)`);
   }
-  const served = {};
+  const served = Object.create(null);
   for (const e of cat.interpretations) for (const c of e.e1Capabilities ?? []) (served[c] ??= new Set()).add(e.eligibility.status);
   const elig = (c) => [...(served[c] ?? [])].some((s) => s === 'eligible-initial' || s === 'eligible-later');
   for (const c of [...(tiers.essential ?? []), ...(tiers.optionalAssisted ?? [])]) if (c !== 'E1-E1' && c !== 'E1-E2' && !elig(c)) F(`${c}: planned capability serves no eligible record`);
