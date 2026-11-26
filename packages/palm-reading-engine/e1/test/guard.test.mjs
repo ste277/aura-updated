@@ -6,6 +6,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
+import { performance } from 'node:perf_hooks';
 import { planSelection, defaultLibrary, MODES, E1_ENGINE } from '../src/index.mjs';
 import { E1, PKG, REPO, oracleDump, tmpdir, writeArtifactFixture, FIXTURE_BUILD_ID } from './helpers.mjs';
 const composeSyn = (obs, opts = {}) => planSelection(defaultLibrary(), obs, { synthetic: true, ...opts });
@@ -249,7 +250,7 @@ test('G1d R6 isolated startup smoke: the generated server must start from its ow
     fs.writeFileSync(path.join(t, 'server.js'), "require('next'); throw new Error('startup failed')\n");
     r = run(['--tree', t]); assert.equal(r.status, 1); assert.match(r.stderr, /startup failed/);
     fs.writeFileSync(path.join(t, 'server.js'), "require('next'); setInterval(() => {}, 1000)\n");
-    r = run(['--tree', t], { AURA_STARTUP_TIMEOUT_MS: '1500' }); assert.equal(r.status, 1); assert.match(r.stderr, /no readiness within/);
+    r = run(['--tree', t], { AURA_STARTUP_TIMEOUT_MS: '1500' }); assert.equal(r.status, 1); assert.match(r.stderr, /no complete readiness response within the 1500 ms deadline/);
   } finally { fs.rmSync(t, { recursive: true, force: true }); }
   // web-build layouts: flat (CI, Docker build stage) and nested (Vercel-style), with node_modules at the standalone root
   for (const nested of [false, true]) {
@@ -268,6 +269,107 @@ test('G1d R6 isolated startup smoke: the generated server must start from its ow
       assert.equal(r.status, 1, nested ? 'nested witness' : 'flat witness'); assert.match(r.stderr, /require-hook/);
     } finally { fs.rmSync(w, { recursive: true, force: true }); }
   }
+});
+
+test('G1e R7 readiness deadline (deterministic clock): one fixed deadline; late, retried and crashed attempts fail', async () => {
+  const require = (await import('node:module')).createRequire(import.meta.url);
+  const { waitForReadiness } = require(path.join(REPO, 'apps', 'web', 'scripts', 'check-artifact-startup.js'));
+  // a fake monotonic clock: only the code under test advances it, so nothing here depends on real timing
+  const clock = () => { let t = 1000; return { now: () => t, advance: (ms) => { t += ms; }, at: () => t }; };
+  const ok = (c, extra = {}) => ({ status: 200, bytes: 54, completedAt: c.now(), ...extra });
+  // healthy: the first complete 200 inside the budget is ready
+  let c = clock();
+  let r = await waitForReadiness({ url: 'u', budgetMs: 900, now: c.now, sleep: async (ms) => c.advance(ms), request: async (u, b) => { c.advance(100); return ok(c); } });
+  assert.ok(r.ready && r.attempts === 1);
+  // the R6 witness in miniature: the response completes at +2,100 ms against a 900 ms deadline -> rejected
+  c = clock();
+  const budgets = [];
+  r = await waitForReadiness({ url: 'u', budgetMs: 900, now: c.now, sleep: async (ms) => c.advance(ms), request: async (u, b) => { budgets.push(b); c.advance(2100); return ok(c); } });
+  assert.equal(r.ready, null); assert.equal(r.reason, 'deadline'); assert.deepEqual(budgets, [900]); // the attempt was given only the budget
+  // a complete response that finishes exactly at the deadline is accepted; one tick later is not
+  for (const [cost, pass] of [[900, true], [901, false]]) {
+    c = clock();
+    r = await waitForReadiness({ url: 'u', budgetMs: 900, now: c.now, sleep: async (ms) => c.advance(ms), request: async () => { c.advance(cost); return ok(c); } });
+    assert.equal(!!r.ready, pass, `completion at +${cost}`);
+  }
+  // retries never extend the deadline: every attempt gets at most what is left, pauses are clipped, and the loop ends
+  // with the clock at (not past) the deadline
+  c = clock();
+  const given = [];
+  r = await waitForReadiness({ url: 'u', budgetMs: 900, retryMs: 250, now: c.now, sleep: async (ms) => c.advance(ms), request: async (u, b) => { given.push(b); c.advance(Math.min(b, 120)); return null; } });
+  assert.equal(r.reason, 'deadline');
+  assert.ok(given.every((b, i) => i === 0 || b < given[i - 1]), JSON.stringify(given));
+  assert.ok(c.at() <= 1000 + 900, `clock ${c.at()} passed the deadline`);
+  // non-200, empty bodies and 'headers only' results never count as ready
+  for (const bad of [{ status: 404, bytes: 9 }, { status: 200, bytes: 0 }, { status: 503, bytes: 10 }]) {
+    c = clock();
+    r = await waitForReadiness({ url: 'u', budgetMs: 600, now: c.now, sleep: async (ms) => c.advance(ms), request: async (u, b) => { c.advance(Math.min(b, 50)); return { ...bad, completedAt: c.now() }; } });
+    assert.equal(r.ready, null, JSON.stringify(bad));
+  }
+  // a crash before readiness fails at once, without waiting for the deadline
+  c = clock();
+  let alive = true;
+  r = await waitForReadiness({ url: 'u', budgetMs: 60000, now: c.now, sleep: async (ms) => c.advance(ms), alive: () => alive, request: async () => { c.advance(10); alive = false; return null; } });
+  assert.equal(r.reason, 'exited'); assert.ok(c.at() < 1000 + 100);
+});
+
+test('G1e2 R7 one bounded request: delayed headers, late bodies and stalled responses are cancelled at the remaining budget', async () => {
+  const require = (await import('node:module')).createRequire(import.meta.url);
+  const http = await import('node:http');
+  const { requestWithin } = require(path.join(REPO, 'apps', 'web', 'scripts', 'check-artifact-startup.js'));
+  // margins are wide (budget 150 ms vs server delays of 1,500 ms) so this is not timing-sensitive
+  const serve = (handler) => new Promise((resolve) => { const closed = []; const srv = http.createServer((q, res) => { q.socket.on('close', () => closed.push(true)); handler(q, res); }); srv.listen(0, '127.0.0.1', () => resolve({ srv, url: `http://127.0.0.1:${srv.address().port}/m`, closed })); });
+  const cases = [
+    ['healthy', (q, res) => res.end('self.__BUILD_MANIFEST={}'), true],
+    ['delayed headers', (q, res) => { setTimeout(() => { if (!res.destroyed) res.end('late'); }, 1500); }, false],
+    ['headers before expiry, completion after', (q, res) => { res.writeHead(200); res.write('self.'); setTimeout(() => { if (!res.destroyed) res.end('late'); }, 1500); }, false],
+    ['stalled response (trickles, never ends)', (q, res) => { res.writeHead(200); const t = setInterval(() => { if (res.destroyed) clearInterval(t); else res.write(' '); }, 20); }, false],
+  ];
+  for (const [name, handler, pass] of cases) {
+    const { srv, url, closed } = await serve(handler);
+    const t0 = performance.now();
+    const r = await requestWithin(url, 150);
+    const took = performance.now() - t0;
+    try {
+      if (pass) { assert.ok(r && r.status === 200 && r.bytes > 0, name); }
+      else {
+        assert.equal(r, null, name);
+        assert.ok(took < 1000, `${name}: not cancelled at the budget (${Math.round(took)} ms)`);
+        await new Promise((res) => setTimeout(res, 100));
+        assert.ok(closed.length >= 1, `${name}: the outstanding request was not cancelled (connection still open)`);
+      }
+    } finally { srv.closeAllConnections?.(); srv.close(); }
+  }
+  assert.equal(await requestWithin('http://127.0.0.1:9/m', 0), null); // no budget, no request
+});
+
+test('G1e3 R7 end to end: the 900 ms / 2,100 ms witness fails; healthy passes; crash fails; the copy is always removed', () => {
+  const SMOKE = path.join(REPO, 'apps', 'web', 'scripts', 'check-artifact-startup.js');
+  const art = tmpdir('g1e3-art');
+  fs.mkdirSync(path.join(art, '.next'), { recursive: true });
+  fs.writeFileSync(path.join(art, '.next/BUILD_ID'), 'fixtureManifest01');
+  const server = (mode) => `const http = require('node:http'); const mode = ${JSON.stringify(mode)};
+http.createServer((q, res) => {
+  if (q.url !== '/_next/static/fixtureManifest01/_buildManifest.js') { res.writeHead(404); res.end(); return; }
+  if (mode === 'late-stream') { res.writeHead(200); res.write('self.'); const t = setInterval(() => res.write(' '), 60); setTimeout(() => { clearInterval(t); res.end('__BUILD_MANIFEST={};'); }, 2100); }
+  else res.end('self.__BUILD_MANIFEST={};');
+}).listen(Number(process.env.PORT), process.env.HOSTNAME);
+if (mode === 'crash') process.exit(42);`;
+  try {
+    for (const [mode, budget, pass, msg] of [['late-stream', '900', false, /no complete readiness response within the 900 ms deadline/], ['healthy', '5000', true, /\[artifact-startup\] OK/], ['crash', '5000', false, /the server exited \(code 42\)/]]) {
+      fs.writeFileSync(path.join(art, 'server.js'), server(mode));
+      const scratch = tmpdir('g1e3-tmp'); // the check's own TMPDIR: must be empty afterwards
+      const t0 = performance.now();
+      const r = spawnSync(process.execPath, [SMOKE, '--tree', art], { encoding: 'utf8', env: { ...process.env, TMPDIR: scratch, AURA_STARTUP_TIMEOUT_MS: budget } });
+      const took = performance.now() - t0;
+      try {
+        assert.equal(r.status, pass ? 0 : 1, `${mode}: ${r.stdout}${r.stderr}`);
+        assert.match(pass ? r.stdout : r.stderr, msg, mode);
+        assert.deepEqual(fs.readdirSync(scratch), [], `${mode}: temporary copy left behind`);
+        if (mode === 'late-stream') assert.ok(took < 2000, `the witness must fail at the deadline, not after the response (${Math.round(took)} ms)`);
+      } finally { fs.rmSync(scratch, { recursive: true, force: true }); }
+    }
+  } finally { fs.rmSync(art, { recursive: true, force: true }); }
 });
 
 test('G2 nothing outside the engine package imports or names E1; no manifest, alias or config resolves to it', () => {
