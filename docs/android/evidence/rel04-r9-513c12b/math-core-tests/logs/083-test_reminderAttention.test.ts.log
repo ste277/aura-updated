@@ -1,0 +1,17 @@
+$ npx ts-node test/reminderAttention.test.ts
+# job=math-core-tests step=Run reminder attention test env={}
+OK   reminderOccurrenceKey differs when reminderAt differs (a rescheduled item is a DIFFERENT occurrence)
+OK   reminderOccurrenceKey is identical for the same type+id+reminderAt
+OK   reminderOccurrenceKey differs between a Plan and a Moment sharing the same raw id
+OK   A reminder with no matching attention row is unread
+OK   relevant = true (still present in the list) AND unread = false, once a matching attention row exists
+OK   A rescheduled Plan's NEW occurrence is unread again, even though the OLD occurrence for the same item was seen
+OK   Two reminders, one seen -> exactly one counts as unseen
+OK   Both reminders remain present in the Upcoming list regardless of seen state (brief section 9)
+OK   One unread social update + one unseen reminder -> Bell = 2
+OK   After opening the reminder -> Bell = 1 (only the social update remains)
+OK   After opening BOTH the reminder and the response -> Bell = 0
+
+ALL REMINDER ATTENTION CHECKS PASSED
+
+# exit=0 signal=

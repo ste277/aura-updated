@@ -1,0 +1,51 @@
+$ npx ts-node test/pa3cC1B01SolarUnavailable.test.ts
+# job=math-core-tests step=Run PA-3C-C1B-01 solar unavailable classification test env={}
+OK   UNAVAILABLE is a recognized SolarWindowType member
+OK   ALL_SOLAR_WINDOW_TYPES includes exactly 7 members (6 original + UNAVAILABLE)
+OK   A genuinely unrecognized string is NOT a valid SolarWindowType
+OK   Empty string is NOT a valid SolarWindowType
+OK   F1: UNAVAILABLE active type produces a null score, never NEUTRAL's 7.8
+OK   F1: UNAVAILABLE active type produces a null stars value
+OK   F1: UNAVAILABLE active type's themeText is honest, not the NEUTRAL "Balanced and stable" copy
+OK   F1: UNAVAILABLE active type's nextShift fallback also carries a null score (no windows exist to find an upcoming one)
+OK   F1: existing NEUTRAL behavior with no windows is completely unchanged (regression)
+OK   F1: existing RAHU_KALAM scoring is unchanged
+OK   F2/D10: evaluateActivityFit throws for UNAVAILABLE windowType (typed refusal, not a fabricated score)
+OK   F2/D10: the thrown error is specifically AuraFitUnavailableError
+OK   F2: existing ABHIJIT Aura Fit evaluation still returns a real numeric score
+OK   F7: getActionCards('UNAVAILABLE') returns an empty array, never ACTION_CARDS.NEUTRAL's cards
+OK   F7: getActionCards('NEUTRAL') is unchanged (non-empty, as before)
+OK   F7: getActionCards('ABHIJIT') is unchanged
+OK   F7: getActivityDiscoveryCards('UNAVAILABLE', ...) returns an empty array, never a fabricated discovery list
+OK   F8: normalizeWindowType('UNAVAILABLE') returns 'UNAVAILABLE', never falls through to NEUTRAL
+OK   F8: normalizeWindowType('unavailable') (lowercase) still normalizes correctly
+OK   F8: normalizeWindowType('RAHU_KALAM') is unchanged
+OK   F8: normalizeWindowType of a genuinely unrecognized string still returns NEUTRAL (pre-existing, unchanged display-normalizer default)
+OK   F3: classifyInsightsWindow('UNAVAILABLE') is UNCLASSIFIED, never NEUTRAL
+OK   F3: insightsWindowWeight('UNAVAILABLE') is null, never NEUTRAL's 0.7 weight
+OK   F3: INSIGHTS_WINDOW_BAND_WEIGHT has exactly the 3 original numeric bands (UNCLASSIFIED deliberately has no weight)
+OK   F3: existing NEUTRAL weight is unchanged at 0.7
+OK   F3: existing SUPPORTIVE (ABHIJIT) weight is unchanged at 1.0
+OK   F3: existing FRICTION (RAHU_KALAM) weight is unchanged at 0.0
+OK   F3: a mixed batch filters out exactly the 2 UNAVAILABLE entries
+OK   F3: the correct 2-entry average is 50% (ABHIJIT=1.0, RAHU_KALAM=0.0), not diluted by the 2 excluded entries
+OK   F3: an all-UNAVAILABLE batch has zero classified weights (honest "no data", never a fabricated 0% or 70%)
+OK   F4: windowLabel has an explicit UNAVAILABLE branch returning a distinct label, not "Neutral Flow"
+OK   F5: getWindowMeta has an explicit UNAVAILABLE branch before falling through to Neutral Flow
+OK   F6: actionQueryForWindow has an explicit UNAVAILABLE branch returning 'UNAVAILABLE', not 'NEUTRAL'
+OK   Home: activeType falls back to 'UNAVAILABLE' when solar is null, never silently 'NEUTRAL'
+OK   HomeDashboard: getWindowTone has an explicit UNAVAILABLE branch before any numeric score comparison
+OK   HomeDashboard: getHeroHeadline has an explicit UNAVAILABLE branch, not the favorable default
+OK   HomeDashboard: FlowRing accepts a null score and skips drawing a fabricated fill arc
+OK   Habit logging: SolarNoEventError is caught and mapped to 'UNAVAILABLE'
+OK   Habit logging: any OTHER error (invalid input / computation error) still propagates, never silently caught
+OK   Plan completion: SolarNoEventError is caught and mapped to 'UNAVAILABLE'
+OK   D9: legacy endpoint validates activeWindow against isSolarWindowType, not a bare non-empty check
+OK   D9: legacy endpoint still imports/uses logHabitCompletion (route not deleted or renamed)
+OK   DEFAULT_NOTIFICATION_PREFS has an explicit UNAVAILABLE: false entry (TypeScript-forced, not accidentally omitted)
+OK   ACTION_CARDS.UNAVAILABLE is deliberately an empty array, not a copy of NEUTRAL's cards
+
+44 passed, 0 failed.
+ALL PA-3C-C1B-01 CHECKS PASSED
+
+# exit=0 signal=

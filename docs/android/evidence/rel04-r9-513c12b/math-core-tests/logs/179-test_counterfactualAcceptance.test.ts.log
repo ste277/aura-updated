@@ -1,0 +1,58 @@
+$ npx ts-node test/counterfactualAcceptance.test.ts
+# job=math-core-tests step=Run counterfactual acceptance test env={}
+=== Part 1: the V1 policy, rule by rule (coherent pairs) ===
+OK   SIMPLE ACCEPT: P promoted, owner O relocated with the SAME timing fit, P ties O above pressure, nothing else changes -> ACCEPT (and only that: the decision carries no score, count or reason)
+OK   BETTER OWNER TIMING: O relocated from WORKABLE to BEST -> ACCEPT (the floor is "no worse", not "equal")
+OK   WORSE OWNER TIMING: O relocated from GOOD to CAUTION (and to WORKABLE) -> REJECT OWNER_TIMING_DEGRADED; the relocated fit being UNKNOWN (undefined ranks worst) is also a degradation
+OK   TIMING-FLOOR GRID (committed): over every baseline fit x relocated fit (BEST, GOOD, WORKABLE, CAUTION, unknown) x earlier / later relocation (50 cells) same or better -> ACCEPT, worse (an unknown relocated fit ranks worst) -> REJECT OWNER_TIMING_DEGRADED, unknown baseline -> UNAVAILABLE BASELINE_TIMING_UNKNOWN
+OK   SAME-FIT START INDEPENDENCE (pinned): baseline GOOD @ 15:00 relocated to GOOD @ 09:00, and baseline GOOD @ 09:00 relocated to GOOD @ 15:00, never reject for timing -> ACCEPT both ways
+OK   P'S OWN FIT IS NOT A CONDITION: P promoted at CAUTION while O keeps GOOD -> ACCEPT (P is promoted for pressure, not for timing)
+OK   CRITICAL NONE FIXTURE: a displaced owner left UNPLACED -> REJECT OWNER_WOULD_BE_UNPLACED, whether the owner's pressure is NONE or LAST_KNOWN_OPPORTUNITY (NONE means "no established pressure", not "safe to defer")
+OK   NONE RELOCATED SAME FIT -> ACCEPT: NONE does not block when the owner is still scheduled; PRESSURED RELOCATED SAME DAY -> ACCEPT: LAST_KNOWN_OPPORTUNITY is DAY-level (the current day stays the opportunity), so a same-day relocation is not owner loss and pressure alone never rejects
+OK   FIXED CHANGED: a counterfactual that (truthfully) moves, or drops, a baseline FIXED placement never ACCEPTs -> REJECT FIXED_PLACEMENT_CHANGED
+OK   NON-OWNER MOVED: N is not an authorized owner; a counterfactual that truthfully moves (or drops) it -> REJECT NON_OWNER_CHANGED
+OK   UNDISTURBED AUTHORIZED OWNER MOVED: O2 is authorized but P's interval does not overlap it; a counterfactual that nevertheless displaces it -> REJECT UNNECESSARY_OWNER_CHANGE (minimum change); with O2 untouched the same promotion ACCEPTs
+OK   PRECEDENCE: an owner that OUTRANKS P on importance, a deadline-today owner, a stronger-deadline owner -> REJECT PRECEDENCE_NOT_TIE
+OK   PRECEDENCE, THE OTHER DIRECTION: P stronger than O (P HIGH vs O LOW) is also not a tie -> REJECT PRECEDENCE_NOT_TIE (P4a authorizes only ties; a non-tie pair is out of contract and never ACCEPTs)
+OK   originalOrder, timing fit and pressure must NOT affect the tie: owner and candidate with different originalOrder (always, by construction), O BEST vs P CAUTION, and every pressure combination -> ACCEPT; the same equal-importance / equal-deadline tie with a deadline on both -> ACCEPT
+OK   MULTI-OWNER ALL PASS -> ACCEPT; every displaced owner is judged independently and ONE failure rejects the whole counterfactual: one timing fail, one unplaced, one precedence fail
+OK   NET COUNT: an ACCEPTed counterfactual holds exactly baseline count + 1 placements (here 2 + 1 = 3) -- count is a backstop and is never a substitute for the per-owner rules
+OK   the touching boundary is NOT overlap (half-open): O relocated to start exactly where P ends, and P touching an unmoved non-owner, are both valid -> ACCEPT
+=== Part 2: the structural boundary -- an untrustworthy structure is UNAVAILABLE, never a policy REJECT ===
+OK   RUN NOT READY: the basis or the baseline placements not READY -> UNAVAILABLE / RUN_NOT_READY
+OK   AUTHORITIES MUST AGREE: the counterfactual's candidate differs from the PromotionInput's; P present in the BASELINE; an unknown or non-placed owner; duplicate owners; the candidate listed as an owner -> UNAVAILABLE / INCONSISTENT_AUTHORITY
+OK   A SILENT SHIFT that stays valid (a non-owner moved 30 minutes, still BASELINE_UNCHANGED, no overlap, same duration) is a contradiction, not a policy question -> UNAVAILABLE / COUNTERFACTUAL_INVALID
+OK   P MISSING / DUPLICATED / WRONG SOURCE -> UNAVAILABLE / COUNTERFACTUAL_INVALID
+OK   EXTRA INTENT (pinned): a placement for an intent that is neither in the baseline nor P -- an unknown id or a Deferred intent that "became placed" -- is a contradiction of the counterfactual's own scope -> UNAVAILABLE / COUNTERFACTUAL_INVALID (not a policy reject)
+OK   A "PROMOTION" THAT DISPLACES NOBODY (P in free time, nothing declared displaced) is not a promotion counterfactual -- the baseline could have placed it, and the pair may not share a run -> UNAVAILABLE / COUNTERFACTUAL_INVALID
+OK   DUPLICATE PLACEMENT, OVERLAPPING RESULT, OUTSIDE WINDOW, BLOCKER CONFLICT, WRONG DURATION -> UNAVAILABLE / COUNTERFACTUAL_INVALID
+OK   A NON-POSITIVE blocker is ignored exactly as the Constructor ignores it; a blocker that merely TOUCHES a placement is not a conflict
+OK   SILENT CHANGES are contradictions, not policy: a non-owner moved while labelled BASELINE_UNCHANGED, a FIXED placement silently moved, a baseline placement silently dropped, a displaced owner not declared -> UNAVAILABLE / COUNTERFACTUAL_INVALID
+OK   DECLARED CHANGE LISTS must agree with the placements: relocated not displaced, unplaced AND relocated, an unplaced owner still placed, displaced duplicated, a relocated entry that disagrees with its placement -> UNAVAILABLE / COUNTERFACTUAL_INVALID
+OK   NON-FINITE INSTANTS anywhere (the window, a blocker, a baseline placement, a counterfactual placement, the promoted placement) -> UNAVAILABLE / INVALID_INTERVAL
+OK   BASELINE PLACEMENTS must be coherent with the basis: duplicate ids, overlapping baseline placements, a placement of an unknown intent, a wrong duration, a FIXED / FLEXIBLE source mismatch -> UNAVAILABLE / INCONSISTENT_AUTHORITY
+OK   BASELINE TIMING FIT UNKNOWN for a relocated owner -> UNAVAILABLE / BASELINE_TIMING_UNKNOWN (an unknown baseline fit is never treated as safe); an UNKNOWN fit on a non-relocated placement is irrelevant
+OK   the module never throws: a hostile source is UNAVAILABLE / EVALUATION_FAILED
+=== Part 3: determinism -- reason precedence, order invariance, pressure and above-pressure parity ===
+OK   REASON PRECEDENCE: with several violations the reported reason follows the pinned order -- FIXED before unplaced, non-owner before precedence, unplaced before timing, unplaced before the count backstop
+OK   ORDER INVARIANCE: 48 permutations of the counterfactual placement order x owner order x displaced / relocated list order give the SAME decision and the SAME reason (REJECT:OWNER_TIMING_DEGRADED)
+OK   an ACCEPT is likewise independent of the placement order
+OK   PRESSURE PARITY: over all 4 owner-pressure combinations the ACCEPT stays ACCEPT, the owner-loss stays REJECT OWNER_WOULD_BE_UNPLACED and the timing failure stays REJECT OWNER_TIMING_DEGRADED -- pressure is never read, and NONE is never "safe to lose"
+OK   ABOVE-PRESSURE PARITY: over 144 importance x deadline combinations (12 ties) the module accepts exactly when the ESTABLISHED P3b / P4a primitive `compareAbovePressure` says TIE and otherwise reports PRECEDENCE_NOT_TIE -- the same comparator with originalOrder neutralised, never a second copy
+OK   PURE AND IMMUTABLE: the inputs are byte-identical after evaluation (they are deep-frozen), the decision is a frozen record of strings sharing nothing with the inputs, and repeated calls are byte-equal
+OK   NO CLOCK: evaluation calls Date.now zero times
+=== Part 4: the REAL pipeline -- orchestrator diagnostics -> evidence / pressure -> PromotionInput -> contention -> attempts -> P4b2 -> P4b3 ===
+OK   REAL ACCEPT: real orchestrator -> evidence / pressure -> PromotionInput -> contention -> attempts -> P4b2 generates P@10:30 with O relocated to 15:00 (GOOD, the same fit) -> P4b3 ACCEPTs (no handcrafted authority anywhere)
+OK   BASELINE PARITY: the Constructor result is byte-identical before / after the decision, equals a plain orchestration, and the signed preview body is byte-identical (P4b3 is not wired); evaluating again changes nothing
+OK   REAL REJECT: the real counterfactual relocates O (attempt-only 09:30) but leaves Y unplaced -> P4b3 REJECTs OWNER_WOULD_BE_UNPLACED (all owners were pressured: LAST_KNOWN_OPPORTUNITY does not make loss acceptable)
+OK   REAL NONE FIXTURE: with only P pressured the owners are NONE -- the same unplaced owner is still REJECTed (NONE is not "safe to defer"), and the decision is byte-identical to the all-pressured run
+=== Part 5: diagnostics-only INCIDENCE over real generated counterfactuals (reported honestly; never used to tune the policy) ===
+     incidence: {"runs":700,"pairs":452,"generated":444,"notGenerated":8,"evaluated":444,"accept":23,"pressureMismatch":0,"nonDeterministic":0,"unavailable":0} reasons: {"REJECT:OWNER_WOULD_BE_UNPLACED":372,"ACCEPT":23,"REJECT:OWNER_TIMING_DEGRADED":49}
+OK   INCIDENCE (diagnostics only): of 444 real P4b2 counterfactuals (700 deterministic runs, 452 promotion pairs, 8 without an actionable slot), ACCEPT = 23; REJECT / UNAVAILABLE by reason: {"REJECT:OWNER_WOULD_BE_UNPLACED":372,"ACCEPT":23,"REJECT:OWNER_TIMING_DEGRADED":49} -- reported as measured, never used to tune the policy
+OK   AUTHORITATIVE, ENGINE-INDEPENDENT INCIDENCE (O5 P4b5: seeded Fisher-Yates + a pure comparator replaced the random sort comparator): 700 runs, 452 pairs, 444 generated, 8 without an actionable slot; 23 ACCEPT + 372 OWNER_WOULD_BE_UNPLACED + 49 OWNER_TIMING_DEGRADED = 444; 0 UNAVAILABLE -- identical on every supported Node
+OK   REAL COUNTERFACTUALS ARE STRUCTURALLY TRUSTWORTHY: zero UNAVAILABLE decisions over every real generated counterfactual (P4b2 output always satisfies the structural contract P4b3 revalidates)
+OK   the V1 policy is REACHABLE on real contracts: real ACCEPTs and real REJECTs both occur (and ACCEPT / REJECT are the only decisions)
+OK   every real decision is unchanged by flipping every owner pressure and by repetition (zero differences)
+ALL COUNTERFACTUAL ACCEPTANCE CHECKS PASSED
+
+# exit=0 signal=

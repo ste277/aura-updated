@@ -1,8 +1,15 @@
 # AURA-ANDROID-REL-04 — Application Release Readiness
 
-**Date:** 2026-11-26 (R8) · **PR:** #392 · **Branch:** `aura-android-rel04-app-readiness`, cut from `main` `ad49e6a`
+**Date:** 2026-11-26 (R9) · **PR:** #392 · **Branch:** `aura-android-rel04-app-readiness`, cut from `main` `ad49e6a`
 
-**Revision:** **R8** — logical request lifecycle and legacy simplification (ticket 39224). R8 addresses the four findings of the R7 independent assessment of final head `8e0a2329d2628f5c56080c0c85a7e1a86bc399d4` (mixed-format discard resurrection, premature marker retirement, unrelated foreign marker, held-entry presentation). Release history shows the R1–R7 queue formats were never released; by owner decision their automatic migration is retired (§R8-1). The R7 assessment file was not available locally; R8 works from the ticket's four reproductions, all reproduced against the R7 code head.
+**Revision:** **R9** — durable lifecycle enforcement. R9 closes the three lifecycle blockers of the R8 independent assessment of reviewed head `2e32b914f011a83333fa0850c19d1997f36cd897` (implementation `eab072c`): no single transmission boundary, non-durable discard of localStorage-only entries, and cleanup before the discard decision (§R9). The R8 simplified architecture is kept: no new format, migration or marker expiry.
+
+- **R9 implementation commit:** `513c12b6d9a824bbe86b3e63df12a3aede21ac8f` · **integration (CI merge ref):** `7b07ae5eab8f818be0fdc5cedd641928ceb339a2` · **main base:** `3feff0342c48959be7006648ee4bdcaa71fbb162`.
+- **Evidence:** `docs/android/evidence/rel04-r9-513c12b/` · **R8 witnesses (preserved):** `docs/android/evidence/rel04-r8-independent-45804709468/` · **Handover:** `docs/android/AURA_ANDROID_REL_04_R9_VERIFICATION_HANDOVER.md`.
+
+**§R9 supersedes R8 where they differ.**
+
+**Previous revision — R8** (ticket 39224): logical request lifecycle and legacy simplification. R8 addresses the four findings of the R7 independent assessment of final head `8e0a2329d2628f5c56080c0c85a7e1a86bc399d4` (mixed-format discard resurrection, premature marker retirement, unrelated foreign marker, held-entry presentation). Release history shows the R1–R7 queue formats were never released; by owner decision their automatic migration is retired (§R8-1).
 
 - **R8 code commit:** `eab072c9b3a41cae7e15d38ee2fd7ceae31989f7`.
 - **Evidence:** `docs/android/evidence/rel04-r8-eab072c/`.
@@ -27,19 +34,85 @@ R5, R4 and R3 sections are kept as history.
 - `…_R4_INDEPENDENT_DISPOSITION_a59a934.md`;
 - `…_R5_INDEPENDENT_DISPOSITION_0c97d3a.md`;
 - the R6 independent assessment of `8d83f1f`;
-- the R7 independent assessment of `8e0a232`.
+- the R7 independent assessment of `8e0a232`;
+- the R8 independent assessment of `2e32b91` (witnesses preserved in `docs/android/evidence/rel04-r8-independent-45804709468/`).
 
 **Not done:** no merge, deployment, hosting-setting change, Production access, credential, infrastructure, emulator, physical device, signing or Play Store activity.
 
 ## 1. Verdict
 
-**LOGICAL REQUEST LIFECYCLE VERIFIED — NO DISCARDED ACTIVITY RESURRECTION ACROSS SUPPORTED FORMATS — READY FOR FOCUSED INDEPENDENT VERIFICATION.**
+**ONE AUTHORITATIVE LIFECYCLE BOUNDARY — DURABLE DECISIONS BEFORE CLEANUP — NO TRANSMISSION WHEN ELIGIBILITY CANNOT BE ESTABLISHED — READY FOR FOCUSED INDEPENDENT VERIFICATION.**
 
 | Disposition | State |
 |---|---|
-| **1. Application implementation** | **Corrected (R8)** for the four R7-assessment queue findings (§R8). It stays OPEN until focused independent verification. All other closed findings are unchanged (none reopened). |
+| **1. Application implementation** | **Corrected (R9)** for the three R8-assessment lifecycle blockers (§R9), on top of R8 (§R8). It stays OPEN until focused independent verification. All other closed findings are unchanged (none reopened). |
 | **2. Controlled merge readiness** | **NO-GO**. Still needed: independent verification, owner approval, and deployment-boundary reconfirmation at merge time. PR #392 stays **separate from REL-05**. |
 | **3. Production activation and native acceptance** | **NO-GO / HOLD**, unchanged. The separately gated items are listed in §R5-4: A-1 to A-3, AUTH-01 dependencies, rollout criteria and telemetry, supported-client compatibility, worker rollback, and native plus REL-03 supervised acceptance. |
+
+---
+
+## R9. Durable lifecycle enforcement
+
+### R9-1. Findings (R8 independent assessment), root causes, corrections
+
+The witnesses of the R8 assessment are preserved byte-for-byte in `docs/android/evidence/rel04-r8-independent-45804709468/` (with its `SHA256SUMS`). The evidence directory held the witness outputs, not the probe scripts; `test/rel04R9LifecycleEnforcement.test.ts` rebuilds each witness from its logged shape, with historical data from the actual R2/R3 producers, and runs it against the R8 code head `eab072c` (vendored in `test/fixtures/rel04-r8-head`, checked against git) and the current code.
+
+| Blocker | Root cause (R8) | Correction (R9) |
+|---|---|---|
+| **X1 No single transmission boundary** — a discarded request was sent when IndexedDB reads failed; a request matching an unreadable retired source was sent | `submitActivityLog` fell back to a direct POST whenever `enqueueOwned` failed; `enqueueOwned` skipped the retired-source check when localStorage could not be read | The ONLY way to transmit is a claim on an eligible active record, made in the same transaction that checks the decision (`enqueueOwned` with `claimFor`, or `claimForDispatch`). An IndexedDB failure, unreadable localStorage, or an unidentifiable retired entry of the account returns `storage-unavailable`: nothing stored, nothing sent, a recoverable message on Home. A retired `aura_q3`/`aura_q4` entry's request id is read from its **key**, so it is identified even when its value is unparseable. |
+| **X2 Discard of localStorage-only entries not durable** — the same request was submitted and confirmed after a confirmed discard (R2 `aura_q3`, R3 `aura_q4`) | `discardQuarantined` removed retired entries without recording any decision | `discardOwned` records the `discarded` decision of every logical activity of the confirmed snapshot — including those that exist only in localStorage — before any entry is removed |
+| **X3 Cleanup before decision** — a failed IndexedDB discard still removed the retired copy, which unpaused the active copy and replayed it; sign-out counted physical copies | sign-out removed localStorage entries independently of the IndexedDB transaction's outcome | ONE IndexedDB transaction records the decisions and removes every IndexedDB copy; retired entries are removed only **after it committed**. A failed or unknown transaction removes nothing (reported `failed`); a cleanup failure after the commit leaves an entry that is permanently ineligible (reported `cleanupPending`, removable by a retried sign-out). Home and sign-out count **logical** activities (`pending + paused`). |
+
+No new queue format, migration or marker expiry; no service-worker change; the decision marker of R8 is reused (`payload: null` when a retired entry's payload cannot be read: any payload is refused).
+
+### R9-2. The lifecycle boundary
+
+| Path | Eligibility established | If it cannot be established |
+|---|---|---|
+| Immediate submission (`submitActivityLog`) | `enqueueOwned`: retired sources inspected (readable, request identified) → transaction: no decision, no quarantined copy, payload consistent → record + claim | `storage-unavailable` (no send); `not-stored` for decided/paused/conflicting requests |
+| Queued replay (`replayOfflineQueue`) | `readOwnedQueue` (unreadable → stop) → `claimForDispatch`: active record, no decision, no quarantined copy, readable sources, fresh-claim check, in one transaction | `unreadable` (stop) / skipped (`paused`, `gone`) |
+| Other client POSTs | `useHabitLogs` is never imported; `PastActivityModal`'s fallback POST is never reached (every caller passes `onConfirmLog`) and carries no `clientRequestId` or expected-account header — the server refuses it (503) before storing anything | — |
+
+**Race ordering.** A discard commits its decision before it removes any retired entry; a submission inspects retired entries before its transaction. So a submission either still sees the entry (`paused`) or the decision is already committed and its transaction sees it (`settled`). A send that holds a fresh claim keeps its activity out of a concurrent discard (`keptInFlight`, undecided), and its settlement then records `settled`.
+
+### R9-3. Before and after
+
+| Witness (assessment) | R8 head `eab072c` | Current |
+|---|---|---|
+| X2 localStorage-only confirmed discard, same request submitted — R2 `aura_q3` | removed 1, **0 decisions**, submit **confirmed**, **1 server row** | removed 1, 1 decision, submit `not-stored`, **0 rows** |
+| X2 same — R3 `aura_q4` | removed 1, 0 decisions, confirmed, **1 row** | removed 1, 1 decision, `not-stored`, **0 rows** |
+| X1 IndexedDB read failure after a confirmed discard | submit **confirmed** (direct fallback), **1 row** | `storage-unavailable`, replay `unreadable`, **0 rows** |
+| X1 matching retired source unreadable (access denied; `getItem` throws) | **confirmed**, **1 row**, still paused | `storage-unavailable`, still paused, **0 rows** |
+| X3 IndexedDB discard fails, localStorage cleanup succeeds | retired copy removed, active copy **unpaused and replayed**, **1 row**; asks about **2** logs | nothing removed (failed 1), still paused, nothing replayed, **0 rows**; asks about **1** log |
+
+**Current lifecycle (E1–E9):** cleanup failing after the durable discard (cleanupPending, never sent, a retried sign-out completes it); a transaction interrupted after its first write commits nothing; a committed decision whose cleanup never ran keeps the survivor ineligible for any payload; an unparseable `aura_q3` value identified by its key (only that request paused); an unparseable v2 array blocks every transmission of the account until discarded; a discard during another context's send (`keptInFlight`, settled once); 20 interleavings of submission against the durable discard of its localStorage-only request (never sent); Home and sign-out counting the same 5 logical activities for 7 physical copies; account isolation of the decision; healthy online and offline submission; no bypassing POST path. **Every resurrection witness has 0 server rows.**
+
+**Earlier checks adjusted** (stricter, none weakened): `C7a` (account isolation) and `F1` (R4) now require `storage-unavailable` **and no POST** where they accepted `not-stored`; R5 `T2`, R6 `Q1`, R8 `L6` await the now-durable (async) `discardQuarantined`; R5 `T2` now also requires the shown request to be decided; R8 `L2`/`L4` count logical activities and report a cleanup failure after the durable decision as `cleanupPending` (L4 additionally requires `failed === 0`).
+
+### R9-4. Evidence
+
+**Evidence at implementation commit `513c12b`** (`docs/android/evidence/rel04-r9-513c12b/`; manifests and checksums in its README):
+
+| Run | Result |
+|---|---|
+| `rel04R9LifecycleEnforcement` | **36/36**: 5 fixture-provenance checks + the preserved-witness checksum check; every R8 witness reproduced on `eab072c` (X1 ×3, X2 ×2, X3 ×2) and corrected; E1–E9 |
+| `math-core-tests`, every `npx ts-node` command | **250/250** (manifest sha256 `d80b7b8e…87b4`) |
+| Day Constructor DB suites (fresh isolated Postgres 16, 54 migrations) | **75/76**: `dayConstructorPreviewItemDb` failed locally because the real muhurta engine refused every candidate time at 17:47 IST (clock-dependent; imports nothing R9 changed; passed in the R8 sweep and in CI on this commit) |
+| Chromium multi-tab | **29/29** |
+| Real Next.js app rendering (incl. N4 "Sync paused") | **14/14** |
+| `prisma generate`, web `tsc`, root `tsc` | exit 0 ×3 |
+| **CI run 45814445236** on `513c12b` (integration `7b07ae5`, `main` `3feff03`) | **success, 9/9 jobs**; nothing rerun |
+
+Closed R4–R8 findings re-run in the sweep: account isolation 50/50, R4 27/27, R5 16/16, R6 22/22 (worker acknowledgement, reload reservation, Plan Day authentication), R7 38/38, R8 43/43, Chromium CH8/CH15, real-app N2/N4, reload visibility and replay reconciliation.
+
+### R9-5. Remaining limitations
+
+- **Unidentifiable retired data blocks the account.** An unparseable v2 array (development builds only) makes eligibility of every request of the account unknowable; transmission is refused (`storage-unavailable`) until the account signs out and discards it.
+- **Storage unavailable = no new activity.** When IndexedDB or localStorage cannot be read, a new activity is neither kept nor sent; the user is told to try again (no direct-network fallback by design).
+- **Mixed versions.** A tab still running a pre-R9 build of this branch keeps its older behaviour until it reloads (gated rollout, §R5-4).
+- **Production → R8/R9 transition.** The released `offline_habit_queue` path is unchanged (still counted, never sent, byte-identical after sign-out; R4 L1/S1/S2, Chromium CH9). The assessor's Production-transition witness (`review-prod-transition.log`, 0 posts, 0 rows) is preserved; its probe script was not supplied, so it is not re-run here.
+- **Not device evidence:** jsdom with fake-indexeddb, real Chromium, the real Next.js production build.
+- R8-5 limitations otherwise unchanged.
 
 ---
 
@@ -828,7 +901,20 @@ RC-1…RC-8 as in R2, and RC-1 now also requires the activation plan (§R6.2).
 
 ## 13. Independent verification request
 
-### R8: focused verification (logical request lifecycle only)
+### R9: focused verification (lifecycle enforcement only)
+
+**Scope:** `2e32b91..<R9 final head>`; handover with checksums: `docs/android/AURA_ANDROID_REL_04_R9_VERIFICATION_HANDOVER.md`.
+
+**Questions:**
+1. Is there any path by which an activity is transmitted without a claim made in the same transaction that checks its decision and quarantine (including IndexedDB or localStorage failures)?
+2. Is every discard decision durable before any retired entry is removed, for localStorage-only, IndexedDB-only and mixed activities?
+3. Can a failed, interrupted or ambiguous discard remove a retired copy, unpause an active copy, or be reported as successful?
+4. Do Home and sign-out classify and count the same logical activities?
+5. Are healthy online and offline submission, and the closed R4–R8 findings, unaffected?
+
+**Not in scope:** findings already closed, activation, native acceptance, REL-05.
+
+### R8: focused verification (logical request lifecycle only) — historical
 
 **Scope:** `8e0a232..<R8 final head>`. Code: `apps/web/lib/offlineHabitQueue.ts`, the `settled`/`paused` handling in `activitySync.ts`, the quarantine discard and paused wording in `signOut.ts`, and the paused status in `apps/web/app/page.tsx`. Tests: `test/rel04R8LogicalLifecycle.test.ts`, `test/fixtures/rel04-r7-head`, the re-expressed checks listed in §R8-3, and N4 in `test/rel04R5NextAppRendering.test.ts`.
 

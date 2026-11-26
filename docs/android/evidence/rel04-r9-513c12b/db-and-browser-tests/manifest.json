@@ -1,0 +1,1026 @@
+{
+  "head": "513c12b6d9a824bbe86b3e63df12a3aede21ac8f",
+  "codeTreeClean": true,
+  "node": "v26.5.0",
+  "startedAt": "2026-11-26T12:05:11.349Z",
+  "jobs": [
+    "day-constructor-acceptance-db-tests",
+    "rel04-chromium-multitab",
+    "rel04-next-app-rendering"
+  ],
+  "extraEnvKeys": [
+    "DATABASE_URL"
+  ],
+  "commands": [
+    {
+      "n": 1,
+      "job": "rel04-chromium-multitab",
+      "name": "Run REL-04 Chromium multi-tab test",
+      "run": "npx ts-node test/rel04Chromium.test.ts",
+      "env": {},
+      "exit": 0,
+      "signal": null,
+      "ms": 31354,
+      "log": "logs/001-test_rel04Chromium.test.ts.log",
+      "logSha256": "a38194b2e3725e9273598f2276e9ad81a76c481a9f334268c0f6056e757b031a"
+    },
+    {
+      "n": 2,
+      "job": "rel04-next-app-rendering",
+      "name": "Run REL-04 Next.js app rendering test (builds the app)",
+      "run": "npx ts-node test/rel04R5NextAppRendering.test.ts",
+      "env": {},
+      "exit": 0,
+      "signal": null,
+      "ms": 37069,
+      "log": "logs/002-test_rel04R5NextAppRendering.test.ts.log",
+      "logSha256": "c921f33a61fe6c0d76296c08320f730e3ceed81b2b5b0e17a2f66590946e077a"
+    },
+    {
+      "n": 3,
+      "job": "day-constructor-acceptance-db-tests",
+      "name": "Run Day Constructor acceptance persistence DB tests",
+      "run": "npx ts-node test/dayConstructorAcceptancePersistenceDb.test.ts",
+      "env": {},
+      "exit": 0,
+      "signal": null,
+      "ms": 12884,
+      "log": "logs/003-test_dayConstructorAcceptancePersistenceDb.test.ts.log",
+      "logSha256": "55b8c10f220ce135098b14cae431bc0a9d863a9957804a671079178cf7862911"
+    },
+    {
+      "n": 4,
+      "job": "day-constructor-acceptance-db-tests",
+      "name": "Run plan goal-activity link DB test",
+      "run": "npx ts-node test/planGoalActivityLinkDb.test.ts",
+      "env": {},
+      "exit": 0,
+      "signal": null,
+      "ms": 4284,
+      "log": "logs/004-test_planGoalActivityLinkDb.test.ts.log",
+      "logSha256": "6411ee0a35a9630265506cb28fdcc2bfb5ae75249fb309f4958f9cfcb774c0ef"
+    },
+    {
+      "n": 5,
+      "job": "day-constructor-acceptance-db-tests",
+      "name": "Run plan goal-activity completion integrity DB test",
+      "run": "npx ts-node test/planGoalActivityCompletionIntegrityDb.test.ts",
+      "env": {},
+      "exit": 0,
+      "signal": null,
+      "ms": 3306,
+      "log": "logs/005-test_planGoalActivityCompletionIntegrityDb.test.ts.log",
+      "logSha256": "24c33a7173f164b20bf8f07daaa5cb35f38e0aae01d4bacfbaa3c19ed10d0608"
+    },
+    {
+      "n": 6,
+      "job": "day-constructor-acceptance-db-tests",
+      "name": "Run plan goal-activity archived lifecycle DB test",
+      "run": "npx ts-node test/planGoalActivityArchivedLifecycleDb.test.ts",
+      "env": {},
+      "exit": 0,
+      "signal": null,
+      "ms": 3931,
+      "log": "logs/006-test_planGoalActivityArchivedLifecycleDb.test.ts.log",
+      "logSha256": "bccbf720096d1f82a0e1c10b8842ede62a11a96e68130584ae102a8f5f09b187"
+    },
+    {
+      "n": 7,
+      "job": "day-constructor-acceptance-db-tests",
+      "name": "Run plan status preservation DB test",
+      "run": "npx ts-node test/planStatusPreservationDb.test.ts",
+      "env": {},
+      "exit": 0,
+      "signal": null,
+      "ms": 5303,
+      "log": "logs/007-test_planStatusPreservationDb.test.ts.log",
+      "logSha256": "fc607ba08923a115918748de289f783b79594c7c777e14ed5e9ec0eb0725edcd"
+    },
+    {
+      "n": 8,
+      "job": "day-constructor-acceptance-db-tests",
+      "name": "Run planned activity scheduling mode DB test",
+      "run": "npx ts-node test/plannedActivitySchedulingModeDb.test.ts",
+      "env": {},
+      "exit": 0,
+      "signal": null,
+      "ms": 6856,
+      "log": "logs/008-test_plannedActivitySchedulingModeDb.test.ts.log",
+      "logSha256": "5ff1845c82a8f020b1c8ec0bca69d5b27ec61b111b52e13e62c15bfe1e26b647"
+    },
+    {
+      "n": 9,
+      "job": "day-constructor-acceptance-db-tests",
+      "name": "Run Goal demand candidates DB test",
+      "run": "npx ts-node test/goalDemandCandidatesDb.test.ts",
+      "env": {},
+      "exit": 0,
+      "signal": null,
+      "ms": 15378,
+      "log": "logs/009-test_goalDemandCandidatesDb.test.ts.log",
+      "logSha256": "ed4f7e1f20561ff9c320432bc484295d6872bcafb6b0e6dc4c9c3affa3623a23"
+    },
+    {
+      "n": 10,
+      "job": "day-constructor-acceptance-db-tests",
+      "name": "Run HPG-FIX-01 daily occupancy DB test",
+      "run": "npx ts-node test/hpgFix01DailyOccupancyDb.test.ts",
+      "env": {},
+      "exit": 0,
+      "signal": null,
+      "ms": 3751,
+      "log": "logs/010-test_hpgFix01DailyOccupancyDb.test.ts.log",
+      "logSha256": "568f80e9d27306618c8c58e8804f8dcf8bbf3fe6887dfa1bc348683a7e860ac6"
+    },
+    {
+      "n": 11,
+      "job": "day-constructor-acceptance-db-tests",
+      "name": "Run Goal Rhythm weekly acceptance DB test",
+      "run": "npx ts-node test/goalRhythmWeeklyAcceptanceDb.test.ts",
+      "env": {},
+      "exit": 0,
+      "signal": null,
+      "ms": 14005,
+      "log": "logs/011-test_goalRhythmWeeklyAcceptanceDb.test.ts.log",
+      "logSha256": "4121d1514a54258cc9dfa9b66b4942b94af06e6797390656284020ffe4a4aa2d"
+    },
+    {
+      "n": 12,
+      "job": "day-constructor-acceptance-db-tests",
+      "name": "Run Weekly plan review client DB test",
+      "run": "npx ts-node test/weeklyPlanReviewClientDb.test.ts",
+      "env": {},
+      "exit": 0,
+      "signal": null,
+      "ms": 15801,
+      "log": "logs/012-test_weeklyPlanReviewClientDb.test.ts.log",
+      "logSha256": "7a847a375c8f64f09eac78013461cf1661371d965c34e2e553c7e44411296557"
+    },
+    {
+      "n": 13,
+      "job": "day-constructor-acceptance-db-tests",
+      "name": "Run Automatic Goal demand bootstrap DB test",
+      "run": "npx ts-node test/automaticGoalDemandBootstrapDb.test.ts",
+      "env": {},
+      "exit": 0,
+      "signal": null,
+      "ms": 12214,
+      "log": "logs/013-test_automaticGoalDemandBootstrapDb.test.ts.log",
+      "logSha256": "da643115e973a4203787892aca24b177d6fb8bd0d94c55ce5ad8c74f679e69f6"
+    },
+    {
+      "n": 14,
+      "job": "day-constructor-acceptance-db-tests",
+      "name": "Run Goal demand provenance authorization DB test",
+      "run": "npx ts-node test/goalDemandProvenanceAuthorizationDb.test.ts",
+      "env": {},
+      "exit": 0,
+      "signal": null,
+      "ms": 13416,
+      "log": "logs/014-test_goalDemandProvenanceAuthorizationDb.test.ts.log",
+      "logSha256": "0857b934ae1c2ac85a9c0d939386b3fa1b3e3dccc005074145df92ded2a20aef"
+    },
+    {
+      "n": 15,
+      "job": "day-constructor-acceptance-db-tests",
+      "name": "Run automatic Goal lifecycle closure DB test",
+      "run": "npx ts-node test/automaticGoalLifecycleClosureDb.test.ts",
+      "env": {},
+      "exit": 0,
+      "signal": null,
+      "ms": 15933,
+      "log": "logs/015-test_automaticGoalLifecycleClosureDb.test.ts.log",
+      "logSha256": "c1856c359555e810c8738f5511551c6aa2e50c18bfc4827d797e5ceecfd8b7b9"
+    },
+    {
+      "n": 16,
+      "job": "day-constructor-acceptance-db-tests",
+      "name": "Run Goals reviewed-create DB test",
+      "run": "npx ts-node test/goalsReviewedCreateDb.test.ts",
+      "env": {},
+      "exit": 0,
+      "signal": null,
+      "ms": 12383,
+      "log": "logs/016-test_goalsReviewedCreateDb.test.ts.log",
+      "logSha256": "f79030609f51514fa9bfba615b25b656b7e7469857f42dcb0e316fc4d7ddabc1"
+    },
+    {
+      "n": 17,
+      "job": "day-constructor-acceptance-db-tests",
+      "name": "Run Goals create idempotency DB test",
+      "run": "npx ts-node test/goalsCreateIdempotencyDb.test.ts",
+      "env": {},
+      "exit": 0,
+      "signal": null,
+      "ms": 12411,
+      "log": "logs/017-test_goalsCreateIdempotencyDb.test.ts.log",
+      "logSha256": "c440d276fcb520c552beec5419d7247599dd6358bf4dcfcc8e24214cce4f193f"
+    },
+    {
+      "n": 18,
+      "job": "day-constructor-acceptance-db-tests",
+      "name": "Run Goals DB test",
+      "run": "npx ts-node test/goalsDb.test.ts",
+      "env": {},
+      "exit": 0,
+      "signal": null,
+      "ms": 12007,
+      "log": "logs/018-test_goalsDb.test.ts.log",
+      "logSha256": "913708fd6ecb2908fe3db1bc210d457e11f14e461685568af5d020663c09e72e"
+    },
+    {
+      "n": 19,
+      "job": "day-constructor-acceptance-db-tests",
+      "name": "Run Goal planning handoff DB test",
+      "run": "npx ts-node test/goalPlanningHandoffDb.test.ts",
+      "env": {},
+      "exit": 0,
+      "signal": null,
+      "ms": 13294,
+      "log": "logs/019-test_goalPlanningHandoffDb.test.ts.log",
+      "logSha256": "845c22aed437f02c483e5c93f29f27b6a3efcca58f50699da02e2295b4d7535f"
+    },
+    {
+      "n": 20,
+      "job": "day-constructor-acceptance-db-tests",
+      "name": "Run Goal activity execution DB test",
+      "run": "npx ts-node test/goalActivityExecutionDb.test.ts",
+      "env": {},
+      "exit": 0,
+      "signal": null,
+      "ms": 12053,
+      "log": "logs/020-test_goalActivityExecutionDb.test.ts.log",
+      "logSha256": "a66345d11dfca33348680e4b64bbca3e82e9700ece3e04ff74cea6b709fe4f13"
+    },
+    {
+      "n": 21,
+      "job": "day-constructor-acceptance-db-tests",
+      "name": "Run Goal activity execution completion DB test",
+      "run": "npx ts-node test/goalActivityExecutionCompletionDb.test.ts",
+      "env": {},
+      "exit": 0,
+      "signal": null,
+      "ms": 12393,
+      "log": "logs/021-test_goalActivityExecutionCompletionDb.test.ts.log",
+      "logSha256": "17b1158d3cc99afc4dd33185183fe4a402b21030d6d0e6afd8178197356ef243"
+    },
+    {
+      "n": 22,
+      "job": "day-constructor-acceptance-db-tests",
+      "name": "Run Goal activity execution Move continuity DB test",
+      "run": "npx ts-node test/goalActivityExecutionMoveContinuityDb.test.ts",
+      "env": {},
+      "exit": 0,
+      "signal": null,
+      "ms": 12550,
+      "log": "logs/022-test_goalActivityExecutionMoveContinuityDb.test.ts.log",
+      "logSha256": "0d3d92420b1b94fe1e5a23bea3cc83b6dd54f73482d4c67e9d9d8795f0c3d129"
+    },
+    {
+      "n": 23,
+      "job": "day-constructor-acceptance-db-tests",
+      "name": "Run Goal activity occurrence DB test",
+      "run": "npx ts-node test/goalActivityOccurrenceDb.test.ts",
+      "env": {},
+      "exit": 0,
+      "signal": null,
+      "ms": 11844,
+      "log": "logs/023-test_goalActivityOccurrenceDb.test.ts.log",
+      "logSha256": "c3f23bca7576eae7a0b628aca4537cdcfc93677e71eed510e660f27835c597d7"
+    },
+    {
+      "n": 24,
+      "job": "day-constructor-acceptance-db-tests",
+      "name": "Run Goal activity rhythm DB test",
+      "run": "npx ts-node test/goalActivityRhythmDb.test.ts",
+      "env": {},
+      "exit": 0,
+      "signal": null,
+      "ms": 12214,
+      "log": "logs/024-test_goalActivityRhythmDb.test.ts.log",
+      "logSha256": "87e43ae5e9494609fabd7bc0d6459e7e172095bbecae3f8b8979b7fa03ae44fd"
+    },
+    {
+      "n": 25,
+      "job": "day-constructor-acceptance-db-tests",
+      "name": "Run Goal activity rhythm materialization DB test",
+      "run": "npx ts-node test/goalActivityRhythmMaterializationDb.test.ts",
+      "env": {},
+      "exit": 0,
+      "signal": null,
+      "ms": 13216,
+      "log": "logs/025-test_goalActivityRhythmMaterializationDb.test.ts.log",
+      "logSha256": "a53417edabde39d8c418ab77fb1e85626c1e5926de99863faea82d5cb92f06a5"
+    },
+    {
+      "n": 26,
+      "job": "day-constructor-acceptance-db-tests",
+      "name": "Run Goal activity rhythm Goal Detail DB test",
+      "run": "npx ts-node test/goalActivityRhythmGoalDetailDb.test.ts",
+      "env": {},
+      "exit": 0,
+      "signal": null,
+      "ms": 11542,
+      "log": "logs/026-test_goalActivityRhythmGoalDetailDb.test.ts.log",
+      "logSha256": "27791b729389e22a57643ed1e7f2ce5401d4938587ade233d2f513032013419d"
+    },
+    {
+      "n": 27,
+      "job": "day-constructor-acceptance-db-tests",
+      "name": "Run Goal activity rhythm setup DB test",
+      "run": "npx ts-node test/goalActivityRhythmSetupDb.test.ts",
+      "env": {},
+      "exit": 0,
+      "signal": null,
+      "ms": 13323,
+      "log": "logs/027-test_goalActivityRhythmSetupDb.test.ts.log",
+      "logSha256": "066aa57be3f067ad29e08ad6def5c77abc126b8e7f079d011bfddb89a1665bd5"
+    },
+    {
+      "n": 28,
+      "job": "day-constructor-acceptance-db-tests",
+      "name": "Run My Rhythm foundation DB test",
+      "run": "npx ts-node test/myRhythmFoundationDb.test.ts",
+      "env": {},
+      "exit": 0,
+      "signal": null,
+      "ms": 2143,
+      "log": "logs/028-test_myRhythmFoundationDb.test.ts.log",
+      "logSha256": "bfd37b27a9708ca6960b8e704fa8ab526cb2c17a7b67e35ac67992d2900bae23"
+    },
+    {
+      "n": 29,
+      "job": "day-constructor-acceptance-db-tests",
+      "name": "Run My Rhythm scheduling DB test",
+      "run": "npx ts-node test/myRhythmSchedulingDb.test.ts",
+      "env": {},
+      "exit": 0,
+      "signal": null,
+      "ms": 4096,
+      "log": "logs/029-test_myRhythmSchedulingDb.test.ts.log",
+      "logSha256": "b865ed49d392ae694a27a23b0aa2fd7114303ac81daab676c3c6314153c538b9"
+    },
+    {
+      "n": 30,
+      "job": "day-constructor-acceptance-db-tests",
+      "name": "Run MR3 My Rhythm preferences UI DB test",
+      "run": "npx ts-node test/myRhythmPreferencesUiDb.test.ts",
+      "env": {},
+      "exit": 0,
+      "signal": null,
+      "ms": 3175,
+      "log": "logs/030-test_myRhythmPreferencesUiDb.test.ts.log",
+      "logSha256": "14985cd8d5247dfac7511a2cab46aee693b53de249024a5874cdddaf75d5e7fe"
+    },
+    {
+      "n": 31,
+      "job": "day-constructor-acceptance-db-tests",
+      "name": "Run REM-01 reminder reliability DB test",
+      "run": "npx ts-node test/reminderReliabilityDb.test.ts",
+      "env": {},
+      "exit": 0,
+      "signal": null,
+      "ms": 2753,
+      "log": "logs/031-test_reminderReliabilityDb.test.ts.log",
+      "logSha256": "94639d8f06f950fbb64ab022c362fcd4e6868ee7ab16695cea834217854f2f9c"
+    },
+    {
+      "n": 32,
+      "job": "day-constructor-acceptance-db-tests",
+      "name": "Run reminder delivery DB test",
+      "run": "npx ts-node test/reminderDeliveryDb.test.ts",
+      "env": {},
+      "exit": 0,
+      "signal": null,
+      "ms": 1716,
+      "log": "logs/032-test_reminderDeliveryDb.test.ts.log",
+      "logSha256": "77ede55995b426720b21a575173e82c507b4514ec03f10a45bb80624789321bb"
+    },
+    {
+      "n": 33,
+      "job": "day-constructor-acceptance-db-tests",
+      "name": "Run reminder delivery claim DB test",
+      "run": "npx ts-node test/reminderDeliveryClaimDb.test.ts",
+      "env": {},
+      "exit": 0,
+      "signal": null,
+      "ms": 2477,
+      "log": "logs/033-test_reminderDeliveryClaimDb.test.ts.log",
+      "logSha256": "efead91b26a8456b163bb2fd114358a4f88b1e9ea01f6fceb32b012afe378e8c"
+    },
+    {
+      "n": 34,
+      "job": "day-constructor-acceptance-db-tests",
+      "name": "Run push subscriptions DB test",
+      "run": "npx ts-node test/pushSubscriptionsDb.test.ts",
+      "env": {},
+      "exit": 0,
+      "signal": null,
+      "ms": 1643,
+      "log": "logs/034-test_pushSubscriptionsDb.test.ts.log",
+      "logSha256": "aa71fc64c7648a4e6ea9ae8605f32a7049df4d6064449d7f732661f1d722b56b"
+    },
+    {
+      "n": 35,
+      "job": "day-constructor-acceptance-db-tests",
+      "name": "Run reminder attention DB test",
+      "run": "npx ts-node test/reminderAttentionDb.test.ts",
+      "env": {},
+      "exit": 0,
+      "signal": null,
+      "ms": 1329,
+      "log": "logs/035-test_reminderAttentionDb.test.ts.log",
+      "logSha256": "a3d9df6056f340c064f6eba5e71603349ee96884c1e4d3e37d14cf55380b5310"
+    },
+    {
+      "n": 36,
+      "job": "day-constructor-acceptance-db-tests",
+      "name": "Run Goal context DB test",
+      "run": "npx ts-node test/goalContextDb.test.ts",
+      "env": {},
+      "exit": 0,
+      "signal": null,
+      "ms": 11888,
+      "log": "logs/036-test_goalContextDb.test.ts.log",
+      "logSha256": "09f516bb5a493bab8a504e51e63227fec71958efbeb1da804bc382d00fb6b4db"
+    },
+    {
+      "n": 37,
+      "job": "day-constructor-acceptance-db-tests",
+      "name": "Run Goal template completion DB test",
+      "run": "npx ts-node test/goalTemplateCompletionDb.test.ts",
+      "env": {},
+      "exit": 0,
+      "signal": null,
+      "ms": 11337,
+      "log": "logs/037-test_goalTemplateCompletionDb.test.ts.log",
+      "logSha256": "4ecdc51eb77154929d6757db2405fbd451bdfc1bfb546a9bc19945b35fca9daf"
+    },
+    {
+      "n": 38,
+      "job": "day-constructor-acceptance-db-tests",
+      "name": "Run Goal-aware Recomposition presentation DB test",
+      "run": "npx ts-node test/goalAwareRecompositionPresentationDb.test.ts",
+      "env": {},
+      "exit": 0,
+      "signal": null,
+      "ms": 12168,
+      "log": "logs/038-test_goalAwareRecompositionPresentationDb.test.ts.log",
+      "logSha256": "e4080c2f34acf390860933fc03f423a9df5d7c461f7573e7cbe8cd64ea3ef6e5"
+    },
+    {
+      "n": 39,
+      "job": "day-constructor-acceptance-db-tests",
+      "name": "Run Scheduling eligibility UI presentation DB test",
+      "run": "npx ts-node test/schedulingEligibilityUiPresentationDb.test.ts",
+      "env": {},
+      "exit": 0,
+      "signal": null,
+      "ms": 12188,
+      "log": "logs/039-test_schedulingEligibilityUiPresentationDb.test.ts.log",
+      "logSha256": "023e76382009f266879fe482677a35e1da05726e9cfef6d12b25737fd8cd9a54"
+    },
+    {
+      "n": 40,
+      "job": "day-constructor-acceptance-db-tests",
+      "name": "Run Goal decomposition planning handoff DB test",
+      "run": "npx ts-node test/goalDecompositionPlanningHandoffDb.test.ts",
+      "env": {
+        "TS_NODE_COMPILER_OPTIONS": "{\"jsx\":\"react\"}"
+      },
+      "exit": 0,
+      "signal": null,
+      "ms": 12365,
+      "log": "logs/040-test_goalDecompositionPlanningHandoffDb.test.ts.log",
+      "logSha256": "17f180b43d8f12d3e6cf392f31ae954ef1040dbfb2e4ddd7040a12bf42bdaec1"
+    },
+    {
+      "n": 41,
+      "job": "day-constructor-acceptance-db-tests",
+      "name": "Run Goal create replay ordering DB test",
+      "run": "npx ts-node test/goalCreateReplayOrderingDb.test.ts",
+      "env": {},
+      "exit": 0,
+      "signal": null,
+      "ms": 3335,
+      "log": "logs/041-test_goalCreateReplayOrderingDb.test.ts.log",
+      "logSha256": "bb284f4f5150c9bb286b1d98a3afeb3a6ec00ca0d3f49e99e0ccc6fb049e8273"
+    },
+    {
+      "n": 42,
+      "job": "day-constructor-acceptance-db-tests",
+      "name": "Run Decision Facts V1 threading DB test",
+      "run": "npx ts-node test/decisionFactsThreadingDb.test.ts",
+      "env": {},
+      "exit": 0,
+      "signal": null,
+      "ms": 13282,
+      "log": "logs/042-test_decisionFactsThreadingDb.test.ts.log",
+      "logSha256": "9701ac49230c782121187c8a60c21d71d55330bbbd35d570adfaa1cf73357560"
+    },
+    {
+      "n": 43,
+      "job": "day-constructor-acceptance-db-tests",
+      "name": "Run opportunity range adapter DB test",
+      "run": "npx ts-node test/opportunityRangeAdapterDb.test.ts",
+      "env": {},
+      "exit": 0,
+      "signal": null,
+      "ms": 11869,
+      "log": "logs/043-test_opportunityRangeAdapterDb.test.ts.log",
+      "logSha256": "2b3bf2de7a53a55844b61980cf711ad7fa6d1f43b6ff7e768d07678b9c038b7d"
+    },
+    {
+      "n": 44,
+      "job": "day-constructor-acceptance-db-tests",
+      "name": "Run opportunity decision facts DB test",
+      "run": "npx ts-node test/opportunityDecisionFactsDb.test.ts",
+      "env": {},
+      "exit": 0,
+      "signal": null,
+      "ms": 16456,
+      "log": "logs/044-test_opportunityDecisionFactsDb.test.ts.log",
+      "logSha256": "a904b641c61b585453d8f354ed43d1dd8461890151d48d6088d6d1f3a459734e"
+    },
+    {
+      "n": 45,
+      "job": "day-constructor-acceptance-db-tests",
+      "name": "Run manual Goal provenance parity DB test",
+      "run": "npx ts-node test/manualGoalProvenanceParityDb.test.ts",
+      "env": {},
+      "exit": 0,
+      "signal": null,
+      "ms": 13034,
+      "log": "logs/045-test_manualGoalProvenanceParityDb.test.ts.log",
+      "logSha256": "ae1ff7687ed986326d75f3a4df191524eb1a25a307f394824104b606e8b83ac7"
+    },
+    {
+      "n": 46,
+      "job": "day-constructor-acceptance-db-tests",
+      "name": "Run opportunity fact quality DB test",
+      "run": "npx ts-node test/opportunityFactQualityDb.test.ts",
+      "env": {},
+      "exit": 0,
+      "signal": null,
+      "ms": 13190,
+      "log": "logs/046-test_opportunityFactQualityDb.test.ts.log",
+      "logSha256": "edf22b5ca5474dd6c90413dd3e3e99401e34bfbd2e977e9a149c60caee6e8d54"
+    },
+    {
+      "n": 47,
+      "job": "day-constructor-acceptance-db-tests",
+      "name": "Run Goal lifecycle archived-acceptance DB test",
+      "run": "npx ts-node test/goalLifecycleArchivedAcceptanceDb.test.ts",
+      "env": {},
+      "exit": 0,
+      "signal": null,
+      "ms": 14890,
+      "log": "logs/047-test_goalLifecycleArchivedAcceptanceDb.test.ts.log",
+      "logSha256": "04d04116ff04c1c722d7ab4792cd45cd1bc083f58745b83d6967660f1fd7a537"
+    },
+    {
+      "n": 48,
+      "job": "day-constructor-acceptance-db-tests",
+      "name": "Run Constructor overload decision DB test",
+      "run": "npx ts-node test/dayConstructorOverloadDecisionDb.test.ts",
+      "env": {},
+      "exit": 0,
+      "signal": null,
+      "ms": 15798,
+      "log": "logs/048-test_dayConstructorOverloadDecisionDb.test.ts.log",
+      "logSha256": "ae6b1eace7582a04ac2e2e38ce0f1ed9fe1823bb238f25da75f3f1b3ac359fda"
+    },
+    {
+      "n": 49,
+      "job": "day-constructor-acceptance-db-tests",
+      "name": "Run decision fact preparation DB test",
+      "run": "npx ts-node test/decisionFactPreparationDb.test.ts",
+      "env": {},
+      "exit": 0,
+      "signal": null,
+      "ms": 14033,
+      "log": "logs/049-test_decisionFactPreparationDb.test.ts.log",
+      "logSha256": "fe1d369f5568750ab63e6aabbfe304e80a4cd4af0bd392c1366d8bdccc94f1f7"
+    },
+    {
+      "n": 50,
+      "job": "day-constructor-acceptance-db-tests",
+      "name": "Run decision evidence DB test",
+      "run": "npx ts-node test/decisionEvidenceDb.test.ts",
+      "env": {},
+      "exit": 0,
+      "signal": null,
+      "ms": 2877,
+      "log": "logs/050-test_decisionEvidenceDb.test.ts.log",
+      "logSha256": "745cd97348819ab0929a2a283e5d2366cd6e6bc5e60ce827a20f7dc4f659fdda"
+    },
+    {
+      "n": 51,
+      "job": "day-constructor-acceptance-db-tests",
+      "name": "Run decision pressure DB test",
+      "run": "npx ts-node test/decisionPressureDb.test.ts",
+      "env": {},
+      "exit": 0,
+      "signal": null,
+      "ms": 2059,
+      "log": "logs/051-test_decisionPressureDb.test.ts.log",
+      "logSha256": "153103f6d73f5721981b30dc73beecf9a743ade3a6277dc41bad2a4fa2ac4e2f"
+    },
+    {
+      "n": 52,
+      "job": "day-constructor-acceptance-db-tests",
+      "name": "Run decision pressure reachability DB test",
+      "run": "npx ts-node test/decisionPressureReachabilityDb.test.ts",
+      "env": {},
+      "exit": 0,
+      "signal": null,
+      "ms": 6256,
+      "log": "logs/052-test_decisionPressureReachabilityDb.test.ts.log",
+      "logSha256": "940628b1605f54c73cb09234e4271b726c5c7dc9dc100a7a0620eeffeb2d82d0"
+    },
+    {
+      "n": 53,
+      "job": "day-constructor-acceptance-db-tests",
+      "name": "Run decision scheduling snapshot DB test",
+      "run": "npx ts-node test/decisionSchedulingSnapshotDb.test.ts",
+      "env": {},
+      "exit": 0,
+      "signal": null,
+      "ms": 3975,
+      "log": "logs/053-test_decisionSchedulingSnapshotDb.test.ts.log",
+      "logSha256": "dc16f0a20e5d83ba0f77dd4a92786df8deda13825ed1ac4518db1be8d3909bde"
+    },
+    {
+      "n": 54,
+      "job": "day-constructor-acceptance-db-tests",
+      "name": "Run shadow policy execution DB test",
+      "run": "npx ts-node test/shadowPolicyExecutionDb.test.ts",
+      "env": {},
+      "exit": 0,
+      "signal": null,
+      "ms": 10494,
+      "log": "logs/054-test_shadowPolicyExecutionDb.test.ts.log",
+      "logSha256": "79226941134dc76de1e2702fbd57cdcfa912508cbe9d7cc2efcc4b710e909eb5"
+    },
+    {
+      "n": 55,
+      "job": "day-constructor-acceptance-db-tests",
+      "name": "Run active result materializer DB test",
+      "run": "npx ts-node test/activeResultMaterializerDb.test.ts",
+      "env": {},
+      "exit": 0,
+      "signal": null,
+      "ms": 18112,
+      "log": "logs/055-test_activeResultMaterializerDb.test.ts.log",
+      "logSha256": "c64361418b6d7f0dd211199f714027b6fbb32aeefe85e0e6e27880e470d86d6f"
+    },
+    {
+      "n": 56,
+      "job": "day-constructor-acceptance-db-tests",
+      "name": "Run shadow rollout R3 preview review DB test",
+      "run": "npx ts-node test/shadowRolloutR3PreviewReviewDb.test.ts",
+      "env": {},
+      "exit": 0,
+      "signal": null,
+      "ms": 2393,
+      "log": "logs/056-test_shadowRolloutR3PreviewReviewDb.test.ts.log",
+      "logSha256": "82f30726c35d286bbeb053115daf9840a51343c5a7c810ae3b8d4fb266c4b693"
+    },
+    {
+      "n": 57,
+      "job": "day-constructor-acceptance-db-tests",
+      "name": "Run birth date writers DB test",
+      "run": "npx ts-node test/birthDateWritersDb.test.ts",
+      "env": {},
+      "exit": 0,
+      "signal": null,
+      "ms": 16106,
+      "log": "logs/057-test_birthDateWritersDb.test.ts.log",
+      "logSha256": "e708e64d39d10fdf25b49b4d38620c165ea7f616740536052d25fd76b25de6a0"
+    },
+    {
+      "n": 58,
+      "job": "day-constructor-acceptance-db-tests",
+      "name": "Run Constructor overlapping blocker DB test",
+      "run": "npx ts-node test/dayConstructorOverlappingBlockerDb.test.ts",
+      "env": {},
+      "exit": 0,
+      "signal": null,
+      "ms": 12814,
+      "log": "logs/058-test_dayConstructorOverlappingBlockerDb.test.ts.log",
+      "logSha256": "991b5d891a015ab31f925f0cbe906c21665fa5c1d9585a2ccc207007bb8dbdfe"
+    },
+    {
+      "n": 59,
+      "job": "day-constructor-acceptance-db-tests",
+      "name": "Run acceptance fresh-overlap DB test",
+      "run": "npx ts-node test/dayConstructorAcceptanceFreshOverlapDb.test.ts",
+      "env": {},
+      "exit": 0,
+      "signal": null,
+      "ms": 12717,
+      "log": "logs/059-test_dayConstructorAcceptanceFreshOverlapDb.test.ts.log",
+      "logSha256": "d728df174278dc8e78e0c42364da16434e2218d2272e63303f0ff3ae154f9c3d"
+    },
+    {
+      "n": 60,
+      "job": "day-constructor-acceptance-db-tests",
+      "name": "Run Day Constructor preview-item DB test",
+      "run": "npx ts-node test/dayConstructorPreviewItemDb.test.ts",
+      "env": {},
+      "exit": 1,
+      "signal": null,
+      "ms": 2801,
+      "log": "logs/060-test_dayConstructorPreviewItemDb.test.ts.log",
+      "logSha256": "fa859b42f0c5a4fc40a5277edc87c2f855df880ca377f38327d63e2602ba8da7"
+    },
+    {
+      "n": 61,
+      "job": "day-constructor-acceptance-db-tests",
+      "name": "Run manual writer serialization DB test",
+      "run": "npx ts-node test/scheduleWriteManualSerializationDb.test.ts",
+      "env": {},
+      "exit": 0,
+      "signal": null,
+      "ms": 14943,
+      "log": "logs/061-test_scheduleWriteManualSerializationDb.test.ts.log",
+      "logSha256": "0f9252b917775e177784065ceec848a426fec6e34e8bd50d2d2b38b42c58ba8e"
+    },
+    {
+      "n": 62,
+      "job": "day-constructor-acceptance-db-tests",
+      "name": "Run Find a Time constraints DB test (HPG5-V2-I1)",
+      "run": "npx ts-node test/findATimeConstraintsDb.test.ts",
+      "env": {
+        "TS_NODE_COMPILER_OPTIONS": "{\"jsx\":\"react\"}"
+      },
+      "exit": 0,
+      "signal": null,
+      "ms": 2500,
+      "log": "logs/062-test_findATimeConstraintsDb.test.ts.log",
+      "logSha256": "286fc7c413075f51916c194e5aec7ebd364b295ec32620b17ae72507914e42aa"
+    },
+    {
+      "n": 63,
+      "job": "day-constructor-acceptance-db-tests",
+      "name": "Run My Day save protection DB test (HPG5-V2-I2)",
+      "run": "npx ts-node test/hpg5I2MyDaySaveDb.test.ts",
+      "env": {
+        "TS_NODE_COMPILER_OPTIONS": "{\"jsx\":\"react\"}"
+      },
+      "exit": 0,
+      "signal": null,
+      "ms": 3084,
+      "log": "logs/063-test_hpg5I2MyDaySaveDb.test.ts.log",
+      "logSha256": "c2d8f51c898cfbb05a1051261554cf2e6e378aa2c8d9bffddf62e8b6371ed366"
+    },
+    {
+      "n": 64,
+      "job": "day-constructor-acceptance-db-tests",
+      "name": "Run Home save protection DB test (HPG5-V2-I3)",
+      "run": "npx ts-node test/hpg5I3HomeSaveDb.test.ts",
+      "env": {
+        "TS_NODE_COMPILER_OPTIONS": "{\"jsx\":\"react\"}"
+      },
+      "exit": 0,
+      "signal": null,
+      "ms": 4328,
+      "log": "logs/064-test_hpg5I3HomeSaveDb.test.ts.log",
+      "logSha256": "f4838a51895d2c44f2f45661f9b3308449701e23b0dfa5ff332a7a62160200c2"
+    },
+    {
+      "n": 65,
+      "job": "day-constructor-acceptance-db-tests",
+      "name": "Run sign-in rate-limit concurrency DB test (AURA-AUTH-01)",
+      "run": "npx ts-node test/authRequestLinkQuotaDb.test.ts",
+      "env": {
+        "TS_NODE_COMPILER_OPTIONS": "{\"jsx\":\"react\"}"
+      },
+      "exit": 0,
+      "signal": null,
+      "ms": 2927,
+      "log": "logs/065-test_authRequestLinkQuotaDb.test.ts.log",
+      "logSha256": "579f01e79a175375fac673ab3dedf922dc3b458563b7fa01a553592ef7991a62"
+    },
+    {
+      "n": 66,
+      "job": "day-constructor-acceptance-db-tests",
+      "name": "Run sign-in log redaction DB test (AURA-SEC-01)",
+      "run": "npx ts-node test/authLogRedactionDb.test.ts",
+      "env": {
+        "TS_NODE_COMPILER_OPTIONS": "{\"jsx\":\"react\"}"
+      },
+      "exit": 0,
+      "signal": null,
+      "ms": 1700,
+      "log": "logs/066-test_authLogRedactionDb.test.ts.log",
+      "logSha256": "8d95ca7844a14e72700a8a9b96ddd4aad1e1864782e336475cd65ad24d690d77"
+    },
+    {
+      "n": 67,
+      "job": "day-constructor-acceptance-db-tests",
+      "name": "Run Recomposition proposal overlap DB test",
+      "run": "npx ts-node test/remainingDayRecompositionProposalOverlapDb.test.ts",
+      "env": {},
+      "exit": 0,
+      "signal": null,
+      "ms": 4703,
+      "log": "logs/067-test_remainingDayRecompositionProposalOverlapDb.test.ts.log",
+      "logSha256": "70086f5c91480cd9fdebd6af5b502e7d8340eeba9b7e6850c734fcc9467ef638"
+    },
+    {
+      "n": 68,
+      "job": "day-constructor-acceptance-db-tests",
+      "name": "Run Forward Planner overlap blocker DB test",
+      "run": "npx ts-node test/forwardPlannerOverlapBlockerDb.test.ts",
+      "env": {},
+      "exit": 0,
+      "signal": null,
+      "ms": 6445,
+      "log": "logs/068-test_forwardPlannerOverlapBlockerDb.test.ts.log",
+      "logSha256": "ad73661015f3f588a36a32e7f4690e132dfcda8ba996c4fb8de08700fe79536d"
+    },
+    {
+      "n": 69,
+      "job": "day-constructor-acceptance-db-tests",
+      "name": "Run magic-link local-only DB test (AURA-AUTH-02)",
+      "run": "npx ts-node test/authMagicLinkLocalOnlyDb.test.ts",
+      "env": {
+        "TS_NODE_COMPILER_OPTIONS": "{\"jsx\":\"react\"}"
+      },
+      "exit": 0,
+      "signal": null,
+      "ms": 2044,
+      "log": "logs/069-test_authMagicLinkLocalOnlyDb.test.ts.log",
+      "logSha256": "b11c28a4db05608f6b138a0e80590ee03c1f9d59b9dad05633c50fb789b28272"
+    },
+    {
+      "n": 70,
+      "job": "day-constructor-acceptance-db-tests",
+      "name": "Run scheduling eligibility error contract DB test",
+      "run": "npx ts-node test/schedulingEligibilityErrorContractDb.test.ts",
+      "env": {},
+      "exit": 0,
+      "signal": null,
+      "ms": 3117,
+      "log": "logs/070-test_schedulingEligibilityErrorContractDb.test.ts.log",
+      "logSha256": "d3c3eeb74d1082eb0a55a50a37df5a93cd17b6d4f7a2997d5b5e3da383bffbc3"
+    },
+    {
+      "n": 71,
+      "job": "day-constructor-acceptance-db-tests",
+      "name": "Run Goal activity daily occurrence eligibility DB test",
+      "run": "npx ts-node test/goalActivityDailyOccurrenceEligibilityDb.test.ts",
+      "env": {},
+      "exit": 0,
+      "signal": null,
+      "ms": 2782,
+      "log": "logs/071-test_goalActivityDailyOccurrenceEligibilityDb.test.ts.log",
+      "logSha256": "dd098c5d7887730cecb1e2f96c2bf7cb747ec94a491f657954372b51fbd1e619"
+    },
+    {
+      "n": 72,
+      "job": "day-constructor-acceptance-db-tests",
+      "name": "Run multi-occurrence Rhythm Move capacity DB test",
+      "run": "npx ts-node test/multiOccurrenceRhythmMoveCapacityDb.test.ts",
+      "env": {},
+      "exit": 0,
+      "signal": null,
+      "ms": 13327,
+      "log": "logs/072-test_multiOccurrenceRhythmMoveCapacityDb.test.ts.log",
+      "logSha256": "38962be947470fb9271c31afbd369cfc92b7db66119222a3831a3dc4b07f6782"
+    },
+    {
+      "n": 73,
+      "job": "day-constructor-acceptance-db-tests",
+      "name": "Run Home Move DB test",
+      "run": "npx ts-node test/homeMoveDb.test.ts",
+      "env": {},
+      "exit": 0,
+      "signal": null,
+      "ms": 2665,
+      "log": "logs/073-test_homeMoveDb.test.ts.log",
+      "logSha256": "f430deb908e1893e1c68d464347d9b26158c94b704f5e163a7e501cafabf8d36"
+    },
+    {
+      "n": 74,
+      "job": "day-constructor-acceptance-db-tests",
+      "name": "Run Home Skip DB test",
+      "run": "npx ts-node test/homeSkipDb.test.ts",
+      "env": {},
+      "exit": 0,
+      "signal": null,
+      "ms": 3802,
+      "log": "logs/074-test_homeSkipDb.test.ts.log",
+      "logSha256": "5d5ffad9f1c171f29b45d06a142690331ddeecde3f063eb07c4d370d51811bfa"
+    },
+    {
+      "n": 75,
+      "job": "day-constructor-acceptance-db-tests",
+      "name": "Run Missed recovery DB test",
+      "run": "npx ts-node test/missedRecoveryDb.test.ts",
+      "env": {},
+      "exit": 0,
+      "signal": null,
+      "ms": 5943,
+      "log": "logs/075-test_missedRecoveryDb.test.ts.log",
+      "logSha256": "31fa19fdb0dcf2b49b0d718216d976cb8bef991038f00aeff4e2d10c1764bb40"
+    },
+    {
+      "n": 76,
+      "job": "day-constructor-acceptance-db-tests",
+      "name": "Run Skip planned activity DB test",
+      "run": "npx ts-node test/skipPlannedActivityDb.test.ts",
+      "env": {},
+      "exit": 0,
+      "signal": null,
+      "ms": 3521,
+      "log": "logs/076-test_skipPlannedActivityDb.test.ts.log",
+      "logSha256": "b554145e04eeb5881d8d9379a3ff74f128f49883879669a0c03690b68b034671"
+    },
+    {
+      "n": 77,
+      "job": "day-constructor-acceptance-db-tests",
+      "name": "Run Recomposition error propagation DB test",
+      "run": "npx ts-node test/remainingDayRecompositionErrorPropagationDb.test.ts",
+      "env": {},
+      "exit": 0,
+      "signal": null,
+      "ms": 12633,
+      "log": "logs/077-test_remainingDayRecompositionErrorPropagationDb.test.ts.log",
+      "logSha256": "627500dcfb7352637648e2a5226c15048645e399996808dfc81f3906e328ccc8"
+    },
+    {
+      "n": 78,
+      "job": "day-constructor-acceptance-db-tests",
+      "name": "Run Daily Guidance orchestrator DB test",
+      "run": "npx ts-node test/dailyGuidanceOrchestratorDb.test.ts",
+      "env": {},
+      "exit": 0,
+      "signal": null,
+      "ms": 15509,
+      "log": "logs/078-test_dailyGuidanceOrchestratorDb.test.ts.log",
+      "logSha256": "ef2d7c8c1d621b1f7fdff423f36c756153dee1f771bab3213f910ef3e6ce0a29"
+    }
+  ],
+  "skipped": [
+    {
+      "job": "rel04-chromium-multitab",
+      "name": "Install root deps",
+      "run": "npm install"
+    },
+    {
+      "job": "rel04-chromium-multitab",
+      "name": "Install web deps",
+      "run": "npm install"
+    },
+    {
+      "job": "rel04-chromium-multitab",
+      "name": "Install Chromium for Playwright",
+      "run": "npx playwright install --with-deps chromium"
+    },
+    {
+      "job": "rel04-next-app-rendering",
+      "name": "Install root deps",
+      "run": "npm install"
+    },
+    {
+      "job": "rel04-next-app-rendering",
+      "name": "Install web deps",
+      "run": "npm install"
+    },
+    {
+      "job": "rel04-next-app-rendering",
+      "name": "Apply the complete migration chain to a fresh database",
+      "run": "npx prisma migrate deploy"
+    },
+    {
+      "job": "rel04-next-app-rendering",
+      "name": "Install Chromium for Playwright",
+      "run": "npx playwright install --with-deps chromium"
+    },
+    {
+      "job": "day-constructor-acceptance-db-tests",
+      "name": "Install root deps",
+      "run": "npm install"
+    },
+    {
+      "job": "day-constructor-acceptance-db-tests",
+      "name": "Install web deps",
+      "run": "npm install"
+    },
+    {
+      "job": "day-constructor-acceptance-db-tests",
+      "name": "Apply the complete migration chain to a fresh database",
+      "run": "npx prisma migrate deploy"
+    }
+  ],
+  "finishedAt": "2026-11-26T12:17:27.848Z",
+  "summary": {
+    "run": 78,
+    "passed": 77,
+    "failed": [
+      "60 npx ts-node test/dayConstructorPreviewItemDb.test.ts"
+    ]
+  }
+}

@@ -1,0 +1,98 @@
+$ npx ts-node test/opportunityProjection.test.ts
+# job=math-core-tests step=Run opportunity projection test env={}
+OK   A. five known days each with a duration-fit span -> viableDays 5, unknownDays 0, coverage COMPLETE
+OK   B. two viable days in the horizon -> viableDays 2 (others known infeasible, not unknown)
+OK   C. one viable day -> viableDays 1 (a plain count: no shortfall/at-risk concept exists)
+OK   C. the output has no evaluative field: exactly the six original facts plus the four additive first-day/after-first-day facts (P0b)
+OK   D. unknown days stay visible in the aggregate (explicit UNKNOWN and absent entry both count)
+OK   D. an unknown day is never converted to known infeasible; a known-empty day is never unknown
+OK   CONFIGURED_EMPTY: a known day with zero windows is KNOWN_INFEASIBLE, not UNKNOWN
+OK   PARTIAL: 4 evaluated, 2 feasible, 1 known infeasible, 1 unknown
+OK   PARTIAL: known infeasible count is derivable (4 - 2 - 1 = 1)
+OK   lower-bound semantics: true viable lies within [viableDays, viableDays + unknownDays] = [2, 3]
+OK   ALL UNKNOWN: viableDays 0, unknownDays = evaluatedDays, coverage UNKNOWN
+OK   ALL UNKNOWN: every day is UNKNOWN, never KNOWN_INFEASIBLE (zero here does not mean zero true opportunities)
+OK   G. duration exceeds every known span -> viableDays 0, unknownDays 0, coverage COMPLETE (factual zero under known data)
+OK   E. today is the only supplied day and feasible -> viableDays 1 (a count; no "last chance" notion)
+OK   F. today blocked, tomorrow feasible -> today KNOWN_INFEASIBLE, tomorrow KNOWN_FEASIBLE, viableDays 1
+OK   H (replacement). a generic blocker consuming a future window changes feasibility (1 -> 0) with no Goal/Rhythm concept
+OK   clip: now before the window -> whole window usable (feasible)
+OK   clip: now inside the window leaves 15 minutes of a needed 30 -> infeasible
+OK   clip: window 09:00-11:00 with now 09:45 leaves 75 minutes -> feasible
+OK   clip: now after the window -> infeasible
+OK   clip: exactly 30 minutes remain (now 09:30) -> feasible
+OK   clip: future days are not clipped by now
+OK   fragment: exactly-fitting span (30 in 30) -> feasible
+OK   fragment: one-minute-too-short span (29 for 30) -> infeasible
+OK   fragment: two windows 09:00-09:20 + 17:00-17:20 (40 free minutes total) -> infeasible for 30
+OK   fragment: blocker 09:30-10:00 on 09:00-10:00 leaves a 30-minute span -> feasible
+OK   fragment: blocker 09:20-09:40 splits 09:00-10:00 into 20 + 20 -> infeasible
+OK   fragment: overlapping blockers are merged (no double subtraction): 09:10-09:20 + 09:15-09:25 leave 09:25-10:00 = 35 -> feasible
+OK   fragment: adjacent blockers behave as one stretch: 09:00-09:30 + 09:30-09:50 leave 09:50-10:00 -> infeasible
+OK   fragment: multiple blockers splitting a window: 09:00-12:00 with blockers 09:30-10:00 and 11:00-11:30 leaves 60,60,30 -> feasible for 60
+OK   fragment: same window, duration 61 -> infeasible
+OK   fragment: touching availability windows form one contiguous span (09:00-09:20 + 09:20-09:50 fit 45)
+OK   fragment: overlapping/duplicate/unsorted availability windows are merged, not double-counted
+OK   boundary: blocker ending exactly at availability start has no effect
+OK   boundary: blocker starting exactly at availability end has no effect
+OK   boundary: blocker exactly consuming the window -> infeasible
+OK   boundary: duration exactly equal to the remaining span -> feasible
+OK   boundary: blocker entirely outside the supplied availability does not matter
+OK   boundary: blocker overhanging the window start is clipped (08:00-09:40 leaves 09:40-10:00 = 20 -> infeasible)
+OK   boundary: a zero-length blocker is ignored
+OK   horizon: single-day horizon evaluates exactly one day and ignores out-of-horizon entries
+OK   horizon: multi-day horizon end is INCLUSIVE and no further period is inferred (10-10 is feasible but not counted)
+OK   horizon: month boundary handled by civil-date stepping (8 days)
+OK   horizon: reversed horizon is a typed validation failure (never silently swapped)
+OK   horizon: an invalid civil date is a typed failure
+OK   horizon: an absurdly long range fails closed instead of looping
+OK   horizon: a range of exactly the maximum length (366 days) is accepted and one day more is rejected
+OK   invalid duration: 0, negative, fractional, > 1440, NaN are typed failures
+OK   valid duration bounds: 1 and 1440 are accepted
+OK   invalid timezone: unknown IANA name and blank are typed failures
+OK   invalid now: an invalid Date is a typed failure
+OK   malformed blocker (end before start) is a typed failure, not silently ignored
+OK   malformed availability window is a typed failure, not treated as unknown/empty
+OK   a malformed window on an out-of-horizon date is ignored (never evaluated)
+OK   timezone: Asia/Kolkata treats 2026-10-07 as today and clips -> 180 minutes left -> infeasible for 210
+OK   timezone: America/Los_Angeles treats 2026-10-07 as a future day (not clipped) -> 240 minutes -> feasible for 210
+OK   process timezone: identical output under three different process TZ settings
+OK   DST (canonical conversion cross-check, spring): 01:00 and 04:00 local on 2026-03-08 in New York are 06:00Z and 08:00Z
+OK   DST spring-forward: a wall span with a skipped hour is 120 real minutes -> 120 fits, 121 does not
+OK   DST (canonical conversion cross-check, fall): 00:30 and 03:30 local on 2026-11-01 in New York are 04:30Z and 08:30Z
+OK   DST fall-back: a wall span with a repeated hour is 240 real minutes -> 240 fits, 241 does not
+OK   DST: today detection uses the local date at the boundary (Mar 8 23:59 EDT clips Mar 8 only)
+OK   overlap limitation: two candidates (60 min each) and one 60-minute future window are EACH reported viable on that day
+OK   overlap limitation (documented): this is candidate-local feasibility, not shared capacity -- the engine never receives another candidate
+OK   deadline horizon: arbitrary horizon end (e.g. a due date) behaves identically -- 90-minute task, only 10-07 fits
+OK   determinism: same inputs -> deep-equal output on repeated execution
+OK   immutability: inputs are unchanged after projection (unsorted blockers/windows are copied before sorting)
+OK   immutability: frozen (read-only) inputs are accepted without any mutation attempt
+OK   past/no availability: KNOWN_INFEASIBLE (not UNKNOWN)
+OK   past/no availability: unknownDays does NOT increase; evaluatedDays still counts the day
+OK   past/explicit UNKNOWN availability: also KNOWN_INFEASIBLE
+OK   past/normal elapsed window: KNOWN_INFEASIBLE
+OK   past/future-looking window (date label 10-08, instants on 10-11): KNOWN_INFEASIBLE -- an inconsistent payload cannot resurrect a past day
+OK   past/straddling window (instants straddle now): KNOWN_INFEASIBLE
+OK   past: supplied windows/blockers cannot change an elapsed day (with and without a blocker -> same result)
+OK   all-past horizon: evaluatedDays = 4, viableDays 0, unknownDays 0, coverage COMPLETE (zero remaining opportunities)
+OK   aggregation example: past + today unknown + tomorrow feasible -> evaluated 3, viable 1, unknown 1, known infeasible 1, PARTIAL
+OK   mixed horizon: past (even with a fitting window) infeasible, today clipped-and-feasible, future feasible
+OK   mixed horizon: today is clipped (90 left < 100) while the future day is not (180 >= 100)
+OK   coverage: elapsed days alongside fully known later days stay COMPLETE
+OK   coverage: elapsed days with no later day in the horizon never produce UNKNOWN/PARTIAL
+OK   lower bound unchanged by elapsed days: viable 1, unknown 2 -> true viable within [1, 3]; the two elapsed days add nothing to either bound
+OK   positive offset (Kolkata): 10-09 is already elapsed locally although it is still the current UTC date -> KNOWN_INFEASIBLE; 10-10 is local today -> feasible
+OK   positive offset (control): the same instants under timezone UTC treat 10-09 as today (clipped, still feasible) -- so classification really depends on the supplied zone
+OK   negative offset (Los Angeles): 10-09 is still local today although the UTC date is already 10-10 -> clipped, remaining evening window feasible; 10-10 is a future day
+OK   negative offset: today in Los Angeles with only a morning window (already elapsed) -> infeasible (clipping, not the elapsed-day rule)
+OK   timezone UTC is accepted and evaluated
+OK   timezone Etc/UTC is accepted and evaluated
+OK   named zones Asia/Kolkata, America/New_York, Europe/London, America/Los_Angeles are accepted
+OK   a genuinely invalid zone is a typed failure: Not/A_Real_Timezone
+OK   blank and whitespace-only zones are typed failures
+OK   consistency: O1 accepts a zone if and only if the canonical getDatePartsInTimezone can resolve it (no stricter private dialect)
+OK   process timezone: for each supplied zone (UTC, Kolkata, New York), output is identical under process TZ UTC / New York / Kolkata / Kiritimati
+ALL OPPORTUNITY PROJECTION CHECKS PASSED
+
+# exit=0 signal=

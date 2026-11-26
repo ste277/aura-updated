@@ -1,0 +1,35 @@
+$ npx ts-node test/goalLifecycleAuthorizationArchitecture.test.ts
+# job=math-core-tests step=Run Goal lifecycle authorization architecture test env={}
+OK   the lifecycle check is called exactly ONCE in the persistence function (one common boundary, not one per path or per item)
+OK   it runs BEFORE the first PlannedActivity insert and before the write loop (authorization fails before any mutation, no insert-then-rollback as control flow)
+OK   it runs AFTER the advisory lock, the replay classification (a replay of a committed acceptance is not a new authorization event) and the acceptance decision
+OK   it is called with the TRANSACTION client (never the pool), so it is inside the acceptance transaction
+OK   it is batched: ONE call over the de-duplicated activity ids of all write intents, outside any loop (no per-item Goal lookup)
+OK   every Goal link reaches it through the SAME map the write loop reads (goalActivityLinks keyed by write intent): the check is path-agnostic by construction
+OK   the check is gated ONLY by "there is at least one Goal link" and a rejection is gated ONLY by "some link is not active" -- no dead-code, flag or path condition can switch it off
+OK   a failure rolls back and returns a typed REJECTED/INVALID_REQUEST with the GOAL_NOT_ACTIVE detail, naming only the client's own intent ids
+OK   the persistence file never mentions an entry path: no plan-day-goal, goal-demand, classify/decode, canonical or manual vocabulary (no path-specific branch is possible)
+OK   no client-asserted Goal state anywhere in the acceptance request, its parser, the accept route or the body builder
+OK   the provenance authorization module stays pure and status-blind (lifecycle is decided at persistence from persisted state, never from ids or links)
+OK   the lifecycle query is ONE SQL statement over ANY($2::text[]) (batched) on the supplied transaction client
+OK   it reads the PERSISTED Goal row (join on Goal) and takes a SHARE lock on it so a concurrent archive cannot interleave
+OK   only status exactly ACTIVE on a Goal owned by the same user authorizes (anything else, including unknown values, is not active)
+OK   it is scoped to the authenticated user and writes nothing
+OK   GoalActivities the user does not own, or that do not exist, are not reported as owned (their existing fail-closed rejection is unchanged, and nothing is ever treated as active by default)
+OK   the production callers of the two Goal provenance writers are exactly the persistence write loop and the HPG2 direct-plan-creation route -- a third, unlisted caller fails this check even if it is individually well-guarded
+OK   apps/web/lib/dayConstructorAcceptancePersistence.ts: calls lockGoalParentLifecycleForPlanning(...) BEFORE writing any Goal provenance -- a future caller that skips or reorders the lifecycle guard fails this check
+OK   apps/web/app/api/plans/route.ts: calls lockGoalParentLifecycleForPlanning(...) BEFORE writing any Goal provenance -- a future caller that skips or reorders the lifecycle guard fails this check
+OK   apps/web/app/api/plans/route.ts: the lifecycle guard runs on the SAME transaction client as the link write, gated only by goalActivityId being present, and rejects with GOAL_NOT_ACTIVE exactly when the GoalActivity is owned but its parent Goal isn't active
+OK   apps/web/app/api/plans/route.ts: a GOAL_NOT_ACTIVE rejection maps to a typed 400, not an unhandled 500
+OK   GoalActivityOccurrence rows are inserted in exactly one production place (db.ts materialization)
+OK   the existing Rhythm/DISMISSED/ownership/live-commitment gates are still in the write loop, untouched (ACTIVE is necessary, not sufficient)
+OK   Move only REPOINTS existing Goal records (UPDATE ... WHERE plannedActivityId = old) and never creates Goal provenance: it neither inserts an occurrence nor calls either writer
+OK   Recomposition has no Goal provenance at all
+OK   archiving updates only the Goal row (status + archivedAt): it cancels, skips, moves, unlinks and deletes nothing (existing plans, occurrences and history are untouched)
+OK   no production code reactivates a Goal (no UPDATE "Goal" SET status to ACTIVE)
+OK   Goal discovery keeps its own ACTIVE filter (the legitimate preview is unchanged and not broadened)
+OK   no fact, provider, Constructor, orchestrator or preview module mentions the lifecycle boundary
+OK   the persistence file adds no policy vocabulary and no opportunity/decision-fact coupling
+ALL GOAL LIFECYCLE AUTHORIZATION ARCHITECTURE CHECKS PASSED
+
+# exit=0 signal=

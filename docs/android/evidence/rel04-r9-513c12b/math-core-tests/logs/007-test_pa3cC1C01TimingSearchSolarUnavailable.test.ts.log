@@ -1,0 +1,31 @@
+$ npx ts-node test/pa3cC1C01TimingSearchSolarUnavailable.test.ts
+# job=math-core-tests step=Run PA-3C-C1C-01 Timing Search solar unavailable containment test env={}
+OK   A1. isValidCustomLocation accepts latitude=66.5 (the app's own MAX_VALID_LATITUDE)
+OK   A2. computeSolarEphemeris(66.5N, 2026-06-05) genuinely throws SolarNoEventError
+OK   A2b. the condition is POLAR_DAY (independently verified sign mapping: cosH < -1)
+OK   B1. FIND at the real no-event coordinate/date does NOT throw (contained)
+OK   B2. FIND returns empty candidates, never a fabricated one
+OK   B3. FIND sets unavailable.reason = SOLAR_NO_EVENT, not folded into "no match"
+OK   B4. FIND reports unavailableDayCount === 1 for a single-day no-event range
+OK   C1. CHECK at the real no-event instant does NOT throw (contained)
+OK   C2. CHECK sets unavailable.reason = SOLAR_NO_EVENT, no requestedCandidate fabricated
+OK   D1. COMPARE with every candidate unavailable does NOT throw (contained)
+OK   D2. COMPARE reports unavailableDayCount === 2 (both supplied candidates failed)
+OK   D3. Mixed COMPARE (1 unavailable + 1 valid) preserves the valid candidate
+OK   D4. Mixed COMPARE reports unavailableDayCount === 1, not treated as fully unavailable
+OK   E1. recommendTaskSlot() itself is UNCHANGED -- still throws SolarNoEventError directly
+OK   E2. findOptimalTaskTimes() itself is UNCHANGED -- still throws SolarNoEventError when every day fails
+OK   F1. recommendTaskSlotResult() does NOT throw -- returns UNAVAILABLE
+OK   F2. recommendTaskSlotResult() UNAVAILABLE carries the real condition (POLAR_DAY)
+OK   F3. recommendTaskSlotResult() for a valid location/date returns OK with a real recommendation
+OK   F4. findOptimalTaskTimesResult() does NOT throw -- returns UNAVAILABLE for a fully-unavailable horizon
+OK   F5. A 7-day horizon spanning valid AND no-event days returns OK, preserving the valid days (not fully unavailable)
+OK   F6. The mixed-horizon OK result's planningOptions came only from the 3 genuinely valid days, never a fabricated 4th
+OK   G1. findEverydaySharedTiming does not throw for a fully-unavailable range
+OK   G2. findEverydaySharedTiming propagates unavailable=true for a fully-unavailable range
+OK   H1. Invalid input (NaN latitude) is NOT converted into "unavailable" -- still throws SolarInputValidationError
+
+24 passed, 0 failed.
+ALL PA-3C-C1C-01 CHECKS PASSED
+
+# exit=0 signal=

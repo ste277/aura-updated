@@ -1,0 +1,34 @@
+$ npx ts-node test/dayConstructorAcceptancePersistenceDb.test.ts
+# job=day-constructor-acceptance-db-tests step=Run Day Constructor acceptance persistence DB tests env={}
+OK   1. multi-item acceptance SAVES
+OK   2. exactly 2 Plans created for 2 proposed items
+OK   3. reviewed start preserved exactly
+OK   4. reviewed end preserved exactly
+OK   5. reviewed duration preserved exactly (60 min)
+OK   6. reviewed activityId preserved
+OK   7. absent activityId persists as null (never fabricated)
+OK   8. status written is UPCOMING for every new Plan
+OK   9. Plans are scoped to the authenticated user
+OK   10. identical replay returns ALREADY_ACCEPTED
+OK   11. replay returns the SAME Plan ids (no duplicates created)
+OK   12. replay created zero additional rows (still exactly 2 for this window)
+OK   13. exactly one of two concurrent identical requests SAVES, the other sees ALREADY_ACCEPTED
+OK   14. concurrent identical acceptance created exactly one Plan, never two
+OK   Case A: original [A,B], retry [A] alone (identical content) rejects as IDEMPOTENCY_CONFLICT
+OK   Case B: original [A,B], retry [B] alone (identical content) rejects as IDEMPOTENCY_CONFLICT
+OK   Case C setup: original [A,B,C] SAVES
+OK   Case C: original [A,B,C], retry [A,C] (dropping B) rejects as IDEMPOTENCY_CONFLICT
+OK   Case D setup: original [A] alone SAVES
+OK   Case D: original [A], retry [A,B] (adding a never-seen item) rejects as IDEMPOTENCY_CONFLICT
+OK   Case D: the never-seen item is never created
+OK   Case F: same item-ID set [A,B], changed content for B rejects as IDEMPOTENCY_CONFLICT
+OK   Case F: zero new rows created (no "RESCHEDULED" title persisted)
+OK   Wildcard safety: a clientRequestId containing a literal '%' SAVES normally
+OK   Wildcard safety: the would-be LIKE-match id is treated as a genuinely SEPARATE, unrelated acceptance (SAVES, not confused with the percent-id one)
+OK   Wildcard safety: replaying the original '%'-containing request returns ALREADY_ACCEPTED for exactly its own single item
+OK   19. a nonexistent user fails the whole acceptance (SAVE_FAILED), never partially
+OK   19b. no Plan exists for a user that was never created
+OK   20. a fresh, valid acceptance still succeeds normally after an earlier, unrelated rejection (no residual corrupted state)
+ALL DAY CONSTRUCTOR ACCEPTANCE PERSISTENCE DB CHECKS PASSED
+
+# exit=0 signal=

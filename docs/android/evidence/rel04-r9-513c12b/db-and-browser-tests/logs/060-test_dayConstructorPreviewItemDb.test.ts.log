@@ -1,0 +1,26 @@
+$ npx ts-node test/dayConstructorPreviewItemDb.test.ts
+# job=day-constructor-acceptance-db-tests step=Run Day Constructor preview-item DB test env={}
+OK   precondition: a real preview item with a valid acceptanceToken exists
+FAIL 1. a valid original item + a valid replacement time returns status UPDATED with a new item/token
+FAIL 1. the returned item keeps the same intentId/activityId/title/placementSource as the original
+FAIL 8. the new signature is genuinely bound to the NEW start/end (verifyPreviewItem accepts it against the new facts)
+FAIL 9. the ORIGINAL token cannot authorize the MODIFIED time (verifyPreviewItem rejects the old token against the new start/end)
+FAIL 9 (inverse). the NEW token does NOT authorize the ORIGINAL (pre-edit) start/end
+OK   2. a corrupted original signature is REJECTED and never returns an item/signature
+OK   3. a request claiming a different activityId than the verified original is REJECTED (signature no longer matches)
+FAIL 3b. extraneous top-level activityId/title/placementSource fields never override the verified item's own values
+OK   4. the signed item shape carries no Goal-attribution field to tamper with (by existing, audited design)
+OK   5. a different authenticated user presenting a valid item/token for the ORIGINAL owner is REJECTED
+OK   5. no row was written for the unauthorized user
+OK   6. a replacement time outside the construction window is REJECTED (STALE_PREVIEW / CANDIDATE_OUTSIDE_WINDOW)
+OK   6. a malformed candidateStart is REJECTED
+OK   7. a candidate exactly at the window start boundary is accepted (inclusive bound), timezone-consistent with the original window
+OK   10. editing one item in a multi-item preview leaves the sibling item completely unaffected by this endpoint (it only ever receives/returns the one edited item)
+OK   11. zero PlannedActivity rows were written by the re-signing endpoint
+OK   12. existing zero-edit acceptance (no call to the new endpoint at all) still SAVES exactly as before
+OK   13. an edited item is accepted via the EXISTING, unmodified acceptance path and persists the EDITED time, not the original
+OK   14. this endpoint performs no capacity/eligibility/conflict checks itself; a fresh blocker occupying the edited time is still caught by the EXISTING, unmodified acceptance path, proving this PR introduces no alternative acceptance path
+OK   15. REJECTED responses use the existing {status, reason, detail?} shape convention (reason is a non-empty string, not a new/undocumented shape)
+SOME DAY CONSTRUCTOR PREVIEW ITEM CHECKS FAILED
+
+# exit=1 signal=

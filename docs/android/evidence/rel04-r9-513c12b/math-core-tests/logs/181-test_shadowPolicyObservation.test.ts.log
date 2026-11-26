@@ -1,0 +1,49 @@
+$ npx ts-node test/shadowPolicyObservation.test.ts
+# job=math-core-tests step=Run shadow policy observation test env={}
+=== Part 1: real same-run observations ===
+OK   SIMPLE ACCEPT (real): one observation, ACCEPT, for candidate P
+OK   the ACCEPT summary is minimal and exact: P at 10:30, O displaced and relocated 10:00 -> 15:00 (GOOD, same fit), nobody unplaced, 1 baseline placement -> 2 counterfactual placements
+OK   the returned Constructor result is byte-identical to a plain orchestration, and so is the signed preview body (the shadow outcome changes nothing)
+OK   the observation names no basis, placements, attempts, contention, trace, evidence, facts or candidate list
+OK   OWNER LOSS (real): P4b2 READY and P4b3 REJECT OWNER_WOULD_BE_UNPLACED, the exact source reason, with the summary of what would have happened (Y unplaced, O relocated)
+OK   NONE owners (only P pressured) observe the SAME owner-loss rejection (NONE is never safe to lose) -- byte-identical to the all-pressured observation
+OK   OWNER TIMING (real): O relocated from its EXCELLENT baseline to a CAUTION slot -> REJECT OWNER_TIMING_DEGRADED, propagated exactly, with from / to fits in the summary
+=== Part 2: generation vs acceptance layers; reasons carried verbatim ===
+OK   GENERATION UNAVAILABLE: P4b2's reason is propagated distinctly (GENERATION_UNAVAILABLE / NO_ACTIONABLE_PROMOTION_SLOT) with NO summary, and P4b3 is NEVER called
+OK   every P4b2 unavailable reason is carried verbatim (no shadow-specific translation)
+OK   ACCEPTANCE UNAVAILABLE: a counterfactual that names another candidate (ID cross-check) fails ONLY this observation as ACCEPTANCE_UNAVAILABLE / INCONSISTENT_AUTHORITY (the predicate's own reason), distinct from generation unavailability and from REJECT
+=== Part 3: multi-promotion -- every observation independent, same baseline, stable order ===
+OK   MULTI-PROMOTION: one observation per PromotionInput, in the run's stable source order
+OK   the same run yields ACCEPT and REJECT (and every outcome is an exact source outcome): ["P1:ACCEPT","P2:REJECT:OWNER_WOULD_BE_UNPLACED","P3:ACCEPT"]
+OK   SAME BASELINE FOR ALL: the generator received the IDENTICAL run-level basis, baseline placements and attempts objects for every observation (nothing re-derived, no observation baselined on another's counterfactual)
+OK   NO SELECTION, NO RANKING: observations continue past the first ACCEPT (later promotions are observed too), no rank / winner field exists, and re-observing the whole run is byte-identical
+OK   ACCEPT + REJECT + UNAVAILABLE in ONE run: the forced-unavailable P3 changes only its own observation; every other observation is byte-identical to the unforced run
+=== Part 4: failure isolation and the run-level contract ===
+OK   GENERATOR THROW in the middle candidate: only that observation becomes GENERATION_UNAVAILABLE / GENERATION_FAILED; the others are byte-identical; the Constructor result is untouched
+OK   PREDICATE THROW in the middle candidate: only that observation becomes ACCEPTANCE_UNAVAILABLE / EVALUATION_FAILED (fail closed -- never an ACCEPT); the others are byte-identical
+OK   RUN NOT READY: the Constructor result is returned as normal and the shadow run is UNAVAILABLE / RUN_NOT_READY -- no per-promotion observation is manufactured, and it is distinct from READY with no observations
+OK   NO PROMOTIONS: READY with observations [] is valid (not an error)
+OK   ZERO ACCEPT: a READY run whose observations contain no ACCEPT is valid
+=== Part 5: SAME RUN -- exactly the orchestration / load / search counts of the normal prepared run ===
+OK   SAME-RUN COUNTS (accept): one shadow observation performs exactly the loads / searches / availability / fact preparations of the normal prepared run and of a plain orchestration -- {"blocking":1,"duration":1,"search":3,"availability":0,"facts":1}
+OK   SAME-RUN COUNTS (loss): one shadow observation performs exactly the loads / searches / availability / fact preparations of the normal prepared run and of a plain orchestration -- {"blocking":1,"duration":1,"search":10,"availability":0,"facts":1}
+OK   SAME-RUN COUNTS (multi): one shadow observation performs exactly the loads / searches / availability / fact preparations of the normal prepared run and of a plain orchestration -- {"blocking":1,"duration":1,"search":9,"availability":0,"facts":1}
+OK   SAME-RUN SENTINEL: loaders that THROW on any second call do not disturb the shadow composition (it used only the first run) -- the result and every observation equal the normal run
+OK   THE SEAM TAKES (request, deps) AND ONE OUTPUT-ONLY CALLBACK: `observeShadowPolicy` has no parameter through which a basis, placements, a PromotionInput or a counterfactual could be supplied (the optional third parameter only RECEIVES the baseline result)
+OK   THE BASELINE HAND-OFF: the callback receives the baseline result exactly once, BEFORE any generation (no shadow work had run), and it is the very result the seam returns
+OK   a callback that throws is isolated: the result and every observation are unchanged
+OK   PRE-BASELINE: when the baseline orchestration itself throws, the callback is NEVER called (no result existed) and the error surfaces
+=== Part 6: purity, ownership, deep freeze, parity ===
+OK   OUTPUT IS DEEPLY FROZEN, SCALAR-ONLY (ISO strings -- no Date, Map or Set is exposed) and newly owned: no object is shared between two runs
+OK   DETERMINISTIC: observing the same run twice is byte-identical
+OK   NO CLOCK: the composition performs exactly the clock reads of the normal prepared run (it adds none)
+OK   CONSTRUCTOR / PREVIEW PARITY (multi-promotion): the returned result is byte-identical to a plain orchestration and its signed preview body is byte-identical -- even though ACCEPT observations exist, nothing is substituted, signed or applied
+OK   OBSERVATION SHAPES carry only the exact source vocabulary: ACCEPT { outcome, candidateIntentId, counterfactual }, REJECT adds reason, GENERATION_UNAVAILABLE has reason and no counterfactual
+=== Part 7: diagnostics-only INCIDENCE over the real pipeline (reported, never used to tune) ===
+     incidence: {"runs":700,"readyRuns":700,"promotionInputs":452,"generationReady":444,"accept":23,"nonDeterministic":0,"resultMismatch":0} generationUnavailable: {"NO_ACTIONABLE_PROMOTION_SLOT":8} reject: {"OWNER_WOULD_BE_UNPLACED":372,"OWNER_TIMING_DEGRADED":49} acceptanceUnavailable: {}
+OK   INCIDENCE (diagnostics only): 700 runs, 452 PromotionInputs, 444 generation READY, ACCEPT 23, REJECT {"OWNER_WOULD_BE_UNPLACED":372,"OWNER_TIMING_DEGRADED":49}, generation unavailable {"NO_ACTIONABLE_PROMOTION_SLOT":8}, acceptance unavailable {} -- measured, never used to tune a policy
+OK   AUTHORITATIVE, ENGINE-INDEPENDENT INCIDENCE (O5 P4b5: the seeded fixture no longer uses a random sort comparator, so these exact counts hold on every supported Node): 700 runs, 452 PromotionInputs = 444 generation READY + 8 NO_ACTIONABLE_PROMOTION_SLOT; 444 = 23 ACCEPT + 372 OWNER_WOULD_BE_UNPLACED + 49 OWNER_TIMING_DEGRADED; 0 acceptance unavailable
+OK   every observation matches the plain orchestration it shadowed (zero result mismatches) and repeats byte-identically (zero non-determinism)
+ALL SHADOW POLICY OBSERVATION CHECKS PASSED
+
+# exit=0 signal=
