@@ -1,0 +1,10 @@
+$ npx ts-node test/timezone.test.ts
+# job=math-core-tests step=Run timezone test env={}
+OK   Chennai user at 02:00 IST — date must be ahead of the UTC date
+OK   Same instant in New York — still Friday 08-14
+OK   NY at 22:00 EST on New Year's Eve — previous year vs UTC
+OK   Same instant in Kolkata — already Thursday 2026-01-01
+
+ALL TIMEZONE CHECKS PASSED
+
+# exit=0 signal=

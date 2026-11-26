@@ -1,0 +1,28 @@
+$ npx ts-node --project tsconfig.jsdom-tests.json test/locationPickerRel04SearchRace.test.ts
+# job=math-core-tests step=Run LocationPicker REL-04 search race test env={"TS_NODE_COMPILER_OPTIONS":"{\"jsx\":\"react-jsx\"}"}
+OK   R1 precondition: two requests in flight (Ko, Kollam)
+OK   R1 newer results shown
+OK   R1 late older response does not replace the newer results
+OK   R2 late older failure shows no error and keeps the newer results
+OK   R3 retired request does not repopulate results after the query was cleared
+OK   R4 control: an uncontested search shows its results
+OK   R5 precondition: Kollam row is shown for "Kol"
+OK   R5 the "Kol" row is gone immediately after typing "Kot" (cannot be selected for the wrong query)
+OK   R6 the obsolete "Che" request was aborted; "Chennai" is live
+OK   R6 an aborted request shows no error; the live one shows its results
+OK   R7 unmount aborts the in-flight search request
+OK   R7 nothing is applied after unmount (no React state-update warnings or errors)
+OK   R8 no request within the debounce window
+OK   R8 one request after the debounce
+OK   R9 precondition: Kollam shown for "Kol"
+OK   R9 during the new debounce the retired Kollam row is NOT shown (not selectable)
+OK   R9 a fresh request is in flight for the repeated query; the retired row is still not shown
+OK   R9 loading shows only for the live request
+OK   R9 only the live generation's result becomes selectable
+OK   R10 rapid edits coalesce into one live request (debounce preserved)
+OK   R10 the obsolete request's failure shows no error and does not stop the live spinner
+OK   R10 the live request's failure shows its error and stops loading
+
+22 passed, 0 failed
+
+# exit=0 signal=

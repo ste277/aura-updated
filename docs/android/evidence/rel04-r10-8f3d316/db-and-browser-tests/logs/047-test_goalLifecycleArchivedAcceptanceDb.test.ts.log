@@ -1,0 +1,41 @@
+$ npx ts-node test/goalLifecycleArchivedAcceptanceDb.test.ts
+# job=day-constructor-acceptance-db-tests step=Run Goal lifecycle archived-acceptance DB test env={}
+=== CONTROL: ACTIVE parent Goal, canonical automatic path ===
+OK   ACTIVE control: acceptance SAVED with exactly one occurrence, one plan and the GoalActivity link
+=== PREVIEW -> ARCHIVE -> ACCEPT (canonical automatic) ===
+OK   while ACTIVE, the preview is READY and carries the recurrence facts (legitimate preview unchanged)
+OK   accepting a still-validly-signed preview AFTER the parent Goal was archived is REJECTED with a typed authorization failure (GOAL_NOT_ACTIVE)
+OK   ...and wrote NOTHING: no occurrence, no plan, no execution, no link
+OK   the rejection names only the client's own intent id: no internal Goal id and no activity id is exposed beyond it
+=== MANUAL CANONICAL (P0a identity) -> ARCHIVE -> ACCEPT ===
+OK   the manual handoff produced the CANONICAL row while ACTIVE, with facts
+OK   manual canonical accepted after archive: REJECTED exactly like the automatic path, zero writes
+=== LEGACY plan-day-goal-* handoff (recurring AND finite) ===
+OK   legacy ids + valid client goalActivityLinks for an ARCHIVED parent (recurring and finite): REJECTED, zero writes -- the same invariant, no path-specific bypass
+=== FORGED canonical id for an already-archived parent; archive -> preview ===
+OK   ARCHIVE -> PREVIEW: the provider already yields NO facts for an archived Goal (legitimate preview eligibility is not broadened)
+OK   a forged / stale canonical id for an archived parent cannot create Goal provenance: REJECTED, zero writes
+OK   a different/new acceptance after archive also fails
+=== REPLAY of an acceptance committed while ACTIVE ===
+OK   replay of the already-committed acceptance after archive stays ALREADY_ACCEPTED (a replay is not a new authorization event) and creates no duplicate
+OK   archiving did NOT retroactively touch the accepted plan, its occurrence or its link
+OK   and completing that already-authorized plan after archive still records history (archive is not history deletion)
+=== MIXED requests: whole-request atomicity ===
+OK   non-Goal item + ACTIVE-Goal item + ARCHIVED-Goal item in one request: the WHOLE request is rejected (existing all-or-nothing semantics), the archived Goal cannot sneak through
+OK   mixed Goals: the ACTIVE Goal gets no occurrence/plan/link and the non-Goal item is not saved either (no cross-contamination, no partial write)
+OK   the same non-Goal + ACTIVE-Goal request WITHOUT the archived item succeeds (the rejection was caused only by the archived Goal)
+=== ordinary non-Goal planning is unaffected ===
+OK   a normal non-Goal intent is still accepted while Goals are archived
+=== existing rejections unchanged ===
+OK   ACTIVE Goal with ZERO remaining Rhythm capacity is still refused exactly as before (SAVE_FAILED, nothing written) -- ACTIVE is necessary, not sufficient
+OK   cross-user: user A carrying user B's ACTIVE canonical id still cannot link or consume B's activity (unchanged)
+OK   a nonexistent activity still fails closed with zero writes (never treated as active)
+=== authority is the CURRENT persisted Goal state ===
+OK   an unrecognized persisted Goal status fails closed (only ACTIVE authorizes)
+OK   the decision follows the Goal's state at acceptance time, not preview time: once ACTIVE again the same signed preview is authorized (no reactivation feature exists; this only proves the check reads current state)
+=== CONCURRENT archive vs acceptance (TOCTOU) ===
+OK   while the archive transaction is open, the acceptance WAITS on the Goal row instead of reading a stale ACTIVE and writing
+OK   once the archive commits, the waiting acceptance sees ARCHIVED and is rejected with zero Goal-derived writes
+ALL GOAL LIFECYCLE ARCHIVED ACCEPTANCE DB CHECKS PASSED
+
+# exit=0 signal=

@@ -1,0 +1,17 @@
+$ npx ts-node test/dailyAgendaGoalContext.test.ts
+# job=math-core-tests step=Run Daily agenda Goal context test env={}
+OK   27. non-Goal plan: existing fields unchanged (title/target)
+OK   27. non-Goal plan: goalContext absent
+OK   goalContextsByPlanId threads onto the matching PLAN item
+OK   goal identity present
+OK   goalActivity id present
+OK   DURATION target = 30, currentValue = null (NOT 30) before completion -- target and actual are never collapsed
+OK   plan-a (in the map) receives goalContext
+OK   plan-b (not in the map) has no goalContext
+OK   omitting goalContextsByPlanId entirely behaves exactly like an empty map (no crash, no goalContext)
+OK   HomeTimelineItem.metadata.goalContext is the SAME object, pure passthrough
+OK   goalContext does not affect status/icon/title
+OK   a sibling non-Goal item never acquires goalContext from an unrelated Goal item in the same batch
+ALL DAILY AGENDA GOAL CONTEXT CHECKS PASSED
+
+# exit=0 signal=

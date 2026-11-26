@@ -1,0 +1,45 @@
+$ npx ts-node test/pce4aLahiriAyanamsaEpochFix.test.ts
+# job=math-core-tests step=Run Lahiri ayanamsa epoch-fix regression test (PCE-4A) env={}
+=== 1. Independent Lahiri ayanamsa reference check (multi-epoch) ===
+OK   lahiriAyanamsa(1950-01-01T00:00:00Z) ~= independent reference (23d09m28s = 23.1578deg): got 23.1500
+OK   lahiriAyanamsa(2000-01-01T00:00:00Z) ~= independent reference (23d51m12s = 23.8533deg): got 23.8500
+OK   lahiriAyanamsa(2026-01-01T00:00:00Z) ~= independent reference (24d13m19s = 24.2219deg): got 24.2140
+OK   lahiriAyanamsa(2040-01-01T00:00:00Z) ~= independent reference (24d24m42s = 24.4117deg): got 24.4100
+OK   lahiriAyanamsa(1950-01-01T00:00:00Z) is NOT the old buggy ~1.98deg-low value (21.18)
+OK   lahiriAyanamsa(2000-01-01T00:00:00Z) is NOT the old buggy ~1.98deg-low value (21.88)
+OK   lahiriAyanamsa(2026-01-01T00:00:00Z) is NOT the old buggy ~1.98deg-low value (22.25)
+OK   lahiriAyanamsa(2040-01-01T00:00:00Z) is NOT the old buggy ~1.98deg-low value (22.44)
+
+=== 2. Independent sidereal Lagna reference check ===
+OK   calculateNatalAscendant sidereal longitude ~= independent reference (86.8333deg, livepanditji.com): got 86.8448
+OK   calculateNatalAscendant Rashi index matches independent reference (2 = Mithuna/Gemini)
+
+=== 3. Tithi/Karana ayanamsa-cancellation sanity ===
+OK   Tithi for 2026-02-06 is Krishna Panchami (ayanamsa cancels in moon-sun difference)
+OK   Karana for 2026-02-06 is Kaulava (ayanamsa cancels)
+
+=== 4. Nakshatra boundary-adjacent regression ===
+OK   Nakshatra for 2026-02-08T00:08 IST is Chitra after the fix (was Swati under the old bug)
+
+=== 5. Yoga boundary regression (2x ayanamsa exposure) ===
+OK   Yoga for 2026-06-20 noon IST is Vajra after the fix (was Siddhi under the old bug)
+
+=== 6. Solar ingress (Sankranti) regression ===
+OK   Mesha Sankranti 2026 lands on April 14 (independent refs): got 2026-04-14T03:50:06.405Z
+OK   Mithuna Sankranti 2026 lands on June 15 (independent refs): got 2026-06-15T07:10:08.955Z
+
+=== 7. Adhika Masa classification regression ===
+OK   The synodic month containing 2026-05-20 (published Adhika window) classifies ADHIKA
+OK   The synodic month containing 2026-06-20 (ordinary month after the window) classifies NORMAL
+
+=== 8. Marriage eligibility production-path regression ===
+OK   2026-05-10 before published window -> eligible: got {"status":"ELIGIBLE","eligible":true}
+OK   2026-05-20 inside published Adhika window -> excluded: got {"status":"INELIGIBLE","eligible":false,"reason":"ADHIKA_MASA"}
+OK   2026-06-01 inside published Adhika window -> excluded: got {"status":"INELIGIBLE","eligible":false,"reason":"ADHIKA_MASA"}
+OK   2026-06-20 outside published window -> eligible (was falsely excluded under the bug): got {"status":"ELIGIBLE","eligible":true}
+OK   2026-07-20 well after both windows -> eligible: got {"status":"ELIGIBLE","eligible":true}
+
+23 passed, 0 failed.
+ALL PCE-4A LAHIRI AYANAMSA EPOCH FIX CHECKS PASSED
+
+# exit=0 signal=

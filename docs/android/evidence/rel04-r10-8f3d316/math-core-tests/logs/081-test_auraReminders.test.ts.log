@@ -1,0 +1,42 @@
+$ npx ts-node test/auraReminders.test.ts
+# job=math-core-tests step=Run Aura Reminders eligibility test env={}
+OK   DEFAULT_REMINDER_LEAD_MINUTES is 15
+OK   A Plan starting in exactly 15 min (== lead time) IS active
+OK   minutesUntilStart is exactly 15
+OK   A Plan starting in 16 min (1 min before the lead window opens) is NOT yet active
+OK   A Plan exactly at the grace-period boundary is no longer active (grace period has fully elapsed)
+OK   A Plan just inside the grace period is still active ("Started X min ago")
+OK   minutesUntilStart is negative once the item has started
+OK   formatReminderTiming renders future minutes as "Starts in X min"
+OK   formatReminderTiming renders zero as "Starting now"
+OK   formatReminderTiming renders past minutes as "Started X min ago"
+OK   LOGGED and CANCELLED plans never generate a reminder
+OK   An ACCEPTED SHARED moment reminder carries momentResponseState ACCEPTED
+OK   An ACCEPTED SHARED moment reminder carries the participant display name
+OK   A moment with NO response yet still generates a reminder (waiting-response)
+OK   A waiting-response reminder does NOT falsely claim ACCEPTED
+OK   ANOTHER_TIME with NO successor produces NO reminder (the actionable Aura Update takes priority instead)
+OK   A PERSONAL moment reminder has no participantDisplayName
+OK   A superseded original NEVER reminds, even though its own startAt would otherwise qualify
+OK   The successor reminds at ITS OWN time
+OK   The successor reminder uses the successor's own startAt, not the original's
+OK   A REVOKED moment never generates a reminder
+OK   An expired moment never generates a reminder
+OK   A Plan linked to a Moment (plannedActivityId) never generates its own reminder
+OK   The linked Moment's own reminder wins instead (richer coordination state)
+OK   Exactly ONE reminder total for the linked pair -- never two for the same real-world event
+OK   An UNLINKED Plan and Moment both get their own reminder (no false dedup)
+OK   The most imminent reminder sorts first regardless of type
+OK   A tie in minutesUntilStart still produces a STABLE, deterministic order across calls
+OK   A reminder spanning the US DST spring-forward boundary still computes exactly 15 minutesUntilStart (pure UTC-instant math)
+OK   The reminder carries the item's own timezone for display, unaffected by the DST transition itself
+OK   Asia/Kolkata and America/New_York produce the IDENTICAL minutesUntilStart for the same absolute instant
+OK   A Plan with its own eventTimezone (Chennai) produces exactly one reminder
+OK   The reminder's timezone is the Plan's own eventTimezone (Asia/Kolkata), NOT the owner's Timing Location (America/New_York)
+OK   A Plan with no eventTimezone falls back to the owner's own Timing Location, unaffected by PR B
+OK   A Moment persisted with an Event Location timezone (Chennai) is reflected in its reminder, regardless of the owner's own Timing Location
+OK   AuraReminder DTOs never contain any private/internal field name or value
+
+ALL AURA REMINDERS CHECKS PASSED
+
+# exit=0 signal=

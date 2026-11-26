@@ -1,0 +1,11 @@
+$ npx ts-node test/integration.test.ts
+# job=math-core-tests step=Run integration test env={}
+Active window: ABHIJIT
+Cards: [
+  'Heavy lifting or a hard training session',
+  'Main meal of the day',
+  'Tackle your hardest task'
+]
+INTEGRATION TEST PASSED
+
+# exit=0 signal=

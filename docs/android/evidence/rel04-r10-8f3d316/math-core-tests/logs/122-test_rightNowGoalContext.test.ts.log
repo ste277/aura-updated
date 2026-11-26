@@ -1,0 +1,30 @@
+$ npx ts-node test/rightNowGoalContext.test.ts
+# job=math-core-tests step=Run Right Now Goal context test env={}
+OK   formatGoalActivityCompletion is the SAME function via both import paths (goalActivityExecution.ts canonical, goalsPresentation.ts re-export)
+OK   sanity: DURATION 30/18 -> "18 / 30 min" via the domain import
+OK   sanity: MEASURED_TARGET 20 pages/null -> "20 pages" via the presentation re-export
+OK   36. selectRightNowState picks the SAME item kind (ACTIVE_PLAN) regardless of goalContext
+OK   36. selectRightNowState picks the SAME item id regardless of goalContext
+OK   36. a Goal-linked item does NOT win over an earlier-starting non-Goal item -- commitment order (start, then end, then id) is unaffected by goalContext
+OK   HomeDashboard.tsx imports formatGoalActivityCompletion from goalActivityExecution.ts (the canonical, neutral Goal-domain module, never a Goal-UI module)
+OK   spotlightGoalContext is derived from spotlightItem.metadata?.goalContext (the ALREADY-SELECTED item, never re-queried/re-selected)
+OK   spotlightCompletionDetail is computed via the canonical formatter, fed goalActivity.completionRequirement + currentValue
+OK   the Goal-context line ("For: <goal title>") is conditional on spotlightGoalContext (absent -> absent, never a placeholder)
+OK   the completion-detail line is conditional on spotlightCompletionDetail (null -> nothing rendered)
+OK   no Progress/Adjust/Edit/+1/History/Repeat/Target button was added anywhere in HomeDashboard.tsx
+OK   no new fetch(...) call was added for Goal progress -- createPlanExecutor (Done/Skip/Move) remains the only completion-related network path
+OK   handleCompleteRightNow/handleSkipRightNow call sites are unchanged (same plan-id argument, same disabled-guard pattern)
+OK   the Move trigger call site is unchanged
+OK   the "Why?" control is untouched -- still gated on spotlightExplanation, still calls the same handleToggleExpand, never replaced by Goal context
+OK   HomeTimeline.tsx never imports/calls formatGoalActivityCompletion -- the Right Now spotlight remains the only surface rendering completion-progress detail (goal IDENTITY on an ordinary row is DR4-C's own, separate, more minimal addition)
+OK   GoalDetailClient.tsx was not touched by G3.3 (still only its own G3.2 completionDetail usage, never spotlightGoalContext/spotlightCompletionDetail)
+OK   dayConstructorOrchestrator.ts does not reference goalContext/formatGoalActivityCompletion
+OK   RecompositionCard.tsx never references formatGoalActivityCompletion/completionRequirement/currentValue (Goal identity only, no completion/progress detail -- G3.3's own formatter stays Right-Now-exclusive)
+OK   planMove.ts does not reference formatGoalActivityCompletion
+OK   no migration directory was added for G3.3 (HomeDashboard.tsx's Right Now spotlight reuses the existing formatGoalActivityCompletion formatter over existing tables, no new persisted concept -- count-independent: holds regardless of how many unrelated migrations exist)
+OK   no RRULE/custom-interval recurrence concept anywhere in HomeDashboard.tsx
+OK   no day-scoped progress concept (dayBucket/dailyTarget) anywhere in HomeDashboard.tsx
+OK   no history/aggregate concept (executionHistory/weeklyTotal/allExecutions) anywhere in HomeDashboard.tsx
+ALL RIGHT NOW GOAL CONTEXT CHECKS PASSED
+
+# exit=0 signal=

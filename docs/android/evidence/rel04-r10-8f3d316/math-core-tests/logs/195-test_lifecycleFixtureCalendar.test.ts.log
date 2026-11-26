@@ -1,0 +1,25 @@
+$ npx ts-node test/lifecycleFixtureCalendar.test.ts
+# job=math-core-tests step=Run lifecycle fixture calendar test env={}
+OK   civil arithmetic: leap day, month end, year end, negative offsets
+OK   ISO weekdays: 2026-10-05 is a Monday (1), 2026-10-11 a Sunday (7), 2028-02-29 a Tuesday (2)
+OK   over 21924 simulated run dates (5 years x 3 times of day x 4 timezones, including leap day and every month / year end) the anchor is ALWAYS a Monday
+OK   ... always 28..34 local days after the run date's local civil date (the week is wholly in the future of any real clock a run could read)
+OK   ... its Sunday and the following Monday exist at the expected offsets (the week boundary the lifecycle fixture crosses), and the input instant is never mutated
+OK   FUTURE MOVE DESTINATION: the anchored Tuesday 15:00Z destination is at least 20 days after every simulated run instant (5 years x 3 times of day x 4 timezones) -- never a past or imminent instant for the database-clock validation
+OK   ACCEPTANCE FIXTURE CALENDAR: for every simulated run instant (5 years x 3 times of day, including leap day, every month / year end and every weekday) the anchored Monday / Tuesday / Wednesday planning date / Sunday keep their weekdays and the Monday-start Rhythm week, and the whole fixture week is at least 20 days after the run instant (the real accept route can never find a proposed start elapsed)
+OK   BOUNDARY WEEKS: a year-end week (2026-12-28 .. 2027-01-03), a non-leap February-end week (2027-02-22 .. 2027-02-28) and the leap-day week (2028-02-28 .. 2028-03-05) anchor correctly, with the planning Wednesday on the expected civil date
+OK   LOCAL MIDNIGHT: one minute either side of Asia/Kolkata midnight (18:30Z) uses the local date before / after -- 2026-10-12 + 28 days = 2026-11-09 (a Monday) vs 2026-10-13 + 28 days = 2026-11-10 -> the next Monday 2026-11-16; UTC at the same instant is still 2026-10-12
+OK   the run date 2026-10-06 itself (when the old hard-coded fixture began failing) anchors the week of 2026-11-09 -> its Tuesday is 2026-11-10 (the dates the DB matrix prints)
+OK   THE DB FIXTURE automaticGoalLifecycleClosureDb: no hard-coded calendar date, no `Date.now()` / no-argument `new Date()` / timer read, anchored through the helper, timezone pinned to Asia/Kolkata (never the host timezone)
+OK   THE DB FIXTURE goalDecompositionPlanningHandoffDb: no hard-coded calendar date, no `Date.now()` / no-argument `new Date()` / timer read, anchored through the helper, timezone pinned to Asia/Kolkata (never the host timezone)
+OK   THE DB FIXTURE decisionFactsThreadingDb: no hard-coded calendar date, no `Date.now()` / no-argument `new Date()` / timer read, anchored through the helper, timezone pinned to Asia/Kolkata (never the host timezone)
+OK   THE DB FIXTURE goalDemandCandidatesDb: no hard-coded calendar date, no `Date.now()` / no-argument `new Date()` / timer read, anchored through the helper, timezone pinned to Asia/Kolkata (never the host timezone)
+OK   THE DB FIXTURE manualGoalProvenanceParityDb: no hard-coded calendar date, no `Date.now()` / no-argument `new Date()` / timer read, anchored through the helper, timezone pinned to Asia/Kolkata (never the host timezone)
+OK   THE DB FIXTURE goalLifecycleArchivedAcceptanceDb: no hard-coded calendar date, no `Date.now()` / no-argument `new Date()` / timer read, anchored through the helper, timezone pinned to Asia/Kolkata (never the host timezone)
+OK   THE DB FIXTURE activeResultMaterializerDb: no hard-coded calendar date, no `Date.now()` / no-argument `new Date()` / timer read, anchored through the helper, timezone pinned to Asia/Kolkata (never the host timezone)
+OK   the helper holds the ONE approved wall-clock read
+OK   MUTATION: a hard-coded date, a `Date.now()`, a no-argument `new Date()` in a fixture, a second clock read in the helper, an unpinned timezone and an unanchored fixture are each detected (for every guarded fixture)
+OK   REQUIRED CI: this suite runs in the pure job and the seven anchored DB fixtures remain required DB-job steps
+ALL LIFECYCLE FIXTURE CALENDAR CHECKS PASSED
+
+# exit=0 signal=

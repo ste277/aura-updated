@@ -1,0 +1,23 @@
+$ npx ts-node test/fullDayTimelineNavigation.test.ts
+# job=math-core-tests step=Run Full-day timeline navigation test env={}
+OK   1/2. page.tsx located a single onNextShiftClick prop assignment
+OK   1. onNextShiftClick triggers the existing homeTimelineFocusKey mechanism (setHomeTimelineFocusKey), the SAME update call the cross-tab handoff already uses
+OK   2. onNextShiftClick no longer calls setActiveTab('timeline') -- it stays on Home
+OK   3/6. exactly 2 OTHER call sites still legitimately navigate to the Panchang timeline tab (onViewTimeline, onViewTodayRhythm) -- unrelated navigation is unchanged
+OK   3. HomeDashboard.tsx has exactly ONE scrollIntoView call site (the existing focusTimelineKey effect) -- no duplicate/standalone scroll mechanism was introduced
+OK   3. the existing focusTimelineKey effect (scroll + focus against [data-home-timeline-region]) is present, unmodified in shape
+OK   3. that effect still scrolls the timeline region into view
+OK   3. that effect still focuses the timeline region (preventScroll, so the smooth scroll is not interrupted)
+OK   4. HomeTimeline.tsx now declares the data-home-timeline-region marker exactly twice (once per branch: empty-state and populated)
+OK   4. the empty-state branch's opening <section> tag was located
+OK   4. the empty-state timeline region carries the focus-region marker
+OK   4. the empty-state timeline region is focusable (tabIndex={-1}), matching the populated branch
+OK   4. located the populated branch's unique content anchor (background: colors.surfaceSubtle, only present in that branch)
+OK   4. the populated branch's opening <section> tag (the nearest one preceding its unique content anchor) was located, independently of the empty-state branch's match above
+OK   4. the populated timeline region still carries the focus-region marker (unchanged)
+OK   4. the populated timeline region is focusable (tabIndex={-1}), matching the empty-state branch
+OK   5. the update call passes a fresh value each invocation (Date.now()), so repeated clicks keep producing distinct, non-zero focusTimelineKey values -- the effect's `if (!focusTimelineKey) return;` guard is never defeated by a repeat click
+
+ALL FULL-DAY TIMELINE NAVIGATION CHECKS PASSED
+
+# exit=0 signal=

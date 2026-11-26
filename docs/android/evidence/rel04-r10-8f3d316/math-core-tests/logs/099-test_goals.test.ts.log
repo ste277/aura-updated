@@ -1,0 +1,42 @@
+$ npx ts-node test/goals.test.ts
+# job=math-core-tests step=Run Goals domain test env={}
+OK   K. persisted SUGGESTED + no link -> derived SUGGESTED
+OK   L. persisted DISMISSED (even with a link) -> derived DISMISSED
+OK   M. linked + UPCOMING -> derived PLANNED
+OK   N. linked + LOGGED -> derived COMPLETED
+OK   O. linked + CANCELLED -> derived SUGGESTED (available to plan again)
+OK   edge: plannedActivityId set but linkedPlanStatus missing (row gone) -> derived SUGGESTED, not a crash
+OK   P. progress excludes DISMISSED from both total and completed
+OK   Q. progress handles zero activities
+OK   progress: all dismissed -> total 0, completed 0 (never divides by zero elsewhere)
+OK   progress: PLANNED does not count as completed
+OK   C. civil date round-trips: "2026-09-25" -> Date -> "2026-09-25"
+OK   C. civil date is stored as literal UTC midnight (never shifted by local/server timezone)
+OK   isValidCivilDateString accepts a real, well-formed date
+OK   AB. isValidCivilDateString rejects a calendrically-invalid date (Feb 30)
+OK   AB. isValidCivilDateString rejects a malformed string
+OK   AB. isValidCivilDateString rejects a non-date-shaped string
+OK   AB. isValidCivilDateString rejects a bare instant/timestamp
+OK   AB. isValidCivilDateString rejects non-string input
+OK   AB. isValidCivilDateString rejects null
+OK   AC. isGoalTemplateCategory accepts every declared category
+OK   AC. isGoalTemplateCategory rejects an unknown category
+OK   AC. isGoalTemplateCategory rejects a UserPriorityGroup value (RELATIONSHIPS is not a GoalTemplateCategory -- the taxonomies are deliberately distinct)
+OK   AC. isGoalTemplateCategory rejects non-string input
+OK   exactly 4 template categories exist (deliberately small, per this ticket's own section 16)
+OK   every template category has at least one activity title
+OK   GET_FITTER activities resolve to real catalog ids where the catalog genuinely supports the mapping ("run"/"training" -> workout, "stretch"/"mobility" -> task-7)
+OK   MEDITATE_REGULARLY resolves to the real "meditation" catalog id
+OK   STUDY_CONSISTENTLY resolves to the real "learning" catalog id
+OK   FINISH_PROJECT: no fallback activityId is forced -- every activity resolves to null because no catalog entry genuinely matches these titles (this ticket's own section 11 instruction, verified against the live catalog rather than assumed)
+OK   resolveGoalTemplateActivities preserves the exact static titles verbatim
+OK   request mode: neither activities nor activityRhythms present -> LEGACY_TEMPLATE
+OK   request mode: activityRhythms present, activities absent -> LEGACY_TEMPLATE
+OK   request mode: activities present (non-empty), activityRhythms absent -> EXPLICIT_REVIEW
+OK   request mode: activities explicitly [] (zero approved activities) -> still EXPLICIT_REVIEW, never treated as absent
+OK   request mode: activities present AND activityRhythms present -> AMBIGUOUS (never silently prefers one)
+OK   request mode: activities explicitly null (same as absent) -> LEGACY_TEMPLATE
+OK   request mode: activityRhythms explicitly null alongside present activities -> EXPLICIT_REVIEW, not AMBIGUOUS (null counts as absent)
+ALL GOALS DOMAIN CHECKS PASSED
+
+# exit=0 signal=

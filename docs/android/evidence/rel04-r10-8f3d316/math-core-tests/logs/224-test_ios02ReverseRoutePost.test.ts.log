@@ -1,0 +1,25 @@
+$ npx ts-node test/ios02ReverseRoutePost.test.ts
+# job=math-core-tests step=Run IOS-02 reverse-geocode POST route test env={}
+OK   R0 the route exports POST and no longer exports GET (GET -> 405 from Next)
+OK   R1 unauthenticated -> 401, provider not called
+OK   R2 ...401 response is no-store
+OK   R3 provider not configured -> 503 { configured: false }, provider not called
+OK   R4 ...coordinates body is not even read when unconfigured
+OK   R5 ...503 response is no-store
+OK   R6 non-JSON content type -> 415
+OK   R7 body over 1 KB -> 413
+OK   R8 declared content-length over 1 KB -> 413 before reading
+OK   R9 invalid / mistyped / out-of-range coordinates -> 400 (8 cases), provider never called
+OK   R10 ...error messages never echo coordinates
+OK   R11 valid body -> 200 with result
+OK   R12 ...provider receives the numbers exactly
+OK   R13 ...200 response is private, no-store
+OK   R14 shared lib/cities bounds: exact limits accepted, just outside rejected
+OK   R15 no usable place -> 404, no coordinates echoed
+OK   R16 provider failure -> 502 with generic message, no coordinates echoed
+OK   R17 ...server log line carries no coordinates and no request body
+OK   R18 rate limit unchanged: 11th and 12th request within a minute -> 429
+
+19 passed, 0 failed
+
+# exit=0 signal=

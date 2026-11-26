@@ -1,0 +1,31 @@
+$ npx ts-node test/activityOntology.test.ts
+# job=math-core-tests step=Run activity ontology test env={}
+OK   Every catalog activity has an ActivityDefinition
+OK   Every ActivityDefinition has a non-empty family, intent, and socialMode
+OK   getActivityDefinition resolves a known catalog id
+OK   getActivityDefinition resolves by ActivityProfile object
+OK   MuhurtaClassification does not carry a legacy engine family (kept out of the canonical model)
+OK   toLegacyMuhurtaFamily() matches familyForActivityProfile() for every catalog activity (zero scoring change)
+OK   High-Stakes Decision or Pitch is flagged AMBIGUOUS
+OK   High-Stakes Decision or Pitch uses the broader IMPORTANT_DECISION intent
+OK   Breathwork & Strategic Visioning is flagged AMBIGUOUS
+OK   New Beginning is flagged LEGACY_ALIAS
+OK   Every non-CANONICAL activity documents why via notes
+OK   Most activities remain CANONICAL (status is the exception, not the norm)
+OK   Workout significance is decoupled to MEDIUM (catalog HIGH reflects planner priority, not Muhurta importance)
+OK   Workout intent/family are unchanged by the significance override
+OK   Financial Decision uses IMPORTANT_FINANCIAL_DECISION, not the too-specific INVESTMENT
+OK   Every ActivityDefinition.family matches familyForIntent(intent)
+OK   Known free-text phrase resolves via the catalog, not the classifier
+OK   Known free-text phrase resolves to the dedicated everyday road-trip activity
+OK   Known free-text phrase carries the OUTING intent
+OK   Catalog resolution keeps the exact legacy family the engine already uses today
+OK   Unrecognized free text falls back to the classifier
+OK   Fallback resolution matches classifyMuhurtaActivity() directly (fallback path unchanged)
+OK   Fallback intent maps back to the same broad family bucket
+OK   evaluateActivityFit still runs and produces a scored, labeled result (engine untouched)
+OK   Journey start still scores well during Abhijit (existing behaviour preserved)
+
+ALL ACTIVITY ONTOLOGY CHECKS PASSED
+
+# exit=0 signal=

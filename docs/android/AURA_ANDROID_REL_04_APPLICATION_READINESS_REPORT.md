@@ -2,7 +2,12 @@
 
 **Date:** 2026-11-26 (R9) · **PR:** #392 · **Branch:** `aura-android-rel04-app-readiness`, cut from `main` `ad49e6a`
 
-**Revision:** **R9** — durable lifecycle enforcement. R9 closes the three lifecycle blockers of the R8 independent assessment of reviewed head `2e32b914f011a83333fa0850c19d1997f36cd897` (implementation `eab072c`): no single transmission boundary, non-durable discard of localStorage-only entries, and cleanup before the discard decision (§R9). The R8 simplified architecture is kept: no new format, migration or marker expiry.
+**Revision:** **R10**: durable discard identity and reporting. R10 closes the open X2 findings of independent verification 39228-R9 (reviewed head `9385eb2`, implementation `513c12b`), with X1 and X3 already closed.
+- **Identity:** lifecycle identity is established from identity fields alone. Identifiable activities with damaged non-identity fields are discarded durably. Missing, malformed or conflicting identity is preserved.
+- **Reporting:** sign-out reports each logical activity in exactly one outcome, with "possibly sent" stated per category.
+- **References:** implementation `8f3d3167af2c48ea463d454600dc94358e4e7249`; evidence `docs/android/evidence/rel04-r10-8f3d316/`; reviewer evidence `docs/android/evidence/rel04-r9-independent-39228/`; handover `docs/android/AURA_ANDROID_REL_04_R10_VERIFICATION_HANDOVER.md` (sections there supersede §R9 where they differ).
+
+**Previous revision:** **R9** — durable lifecycle enforcement. R9 closes the three lifecycle blockers of the R8 independent assessment of reviewed head `2e32b914f011a83333fa0850c19d1997f36cd897` (implementation `eab072c`): no single transmission boundary, non-durable discard of localStorage-only entries, and cleanup before the discard decision (§R9). The R8 simplified architecture is kept: no new format, migration or marker expiry.
 
 - **R9 implementation commit:** `513c12b6d9a824bbe86b3e63df12a3aede21ac8f` · **integration (CI merge ref):** `7b07ae5eab8f818be0fdc5cedd641928ceb339a2` · **main base:** `3feff0342c48959be7006648ee4bdcaa71fbb162`.
 - **Evidence:** `docs/android/evidence/rel04-r9-513c12b/` · **R8 witnesses (preserved):** `docs/android/evidence/rel04-r8-independent-45804709468/` · **Handover:** `docs/android/AURA_ANDROID_REL_04_R9_VERIFICATION_HANDOVER.md`.
@@ -41,7 +46,7 @@ R5, R4 and R3 sections are kept as history.
 
 ## 1. Verdict
 
-**ONE AUTHORITATIVE LIFECYCLE BOUNDARY — DURABLE DECISIONS BEFORE CLEANUP — NO TRANSMISSION WHEN ELIGIBILITY CANNOT BE ESTABLISHED — READY FOR FOCUSED INDEPENDENT VERIFICATION.**
+**DURABLE DISCARD INVARIANT VERIFIED — R10 READY FOR FOCUSED INDEPENDENT REVIEW.** (R9 boundary and durable-before-cleanup retained.)
 
 | Disposition | State |
 |---|---|

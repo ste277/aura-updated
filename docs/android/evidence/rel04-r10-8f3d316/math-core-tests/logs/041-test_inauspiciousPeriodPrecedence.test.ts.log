@@ -1,0 +1,172 @@
+$ npx ts-node test/inauspiciousPeriodPrecedence.test.ts
+# job=math-core-tests step=Run inauspicious period precedence test env={}
+OK   Fixture sanity: real 2026-09-02 Abhijit/Rahu Kalam genuinely overlap
+OK   Financial Decision 12:15-12:30 PM (real 2026-09-02, entirely inside Rahu Kalam) is NOT a positive candidate
+OK   Financial Decision 12:15-12:30 PM carries a FRICTION_WINDOW_BLOCKED conflict
+OK   Financial Decision 12:15-12:30 PM is not labeled GOOD/BEST/EXCELLENT/VERY_GOOD
+OK   FIND never returns a candidate entirely inside the Abhijit/Rahu overlap zone for Financial Decision
+OK   task-1: Abhijit+Rahu Kalam overlap (12:15-12:40) is hard-excluded for this significant commencement
+OK   task-1: the pure-Abhijit portion (11:50-12:15) of the SAME window remains a valid, positive candidate
+OK   engagement: Abhijit+Rahu Kalam overlap (12:15-12:40) is hard-excluded for this significant commencement
+OK   engagement: the pure-Abhijit portion (11:50-12:15) of the SAME window remains a valid, positive candidate
+OK   financial-decision: Abhijit+Rahu Kalam overlap (12:15-12:40) is hard-excluded for this significant commencement
+OK   financial-decision: the pure-Abhijit portion (11:50-12:15) of the SAME window remains a valid, positive candidate
+OK   new-beginning: Abhijit+Rahu Kalam overlap (12:15-12:40) is hard-excluded for this significant commencement
+OK   new-beginning: the pure-Abhijit portion (11:50-12:15) of the SAME window remains a valid, positive candidate
+OK   business-start: Abhijit+Rahu Kalam overlap (12:15-12:40) is hard-excluded for this significant commencement
+OK   business-start: the pure-Abhijit portion (11:50-12:15) of the SAME window remains a valid, positive candidate
+OK   property-purchase: Abhijit+Rahu Kalam overlap (12:15-12:40) is hard-excluded for this significant commencement
+OK   property-purchase: the pure-Abhijit portion (11:50-12:15) of the SAME window remains a valid, positive candidate
+OK   griha-pravesh: Abhijit+Rahu Kalam overlap (12:15-12:40) is hard-excluded for this significant commencement
+OK   griha-pravesh: the pure-Abhijit portion (11:50-12:15) of the SAME window remains a valid, positive candidate
+OK   start-journey: Abhijit+Rahu Kalam overlap (12:15-12:40) is hard-excluded for this significant commencement
+OK   start-journey: the pure-Abhijit portion (11:50-12:15) of the SAME window remains a valid, positive candidate
+OK   task-1: Abhijit+Yamaganda overlap (12:15-12:40) is hard-excluded for this significant commencement
+OK   task-1: the pure-Abhijit portion (11:50-12:15) of the SAME window remains a valid, positive candidate
+OK   engagement: Abhijit+Yamaganda overlap (12:15-12:40) is hard-excluded for this significant commencement
+OK   engagement: the pure-Abhijit portion (11:50-12:15) of the SAME window remains a valid, positive candidate
+OK   financial-decision: Abhijit+Yamaganda overlap (12:15-12:40) is hard-excluded for this significant commencement
+OK   financial-decision: the pure-Abhijit portion (11:50-12:15) of the SAME window remains a valid, positive candidate
+OK   new-beginning: Abhijit+Yamaganda overlap (12:15-12:40) is hard-excluded for this significant commencement
+OK   new-beginning: the pure-Abhijit portion (11:50-12:15) of the SAME window remains a valid, positive candidate
+OK   business-start: Abhijit+Yamaganda overlap (12:15-12:40) is hard-excluded for this significant commencement
+OK   business-start: the pure-Abhijit portion (11:50-12:15) of the SAME window remains a valid, positive candidate
+OK   property-purchase: Abhijit+Yamaganda overlap (12:15-12:40) is hard-excluded for this significant commencement
+OK   property-purchase: the pure-Abhijit portion (11:50-12:15) of the SAME window remains a valid, positive candidate
+OK   griha-pravesh: Abhijit+Yamaganda overlap (12:15-12:40) is hard-excluded for this significant commencement
+OK   griha-pravesh: the pure-Abhijit portion (11:50-12:15) of the SAME window remains a valid, positive candidate
+OK   start-journey: Abhijit+Yamaganda overlap (12:15-12:40) is hard-excluded for this significant commencement
+OK   start-journey: the pure-Abhijit portion (11:50-12:15) of the SAME window remains a valid, positive candidate
+OK   task-1: Abhijit+Gulika overlap (12:15-12:40) is hard-excluded for this significant commencement
+OK   task-1: the pure-Abhijit portion (11:50-12:15) of the SAME window remains a valid, positive candidate
+OK   engagement: Abhijit+Gulika overlap (12:15-12:40) is hard-excluded for this significant commencement
+OK   engagement: the pure-Abhijit portion (11:50-12:15) of the SAME window remains a valid, positive candidate
+OK   financial-decision: Abhijit+Gulika overlap (12:15-12:40) is hard-excluded for this significant commencement
+OK   financial-decision: the pure-Abhijit portion (11:50-12:15) of the SAME window remains a valid, positive candidate
+OK   new-beginning: Abhijit+Gulika overlap (12:15-12:40) is hard-excluded for this significant commencement
+OK   new-beginning: the pure-Abhijit portion (11:50-12:15) of the SAME window remains a valid, positive candidate
+OK   business-start: Abhijit+Gulika overlap (12:15-12:40) is hard-excluded for this significant commencement
+OK   business-start: the pure-Abhijit portion (11:50-12:15) of the SAME window remains a valid, positive candidate
+OK   property-purchase: Abhijit+Gulika overlap (12:15-12:40) is hard-excluded for this significant commencement
+OK   property-purchase: the pure-Abhijit portion (11:50-12:15) of the SAME window remains a valid, positive candidate
+OK   griha-pravesh: Abhijit+Gulika overlap (12:15-12:40) is hard-excluded for this significant commencement
+OK   griha-pravesh: the pure-Abhijit portion (11:50-12:15) of the SAME window remains a valid, positive candidate
+OK   start-journey: Abhijit+Gulika overlap (12:15-12:40) is hard-excluded for this significant commencement
+OK   start-journey: the pure-Abhijit portion (11:50-12:15) of the SAME window remains a valid, positive candidate
+OK   task-1: Brahma+Rahu Kalam overlap (5:00-5:18 AM) is hard-excluded for this significant commencement
+OK   task-1: the pure-Brahma portion (4:30-5:00 AM) of the SAME window remains a valid, positive candidate
+OK   new-beginning: Brahma+Rahu Kalam overlap (5:00-5:18 AM) is hard-excluded for this significant commencement
+OK   new-beginning: the pure-Brahma portion (4:30-5:00 AM) of the SAME window remains a valid, positive candidate
+OK   task-1: Brahma+Yamaganda overlap (5:00-5:18 AM) is hard-excluded for this significant commencement
+OK   task-1: the pure-Brahma portion (4:30-5:00 AM) of the SAME window remains a valid, positive candidate
+OK   new-beginning: Brahma+Yamaganda overlap (5:00-5:18 AM) is hard-excluded for this significant commencement
+OK   new-beginning: the pure-Brahma portion (4:30-5:00 AM) of the SAME window remains a valid, positive candidate
+OK   task-1: Brahma+Gulika overlap (5:00-5:18 AM) is hard-excluded for this significant commencement
+OK   task-1: the pure-Brahma portion (4:30-5:00 AM) of the SAME window remains a valid, positive candidate
+OK   new-beginning: Brahma+Gulika overlap (5:00-5:18 AM) is hard-excluded for this significant commencement
+OK   new-beginning: the pure-Brahma portion (4:30-5:00 AM) of the SAME window remains a valid, positive candidate
+OK   Engagement Ceremony catalog entry no longer lists GULIKA in recommendedWindowTypes
+OK   Engagement Ceremony during ISOLATED Gulika (no overlap needed) is hard-excluded (-100)
+OK   isTimingSensitiveActivity(engagement classification) is true (canonical guard is reachable)
+OK   deep-work during RAHU_KALAM: remains schedulable (not hard-excluded)
+OK   deep-work during RAHU_KALAM: fit score is a real, finite number in the normal 0-100 range
+OK   workout during RAHU_KALAM: remains schedulable (not hard-excluded)
+OK   workout during RAHU_KALAM: fit score is a real, finite number in the normal 0-100 range
+OK   task-7 during RAHU_KALAM: remains schedulable (not hard-excluded)
+OK   task-7 during RAHU_KALAM: fit score is a real, finite number in the normal 0-100 range
+OK   tea-break during RAHU_KALAM: remains schedulable (not hard-excluded)
+OK   tea-break during RAHU_KALAM: fit score is a real, finite number in the normal 0-100 range
+OK   family-dinner during RAHU_KALAM: remains schedulable (not hard-excluded)
+OK   family-dinner during RAHU_KALAM: fit score is a real, finite number in the normal 0-100 range
+OK   date-night during RAHU_KALAM: remains schedulable (not hard-excluded)
+OK   date-night during RAHU_KALAM: fit score is a real, finite number in the normal 0-100 range
+OK   walk-together during RAHU_KALAM: remains schedulable (not hard-excluded)
+OK   walk-together during RAHU_KALAM: fit score is a real, finite number in the normal 0-100 range
+OK   deep-work during YAMA: remains schedulable (not hard-excluded)
+OK   deep-work during YAMA: fit score is a real, finite number in the normal 0-100 range
+OK   workout during YAMA: remains schedulable (not hard-excluded)
+OK   workout during YAMA: fit score is a real, finite number in the normal 0-100 range
+OK   task-7 during YAMA: remains schedulable (not hard-excluded)
+OK   task-7 during YAMA: fit score is a real, finite number in the normal 0-100 range
+OK   tea-break during YAMA: remains schedulable (not hard-excluded)
+OK   tea-break during YAMA: fit score is a real, finite number in the normal 0-100 range
+OK   family-dinner during YAMA: remains schedulable (not hard-excluded)
+OK   family-dinner during YAMA: fit score is a real, finite number in the normal 0-100 range
+OK   date-night during YAMA: remains schedulable (not hard-excluded)
+OK   date-night during YAMA: fit score is a real, finite number in the normal 0-100 range
+OK   walk-together during YAMA: remains schedulable (not hard-excluded)
+OK   walk-together during YAMA: fit score is a real, finite number in the normal 0-100 range
+OK   deep-work during GULIKA: remains schedulable (not hard-excluded)
+OK   deep-work during GULIKA: fit score is a real, finite number in the normal 0-100 range
+OK   workout during GULIKA: remains schedulable (not hard-excluded)
+OK   workout during GULIKA: fit score is a real, finite number in the normal 0-100 range
+OK   task-7 during GULIKA: remains schedulable (not hard-excluded)
+OK   task-7 during GULIKA: fit score is a real, finite number in the normal 0-100 range
+OK   tea-break during GULIKA: remains schedulable (not hard-excluded)
+OK   tea-break during GULIKA: fit score is a real, finite number in the normal 0-100 range
+OK   family-dinner during GULIKA: remains schedulable (not hard-excluded)
+OK   family-dinner during GULIKA: fit score is a real, finite number in the normal 0-100 range
+OK   date-night during GULIKA: remains schedulable (not hard-excluded)
+OK   date-night during GULIKA: fit score is a real, finite number in the normal 0-100 range
+OK   walk-together during GULIKA: remains schedulable (not hard-excluded)
+OK   walk-together during GULIKA: fit score is a real, finite number in the normal 0-100 range
+OK   deep-work: Gulika never scores higher than this activity's own Neutral score
+OK   task-7: Gulika never scores higher than this activity's own Neutral score
+OK   family-dinner: Gulika never scores higher than this activity's own Neutral score
+OK   capabilitiesForWindow(GULIKA) is byte-identical to capabilitiesForWindow(NEUTRAL) -- Gulika has no dedicated, stronger-than-Neutral branch any more
+OK   No activity fit evaluation during GULIKA carries a GULIKA_SUPPORT reason (bonus removed, not merely renamed)
+
+Significant-activity matrix (isolated window):
+Activity            Rahu      Yama      Gulika
+OK   task-1 isolated RAHU_KALAM: BLOCKED (-100)
+OK   task-1 isolated YAMA: BLOCKED (-100)
+OK   task-1 isolated GULIKA: BLOCKED (-100)
+task-1              -100      -100      -100
+OK   engagement isolated RAHU_KALAM: BLOCKED (-100)
+OK   engagement isolated YAMA: BLOCKED (-100)
+OK   engagement isolated GULIKA: BLOCKED (-100)
+engagement          -100      -100      -100
+OK   financial-decision isolated RAHU_KALAM: BLOCKED (-100)
+OK   financial-decision isolated YAMA: BLOCKED (-100)
+OK   financial-decision isolated GULIKA: BLOCKED (-100)
+financial-decision  -100      -100      -100
+OK   new-beginning isolated RAHU_KALAM: BLOCKED (-100)
+OK   new-beginning isolated YAMA: BLOCKED (-100)
+OK   new-beginning isolated GULIKA: BLOCKED (-100)
+new-beginning       -100      -100      -100
+OK   business-start isolated RAHU_KALAM: BLOCKED (-100)
+OK   business-start isolated YAMA: BLOCKED (-100)
+OK   business-start isolated GULIKA: BLOCKED (-100)
+business-start      -100      -100      -100
+OK   property-purchase isolated RAHU_KALAM: BLOCKED (-100)
+OK   property-purchase isolated YAMA: BLOCKED (-100)
+OK   property-purchase isolated GULIKA: BLOCKED (-100)
+property-purchase   -100      -100      -100
+OK   griha-pravesh isolated RAHU_KALAM: BLOCKED (-100)
+OK   griha-pravesh isolated YAMA: BLOCKED (-100)
+OK   griha-pravesh isolated GULIKA: BLOCKED (-100)
+griha-pravesh       -100      -100      -100
+OK   start-journey isolated RAHU_KALAM: BLOCKED (-100)
+OK   start-journey isolated YAMA: BLOCKED (-100)
+OK   start-journey isolated GULIKA: BLOCKED (-100)
+start-journey       -100      -100      -100
+OK   Permuting the overlapping WindowSpan[] order does not change the significant-activity safety result (both orderings hard-exclude)
+OK   Both permutation orderings agree exactly (array order genuinely does not matter)
+OK   All 6 permutations of a 3-window (Abhijit+Gulika+Rahu) overlap agree exactly for a significant commencement
+OK   All 6 permutations hard-exclude the significant commencement
+OK   Muhurtham (start-journey): no candidate anchored inside the Abhijit/Gulika/Rahu overlap zone survives as a valid Muhurtham for 2026-09-02
+OK   Muhurtham (financial-decision): no candidate anchored inside the Abhijit/Gulika/Rahu overlap zone survives as a valid Muhurtham for 2026-09-02
+OK   Muhurtham (new-beginning): no candidate anchored inside the Abhijit/Gulika/Rahu overlap zone survives as a valid Muhurtham for 2026-09-02
+OK   Muhurtham (business-start): no candidate anchored inside the Abhijit/Gulika/Rahu overlap zone survives as a valid Muhurtham for 2026-09-02
+OK   Muhurtham (property-purchase): no candidate anchored inside the Abhijit/Gulika/Rahu overlap zone survives as a valid Muhurtham for 2026-09-02
+OK   Muhurtham (griha-pravesh): no candidate anchored inside the Abhijit/Gulika/Rahu overlap zone survives as a valid Muhurtham for 2026-09-02
+OK   Muhurtham (marriage): no candidate anchored inside the Abhijit/Gulika/Rahu overlap zone survives as a valid Muhurtham for 2026-09-02
+OK   Day Builder fixture: exactly one opening, correctly bounded to the Rahu-Kalam stretch (not silently open until midnight)
+OK   Day Builder: Deep Work (everyday) surfaces at least one candidate in a Rahu-Kalam-only opening
+OK   Day Builder: Financial Decision (significant) does NOT surface any candidate in a Rahu-Kalam-only opening
+OK   Shared Timing (Family Dinner, everyday) returns OK
+OK   Shared Timing candidates remain ranked by sharedScore descending
+
+ALL INAUSPICIOUS PERIOD PRECEDENCE CHECKS PASSED
+
+# exit=0 signal=
