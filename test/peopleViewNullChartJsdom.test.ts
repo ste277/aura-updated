@@ -110,9 +110,20 @@ async function main() {
     await openEdit(root, 1);
     const date = root.querySelector('#person-birth-date') as HTMLInputElement;
     check('edit form for a chart person: birth date and time stay required, prefilled', date.required && date.value === '1993-07-21');
+    // AURA-MP-1 R2 F1 (62009): this assertion used to require that an UNCHANGED save resend the full chart --
+    // that unconditional resubmission IS the defect (it replaced saved timezones/cities with the form's
+    // presentation default). Corrected contract: no change -> no request; an explicit birth edit -> the full
+    // all-or-none chart, with the untouched location carried over from the ORIGINAL record.
+    const patchesBefore = calls.filter((c) => c.method === 'PATCH').length;
+    await submit(root.querySelector('form') as HTMLFormElement);
+    check('R2 F1: saving a chart person WITHOUT changes sends no request at all', calls.filter((c) => c.method === 'PATCH').length === patchesBefore);
+    await flush();
+    const editAgain2 = buttonByText(root, 'Edit');
+    if (editAgain2) { await click(editAgain2); await flush(); }
+    await typeInto(root.querySelector('#person-birth-time') as HTMLInputElement, '06:45');
     await submit(root.querySelector('form') as HTMLFormElement);
     const patch = calls.filter((c) => c.method === 'PATCH').pop();
-    check('saving a chart person sends the full chart, exactly as before', patch?.url === `/api/people/${WITH_CHART.id}` && patch.body.birthDate === '1993-07-21' && patch.body.birthTime === '06:40' && typeof patch.body.birthTimezone === 'string', patch);
+    check('saving an explicit birth-time edit sends the full chart, with the ORIGINAL timezone, city and coordinates', patch?.url === `/api/people/${WITH_CHART.id}` && patch.body.birthDate === '1993-07-21' && patch.body.birthTime === '06:45' && patch.body.birthTimezone === 'Asia/Kolkata' && patch.body.birthCityName === 'Chennai' && patch.body.birthLatitude === 13.0827 && patch.body.birthLongitude === 80.2707 && !('name' in patch.body) && !('relationshipType' in patch.body), patch);
     await h.unmount();
   }
 

@@ -1646,3 +1646,10 @@ jobs:
       # accepts, enable/disable/re-enable preservation, graceful degradation.
       - name: Run AURA-MP-1 R1 legacy People editor DB test
         run: npx ts-node --project tsconfig.jsdom-tests.json test/peopleViewLegacyEditorDb.test.ts
+      # AURA-MP-1 R2 (62009) -- F1: the real People editor + real API + real
+      # database never changes unrelated birth/location data (full-record
+      # before/after comparison, exact payload keys) across disabled /
+      # enabled / re-enabled states; F4: direct-SQL INSERT and UPDATE matrix
+      # for the Gregorian CHECK (NULL month/day refused, unknown year kept).
+      - name: Run AURA-MP-1 R2 profile preservation and Gregorian integrity DB test
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/myPeopleR2Db.test.ts

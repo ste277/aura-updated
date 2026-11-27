@@ -53,6 +53,8 @@ Make a person **name-only-capable and special-day-aware** at the data and API le
 - **R1 F3:** `birthDate` must be a real calendar date, so a 400 is returned before any writer. Coordinates are optional, but if either is given both must be finite numbers in range; null, '', strings and NaN are rejected and never coerced to 0.
 - **R1 F5:** `occasions` on person create → 400. Special days only via the special-day routes.
 - **R1 F4:** a special-day PATCH is one locked read-merge-validate-write. Migration 0056 adds date-integrity CHECKs (real month/day, 29 Feb only in leap years when a year is known, year ≥ 1900, OTHER needs a label).
+- **R2 F4 (62009):** the Gregorian CHECK explicitly requires `month IS NOT NULL AND day IS NOT NULL`. A PostgreSQL CHECK accepts UNKNOWN, so NULL components were previously accepted. The year stays optional.
+- **R2 F1 (62009):** the legacy editor submits only fields the user changed. An edit to any birth field sends the full all-or-none chart, with untouched parts (timezone, city, coordinates, or their absence) taken from the ORIGINAL record, never from a form default. A save with no changes sends nothing. ADD asks for an explicit birth city.
 
 ### 3. Data access: `lib/db.ts` (raw SQL, owner-scoped like today)
 - **`updateSavedPerson` becomes partial.** It builds its SET list only from the keys present. A **chart is never touched unless `chart` is in the input**; then it is replaced whole or cleared whole.

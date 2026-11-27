@@ -8,7 +8,9 @@
 -- (owner-confirmed 2026-11-27), so My People uses 0056. R1 (62007) amended
 -- the PersonOccasion CHECKs before 0056 was applied to any persistent
 -- environment (verified 2026-11-27: no Production build with 0056, Preview
--- builds skip migrations, no local persistent database has it). Neither migration touches the
+-- builds skip migrations, no local persistent database has it). R2 (62009)
+-- amended the same CHECK again after re-verifying that 0056 is still
+-- unapplied to any persistent environment. Neither migration touches the
 -- other's tables, and `prisma migrate deploy` applies any unapplied
 -- migration regardless of which one lands first.
 
@@ -60,10 +62,16 @@ CREATE TABLE "PersonOccasion" (
   -- writer and no concurrent interleaving can ever persist 31 Apr, 30 Feb,
   -- or 29 Feb in a known non-leap year. An unknown year (NULL) keeps 29 Feb
   -- valid; it is observed on 28 Feb in non-leap years at read time.
+  -- R2 F4 (62009): month and day are required EXPLICITLY. A PostgreSQL
+  -- CHECK passes when its expression is UNKNOWN, so without these IS NOT
+  -- NULL terms a NULL month or day made every comparison below NULL and the
+  -- row was accepted. The year stays optional (NULL = unknown year).
   CONSTRAINT "PersonOccasion_gregorian_date_check" CHECK (
     calendar <> 'GREGORIAN'
     OR (
-      month BETWEEN 1 AND 12
+      month IS NOT NULL
+      AND day IS NOT NULL
+      AND month BETWEEN 1 AND 12
       AND day >= 1
       AND day <= CASE WHEN month = 2 THEN 29 WHEN month IN (4, 6, 9, 11) THEN 30 ELSE 31 END
       AND NOT (

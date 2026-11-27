@@ -284,13 +284,96 @@ function PersonDetail({ personId, onEdit, onDeleted }: { personId: string; onEdi
   );
 }
 
+/**
+ * R2 F1 (62009): the editor distinguishes four things and submits only the
+ * second-to-last:
+ *   1. ORIGINAL persisted values (snapshot from GET /api/people/:id);
+ *   2. UI presentation defaults (e.g. a city select needs *some* value);
+ *   3. EXPLICIT user edits (a field whose value differs from the original);
+ *   4. explicit clearing (not offered by this legacy screen; the API supports
+ *      `chart: null` only while My People is enabled).
+ * An EDIT therefore sends only changed fields. The birth chart is all-or-none
+ * by contract, so when the user edits ANY chart field the full chart is sent,
+ * with every untouched part (timezone, city, coordinates) carried over from
+ * the ORIGINAL record -- never from a presentation default. A save with no
+ * changes sends nothing.
+ */
+const SAVED_LOCATION = '__saved_location__';
+const NO_CITY = '';
+
+interface OriginalPerson {
+  name: string;
+  relationshipType: RelationshipType;
+  birthDate: string; // 'YYYY-MM-DD' or ''
+  birthTime: string; // 'HH:MM' or ''
+  birthTimezone: string | null;
+  birthCityName: string | null;
+  birthLatitude: number | null;
+  birthLongitude: number | null;
+}
+
+/** The PATCH body for an EDIT, or null when nothing changed. Exported for tests. */
+export function buildPersonEditPayload(
+  original: OriginalPerson,
+  edited: { name: string; relationshipType: RelationshipType; birthDate: string; birthTime: string; birthCity: string },
+  cities: CityOption[]
+): { ok: true; body: Record<string, unknown> | null } | { ok: false; error: string } {
+  const body: Record<string, unknown> = {};
+  if (edited.name !== original.name) body.name = edited.name;
+  if (edited.relationshipType !== original.relationshipType) body.relationshipType = edited.relationshipType;
+
+  const hadChart = Boolean(original.birthDate && original.birthTime && original.birthTimezone);
+  const cityChosen = edited.birthCity !== SAVED_LOCATION && edited.birthCity !== NO_CITY;
+  const dateChanged = edited.birthDate !== original.birthDate;
+  const timeChanged = edited.birthTime !== original.birthTime;
+
+  if (hadChart) {
+    if (dateChanged || timeChanged || cityChosen) {
+      if (!edited.birthDate || !edited.birthTime) return { ok: false, error: 'Birth date and birth time are both needed.' };
+      const chosen = cityChosen ? cities.find((c) => c.cityName === edited.birthCity) : undefined;
+      if (cityChosen && !chosen) return { ok: false, error: 'Choose a birth location from the list.' };
+      body.birthDate = edited.birthDate;
+      body.birthTime = edited.birthTime;
+      if (chosen) {
+        body.birthTimezone = chosen.timezone;
+        body.birthCityName = chosen.cityName;
+        body.birthLatitude = chosen.latitude;
+        body.birthLongitude = chosen.longitude;
+      } else {
+        // Location untouched: carry the ORIGINAL location exactly, including
+        // its absence (no city / no coordinates stay absent).
+        body.birthTimezone = original.birthTimezone;
+        if (original.birthCityName) body.birthCityName = original.birthCityName;
+        if (original.birthLatitude != null && original.birthLongitude != null) {
+          body.birthLatitude = original.birthLatitude;
+          body.birthLongitude = original.birthLongitude;
+        }
+      }
+    }
+  } else {
+    const anyChart = Boolean(edited.birthDate || edited.birthTime || cityChosen);
+    if (anyChart) {
+      if (!edited.birthDate || !edited.birthTime || !cityChosen) {
+        return { ok: false, error: 'Add both a birth date and a birth time, and a birth location -- or leave all three empty.' };
+      }
+      const chosen = cities.find((c) => c.cityName === edited.birthCity);
+      if (!chosen) return { ok: false, error: 'Choose a birth location from the list.' };
+      Object.assign(body, { birthDate: edited.birthDate, birthTime: edited.birthTime, birthTimezone: chosen.timezone, birthCityName: chosen.cityName, birthLatitude: chosen.latitude, birthLongitude: chosen.longitude });
+    }
+  }
+  return { ok: true, body: Object.keys(body).length > 0 ? body : null };
+}
+
 function PersonForm({ mode, personId, onSaved, onCancel, myPeopleEffective: listEffective = false }: { mode: 'ADD' | 'EDIT'; personId?: string; onSaved: () => void; onCancel: () => void; myPeopleEffective?: boolean }) {
   const [customCities, setCustomCities] = useState<CityOption[]>([]);
   const [name, setName] = useState('');
   const [relationshipType, setRelationshipType] = useState<RelationshipType>('PARTNER');
   const [birthDate, setBirthDate] = useState('');
   const [birthTime, setBirthTime] = useState('');
-  const [birthCity, setBirthCity] = useState(CITY_OPTIONS[0]?.cityName || 'Chennai');
+  // R2 F1: no city is pre-selected as a silent default. ADD asks for an
+  // explicit choice; EDIT starts on the person's SAVED location.
+  const [birthCity, setBirthCity] = useState<string>(NO_CITY);
+  const [original, setOriginal] = useState<OriginalPerson | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [loaded, setLoaded] = useState(mode === 'ADD');
@@ -298,10 +381,6 @@ function PersonForm({ mode, personId, onSaved, onCancel, myPeopleEffective: list
   // demand them -- name/relationship can be changed on their own, and the
   // chart is then left untouched (PATCH is partial).
   const [hadChart, setHadChart] = useState(mode === 'ADD');
-  // R1 F1: the relationship as loaded. An EDIT resubmits relationshipType only
-  // when the user actually changed it, so an unchanged PARENT / CHILD /
-  // SIBLING is never sent back to a server where My People is disabled.
-  const [loadedRelationshipType, setLoadedRelationshipType] = useState<RelationshipType | null>(null);
   // R1 F2: My People options only when the public flag is on AND the server
   // confirmed it (list response for ADD, detail response for EDIT).
   const [detailEffective, setDetailEffective] = useState<boolean | null>(null);
@@ -327,13 +406,23 @@ function PersonForm({ mode, personId, onSaved, onCancel, myPeopleEffective: list
         return res.json();
       })
       .then((data: SavedPersonDetail) => {
-        setName(data.name);
-        setRelationshipType(data.relationshipType);
-        setLoadedRelationshipType(data.relationshipType);
+        const snapshot: OriginalPerson = {
+          name: data.name,
+          relationshipType: data.relationshipType,
+          birthDate: data.birthDate ? data.birthDate.slice(0, 10) : '',
+          birthTime: data.birthTime ?? '',
+          birthTimezone: data.birthTimezone ?? null,
+          birthCityName: data.birthCityName ?? null,
+          birthLatitude: data.birthLatitude ?? null,
+          birthLongitude: data.birthLongitude ?? null,
+        };
+        setOriginal(snapshot);
+        setName(snapshot.name);
+        setRelationshipType(snapshot.relationshipType);
         setHadChart(personHasChartDetails(data));
-        setBirthDate(data.birthDate ? data.birthDate.slice(0, 10) : '');
-        setBirthTime(data.birthTime ?? '');
-        if (data.birthCityName) setBirthCity(data.birthCityName);
+        setBirthDate(snapshot.birthDate);
+        setBirthTime(snapshot.birthTime);
+        setBirthCity(personHasChartDetails(data) ? SAVED_LOCATION : NO_CITY);
         setLoaded(true);
       })
       .catch((err: Error) => setError(err.message));
@@ -344,42 +433,38 @@ function PersonForm({ mode, personId, onSaved, onCancel, myPeopleEffective: list
     [customCities]
   );
 
+  const save = async (method: 'POST' | 'PATCH', url: string, body: Record<string, unknown>) => {
+    const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || 'Unable to save this person.');
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
     setError('');
-    const city = combinedCities.find((c) => c.cityName === birthCity) || combinedCities[0];
-    const chartLeftEmpty = !birthDate && !birthTime;
-    if (!chartRequired && !chartLeftEmpty && (!birthDate || !birthTime)) {
-      setError('Add both a birth date and a birth time, or leave both empty.');
-      setSaving(false);
-      return;
-    }
-    // Chart fields are sent only when they are being written; otherwise the
-    // partial PATCH leaves the saved chart (and every other field) untouched.
-    const chartFields = chartLeftEmpty && !chartRequired
-      ? {}
-      : {
+    try {
+      if (mode === 'EDIT') {
+        if (!original || !personId) throw new Error('Unable to load this person.');
+        const payload = buildPersonEditPayload(original, { name, relationshipType, birthDate, birthTime, birthCity }, combinedCities);
+        if (!payload.ok) throw new Error(payload.error);
+        // Nothing changed: nothing is sent, nothing is written.
+        if (payload.body) await save('PATCH', `/api/people/${personId}`, payload.body);
+      } else {
+        const city = combinedCities.find((c) => c.cityName === birthCity);
+        if (!city) throw new Error('Choose a birth location.');
+        await save('POST', '/api/people', {
+          name,
+          relationshipType,
           birthDate,
           birthTime,
           birthTimezone: city.timezone,
           birthCityName: city.cityName,
           birthLatitude: city.latitude,
           birthLongitude: city.longitude,
-        };
-    try {
-      const res = await fetch(mode === 'ADD' ? '/api/people' : `/api/people/${personId}`, {
-        method: mode === 'ADD' ? 'POST' : 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name,
-          ...(mode === 'ADD' || relationshipType !== loadedRelationshipType ? { relationshipType } : {}),
-          ...chartFields,
-        }),
-      });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.error || 'Unable to save this person.');
+        });
       }
       onSaved();
     } catch (err) {
@@ -392,6 +477,11 @@ function PersonForm({ mode, personId, onSaved, onCancel, myPeopleEffective: list
   if (!loaded) return <SurfaceCard><div style={{ fontSize: 12, color: colors.textFaint }}>Loading…</div></SurfaceCard>;
 
   const relationshipOptions = RELATIONSHIP_OPTIONS.filter((o) => !o.myPeopleOnly || myPeopleEnabled || o.value === relationshipType);
+  const savedLocationLabel = original && hadChart
+    ? original.birthCityName
+      ? `${original.birthCityName} (saved)`
+      : `Saved time zone: ${original.birthTimezone}`
+    : null;
 
   return (
     <form onSubmit={handleSubmit} style={theme.surfaceCardStyle}>
@@ -424,7 +514,12 @@ function PersonForm({ mode, personId, onSaved, onCancel, myPeopleEffective: list
 
         <div>
           <FieldLabel htmlFor="person-birth-city">Birth location</FieldLabel>
-          <SelectInput id="person-birth-city" value={birthCity} onChange={(e) => setBirthCity(e.target.value)}>
+          <SelectInput id="person-birth-city" required={mode === 'ADD'} value={birthCity} onChange={(e) => setBirthCity(e.target.value)}>
+            {savedLocationLabel ? (
+              <option value={SAVED_LOCATION}>{savedLocationLabel}</option>
+            ) : (
+              <option value={NO_CITY}>{mode === 'ADD' ? 'Choose a city…' : 'Not set'}</option>
+            )}
             {combinedCities.map((c) => (
               <option key={c.cityName} value={c.cityName}>{c.cityName}</option>
             ))}

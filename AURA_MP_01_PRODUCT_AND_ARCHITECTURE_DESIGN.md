@@ -556,7 +556,7 @@ The switch controls **new capabilities only**. Anything existing records depend 
 
 | | Switch **off** (Production until sign-off) | Switch **on** |
 |---|---|---|
-| People screen | Today's screen and form. **Null-safe:** a person without chart details shows "No birth details" instead of crashing (today's code would crash at `PeopleView.tsx:216, 283`), and can still be edited (name/relationship) or removed. **R1 F1:** an unchanged PARENT / CHILD / SIBLING is kept; the editor never resubmits it | My People screens |
+| People screen | Today's screen and form. **Null-safe:** a person without chart details shows "No birth details" instead of crashing (today's code would crash at `PeopleView.tsx:216, 283`), and can still be edited (name/relationship) or removed. **R1 F1:** an unchanged PARENT / CHILD / SIBLING is kept; the editor never resubmits it. **R2 F1:** the editor submits only fields the user changed; a birth edit sends the full chart with the untouched location taken from the saved record (custom/unlisted cities and absent coordinates preserved); a save with no changes sends nothing | My People screens |
 | `POST /api/people` | Legacy contract: chart details required | Name-only allowed |
 | `PATCH /api/people/:id` | **Always partial.** Legacy fields only; new-field keys are rejected (400) but the stored new fields are **kept**. Chart details are optional when the person has none. **R1 F1:** resubmitting the person's own unchanged My People type is an accepted no-op; *changing* to one is a 400 | Partial, all fields |
 | `GET /api/people[/:id]` | Legacy shape; chart fields may be null; new fields omitted from the response, not from the database | List: the design 4.1 item. Detail: full record |
