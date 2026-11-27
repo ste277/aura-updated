@@ -1,9 +1,14 @@
-// AUTH-SESSION-01 local overhead benchmark (throwaway cluster on 127.0.0.1:55991).
+// AUTH-SESSION-01 local overhead benchmark (throwaway loopback cluster).
 // Not an Aura migration: creates bench-only tables in a scratch database.
 const { Pool } = require('pg');
 const crypto = require('crypto');
 
-const URL = 'postgres://bench@127.0.0.1:55991/postgres';
+// Disposable loopback database only; supplied by the operator, never committed.
+const URL = process.env.BENCH_DATABASE_URL || '';
+if (!URL || !['127.0.0.1', 'localhost', '::1', '[::1]'].includes(new globalThis.URL(URL).hostname)) {
+  console.error('Set BENCH_DATABASE_URL to a disposable loopback database.');
+  process.exit(1);
+}
 const N_USERS = 10000, N_SESS = 100000, ITER = 4000;
 
 function pct(a, p) { const s = [...a].sort((x, y) => x - y); return s[Math.min(s.length - 1, Math.floor(p * s.length))]; }
@@ -51,7 +56,8 @@ async function main() {
 
   // Plan check
   const plan = (await pool.query(`EXPLAIN (ANALYZE, BUFFERS) ${qSess.replace('$1', `'${sess[0].idHash}'`).replace('$2', `'${sess[0].userId}'`)}`)).rows.map((r) => r['QUERY PLAN']);
-  console.log('\nPLAN B:\n  ' + plan.join('\n  '));
+  // Literal ids in the plan are synthetic, but are redacted from the output anyway.
+  console.log('\nPLAN B:\n  ' + plan.join('\n  ').replace(/'[^']*'::text/g, "'<redacted>'::text"));
 
   // Concurrency / pool: 50 concurrent "requests", pool max 10.
   for (const conc of [10, 50]) {

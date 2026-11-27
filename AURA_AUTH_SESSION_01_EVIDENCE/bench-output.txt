@@ -5,8 +5,8 @@ D joined session+user (1 round trip)             p50 0.113 ms  p95 0.154 ms  p99
 
 PLAN B:
   Index Scan using "AuthSession_pkey" on "AuthSession"  (cost=0.42..8.44 rows=1 width=37) (actual time=0.004..0.004 rows=1 loops=1)
-    Index Cond: ("idHash" = '6LwWPILu4YczKIx9SsY22zpt6wE+8tN7aDIr4g7cRcw='::text)
-    Filter: (("revokedAt" IS NULL) AND ("userId" = '939cc4fd-4d53-4c93-9959-a0d35855884d'::text) AND ("expiresAt" > now()))
+    Index Cond: ("idHash" = '<synthetic-bench-idHash-redacted>'::text)
+    Filter: (("revokedAt" IS NULL) AND ("userId" = '<synthetic-bench-userId-redacted>'::text) AND ("expiresAt" > now()))
     Buffers: shared hit=4
   Planning Time: 0.019 ms
   Execution Time: 0.007 ms
