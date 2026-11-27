@@ -6,6 +6,7 @@ import {
   listAllHabitLogsForExport,
   listAllPlannedActivitiesForExport,
   listAllSavedPeopleForExport,
+  toPeopleExportPayload,
 } from '../../../../lib/db';
 
 export async function GET(req: NextRequest) {
@@ -47,7 +48,8 @@ export async function GET(req: NextRequest) {
     habitLogs,
     plannedActivities,
     dailyReflections,
-    people: people.map(({ ownerUserId: _owner, ...person }) => person),
+    // R1: ownerUserId omitted at every level (person and nested special day).
+    people: toPeopleExportPayload(people),
   };
 
   return new NextResponse(JSON.stringify(payload, null, 2), {

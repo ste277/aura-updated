@@ -97,7 +97,7 @@ check('MUTATION: a profile writer reverted to the bare `input.birthDate`, the ch
   && writerViolations(dbSrc.replace('canonicalizeCivilBirthDate(chart.birthDate)', 'chart.birthDate')).includes('chart-helper-without-canonicalization')
   && writerViolations(dbSrc.replace('...savedPersonChartParams(chart),', 'chart?.birthDate ?? null, null, null, null, null, null,')).some((x) => x.startsWith('writer-without-canonicalization:createSavedPerson') || x.startsWith('writer-reads-birthDate-directly:createSavedPerson'))
   && writerViolations(`${dbSrc}\nconst leaked = (input: { birthDate: string }) => input.birthDate;`).includes('input.birthDate-used-outside-the-helper')
-  && writerViolations(dbSrc.replace('export async function createSavedPerson(ownerUserId: string, input: SavedPersonInput): Promise<SavedPerson> {', 'export async function createSavedPerson(ownerUserId: string, input: SavedPersonInput): Promise<SavedPerson> {\n  const own = new Date(0);')).includes('writer-builds-its-own-date:createSavedPerson')
+  && writerViolations(dbSrc.replace('export async function createSavedPerson(ownerUserId: string, input: SavedPersonInput, executor: Pool | PoolClient = pool): Promise<SavedPerson> {', 'export async function createSavedPerson(ownerUserId: string, input: SavedPersonInput, executor: Pool | PoolClient = pool): Promise<SavedPerson> {\n  const own = new Date(0);')).includes('writer-builds-its-own-date:createSavedPerson')
   && writerViolations(dbSrc.replace("import { canonicalizeCivilBirthDate } from './birthDate';\n", '')).includes('helper-not-imported'));
 
 // ---- Part 5

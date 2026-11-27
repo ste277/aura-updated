@@ -56,7 +56,7 @@ const CHART = { birthDate: '1992-03-14', birthTime: '08:15', birthTimezone: 'Asi
 const chartCols = async (id: string) => (await sql(`SELECT "birthDate", "birthTime", "birthTimezone", "birthCityName", "birthLatitude", "birthLongitude" FROM "SavedPerson" WHERE id = $1`, [id]))[0];
 
 async function main() {
-  process.env.NEXT_PUBLIC_AURA_MY_PEOPLE = '1';
+  process.env.AURA_MY_PEOPLE_ENABLED = '1'; // R1 F2: the authoritative server flag
   const tag = `mp1-${Date.now()}`;
   const mk = async (key: string) => {
     const u = await upsertUserByEmail({ email: `${key}-${tag}@mp1.aura.local`, cityName: 'Chennai', latitude: 13.0827, longitude: 80.2707, timezone: 'Asia/Kolkata' });
@@ -119,7 +119,13 @@ async function main() {
   check('C9 GET upcoming?days=61 -> 400', upBad.status === 400);
   const peopleList = await call(listPeople, A.token);
   const raviRow = peopleList.body.find((p: any) => p.id === ravi.body.id);
-  check('C10 GET /api/people (on) carries nextOccasion and My People fields', raviRow?.nextOccasion?.kind !== undefined && 'notes' in raviRow);
+  // R1 F5: the enabled LIST is the design 4.1 item -- nextOccasion and hasChartDetails, but never notes or detailed
+  // birth fields (those stay available on the detail route and in the export).
+  check('C10 GET /api/people (on) carries nextOccasion and the design 4.1 fields', raviRow?.nextOccasion?.kind !== undefined && 'hasChartDetails' in raviRow && 'relationshipLabel' in raviRow);
+  const ammaRowList = peopleList.body.find((p: any) => p.id === amma.body.id);
+  check('C10b R1 F5: the list never carries notes, interests, location, owner id or detailed birth fields', ['notes', 'interests', 'locationName', 'timezone', 'ownerUserId', 'birthDate', 'birthTime', 'birthTimezone', 'birthCityName', 'birthLatitude', 'birthLongitude'].every((k) => !(k in ammaRowList)), Object.keys(ammaRowList ?? {}));
+  const ammaDetailAgain = await call(getPerson, A.token, undefined, { personId: amma.body.id });
+  check('C10c R1 F5: the detail route still returns notes and birth details to the owner', ammaDetailAgain.body.notes === 'Updated note' && typeof ammaDetailAgain.body.birthTime === 'string');
 
   // ================= D. isolation =================
   const bPeopleBefore = await call(listPeople, B.token);

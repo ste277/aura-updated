@@ -46,7 +46,7 @@
 | Navigation | One 6-slot bottom dock (`app/page.tsx:2170-2192`): Home, Plan, Explore, Ask Aura, Insights, You. `'people'` is already a tab state with `peopleReturnTo` | No 7th slot. Entry from You, Home and Plan (§5.1) |
 | Auth/isolation | HMAC `as_session` cookie, `getSessionFromRequest` (`lib/session.ts:4`), 401 → owner-scoped `db.ts` call | Same pattern |
 | Privacy | `lib/productEvents.ts` forbids `name`, `birth*`, lat/long… in metadata (:283-309); `SAVED_PERSON_CREATED` allows only `relationshipType` (:443) | Same rules for new events |
-| Gating | Pure gate functions (e.g. `isPalmistryAvailable`, `magicLinksEnabled`); no flag framework | Add `isMyPeopleEnabled()` (§8) |
+| Gating | Pure gate functions (e.g. `isPalmistryAvailable`, `magicLinksEnabled`); no flag framework | Add `isMyPeopleServerEnabled()` (authoritative) + a presentation-only public flag (§11.5, R1) |
 | Tests | Root `test/` with explicit per-file steps in `.github/workflows/ci.yml`; DB tests in `day-constructor-acceptance-db-tests`; `savedPersonDb.test.ts` covers cross-owner isolation | Extend. Every new test file needs its own CI step |
 
 ### 1.2 Gaps and debts this design must handle
@@ -183,7 +183,7 @@ model PersonOccasion {
 
 ## 4. API contracts
 
-All routes: `getSessionFromRequest` → 401. All SQL scoped by `ownerUserId`. Cross-owner or missing id → **404** (never 403, so ids can't be probed). JSON only, using the existing `parseJsonObject`. Gated by `isMyPeopleEnabled()` for new routes; existing routes stay live for current consumers.
+All routes: `getSessionFromRequest` → 401. All SQL scoped by `ownerUserId`. Cross-owner or missing id → **404** (never 403, so ids can't be probed). JSON only, using the existing `parseJsonObject`. Gated by the server flag `isMyPeopleServerEnabled()` (`AURA_MY_PEOPLE_ENABLED`, R1 F2) for new behaviour; existing routes stay live for current consumers.
 
 ### 4.1 People
 
@@ -192,12 +192,18 @@ GET    /api/people
   200 [{ id, name, relationshipType, relationshipLabel, hasChartDetails,
          nextOccasion: { id, kind, label, date: "YYYY-MM-DD", daysUntil } | null }]
   // ordered: soonest nextOccasion first, then name. Never returns notes or birth fields in the list.
+  // R1 F5: implemented exactly (no ownerUserId, notes, interests, location, timezone or birth fields).
+  // While My People is disabled the list keeps the pre-existing legacy shape for existing consumers.
+  // Every /api/people response carries `x-aura-my-people: enabled|disabled` (R1 F2).
 
 POST   /api/people
   body { name, relationshipType?, relationshipLabel?, locationName?, timezone?,
-         interests?, notes?, chart?: { birthDate, birthTime, birthTimezone, birthCityName?, birthLatitude?, birthLongitude? },
-         occasions?: [{ kind, label?, month, day, year?, remindDaysBefore? }] }   // created in one transaction
+         interests?, notes?, chart?: { birthDate, birthTime, birthTimezone, birthCityName?, birthLatitude?, birthLongitude? } }
   201 PersonDetail
+  // MP-1 (R1 F5): `occasions` is NOT accepted on create -> 400. Special days are created only with
+  // POST /api/people/:id/occasions (no additional occasion workflow in MP-1).
+  // R1 F3: birthDate must be a real calendar date; coordinates optional, but if either is given both must be
+  // finite numbers in range (null / '' / strings / NaN rejected, never coerced). All-or-none chart kept.
   // Back-compat: the legacy flat body (birthDate/birthTime/birthTimezone at top level) is still accepted.
 
 GET    /api/people/:personId
@@ -524,28 +530,40 @@ Deletion is permanent with no "trash" in MVP. This is deliberate: it is private 
   - Every My People query in `lib/db.ts` filters by owner (`"ownerUserId" = $n`, or `"userId"` for plans), following the existing SavedPerson pattern.
   - `PersonOccasion` has its own `ownerUserId` plus a composite FK `(savedPersonId, ownerUserId) → SavedPerson(id, ownerUserId)`, so the database itself cannot hold a special day under someone else's person.
   - A `savedPersonId` sent to `/api/plans` is checked with `getSavedPersonForOwner` (404 otherwise).
+  - **Plan ownership (R1 correction):** the `PlannedActivity.savedPersonId` FK only guarantees that the person *exists*; it does not prove the person is the plan owner's. Ownership is enforced by the supported SQL writers: `createPlannedActivity` and `createPlannedActivityWithClient` store the link only through an owner-checked subselect (`SELECT id FROM "SavedPerson" WHERE id = $n AND "ownerUserId" = <plan userId>`), so they store NULL for a foreign id. No other writer sets the column in MP-1. A raw SQL write outside these writers is not prevented by the database. Plans created by Move or Recomposition do not carry the link forward; that is MP-3's concern.
   - Cross-owner and missing ids both return 404.
   - DB tests attempt every route with another user's person or occasion ids and assert nothing leaks or changes.
 - **Export:** `/api/users/export` adds `people[]` with each person's fields, chart details (when present) and special days, owner-scoped (fixes G5). It does not export derived natal context.
+  - **Nested `ownerUserId` (R1 assessment):** omitted at every level, from the person and from each nested special day. The export is the owner's own data, so the owner id adds nothing and only leaks an internal identifier into a file that may be shared. Record ids and `savedPersonId` are kept because they link records within the file.
 - **Account deletion:** Aura has no account-deletion endpoint yet (G8, a platform gap outside MVP). The schema already cascades User → SavedPerson → PersonOccasion, and User → PlannedActivity/GoalActivity, so a future account deletion removes all My People data with no extra work.
 - **Logs and events:** names and notes never appear. `notes` is added to `FORBIDDEN_METADATA_KEYS`.
 
-### 11.5 Does the switch protect both API and UI? Yes
+### 11.5 Does the switch protect both API and UI? Yes (corrected in R1, 62007 F2)
 
-- **Switch:** `isMyPeopleEnabled()` in `lib/myPeopleGate.ts` reads one env var, `NEXT_PUBLIC_AURA_MY_PEOPLE` (`"1"` = on). It is fail-closed: on only for `"1"` in Production, and on by default in local/dev. It follows the existing `NEXT_PUBLIC_AURA_PALM_IMAGE_INPUT` precedent, so the same value is read by server routes and client components.
+Two flags with separate jobs (`lib/myPeopleGate.ts`):
+
+| Flag | Kind | Read | Decides | Default |
+|---|---|---|---|---|
+| **`AURA_MY_PEOPLE_ENABLED`** | Server-only, **authoritative** | From the server's runtime environment on every request. It is not `NEXT_PUBLIC_`, so it is never inlined into any bundle | Every My People API behaviour: contracts, special-day routes, plan links | **Disabled** unless exactly `"1"`, in every environment (Production, Preview, development, test) |
+| `NEXT_PUBLIC_AURA_MY_PEOPLE` | Public, **presentation only** | Inlined into the client bundle when defined at **build** time. Changing it requires a rebuild | Whether the client *may* present My People UI | Hidden unless exactly `"1"` |
+
+- **The public flag can never override server disablement.** The server never reads it. The client presents My People only when the public flag is `"1"` **and** the server's response header `x-aura-my-people` says `enabled`. With the public flag on and the server disabled, the client degrades to the legacy UI. Verified against compiled Production artifacts built with the public flag on and off (R1 evidence).
+- **Vercel semantics:** environment variables are fixed per deployment. Changing either flag affects only deployments created after the change, so a **redeploy** is needed. Existing deployments, including an Instant Rollback target, keep the values they were deployed with.
+  - **Enable:** set `AURA_MY_PEOPLE_ENABLED=1` (and, for the UI, `NEXT_PUBLIC_AURA_MY_PEOPLE=1`), then redeploy.
+  - **Disable:** unset `AURA_MY_PEOPLE_ENABLED`, then redeploy. Leaving the public flag on is harmless.
 
 The switch controls **new capabilities only**. Anything existing records depend on is always on, so turning it off cannot strand data that was created while it was on (R2).
 
 | | Switch **off** (Production until sign-off) | Switch **on** |
 |---|---|---|
-| People screen | Today's screen and form. **Null-safe:** a person without chart details shows "No birth details" instead of crashing (today's code would crash at `PeopleView.tsx:216, 283`), and can still be edited (name/relationship) or removed | My People screens |
+| People screen | Today's screen and form. **Null-safe:** a person without chart details shows "No birth details" instead of crashing (today's code would crash at `PeopleView.tsx:216, 283`), and can still be edited (name/relationship) or removed. **R1 F1:** an unchanged PARENT / CHILD / SIBLING is kept; the editor never resubmits it | My People screens |
 | `POST /api/people` | Legacy contract: chart details required | Name-only allowed |
-| `PATCH /api/people/:id` | **Always partial.** Legacy fields only; new-field keys are rejected (400) but the stored new fields are **kept**. Chart details are optional when the person has none | Partial, all fields |
-| `GET /api/people[/:id]` | Legacy shape; chart fields may be null; new fields omitted from the response, not from the database | Full shape |
+| `PATCH /api/people/:id` | **Always partial.** Legacy fields only; new-field keys are rejected (400) but the stored new fields are **kept**. Chart details are optional when the person has none. **R1 F1:** resubmitting the person's own unchanged My People type is an accepted no-op; *changing* to one is a 400 | Partial, all fields |
+| `GET /api/people[/:id]` | Legacy shape; chart fields may be null; new fields omitted from the response, not from the database | List: the design 4.1 item. Detail: full record |
 | Special-day routes, `/api/people/occasions/upcoming` | 404. Rows stay in the database | Live |
 | `/api/plans` `savedPersonId` | Ignored, not written. Existing links are kept | Validated and written |
 | Home special-day card, "Plan time with" | Hidden | Shown |
-| **Always on** | The additive migration, null-guards at all 9 read sites, the atomic delete with clean-up, the export (including special days and notes) | same |
+| **Always on** | The migration, null-guards at all 9 read sites, the atomic delete with clean-up, the export (including special days and notes), birth-detail validation, the database date CHECKs, atomic limits and updates | same |
 
 Shared Muhurtham with a person who has no chart details returns the friendly 422 in both states. Everyday shared timing, Day Builder, Aura Moments, My Day and Ask Aura behave the same with the switch on or off.
 
@@ -554,7 +572,7 @@ Shared Muhurtham with a person who has no chart details returns the friendly 422
 2. Switch it off. Exercise list, detail, legacy edit, delete, export, Shared Muhurtham (expect 422), everyday shared timing, Day Builder and Ask Aura. There must be no 500s and no client crash.
 3. Switch it back on. Assert every field and special day is unchanged.
 
-Rollback = set the switch off. No data migration is needed.
+Rollback = unset `AURA_MY_PEOPLE_ENABLED` and redeploy. No data migration is needed.
 
 ---
 

@@ -4,7 +4,7 @@ import { deleteSavedPerson, getSavedPersonForOwner, listPersonOccasions, updateS
 import { natalContextForSavedPerson } from '../../../../lib/savedPersonNatalContext';
 import { parseJsonObject } from '../../../../lib/request';
 import { buildSavedPersonUpdate } from '../../../../lib/savedPersonRequest';
-import { isMyPeopleEnabled } from '../../../../lib/myPeopleGate';
+import { isMyPeopleServerEnabled, MY_PEOPLE_CAPABILITY_HEADER, myPeopleCapabilityHeaderValue } from '../../../../lib/myPeopleGate';
 import { toSavedPersonResponse } from '../../../../lib/savedPersonView';
 import { toOccasionResponse, userLocalToday } from '../../../../lib/myPeopleRoutes';
 
@@ -25,6 +25,11 @@ import { toOccasionResponse, userLocalToday } from '../../../../lib/myPeopleRout
 // AURA-MP-1: the My People switch is read per request -- never prerender.
 export const dynamic = 'force-dynamic';
 
+const withCapability = (res: NextResponse, enabled: boolean) => {
+  res.headers.set(MY_PEOPLE_CAPABILITY_HEADER, myPeopleCapabilityHeaderValue(enabled));
+  return res;
+};
+
 export async function GET(req: NextRequest, { params }: { params: { personId: string } }) {
   const session = getSessionFromRequest(req);
   if (!session) return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 });
@@ -32,17 +37,17 @@ export async function GET(req: NextRequest, { params }: { params: { personId: st
   const person = await getSavedPersonForOwner(session.userId, params.personId);
   if (!person) return NextResponse.json({ error: 'Person not found.' }, { status: 404 });
 
-  const enabled = isMyPeopleEnabled();
+  const enabled = isMyPeopleServerEnabled();
   const natalContext = natalContextForSavedPerson(person);
-  if (!enabled) return NextResponse.json({ ...toSavedPersonResponse(person, false), natalContext });
+  if (!enabled) return withCapability(NextResponse.json({ ...toSavedPersonResponse(person, false), natalContext }), false);
 
   const today = await userLocalToday(session.userId);
   const occasions = await listPersonOccasions(session.userId, person.id);
-  return NextResponse.json({
+  return withCapability(NextResponse.json({
     ...toSavedPersonResponse(person, true),
     natalContext,
     occasions: today ? occasions.map((o) => toOccasionResponse(o, today.date)) : [],
-  });
+  }), true);
 }
 
 export async function PATCH(req: NextRequest, { params }: { params: { personId: string } }) {
@@ -52,13 +57,17 @@ export async function PATCH(req: NextRequest, { params }: { params: { personId: 
   const body = await parseJsonObject(req);
   if (!body) return NextResponse.json({ error: 'A valid JSON request body is required.' }, { status: 400 });
 
-  const enabled = isMyPeopleEnabled();
-  const validated = buildSavedPersonUpdate(body, { myPeopleEnabled: enabled });
+  const enabled = isMyPeopleServerEnabled();
+  // R1 F1: the current relationship lets a legacy edit resubmit an unchanged
+  // My People type while My People is disabled.
+  const current = await getSavedPersonForOwner(session.userId, params.personId);
+  if (!current) return NextResponse.json({ error: 'Person not found.' }, { status: 404 });
+  const validated = buildSavedPersonUpdate(body, { myPeopleEnabled: enabled, currentRelationshipType: current.relationshipType });
   if (!validated.ok) return NextResponse.json({ error: validated.error }, { status: validated.status });
 
   try {
     const person = await updateSavedPerson(session.userId, params.personId, validated.update);
-    return NextResponse.json(toSavedPersonResponse(person, enabled));
+    return withCapability(NextResponse.json(toSavedPersonResponse(person, enabled)), enabled);
   } catch (err) {
     const message = err instanceof Error ? err.message : '';
     if (message === 'Person not found.') return NextResponse.json({ error: message }, { status: 404 });

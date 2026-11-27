@@ -50,8 +50,12 @@ const call = async (fn: (req: any, ctx?: any) => Promise<Response>, token: strin
   const res = await fn(fakeReq(token, body, url), params ? { params } : undefined);
   return { status: res.status, body: await res.json().catch(() => null) as any };
 };
+// R1 F2: the AUTHORITATIVE server flag. The public presentation flag is set
+// to '1' throughout to prove it can never keep the server enabled.
 const setSwitch = (on: boolean) => {
-  process.env.NEXT_PUBLIC_AURA_MY_PEOPLE = on ? '1' : '0';
+  process.env.NEXT_PUBLIC_AURA_MY_PEOPLE = '1';
+  if (on) process.env.AURA_MY_PEOPLE_ENABLED = '1';
+  else delete process.env.AURA_MY_PEOPLE_ENABLED;
 };
 const TZ = 'Asia/Kolkata';
 const CHART = { birthDate: '1993-07-21', birthTime: '06:40', birthTimezone: TZ, birthCityName: 'Chennai', birthLatitude: 13.0827, birthLongitude: 80.2707 };

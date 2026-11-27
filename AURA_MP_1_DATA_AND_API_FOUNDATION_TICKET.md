@@ -49,7 +49,10 @@ Make a person **name-only-capable and special-day-aware** at the data and API le
   - `month`/`day` must be a valid date for that month, with 29 Feb always allowed;
   - `year` 1900–current, and it must be a leap year when the date is 29 Feb;
   - `label` is required for OTHER;
-  - limits: ≤10 special days per person, ≤200 people per account.
+  - limits: ≤10 special days per person, ≤200 people per account, **enforced atomically** (R1 F4). Count and insert happen in one transaction: under a per-owner advisory lock for people, and with the person row locked FOR UPDATE for special days.
+- **R1 F3:** `birthDate` must be a real calendar date, so a 400 is returned before any writer. Coordinates are optional, but if either is given both must be finite numbers in range; null, '', strings and NaN are rejected and never coerced to 0.
+- **R1 F5:** `occasions` on person create → 400. Special days only via the special-day routes.
+- **R1 F4:** a special-day PATCH is one locked read-merge-validate-write. Migration 0056 adds date-integrity CHECKs (real month/day, 29 Feb only in leap years when a year is known, year ≥ 1900, OTHER needs a label).
 
 ### 3. Data access: `lib/db.ts` (raw SQL, owner-scoped like today)
 - **`updateSavedPerson` becomes partial.** It builds its SET list only from the keys present. A **chart is never touched unless `chart` is in the input**; then it is replaced whole or cleared whole.
@@ -95,10 +98,10 @@ Make a person **name-only-capable and special-day-aware** at the data and API le
   - edit no longer requires chart fields for a person who has none, and does not send chart keys when they are left empty (`:283`, `:351–356`);
   - otherwise unchanged.
 
-### 7. Switch: `lib/myPeopleGate.ts`
-- `isMyPeopleEnabled(env = process.env)` is true when `NEXT_PUBLIC_AURA_MY_PEOPLE === '1'`, or when `NODE_ENV !== 'production'`.
-- It is fail-closed in Production and read by both the routes and the client.
-- What it gates, and what is always on, is listed in design §11.5. Leave it off in Production.
+### 7. Switch: `lib/myPeopleGate.ts` (corrected in R1, 62007 F2)
+- **Authoritative server flag:** `isMyPeopleServerEnabled()` reads `AURA_MY_PEOPLE_ENABLED` at runtime. It is enabled only for `"1"` and **disabled by default in every environment**. Every server route uses it alone.
+- **Presentation-only public flag:** `NEXT_PUBLIC_AURA_MY_PEOPLE`, inlined at build time. The client presents My People only when it is `"1"` AND the server returns `x-aura-my-people: enabled`. It can never enable server behaviour.
+- **Vercel:** environment variables are fixed per deployment, so changing either flag needs a redeploy. Leave both off in Production. Details: design §11.5.
 
 ### 8. Privacy
 - `/api/users/export` adds `people[]`: fields, chart (when present), special days, notes. It is owner-scoped and does not include derived natal context.

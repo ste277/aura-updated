@@ -38,3 +38,23 @@ export function toSavedPersonResponse(person: SavedPerson, myPeopleEnabled: bool
     notes: person.notes,
   };
 }
+
+/**
+ * R1 F5: the LIST item contract while My People is enabled (design 4.1):
+ * only what a list needs. Never notes, interests, location, timezone, the
+ * owner id or any detailed birth field. Detail (GET /api/people/:id) and
+ * export keep the full authorised record.
+ */
+export function toSavedPersonListItem(
+  person: SavedPerson,
+  nextOccasion: { id: string; kind: string; label: string | null; date: string; daysUntil: number } | null
+) {
+  return {
+    id: person.id,
+    name: person.name,
+    relationshipType: person.relationshipType,
+    relationshipLabel: person.relationshipLabel,
+    hasChartDetails: savedPersonHasChartDetails(person),
+    nextOccasion,
+  };
+}

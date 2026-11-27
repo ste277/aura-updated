@@ -1,22 +1,23 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionFromRequest } from '../../../../../lib/session';
 import {
-  countPersonOccasions,
   createPersonOccasion,
   getSavedPersonForOwner,
   listPersonOccasions,
-  PERSON_OCCASION_LIMIT_PER_PERSON,
   PersonOccasionConflictError,
+  PersonOccasionInvalidError,
+  PersonOccasionLimitError,
 } from '../../../../../lib/db';
 import { parseJsonObject } from '../../../../../lib/request';
 import { buildPersonOccasionInput } from '../../../../../lib/savedPersonRequest';
-import { isMyPeopleEnabled } from '../../../../../lib/myPeopleGate';
+import { isMyPeopleServerEnabled } from '../../../../../lib/myPeopleGate';
 import { toOccasionResponse, userLocalToday } from '../../../../../lib/myPeopleRoutes';
 
 /**
  * AURA-MP-1 -- a person's special days: LIST + CREATE. 404 while My People
- * is switched off (rows stay in the database). Owner-scoped: another user's
- * person behaves exactly like a missing one (404).
+ * is disabled on the SERVER (rows stay in the database). Owner-scoped:
+ * another user's person behaves exactly like a missing one (404).
+ * R1 F4: the per-person limit is enforced inside the create transaction.
  */
 
 // AURA-MP-1: the switch is read per request -- never prerender this route
@@ -26,7 +27,7 @@ export const dynamic = 'force-dynamic';
 const notFound = () => NextResponse.json({ error: 'Not found.' }, { status: 404 });
 
 export async function GET(req: NextRequest, { params }: { params: { personId: string } }) {
-  if (!isMyPeopleEnabled()) return notFound();
+  if (!isMyPeopleServerEnabled()) return notFound();
   const session = getSessionFromRequest(req);
   if (!session) return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 });
 
@@ -40,7 +41,7 @@ export async function GET(req: NextRequest, { params }: { params: { personId: st
 }
 
 export async function POST(req: NextRequest, { params }: { params: { personId: string } }) {
-  if (!isMyPeopleEnabled()) return notFound();
+  if (!isMyPeopleServerEnabled()) return notFound();
   const session = getSessionFromRequest(req);
   if (!session) return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 });
 
@@ -53,18 +54,14 @@ export async function POST(req: NextRequest, { params }: { params: { personId: s
   const validated = buildPersonOccasionInput(body, today.year);
   if (!validated.ok) return NextResponse.json({ error: validated.error }, { status: validated.status });
 
-  const person = await getSavedPersonForOwner(session.userId, params.personId);
-  if (!person) return NextResponse.json({ error: 'Person not found.' }, { status: 404 });
-  if ((await countPersonOccasions(session.userId, person.id)) >= PERSON_OCCASION_LIMIT_PER_PERSON) {
-    return NextResponse.json({ error: `Up to ${PERSON_OCCASION_LIMIT_PER_PERSON} special days per person.` }, { status: 409 });
-  }
-
   try {
-    const occasion = await createPersonOccasion(session.userId, person.id, validated.input);
+    const occasion = await createPersonOccasion(session.userId, params.personId, validated.input);
     if (!occasion) return NextResponse.json({ error: 'Person not found.' }, { status: 404 });
     return NextResponse.json(toOccasionResponse(occasion, today.date), { status: 201 });
   } catch (err) {
-    if (err instanceof PersonOccasionConflictError) return NextResponse.json({ error: err.message }, { status: 409 });
-    throw err;
+    if (err instanceof PersonOccasionLimitError || err instanceof PersonOccasionConflictError) return NextResponse.json({ error: err.message }, { status: 409 });
+    if (err instanceof PersonOccasionInvalidError) return NextResponse.json({ error: err.message }, { status: 400 });
+    console.error('[people] special day create failed');
+    return NextResponse.json({ error: 'Could not save this special day.' }, { status: 500 });
   }
 }

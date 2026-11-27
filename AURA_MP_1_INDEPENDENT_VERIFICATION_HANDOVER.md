@@ -1,5 +1,7 @@
 # AURA-MP-1: My People data and API foundation, independent verification handover
 
+> **Superseded in part by R1 (62007):** see [AURA_MP_1_R1_INDEPENDENT_VERIFICATION_HANDOVER.md](AURA_MP_1_R1_INDEPENDENT_VERIFICATION_HANDOVER.md). Its corrections cover the switch (now an authoritative server flag `AURA_MY_PEOPLE_ENABLED` plus a presentation-only public flag), the merge and Production-build note, the local-failure cause, and findings F1–F5.
+
 | | |
 |---|---|
 | **Ticket** | AURA-MP-1 (62005). HOLD lifted 2026-11-27 after REL-05 |

@@ -6,7 +6,7 @@ import type { CityOption } from '../lib/cities';
 import * as theme from './theme';
 import { colors, spacing, typography } from './theme';
 import { SurfaceCard, PrimaryButton, SecondaryButton, DestructiveButton, EmptyState, FieldLabel, TextInput, SelectInput } from './ui';
-import { isMyPeopleEnabled } from '../lib/myPeopleGate';
+import { isMyPeopleClientEffective, isMyPeoplePresentationEnabled, MY_PEOPLE_CAPABILITY_HEADER } from '../lib/myPeopleGate';
 
 export type RelationshipType = 'PARTNER' | 'SPOUSE' | 'FAMILY' | 'FRIEND' | 'OTHER' | 'PARENT' | 'CHILD' | 'SIBLING';
 
@@ -15,18 +15,26 @@ export interface SavedPersonRow {
   name: string;
   relationshipType: RelationshipType;
   // AURA-MP-1: null for a person saved without birth details (all-or-none).
-  birthDate: string | null;
-  birthTime: string | null;
-  birthTimezone: string | null;
-  birthCityName: string | null;
-  birthLatitude: number | null;
-  birthLongitude: number | null;
+  // R1 F5: absent from the enabled list contract (present in legacy list and detail).
+  birthDate?: string | null;
+  birthTime?: string | null;
+  birthTimezone?: string | null;
+  birthCityName?: string | null;
+  birthLatitude?: number | null;
+  birthLongitude?: number | null;
   hasChartDetails?: boolean;
 }
 
 /** AURA-MP-1: true only when the person has complete birth (chart) details. */
-export function personHasChartDetails(person: Pick<SavedPersonRow, 'birthDate' | 'birthTime' | 'birthTimezone'>): boolean {
+export function personHasChartDetails(person: Partial<Pick<SavedPersonRow, 'birthDate' | 'birthTime' | 'birthTimezone' | 'hasChartDetails'>>): boolean {
+  // R1 F5: the enabled list contract carries only hasChartDetails (no birth fields).
+  if (typeof person.hasChartDetails === 'boolean') return person.hasChartDetails;
   return Boolean(person.birthDate && person.birthTime && person.birthTimezone);
+}
+
+/** R1 F2: what this screen may present -- the public flag AND the server's confirmation. */
+function effectiveFromResponse(res: { headers?: { get(name: string): string | null } }): boolean {
+  return isMyPeopleClientEffective(isMyPeoplePresentationEnabled(), res.headers?.get(MY_PEOPLE_CAPABILITY_HEADER) ?? null);
 }
 
 interface SavedPersonDetail extends SavedPersonRow {
@@ -63,12 +71,14 @@ export function PeopleView({ onBack }: PeopleViewProps) {
   const [mode, setMode] = useState<ViewMode>({ kind: 'LIST' });
   const [people, setPeople] = useState<SavedPersonRow[] | null>(null);
   const [error, setError] = useState('');
+  const [myPeopleEffective, setMyPeopleEffective] = useState(false);
 
   const loadPeople = async () => {
     setError('');
     try {
       const res = await fetch('/api/people');
       if (!res.ok) throw new Error('Unable to load people.');
+      setMyPeopleEffective(effectiveFromResponse(res));
       setPeople(await res.json());
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to load people.');
@@ -106,6 +116,7 @@ export function PeopleView({ onBack }: PeopleViewProps) {
       {mode.kind === 'ADD' && (
         <PersonForm
           mode="ADD"
+          myPeopleEffective={myPeopleEffective}
           onSaved={() => {
             loadPeople();
             setMode({ kind: 'LIST' });
@@ -128,6 +139,7 @@ export function PeopleView({ onBack }: PeopleViewProps) {
       {mode.kind === 'EDIT' && (
         <PersonForm
           mode="EDIT"
+          myPeopleEffective={myPeopleEffective}
           personId={mode.personId}
           onSaved={() => {
             loadPeople();
@@ -272,7 +284,7 @@ function PersonDetail({ personId, onEdit, onDeleted }: { personId: string; onEdi
   );
 }
 
-function PersonForm({ mode, personId, onSaved, onCancel }: { mode: 'ADD' | 'EDIT'; personId?: string; onSaved: () => void; onCancel: () => void }) {
+function PersonForm({ mode, personId, onSaved, onCancel, myPeopleEffective: listEffective = false }: { mode: 'ADD' | 'EDIT'; personId?: string; onSaved: () => void; onCancel: () => void; myPeopleEffective?: boolean }) {
   const [customCities, setCustomCities] = useState<CityOption[]>([]);
   const [name, setName] = useState('');
   const [relationshipType, setRelationshipType] = useState<RelationshipType>('PARTNER');
@@ -286,7 +298,14 @@ function PersonForm({ mode, personId, onSaved, onCancel }: { mode: 'ADD' | 'EDIT
   // demand them -- name/relationship can be changed on their own, and the
   // chart is then left untouched (PATCH is partial).
   const [hadChart, setHadChart] = useState(mode === 'ADD');
-  const myPeopleEnabled = isMyPeopleEnabled();
+  // R1 F1: the relationship as loaded. An EDIT resubmits relationshipType only
+  // when the user actually changed it, so an unchanged PARENT / CHILD /
+  // SIBLING is never sent back to a server where My People is disabled.
+  const [loadedRelationshipType, setLoadedRelationshipType] = useState<RelationshipType | null>(null);
+  // R1 F2: My People options only when the public flag is on AND the server
+  // confirmed it (list response for ADD, detail response for EDIT).
+  const [detailEffective, setDetailEffective] = useState<boolean | null>(null);
+  const myPeopleEnabled = detailEffective ?? listEffective;
   // ADD on this (legacy) screen still asks for birth details; the name-only
   // add flow is the My People screen (MP-2). An EDIT keeps a chart required
   // only for a person who already has one (it can be corrected, not dropped).
@@ -304,11 +323,13 @@ function PersonForm({ mode, personId, onSaved, onCancel }: { mode: 'ADD' | 'EDIT
     fetch(`/api/people/${personId}`)
       .then(async (res) => {
         if (!res.ok) throw new Error('Unable to load this person.');
+        setDetailEffective(effectiveFromResponse(res));
         return res.json();
       })
       .then((data: SavedPersonDetail) => {
         setName(data.name);
         setRelationshipType(data.relationshipType);
+        setLoadedRelationshipType(data.relationshipType);
         setHadChart(personHasChartDetails(data));
         setBirthDate(data.birthDate ? data.birthDate.slice(0, 10) : '');
         setBirthTime(data.birthTime ?? '');
@@ -352,7 +373,7 @@ function PersonForm({ mode, personId, onSaved, onCancel }: { mode: 'ADD' | 'EDIT
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name,
-          relationshipType,
+          ...(mode === 'ADD' || relationshipType !== loadedRelationshipType ? { relationshipType } : {}),
           ...chartFields,
         }),
       });

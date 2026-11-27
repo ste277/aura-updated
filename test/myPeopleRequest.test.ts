@@ -9,7 +9,7 @@
  *   - special-day validation: unknown year, 29 Feb, 31 Apr, year range,
  *     OTHER needs a label, remindDaysBefore range, unknown keys rejected.
  */
-import { isMyPeopleEnabled } from '../apps/web/lib/myPeopleGate';
+import { isMyPeopleClientEffective, isMyPeoplePresentationEnabled, isMyPeopleServerEnabled } from '../apps/web/lib/myPeopleGate';
 import {
   buildPersonOccasionInput,
   buildSavedPersonCreateInput,
@@ -20,8 +20,8 @@ import {
 } from '../apps/web/lib/savedPersonRequest';
 
 let allPassed = true;
-function check(label: string, condition: boolean) {
-  console.log(`${condition ? 'OK  ' : 'FAIL'} ${label}`);
+function check(label: string, condition: boolean, detail?: unknown) {
+  console.log(`${condition ? 'OK  ' : 'FAIL'} ${label}${!condition && detail !== undefined ? ` -- ${JSON.stringify(detail)}` : ''}`);
   if (!condition) allPassed = false;
 }
 
@@ -29,12 +29,27 @@ const ON = { myPeopleEnabled: true };
 const OFF = { myPeopleEnabled: false };
 const CHART = { birthDate: '1992-03-14', birthTime: '08:15', birthTimezone: 'Asia/Kolkata', birthCityName: 'Chennai', birthLatitude: 13.0827, birthLongitude: 80.2707 };
 
-// ---------------- Switch ----------------
-check('switch: production + unset -> OFF (fail-closed)', isMyPeopleEnabled({ NODE_ENV: 'production' }) === false);
-check('switch: production + "true"/"yes"/"0" -> OFF (only "1" enables)', ['true', 'yes', '0', ''].every((v) => isMyPeopleEnabled({ NODE_ENV: 'production', NEXT_PUBLIC_AURA_MY_PEOPLE: v }) === false));
-check('switch: production + "1" -> ON', isMyPeopleEnabled({ NODE_ENV: 'production', NEXT_PUBLIC_AURA_MY_PEOPLE: '1' }) === true);
-check('switch: local/dev/test + unset -> ON', isMyPeopleEnabled({ NODE_ENV: 'development' }) === true && isMyPeopleEnabled({}) === true);
-check('switch: local/dev + "0" -> OFF (lets a developer exercise the rollback state)', isMyPeopleEnabled({ NODE_ENV: 'development', NEXT_PUBLIC_AURA_MY_PEOPLE: '0' }) === false);
+// ---------------- Switch (R1 F2: authoritative server flag + presentation-only public flag) ----------------
+// The pre-R1 single switch let NEXT_PUBLIC_AURA_MY_PEOPLE enable the server and defaulted ON outside production.
+// Its fail-closed assertions are kept below for the server flag, which is now the only thing the API consults.
+check('server switch: unset -> OFF (fail-closed, in every environment)', isMyPeopleServerEnabled({}) === false);
+check('server switch: "true"/"yes"/"0"/"" -> OFF (only "1" enables)', ['true', 'yes', '0', '', ' 1'].every((v) => isMyPeopleServerEnabled({ AURA_MY_PEOPLE_ENABLED: v }) === false));
+check('server switch: "1" -> ON', isMyPeopleServerEnabled({ AURA_MY_PEOPLE_ENABLED: '1' }) === true);
+check('server switch ignores the public flag entirely (NEXT_PUBLIC=1 never enables the server)', isMyPeopleServerEnabled({ NEXT_PUBLIC_AURA_MY_PEOPLE: '1' } as any) === false);
+check('presentation flag: only "1" presents', isMyPeoplePresentationEnabled('1') === true && ['0', '', 'true', undefined].every((v) => isMyPeoplePresentationEnabled(v as any) === false));
+check('client effective = presentation AND server header "enabled"; a public flag can never override server disablement', isMyPeopleClientEffective(true, 'enabled') === true && isMyPeopleClientEffective(true, 'disabled') === false && isMyPeopleClientEffective(true, null) === false && isMyPeopleClientEffective(false, 'enabled') === false);
+check('the server flag is NOT a NEXT_PUBLIC_ variable (never inlined into a client bundle)', !/NEXT_PUBLIC_AURA_MY_PEOPLE_ENABLED/.test(require('fs').readFileSync(require('path').join(__dirname, '../apps/web/lib/myPeopleGate.ts'), 'utf8')));
+{
+  // Every server route consults ONLY the server flag.
+  const fs = require('fs');
+  const path = require('path');
+  const serverFiles = ['app/api/people/route.ts', 'app/api/people/[personId]/route.ts', 'app/api/people/[personId]/occasions/route.ts', 'app/api/people/[personId]/occasions/[occasionId]/route.ts', 'app/api/people/occasions/upcoming/route.ts', 'app/api/plans/route.ts'];
+  const offenders = serverFiles.filter((f) => {
+    const src = fs.readFileSync(path.join(__dirname, '../apps/web', f), 'utf8');
+    return /NEXT_PUBLIC_AURA_MY_PEOPLE|isMyPeoplePresentationEnabled|isMyPeopleClientEffective/.test(src) || !/isMyPeopleServerEnabled\(\)/.test(src);
+  });
+  check('every My People server route uses isMyPeopleServerEnabled() and never the public flag', offenders.length === 0, offenders);
+}
 
 // ---------------- CREATE: legacy contract (switch off) ----------------
 {
@@ -107,6 +122,48 @@ check('switch: local/dev + "0" -> OFF (lets a developer exercise the rollback st
   check('special day: an unknown key (e.g. calendar, personId) is rejected -- calendar types are not client-writable yet', !parsePersonOccasionFields({ calendar: 'TITHI' }).ok && !parsePersonOccasionFields({ savedPersonId: 'x' }).ok);
   check('special day: merged-update validation catches a year that makes an existing 29 Feb invalid', validatePersonOccasion({ kind: 'BIRTHDAY', month: 2, day: 29, year: 2023, label: null, remindDaysBefore: 7 }, Y) !== null);
 }
+
+// ---------------- R1 F1: unchanged My People relationship while disabled ----------------
+for (const type of ['PARENT', 'CHILD', 'SIBLING'] as const) {
+  const same = buildSavedPersonUpdate({ name: 'X', relationshipType: type }, { myPeopleEnabled: false, currentRelationshipType: type });
+  check(`R1 F1 OFF: resubmitting the unchanged ${type} is accepted and NOT written (no-op)`, same.ok && same.update.name === 'X' && !('relationshipType' in same.update), same);
+}
+check('R1 F1 OFF: CHANGING to a My People type is still refused', !buildSavedPersonUpdate({ relationshipType: 'CHILD' }, { myPeopleEnabled: false, currentRelationshipType: 'PARENT' }).ok);
+check('R1 F1 OFF: changing a PARENT to a legacy type (FAMILY) is allowed', (() => { const r = buildSavedPersonUpdate({ relationshipType: 'FAMILY' }, { myPeopleEnabled: false, currentRelationshipType: 'PARENT' }); return r.ok && r.update.relationshipType === 'FAMILY'; })());
+check('R1 F1 ON: an unchanged My People type is written normally', (() => { const r = buildSavedPersonUpdate({ relationshipType: 'SIBLING' }, { myPeopleEnabled: true, currentRelationshipType: 'SIBLING' }); return r.ok && r.update.relationshipType === 'SIBLING'; })());
+
+// ---------------- R1 F3: birth-detail validation ----------------
+{
+  const base = { name: 'A', birthDate: '1990-01-01', birthTime: '08:00', birthTimezone: 'Asia/Kolkata' };
+  for (const opts of [OFF, ON]) {
+    const tag = opts.myPeopleEnabled ? 'ON' : 'OFF';
+    check(`R1 F3 ${tag}: impossible dates (2023-02-30, 2021-04-31, 1990-00-10, 1990-13-01) -> 400`, ['2023-02-30', '2021-04-31', '1990-00-10', '1990-13-01'].every((d) => { const r = buildSavedPersonCreateInput({ ...base, birthDate: d }, opts); return !r.ok && r.status === 400; }));
+    check(`R1 F3 ${tag}: real leap day 2024-02-29 accepted; 2023-02-29 rejected`, buildSavedPersonCreateInput({ ...base, birthDate: '2024-02-29' }, opts).ok && !buildSavedPersonCreateInput({ ...base, birthDate: '2023-02-29' }, opts).ok);
+    const coordCases: Array<[string, Record<string, unknown>]> = [
+      ['null latitude', { birthLatitude: null, birthLongitude: 80.27 }],
+      ['null longitude', { birthLatitude: 13.08, birthLongitude: null }],
+      ['both null', { birthLatitude: null, birthLongitude: null }],
+      ['missing longitude', { birthLatitude: 13.08 }],
+      ['empty string', { birthLatitude: '', birthLongitude: 80.27 }],
+      ['numeric string', { birthLatitude: '13.08', birthLongitude: 80.27 }],
+      ['NaN', { birthLatitude: NaN, birthLongitude: 80.27 }],
+      ['Infinity', { birthLatitude: Infinity, birthLongitude: 80.27 }],
+      ['latitude 91', { birthLatitude: 91, birthLongitude: 80.27 }],
+      ['longitude -181', { birthLatitude: 13.08, birthLongitude: -181 }],
+    ];
+    for (const [label, coords] of coordCases) {
+      const r = buildSavedPersonCreateInput({ ...base, ...coords }, opts);
+      check(`R1 F3 ${tag}: coordinates ${label} -> 400 (never coerced)`, !r.ok && r.status === 400, r);
+    }
+    const okCoords = buildSavedPersonCreateInput({ ...base, birthLatitude: 13.0827, birthLongitude: 80.2707 }, opts);
+    check(`R1 F3 ${tag}: valid coordinates kept exactly; omitted coordinates stay absent`, okCoords.ok && okCoords.input.birthLatitude === 13.0827 && okCoords.input.birthLongitude === 80.2707 && (() => { const r = buildSavedPersonCreateInput(base, opts); return r.ok && r.input.birthLatitude === undefined; })());
+  }
+  check('R1 F3 ON: chart object with an impossible date -> 400; chart:null still clears', !buildSavedPersonUpdate({ chart: { birthDate: '2021-04-31', birthTime: '08:00', birthTimezone: 'Asia/Kolkata' } }, ON).ok && (() => { const r = buildSavedPersonUpdate({ chart: null }, ON); return r.ok && r.update.chart === null; })());
+  check('R1 F3: all-or-none kept -- a partial chart is still a 400', !buildSavedPersonUpdate({ birthDate: '1990-01-01' }, ON).ok && !buildSavedPersonUpdate({ birthDate: '1990-01-01' }, OFF).ok);
+}
+
+// ---------------- R1 F5: no inline occasions on create ----------------
+check('R1 F5: POST with `occasions` -> 400 in both contracts (never silently discarded)', [ON, OFF].every((o) => { const r = buildSavedPersonCreateInput({ name: 'A', ...CHART, occasions: [{ kind: 'BIRTHDAY', month: 1, day: 1 }] }, o); return !r.ok && r.status === 400 && /occasions/.test(r.error); }));
 
 // ---------------- Route rendering ----------------
 // Every My People route reads the switch PER REQUEST. A route Next.js

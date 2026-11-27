@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSessionFromRequest } from '../../../lib/session';
 import { DIRECT_PLAN_SCHEDULING_MODE } from '../../../lib/plannedActivitySchedulingMode';
 import { beginTransaction, createPlannedActivity, listPlannedActivities, getPlannedActivityForOwner, getGuestConversionRedemption, claimGuestConversionToken, fillGuestConversionRedemption, getPlanCreationClaim, claimPlanCreation, fillPlanCreationClaim, linkGoalActivityToPlannedActivity, lockGoalParentLifecycleForPlanning, materializeGoalActivityRhythmOccurrence, getUserById, getSavedPersonForOwner } from '../../../lib/db';
-import { isMyPeopleEnabled } from '../../../lib/myPeopleGate';
+import { isMyPeopleServerEnabled } from '../../../lib/myPeopleGate';
 import { parseJsonObject } from '../../../lib/request';
 import { verifyGuestStateToken, hashGuestConversionToken } from '../../../lib/guestState';
 import { parseEventLocationSnapshot } from '../../../lib/plansRequest';
@@ -304,7 +304,7 @@ export async function POST(req: NextRequest) {
   // (404). createPlannedActivity's INSERT additionally re-checks ownership
   // in SQL, so a cross-owner link can never be persisted.
   let savedPersonId: string | null = null;
-  if (isMyPeopleEnabled() && typeof body?.savedPersonId === 'string' && body.savedPersonId.trim()) {
+  if (isMyPeopleServerEnabled() && typeof body?.savedPersonId === 'string' && body.savedPersonId.trim()) {
     const person = await getSavedPersonForOwner(session.userId, body.savedPersonId.trim());
     if (!person) return NextResponse.json({ error: 'Person not found.' }, { status: 404 });
     savedPersonId = person.id;

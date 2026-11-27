@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionFromRequest } from '../../../../../lib/session';
 import { listAllPersonOccasionsForOwner, listSavedPeople } from '../../../../../lib/db';
-import { isMyPeopleEnabled } from '../../../../../lib/myPeopleGate';
+import { isMyPeopleServerEnabled } from '../../../../../lib/myPeopleGate';
 import { listUpcomingOccasions } from '../../../../../lib/personOccasions';
 import { userLocalToday } from '../../../../../lib/myPeopleRoutes';
 
@@ -16,7 +16,7 @@ import { userLocalToday } from '../../../../../lib/myPeopleRoutes';
 export const dynamic = 'force-dynamic';
 
 export async function GET(req: NextRequest) {
-  if (!isMyPeopleEnabled()) return NextResponse.json({ error: 'Not found.' }, { status: 404 });
+  if (!isMyPeopleServerEnabled()) return NextResponse.json({ error: 'Not found.' }, { status: 404 });
   const session = getSessionFromRequest(req);
   if (!session) return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 });
 

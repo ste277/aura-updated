@@ -5,7 +5,10 @@
 -- column is nullable or has a constant default.
 --
 -- Migration number: 0055_auth_session is reserved for AUTH-SESSION-01 I1
--- (owner-confirmed 2026-11-27), so My People uses 0056. Neither migration touches the
+-- (owner-confirmed 2026-11-27), so My People uses 0056. R1 (62007) amended
+-- the PersonOccasion CHECKs before 0056 was applied to any persistent
+-- environment (verified 2026-11-27: no Production build with 0056, Preview
+-- builds skip migrations, no local persistent database has it). Neither migration touches the
 -- other's tables, and `prisma migrate deploy` applies any unapplied
 -- migration regardless of which one lands first.
 
@@ -53,10 +56,24 @@ CREATE TABLE "PersonOccasion" (
     REFERENCES "SavedPerson"(id, "ownerUserId") ON DELETE CASCADE,
   CONSTRAINT "PersonOccasion_kind_check" CHECK (kind IN ('BIRTHDAY', 'ANNIVERSARY', 'OTHER')),
   CONSTRAINT "PersonOccasion_calendar_check" CHECK (calendar IN ('GREGORIAN')),
+  -- R1 F4: real calendar dates enforced by the database itself, so no
+  -- writer and no concurrent interleaving can ever persist 31 Apr, 30 Feb,
+  -- or 29 Feb in a known non-leap year. An unknown year (NULL) keeps 29 Feb
+  -- valid; it is observed on 28 Feb in non-leap years at read time.
   CONSTRAINT "PersonOccasion_gregorian_date_check" CHECK (
     calendar <> 'GREGORIAN'
-    OR (month BETWEEN 1 AND 12 AND day BETWEEN 1 AND 31)
+    OR (
+      month BETWEEN 1 AND 12
+      AND day >= 1
+      AND day <= CASE WHEN month = 2 THEN 29 WHEN month IN (4, 6, 9, 11) THEN 30 ELSE 31 END
+      AND NOT (
+        month = 2 AND day = 29 AND year IS NOT NULL
+        AND NOT ((year % 4 = 0 AND year % 100 <> 0) OR year % 400 = 0)
+      )
+    )
   ),
+  CONSTRAINT "PersonOccasion_year_check" CHECK (year IS NULL OR year >= 1900),
+  CONSTRAINT "PersonOccasion_other_label_check" CHECK (kind <> 'OTHER' OR (label IS NOT NULL AND length(btrim(label)) > 0)),
   CONSTRAINT "PersonOccasion_remind_days_check" CHECK ("remindDaysBefore" IS NULL OR "remindDaysBefore" BETWEEN 0 AND 30)
 );
 

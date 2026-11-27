@@ -364,10 +364,10 @@ export async function getSavedPersonForOwner(ownerUserId: string, personId: stri
   return result.rows[0] ?? null;
 }
 
-export async function createSavedPerson(ownerUserId: string, input: SavedPersonInput): Promise<SavedPerson> {
+export async function createSavedPerson(ownerUserId: string, input: SavedPersonInput, executor: Pool | PoolClient = pool): Promise<SavedPerson> {
   const id = randomUUID();
   const { chart = null, ...fields } = toSavedPersonUpdate(input);
-  const result = await pool.query(
+  const result = await executor.query(
     `INSERT INTO "SavedPerson"
        (id, "ownerUserId", name, "relationshipType", "birthDate", "birthTime", "birthTimezone", "birthCityName", "birthLatitude", "birthLongitude",
         "relationshipLabel", "locationName", timezone, interests, notes)
@@ -387,6 +387,42 @@ export async function createSavedPerson(ownerUserId: string, input: SavedPersonI
     ]
   );
   return result.rows[0];
+}
+
+export class SavedPersonLimitError extends Error {
+  constructor(limit: number) {
+    super(`You can save up to ${limit} people.`);
+  }
+}
+
+/** R1 F4: run `work` in ONE transaction under a per-owner advisory lock, so
+ * count-then-write limit checks for that owner are serialized (no TOCTOU
+ * window between concurrent requests). Released at COMMIT/ROLLBACK. */
+async function withOwnerPeopleLock<T>(ownerUserId: string, work: (client: PoolClient) => Promise<T>): Promise<T> {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`aura-my-people:${ownerUserId}`]);
+    const out = await work(client);
+    await client.query('COMMIT');
+    return out;
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/** R1 F4: CREATE with the per-account limit enforced atomically: the count
+ * and the insert happen in one transaction under the owner's lock. Throws
+ * SavedPersonLimitError at the limit. */
+export async function createSavedPersonWithinLimit(ownerUserId: string, input: SavedPersonInput, limit: number = SAVED_PERSON_LIMIT_PER_OWNER): Promise<SavedPerson> {
+  return withOwnerPeopleLock(ownerUserId, async (client) => {
+    const count = (await client.query(`SELECT count(*)::int AS n FROM "SavedPerson" WHERE "ownerUserId" = $1`, [ownerUserId])).rows[0].n;
+    if (count >= limit) throw new SavedPersonLimitError(limit);
+    return createSavedPerson(ownerUserId, input, client);
+  });
 }
 
 /** PARTIAL update (AURA-MP-1). Builds the SET list only from the keys
@@ -509,8 +545,28 @@ export class PersonOccasionConflictError extends Error {
   }
 }
 
+export class PersonOccasionLimitError extends Error {
+  constructor(limit: number) {
+    super(`Up to ${limit} special days per person.`);
+  }
+}
+
+/** A special day that is invalid as a WHOLE (merged-record validation, or
+ * the database's own date-integrity CHECKs). Always a client error (400). */
+export class PersonOccasionInvalidError extends Error {}
+
 function isUniqueViolation(err: unknown): boolean {
   return typeof err === 'object' && err !== null && (err as { code?: string }).code === '23505';
+}
+
+function isCheckViolation(err: unknown): boolean {
+  return typeof err === 'object' && err !== null && (err as { code?: string }).code === '23514';
+}
+
+function mapOccasionWriteError(err: unknown): unknown {
+  if (isUniqueViolation(err)) return new PersonOccasionConflictError();
+  if (isCheckViolation(err)) return new PersonOccasionInvalidError('This special day is not a valid date.');
+  return err;
 }
 
 export async function listPersonOccasions(ownerUserId: string, personId: string): Promise<PersonOccasion[]> {
@@ -534,12 +590,24 @@ export async function countPersonOccasions(ownerUserId: string, personId: string
   return result.rows[0].n;
 }
 
-/** Returns null when the person does not exist or is not this owner's. */
-export async function createPersonOccasion(ownerUserId: string, personId: string, input: PersonOccasionInput): Promise<PersonOccasion | null> {
-  const person = await getSavedPersonForOwner(ownerUserId, personId);
-  if (!person) return null;
+/** R1 F4: CREATE with the per-person limit enforced atomically. The
+ * person row is locked (FOR UPDATE, owner-scoped) for the transaction, so
+ * concurrent creates for one person serialize on count-then-insert. Returns
+ * null when the person does not exist or is not this owner's; throws
+ * PersonOccasionLimitError / PersonOccasionConflictError /
+ * PersonOccasionInvalidError. */
+export async function createPersonOccasion(ownerUserId: string, personId: string, input: PersonOccasionInput, limit: number = PERSON_OCCASION_LIMIT_PER_PERSON): Promise<PersonOccasion | null> {
+  const client = await pool.connect();
   try {
-    const result = await pool.query(
+    await client.query('BEGIN');
+    const person = await client.query(`SELECT id FROM "SavedPerson" WHERE id = $1 AND "ownerUserId" = $2 FOR UPDATE`, [personId, ownerUserId]);
+    if (person.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return null;
+    }
+    const count = (await client.query(`SELECT count(*)::int AS n FROM "PersonOccasion" WHERE "ownerUserId" = $1 AND "savedPersonId" = $2`, [ownerUserId, personId])).rows[0].n;
+    if (count >= limit) throw new PersonOccasionLimitError(limit);
+    const result = await client.query(
       `INSERT INTO "PersonOccasion" (id, "ownerUserId", "savedPersonId", kind, label, month, day, year, "remindDaysBefore")
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
        RETURNING *`,
@@ -555,10 +623,13 @@ export async function createPersonOccasion(ownerUserId: string, personId: string
         input.remindDaysBefore === undefined ? 7 : input.remindDaysBefore,
       ]
     );
+    await client.query('COMMIT');
     return result.rows[0];
   } catch (err) {
-    if (isUniqueViolation(err)) throw new PersonOccasionConflictError();
-    throw err;
+    await client.query('ROLLBACK').catch(() => {});
+    throw mapOccasionWriteError(err);
+  } finally {
+    client.release();
   }
 }
 
@@ -570,30 +641,60 @@ export async function getPersonOccasionForOwner(ownerUserId: string, personId: s
   return result.rows[0] ?? null;
 }
 
-/** Partial update. Returns null when not found for this owner and person. */
-export async function updatePersonOccasion(ownerUserId: string, personId: string, occasionId: string, update: PersonOccasionUpdate): Promise<PersonOccasion | null> {
-  const sets: string[] = [];
-  const values: unknown[] = [occasionId, ownerUserId, personId];
-  const set = (column: string, value: unknown) => {
-    values.push(value);
-    sets.push(`${column} = $${values.length}`);
-  };
-  if (update.kind !== undefined) set('kind', update.kind);
-  if (update.label !== undefined) set('label', update.label);
-  if (update.month !== undefined) set('month', update.month);
-  if (update.day !== undefined) set('day', update.day);
-  if (update.year !== undefined) set('year', update.year);
-  if (update.remindDaysBefore !== undefined) set('"remindDaysBefore"', update.remindDaysBefore);
-  sets.push('"updatedAt" = now()');
+/**
+ * R1 F4: partial UPDATE as ONE atomic read-merge-validate-write. The row is
+ * locked FOR UPDATE (owner- and person-scoped), the patch is merged onto the
+ * CURRENT committed values, and `validateMerged` judges the whole merged
+ * record before anything is written. Two concurrent partial updates
+ * therefore serialize: the second is validated against the first's result,
+ * so a contradictory date (e.g. 29 Feb in a non-leap year) can never be
+ * persisted. The database's own date-integrity CHECKs (migration 0056) back
+ * this up. Returns null when not found; throws PersonOccasionInvalidError
+ * (validator or CHECK) or PersonOccasionConflictError.
+ */
+export async function updatePersonOccasion(
+  ownerUserId: string,
+  personId: string,
+  occasionId: string,
+  update: PersonOccasionUpdate,
+  validateMerged?: (merged: PersonOccasionInput) => string | null
+): Promise<PersonOccasion | null> {
+  const client = await pool.connect();
   try {
-    const result = await pool.query(
-      `UPDATE "PersonOccasion" SET ${sets.join(', ')} WHERE id = $1 AND "ownerUserId" = $2 AND "savedPersonId" = $3 RETURNING *`,
-      values
+    await client.query('BEGIN');
+    const current = await client.query(
+      `SELECT * FROM "PersonOccasion" WHERE id = $1 AND "ownerUserId" = $2 AND "savedPersonId" = $3 FOR UPDATE`,
+      [occasionId, ownerUserId, personId]
     );
+    const row: PersonOccasion | undefined = current.rows[0];
+    if (!row || row.month == null || row.day == null) {
+      await client.query('ROLLBACK');
+      return null;
+    }
+    const merged: PersonOccasionInput = {
+      kind: update.kind ?? row.kind,
+      label: update.label !== undefined ? update.label : row.label,
+      month: update.month ?? row.month,
+      day: update.day ?? row.day,
+      year: update.year !== undefined ? update.year : row.year,
+      remindDaysBefore: update.remindDaysBefore !== undefined ? update.remindDaysBefore : row.remindDaysBefore,
+    };
+    const invalid = validateMerged ? validateMerged(merged) : null;
+    if (invalid) throw new PersonOccasionInvalidError(invalid);
+    const result = await client.query(
+      `UPDATE "PersonOccasion"
+       SET kind = $4, label = $5, month = $6, day = $7, year = $8, "remindDaysBefore" = $9, "updatedAt" = now()
+       WHERE id = $1 AND "ownerUserId" = $2 AND "savedPersonId" = $3
+       RETURNING *`,
+      [occasionId, ownerUserId, personId, merged.kind, merged.label ?? null, merged.month, merged.day, merged.year ?? null, merged.remindDaysBefore ?? null]
+    );
+    await client.query('COMMIT');
     return result.rows[0] ?? null;
   } catch (err) {
-    if (isUniqueViolation(err)) throw new PersonOccasionConflictError();
-    throw err;
+    await client.query('ROLLBACK').catch(() => {});
+    throw mapOccasionWriteError(err);
+  } finally {
+    client.release();
   }
 }
 
@@ -633,6 +734,17 @@ export async function listAllSavedPeopleForExport(ownerUserId: string): Promise<
   return people.map((person) => ({
     ...person,
     occasions: occasions.filter((o) => o.savedPersonId === person.id),
+  }));
+}
+
+/** The export payload for people (R1): the owner's internal user id is
+ * omitted at EVERY level -- person and nested special day -- since the
+ * export is the owner's own data and the id adds nothing. Special days keep
+ * their own id and savedPersonId (which identify records within the file). */
+export function toPeopleExportPayload(rows: Array<SavedPerson & { occasions: PersonOccasion[] }>) {
+  return rows.map(({ ownerUserId: _owner, occasions, ...person }) => ({
+    ...person,
+    occasions: occasions.map(({ ownerUserId: _o, ...occasion }) => occasion),
   }));
 }
 

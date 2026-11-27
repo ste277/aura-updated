@@ -1635,3 +1635,14 @@ jobs:
       # (it needs a live database); run here now that SavedPerson changed.
       - name: Run SavedPerson DB test
         run: npx ts-node test/savedPersonDb.test.ts
+      # AURA-MP-1 R1 (62007) -- F1-F5 on real Postgres: legacy relationship
+      # edits while disabled, the authoritative server flag, controlled 400s
+      # for impossible dates / coordinates, DETERMINISTIC special-day update
+      # races and concurrent-create limits, DB date CHECKs, list contract.
+      - name: Run AURA-MP-1 R1 corrections DB test
+        run: npx ts-node test/myPeopleR1Db.test.ts
+      # AURA-MP-1 R1 F1/F2 -- the real legacy People editor (jsdom) driving
+      # the real route handlers and database: what it submits, what the API
+      # accepts, enable/disable/re-enable preservation, graceful degradation.
+      - name: Run AURA-MP-1 R1 legacy People editor DB test
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/peopleViewLegacyEditorDb.test.ts

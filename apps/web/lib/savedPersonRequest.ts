@@ -10,6 +10,7 @@ import type {
 import { isValidCustomLocation } from './cities';
 import { isValidIanaTimezone } from './timezone';
 import { isLeapYear, isValidMonthDay } from './personOccasions';
+import { canonicalizeCivilBirthDate } from './birthDate';
 
 /**
  * Pure request validation for the SavedPerson / My People API, kept out of
@@ -54,8 +55,16 @@ const FLAT_CHART_OPTIONAL_KEYS = ['birthCityName', 'birthLatitude', 'birthLongit
 export const MY_PEOPLE_ONLY_KEYS = ['chart', 'relationshipLabel', 'locationName', 'timezone', 'interests', 'notes'] as const;
 
 export interface SavedPersonRequestOptions {
-  /** isMyPeopleEnabled() at request time. */
+  /** isMyPeopleServerEnabled() at request time (the authoritative server flag). */
   myPeopleEnabled: boolean;
+  /**
+   * UPDATE only (R1 F1): the person's CURRENT relationship type. With My
+   * People disabled, a legacy edit that resubmits an unchanged My People
+   * type (PARENT / CHILD / SIBLING) is accepted as a no-op for that field, so
+   * ordinary edits never fail and never lose the relationship. CHANGING to a
+   * My People type still needs My People enabled.
+   */
+  currentRelationshipType?: SavedPersonRelationshipType;
 }
 
 type Failure = { ok: false; error: string; status: number };
@@ -86,6 +95,14 @@ function validateRelationship(raw: unknown, allowed: readonly SavedPersonRelatio
 function validateChart(source: Record<string, unknown>): { ok: true; chart: SavedPersonChartInput } | Failure {
   const birthDate = typeof source.birthDate === 'string' ? source.birthDate.trim() : '';
   if (!birthDate || !/^\d{4}-\d{2}-\d{2}$/.test(birthDate)) return fail('birthDate must be YYYY-MM-DD.');
+  // R1 F3: an impossible calendar date (2023-02-30, 2021-04-31) is a 400
+  // HERE, never a RangeError from the database writer. The writers'
+  // canonicalizer is the single definition of a real civil date.
+  try {
+    canonicalizeCivilBirthDate(birthDate);
+  } catch {
+    return fail('birthDate must be a real calendar date.');
+  }
 
   const birthTime = typeof source.birthTime === 'string' ? source.birthTime.trim() : '';
   if (!birthTime || !/^([01]\d|2[0-3]):[0-5]\d$/.test(birthTime)) {
@@ -102,16 +119,25 @@ function validateChart(source: Record<string, unknown>): { ok: true; chart: Save
 
   const birthCityName = typeof source.birthCityName === 'string' && source.birthCityName.trim() ? source.birthCityName.trim() : undefined;
 
+  // R1 F3: coordinates are optional, but if EITHER key is present, BOTH must
+  // be real finite numbers in range. null, '', missing partner, NaN/Infinity
+  // or a numeric string are rejected. Nothing is ever coerced (Number(null)
+  // would silently become 0 = a point in the Gulf of Guinea).
   let birthLatitude: number | undefined;
   let birthLongitude: number | undefined;
-  if (source.birthLatitude != null || source.birthLongitude != null) {
-    const latNum = Number(source.birthLatitude);
-    const lngNum = Number(source.birthLongitude);
-    if (!isValidCustomLocation({ latitude: latNum, longitude: lngNum, timezone: birthTimezone })) {
+  const latPresent = Object.prototype.hasOwnProperty.call(source, 'birthLatitude') && source.birthLatitude !== undefined;
+  const lngPresent = Object.prototype.hasOwnProperty.call(source, 'birthLongitude') && source.birthLongitude !== undefined;
+  if (latPresent || lngPresent) {
+    const lat = source.birthLatitude;
+    const lng = source.birthLongitude;
+    if (typeof lat !== 'number' || typeof lng !== 'number' || !Number.isFinite(lat) || !Number.isFinite(lng)) {
+      return fail('birthLatitude and birthLongitude must both be finite numbers when either is given.');
+    }
+    if (!isValidCustomLocation({ latitude: lat, longitude: lng, timezone: birthTimezone })) {
       return fail('Invalid birth location coordinates.');
     }
-    birthLatitude = latNum;
-    birthLongitude = lngNum;
+    birthLatitude = lat;
+    birthLongitude = lng;
   }
 
   return { ok: true, chart: { birthDate, birthTime, birthTimezone, birthCityName, birthLatitude, birthLongitude } };
@@ -204,6 +230,11 @@ function validateMyPeopleFields(body: Record<string, unknown>, opts: SavedPerson
 
 /** CREATE (POST /api/people). */
 export function buildSavedPersonCreateInput(body: Record<string, unknown>, opts: SavedPersonRequestOptions): SavedPersonValidationResult {
+  // R1 F5: special days are NOT created inline with a person in MP-1. An
+  // `occasions` key is rejected explicitly rather than silently dropped.
+  if (has(body, 'occasions')) {
+    return fail('occasions cannot be created with a person. Add special days with POST /api/people/:personId/occasions.');
+  }
   const name = validateName(body.name);
   if (!name.ok) return name;
 
@@ -253,10 +284,16 @@ export function buildSavedPersonUpdate(body: Record<string, unknown>, opts: Save
     update.name = name.value;
   }
   if (has(body, 'relationshipType')) {
-    const allowed = opts.myPeopleEnabled ? ALL_RELATIONSHIP_TYPES : LEGACY_RELATIONSHIP_TYPES;
-    const relationship = validateRelationship(body.relationshipType, allowed);
-    if (!relationship.ok) return relationship;
-    update.relationshipType = relationship.value;
+    const unchanged = opts.currentRelationshipType !== undefined && body.relationshipType === opts.currentRelationshipType;
+    if (unchanged && !opts.myPeopleEnabled) {
+      // R1 F1: resubmitting the person's own (possibly My People-only) type
+      // is a no-op while My People is disabled -- accepted, never written.
+    } else {
+      const allowed = opts.myPeopleEnabled ? ALL_RELATIONSHIP_TYPES : LEGACY_RELATIONSHIP_TYPES;
+      const relationship = validateRelationship(body.relationshipType, allowed);
+      if (!relationship.ok) return relationship;
+      update.relationshipType = relationship.value;
+    }
   }
   const chart = resolveChart(body, opts);
   if (!chart.ok) return chart;
