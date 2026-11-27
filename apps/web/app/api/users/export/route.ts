@@ -5,17 +5,23 @@ import {
   listAllDailyReflectionsForExport,
   listAllHabitLogsForExport,
   listAllPlannedActivitiesForExport,
+  listAllSavedPeopleForExport,
 } from '../../../../lib/db';
 
 export async function GET(req: NextRequest) {
   const session = getSessionFromRequest(req);
   if (!session) return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 });
 
-  const [user, habitLogs, plannedActivities, dailyReflections] = await Promise.all([
+  const [user, habitLogs, plannedActivities, dailyReflections, people] = await Promise.all([
     getUserById(session.userId),
     listAllHabitLogsForExport(session.userId),
     listAllPlannedActivitiesForExport(session.userId),
     listAllDailyReflectionsForExport(session.userId),
+    // AURA-MP-1: the user's people, with chart details (when present), My
+    // People fields, private notes and special days. Owner-scoped; exported
+    // whether or not My People is switched on (it is the user's own data).
+    // Derived natal context is never stored, so never exported.
+    listAllSavedPeopleForExport(session.userId),
   ]);
 
   if (!user) return NextResponse.json({ error: 'User not found.' }, { status: 404 });
@@ -41,6 +47,7 @@ export async function GET(req: NextRequest) {
     habitLogs,
     plannedActivities,
     dailyReflections,
+    people: people.map(({ ownerUserId: _owner, ...person }) => person),
   };
 
   return new NextResponse(JSON.stringify(payload, null, 2), {

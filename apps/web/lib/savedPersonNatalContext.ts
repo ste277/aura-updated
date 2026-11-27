@@ -1,4 +1,4 @@
-import { getSavedPersonForOwner } from './db';
+import { getSavedPersonForOwner, type SavedPerson } from './db';
 import { natalContextFromBirthDetails } from './natalContext';
 import type { NatalContext } from '../../../packages/vedic/src/natalChart';
 
@@ -36,5 +36,29 @@ function formatUTCDateString(dateInput: Date | string): string {
 export async function getSavedPersonNatalContext(savedPersonId: string, ownerUserId: string): Promise<NatalContext | null> {
   const person = await getSavedPersonForOwner(ownerUserId, savedPersonId);
   if (!person) return null;
+  return natalContextForSavedPerson(person);
+}
+
+/**
+ * AURA-MP-1 -- THE one place a SavedPerson's natal context is derived from
+ * its row. Returns null for a person without chart details (a name-only My
+ * People person); every consumer decides what null means for it:
+ *   - SHARED Muhurtham (route + Ask Aura): friendly 422 / reply asking for
+ *     the person's birth details;
+ *   - everyday shared timing, Day Builder, Aura Moments: the partner side
+ *     scores neutral (no personal adjustment), exactly as an incomplete
+ *     profile already does.
+ * Chart details are all-or-none (DB CHECK), so all three present is the
+ * only state that yields a context.
+ */
+export function natalContextForSavedPerson(person: Pick<SavedPerson, 'birthDate' | 'birthTime' | 'birthTimezone'>): NatalContext | null {
+  if (person.birthDate == null || person.birthTime == null || person.birthTimezone == null) return null;
   return natalContextFromBirthDetails(formatUTCDateString(person.birthDate), person.birthTime, person.birthTimezone);
 }
+
+/** User-facing copy when SHARED Muhurtham is asked for a person without chart details. */
+export function chartDetailsRequiredMessage(personName: string): string {
+  return `Add ${personName}'s birth details in People to find a shared Muhurtham together.`;
+}
+
+export const CHART_DETAILS_REQUIRED = 'CHART_DETAILS_REQUIRED';

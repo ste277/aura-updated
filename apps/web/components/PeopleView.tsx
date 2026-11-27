@@ -6,19 +6,27 @@ import type { CityOption } from '../lib/cities';
 import * as theme from './theme';
 import { colors, spacing, typography } from './theme';
 import { SurfaceCard, PrimaryButton, SecondaryButton, DestructiveButton, EmptyState, FieldLabel, TextInput, SelectInput } from './ui';
+import { isMyPeopleEnabled } from '../lib/myPeopleGate';
 
-export type RelationshipType = 'PARTNER' | 'SPOUSE' | 'FAMILY' | 'FRIEND' | 'OTHER';
+export type RelationshipType = 'PARTNER' | 'SPOUSE' | 'FAMILY' | 'FRIEND' | 'OTHER' | 'PARENT' | 'CHILD' | 'SIBLING';
 
 export interface SavedPersonRow {
   id: string;
   name: string;
   relationshipType: RelationshipType;
-  birthDate: string;
-  birthTime: string;
-  birthTimezone: string;
+  // AURA-MP-1: null for a person saved without birth details (all-or-none).
+  birthDate: string | null;
+  birthTime: string | null;
+  birthTimezone: string | null;
   birthCityName: string | null;
   birthLatitude: number | null;
   birthLongitude: number | null;
+  hasChartDetails?: boolean;
+}
+
+/** AURA-MP-1: true only when the person has complete birth (chart) details. */
+export function personHasChartDetails(person: Pick<SavedPersonRow, 'birthDate' | 'birthTime' | 'birthTimezone'>): boolean {
+  return Boolean(person.birthDate && person.birthTime && person.birthTimezone);
 }
 
 interface SavedPersonDetail extends SavedPersonRow {
@@ -29,12 +37,17 @@ interface PeopleViewProps {
   onBack: () => void;
 }
 
-const RELATIONSHIP_OPTIONS: Array<{ value: RelationshipType; label: string; icon: string }> = [
+const RELATIONSHIP_OPTIONS: Array<{ value: RelationshipType; label: string; icon: string; myPeopleOnly?: boolean }> = [
   { value: 'PARTNER', label: 'Partner', icon: '❤️' },
   { value: 'SPOUSE', label: 'Spouse', icon: '💍' },
   { value: 'FAMILY', label: 'Family', icon: '👪' },
   { value: 'FRIEND', label: 'Friend', icon: '🤝' },
   { value: 'OTHER', label: 'Other', icon: '👤' },
+  // AURA-MP-1 (D2): offered only while My People is on, but ALWAYS labelled,
+  // so a person saved with one of these renders correctly when it is off.
+  { value: 'PARENT', label: 'Parent', icon: '👪', myPeopleOnly: true },
+  { value: 'CHILD', label: 'Child', icon: '👪', myPeopleOnly: true },
+  { value: 'SIBLING', label: 'Sibling', icon: '👪', myPeopleOnly: true },
 ];
 
 /** Exported so other screens that reference a SavedPerson (e.g. Muhurtham
@@ -212,10 +225,17 @@ function PersonDetail({ personId, onEdit, onDeleted }: { personId: string; onEdi
         <div style={{ fontSize: 12, color: colors.textFaint, marginTop: 3 }}>{RELATIONSHIP_LABEL[person.relationshipType]}</div>
 
         <div style={{ ...typography.sectionEyebrow, marginTop: spacing.lg }}>Birth details</div>
-        <div style={{ fontSize: 13, color: colors.textSecondary, marginTop: spacing.sm, lineHeight: 1.7 }}>
-          📅 {person.birthDate.slice(0, 10)} · ⏰ {person.birthTime}
-          {person.birthCityName && <><br />📍 {person.birthCityName}</>}
-        </div>
+        {person.birthDate && person.birthTime ? (
+          <div style={{ fontSize: 13, color: colors.textSecondary, marginTop: spacing.sm, lineHeight: 1.7 }}>
+            📅 {person.birthDate.slice(0, 10)} · ⏰ {person.birthTime}
+            {person.birthCityName && <><br />📍 {person.birthCityName}</>}
+          </div>
+        ) : (
+          // AURA-MP-1: a person may be saved without birth details.
+          <div data-testid="person-no-birth-details" style={{ fontSize: 13, color: colors.textSecondary, marginTop: spacing.sm, lineHeight: 1.7 }}>
+            No birth details saved. Add them to include {person.name} in a shared Muhurtham.
+          </div>
+        )}
 
         {person.natalContext && (
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: spacing.sm, marginTop: spacing.md }}>
@@ -236,7 +256,7 @@ function PersonDetail({ personId, onEdit, onDeleted }: { personId: string; onEdi
           </button>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.sm }}>
-            <div style={{ fontSize: 12, color: colors.textSecondary }}>Remove {person.name}? This can&apos;t be undone.</div>
+            <div style={{ fontSize: 12, color: colors.textSecondary }}>Remove {person.name}? Their details, notes and special days will be deleted. Your plans stay in your calendar. This can&apos;t be undone.</div>
             <div style={{ display: 'flex', gap: spacing.sm }}>
               <DestructiveButton onClick={handleDelete} disabled={deleting}>
                 {deleting ? 'Removing…' : 'Yes, remove'}
@@ -262,6 +282,15 @@ function PersonForm({ mode, personId, onSaved, onCancel }: { mode: 'ADD' | 'EDIT
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [loaded, setLoaded] = useState(mode === 'ADD');
+  // AURA-MP-1: an EDIT of a person saved without birth details must not
+  // demand them -- name/relationship can be changed on their own, and the
+  // chart is then left untouched (PATCH is partial).
+  const [hadChart, setHadChart] = useState(mode === 'ADD');
+  const myPeopleEnabled = isMyPeopleEnabled();
+  // ADD on this (legacy) screen still asks for birth details; the name-only
+  // add flow is the My People screen (MP-2). An EDIT keeps a chart required
+  // only for a person who already has one (it can be corrected, not dropped).
+  const chartRequired = mode === 'ADD' || hadChart;
 
   useEffect(() => {
     fetch('/api/cities/custom')
@@ -280,8 +309,9 @@ function PersonForm({ mode, personId, onSaved, onCancel }: { mode: 'ADD' | 'EDIT
       .then((data: SavedPersonDetail) => {
         setName(data.name);
         setRelationshipType(data.relationshipType);
-        setBirthDate(data.birthDate.slice(0, 10));
-        setBirthTime(data.birthTime);
+        setHadChart(personHasChartDetails(data));
+        setBirthDate(data.birthDate ? data.birthDate.slice(0, 10) : '');
+        setBirthTime(data.birthTime ?? '');
         if (data.birthCityName) setBirthCity(data.birthCityName);
         setLoaded(true);
       })
@@ -298,6 +328,24 @@ function PersonForm({ mode, personId, onSaved, onCancel }: { mode: 'ADD' | 'EDIT
     setSaving(true);
     setError('');
     const city = combinedCities.find((c) => c.cityName === birthCity) || combinedCities[0];
+    const chartLeftEmpty = !birthDate && !birthTime;
+    if (!chartRequired && !chartLeftEmpty && (!birthDate || !birthTime)) {
+      setError('Add both a birth date and a birth time, or leave both empty.');
+      setSaving(false);
+      return;
+    }
+    // Chart fields are sent only when they are being written; otherwise the
+    // partial PATCH leaves the saved chart (and every other field) untouched.
+    const chartFields = chartLeftEmpty && !chartRequired
+      ? {}
+      : {
+          birthDate,
+          birthTime,
+          birthTimezone: city.timezone,
+          birthCityName: city.cityName,
+          birthLatitude: city.latitude,
+          birthLongitude: city.longitude,
+        };
     try {
       const res = await fetch(mode === 'ADD' ? '/api/people' : `/api/people/${personId}`, {
         method: mode === 'ADD' ? 'POST' : 'PATCH',
@@ -305,12 +353,7 @@ function PersonForm({ mode, personId, onSaved, onCancel }: { mode: 'ADD' | 'EDIT
         body: JSON.stringify({
           name,
           relationshipType,
-          birthDate,
-          birthTime,
-          birthTimezone: city.timezone,
-          birthCityName: city.cityName,
-          birthLatitude: city.latitude,
-          birthLongitude: city.longitude,
+          ...chartFields,
         }),
       });
       if (!res.ok) {
@@ -327,6 +370,8 @@ function PersonForm({ mode, personId, onSaved, onCancel }: { mode: 'ADD' | 'EDIT
 
   if (!loaded) return <SurfaceCard><div style={{ fontSize: 12, color: colors.textFaint }}>Loading…</div></SurfaceCard>;
 
+  const relationshipOptions = RELATIONSHIP_OPTIONS.filter((o) => !o.myPeopleOnly || myPeopleEnabled || o.value === relationshipType);
+
   return (
     <form onSubmit={handleSubmit} style={theme.surfaceCardStyle}>
       <div style={typography.sectionEyebrow}>{mode === 'ADD' ? 'Add someone' : 'Edit person'}</div>
@@ -340,7 +385,7 @@ function PersonForm({ mode, personId, onSaved, onCancel }: { mode: 'ADD' | 'EDIT
         <div>
           <FieldLabel htmlFor="person-relationship">Relationship</FieldLabel>
           <SelectInput id="person-relationship" value={relationshipType} onChange={(e) => setRelationshipType(e.target.value as RelationshipType)}>
-            {RELATIONSHIP_OPTIONS.map((o) => (
+            {relationshipOptions.map((o) => (
               <option key={o.value} value={o.value}>{o.icon} {o.label}</option>
             ))}
           </SelectInput>
@@ -348,12 +393,12 @@ function PersonForm({ mode, personId, onSaved, onCancel }: { mode: 'ADD' | 'EDIT
 
         <div>
           <FieldLabel htmlFor="person-birth-date">Birth date</FieldLabel>
-          <TextInput id="person-birth-date" required type="date" value={birthDate} onChange={(e) => setBirthDate(e.target.value)} />
+          <TextInput id="person-birth-date" required={chartRequired} type="date" value={birthDate} onChange={(e) => setBirthDate(e.target.value)} />
         </div>
 
         <div>
           <FieldLabel htmlFor="person-birth-time">Birth time</FieldLabel>
-          <TextInput id="person-birth-time" required type="time" value={birthTime} onChange={(e) => setBirthTime(e.target.value)} />
+          <TextInput id="person-birth-time" required={chartRequired} type="time" value={birthTime} onChange={(e) => setBirthTime(e.target.value)} />
         </div>
 
         <div>
