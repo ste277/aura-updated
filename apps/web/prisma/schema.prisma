@@ -123,6 +123,7 @@ model User {
   goalActivityExecutions GoalActivityExecution[]
   goalActivityOccurrences GoalActivityOccurrence[]
   captures            Capture[]
+  authSessions        AuthSession[]
 }
 
 // A lightweight profile for someone the user plans with -- the minimum
@@ -1244,4 +1245,22 @@ model ReminderDispatchHeartbeat {
   channel           String   @id // "WEB_PUSH"
   lastRunAt         DateTime @db.Timestamptz(3)
   lastRunConfigured Boolean
+}
+
+// AURA-AUTH-SESSION-01-I1 (migration 0055) -- server-side session allowlist.
+// Dormant: nothing reads or writes it until the authorized cutover (I2). A
+// session is valid only while its row exists, is not revoked and has not
+// expired. idHash = base64url SHA-256 of the random session id (the raw id is
+// never stored); expiresAt is set by the database. CHECK constraints and the
+// partial index live in the migration (Prisma cannot express them).
+model AuthSession {
+  idHash       String    @id
+  userId       String
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt    DateTime  @default(now()) @db.Timestamptz(3)
+  expiresAt    DateTime  @db.Timestamptz(3)
+  revokedAt    DateTime? @db.Timestamptz(3)
+  revokeReason String?
+
+  @@index([expiresAt])
 }

@@ -1,0 +1,18 @@
+PASS  D1-D3: no application import of I1 modules; no env read or import-time work in them
+PASS  I1 module present: lib/authSessionToken.ts
+PASS  I1 module present: lib/authSessionDb.ts
+PASS  I1 module present: lib/authSessionStore.ts
+PASS  I1 module present: lib/sessionErrors.ts
+PASS  D4: migration 0055 is additive only (CREATE TABLE / CREATE INDEX for AuthSession)
+PASS  D4: migration 0055 creates exactly one table and two indexes
+PASS  fixture: route import is caught (D1)
+PASS  fixture: component require is caught (D1)
+PASS  fixture: dynamic import in pages is caught (D1)
+PASS  fixture: lib/session.ts import is caught (D1)
+PASS  fixture: env read in an I1 module is caught (D2)
+PASS  fixture: top-level pool creation is caught (D3)
+PASS  fixture: top-level key derivation is caught (D3)
+PASS  fixture: a declaration, and pool creation inside a function, are allowed
+PASS  fixture: a non-additive migration statement is caught (D4)
+
+16 passed, 0 failed

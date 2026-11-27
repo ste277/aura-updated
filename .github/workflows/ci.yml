@@ -920,6 +920,15 @@ jobs:
         env:
           TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
         run: npx ts-node --project tsconfig.jsdom-tests.json test/ios02LocationErrorsAndPrivacy.test.ts
+      # AURA-AUTH-SESSION-01-I1 -- dormant session store foundation (no auth
+      # behaviour change): v2 token, HKDF key, cookie helpers and SQL literal
+      # guards; plus the static guard that nothing in the app imports the I1
+      # modules yet, that they read no env and do no work at import, and that
+      # migration 0055 is additive only. No database.
+      - name: Run session token primitives test (AUTH-SESSION-01-I1)
+        run: npx ts-node test/authSessionToken.test.ts
+      - name: Run session store dormancy guard (AUTH-SESSION-01-I1)
+        run: npx ts-node test/authSessionDormancy.test.ts
   palm-g5-upload-tests:
     # AURA-PALM-G5-C2 -- dedicated job for the development-only Upload Photo
     # pipeline suites (G5-I1..R4.3), so a Palmistry failure stays visible on
@@ -1226,6 +1235,15 @@ jobs:
       # the OAuth path and both MCP paths. Touches only the MCP tables.
       - name: Run I2b-S12 redirect integrity and audit cause DB test
         run: npx ts-node test/mcpOAuthS12Db.test.ts
+      # AURA-AUTH-SESSION-01-I1 -- the AuthSession allowlist (migration 0055)
+      # against this disposable database: lifecycle, DB-clock expiry, revoke-all,
+      # cascade, cleanup, privacy, B3 ordering, and the database-enforced bounds
+      # T1-T8 (lock / statement / client deadline / acquisition / recovery /
+      # burst), each asserted server-side via pg_stat_activity. Synthetic users
+      # only; touches only "User" (own rows) and "AuthSession". Not wired into
+      # the app.
+      - name: Run session store and bounds DB test (AUTH-SESSION-01-I1)
+        run: npx ts-node test/authSessionStoreDb.test.ts
       - name: Verify every repository migration was recorded as applied
         run: |
           set -euo pipefail

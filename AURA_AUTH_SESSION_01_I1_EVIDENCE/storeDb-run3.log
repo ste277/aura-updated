@@ -1,0 +1,58 @@
+PASS  create: returns a 43-char sid, its hash and a DB-set expiresAt
+PASS  create: expiresAt = createdAt + exactly 30 days (database clock) -- 30
+PASS  create: the returned expiresAt is the stored value
+PASS  lookup: a live session is found
+PASS  lookup with user: one row, user fields present, alias stripped
+PASS  lookup: right idHash, wrong userId -> null
+PASS  lookup: unknown idHash -> null
+PASS  lookup: malformed inputs -> null without a query
+PASS  revoke: first call -> revoked
+PASS  revoke: the session is no longer valid
+PASS  revoke: second call -> already_inactive (idempotent)
+PASS  revoke: unknown or malformed id -> already_inactive
+PASS  revoke: revokedAt and reason recorded once
+PASS  expiry: a row past expiresAt is rejected by the database clock
+PASS  revoke-all: revokes every not-yet-revoked row of that user (a1, a2 and expired s2 = 3), skips the already revoked s1 -- 3
+PASS  revoke-all: that user has no live session left
+PASS  revoke-all: another user's session is untouched
+PASS  create in transaction: rolled back with the caller -> no row
+PASS  create for a non-existent user -> unavailable (constraint) -- constraint
+PASS  cascade: deleting the user removes its sessions
+PASS  cleanup: the limit is respected (1, then the rest) -- {"limited":1,"rest":1}
+PASS  cleanup: removed only rows revoked/expired > 7 days ago
+PASS  cleanup: kept the recently revoked row and the live row
+PASS  cleanup: the live session still validates
+PASS  privacy: no row contains a raw session id -- 0
+PASS  constraints: malformed idHash, unknown reason and revokedAt without reason are refused -- {"badHash":"23514","badReason":"23514","halfRevoked":"23514"}
+PASS  B3: re-check holds the row; revoke waits until the holder commits, then revokes -- {"ok":true,"outcome":"revoked","waited":303}
+PASS  B3: after the revoke commits, the re-check fails
+PASS  T1 lock: fails closed with lock_timeout, well inside the 2 s budget -- {"reason":"lock_timeout","ms":252}
+PASS  T1 lock: no aura-session backend is left waiting on the lock (server side) -- 4 ms
+PASS  T2 statement: PostgreSQL cancels at statement_timeout (~1 s), not the client -- {"reason":"statement_timeout","ms":1004}
+PASS  T2 statement: the backend is not still sleeping afterwards -- {"total":0,"active":0,"waiting":0,"sleeping":0}
+PASS  T3 deadline: the caller gets deadline at ~200 ms -- {"reason":"deadline","ms":201}
+PASS  T3 deadline: the very next lookup is fast (the busy connection was not handed out again) -- 3
+PASS  T3 deadline: no client is left checked out after the deadline -- {"total":1,"idle":1}
+PASS  T3 deadline: the server statement ended within its own bound (< 2.5 s from start) -- 1018 ms
+PASS  T3 deadline: the discarded connection was closed on the server too (no orphan backend) -- {"backends":1,"poolTotal":1}
+PASS  T4 acquire: pool exhausted -> acquire within ~500 ms -- {"reason":"acquire","ms":502}
+PASS  T4 acquire: nothing left queued -- 0
+PASS  T4 acquire: works again once connections are free
+[auth-session] pool client error (error)
+[auth-session] pool client error (error)
+[auth-session] pool client error (error)
+[auth-session] pool client error (error)
+[auth-session] pool client error (error)
+PASS  T5 recovery: never authenticated wrongly; recovers without a restart -- {"killed":5,"outcomes":["ok","ok","ok","ok"]}
+PASS  T5 recovery: no uncaught error events so far -- 0
+PASS  T6 driver: ended pool -> unavailable (driver), fixed message, no id/token -- driver
+PASS  T7 burst: all 50 fail closed (no success, no unexpected error) -- ["acquire","lock_timeout"]
+PASS  T7 burst: each within its 2 s deadline (+ scheduling slack) -- 516
+PASS  T7 burst: never more than 5 aura-session backends -- 5
+PASS  T7 burst: total wall time bounded -- 516
+PASS  T7 burst: no aura-session backend active after the lock is released
+INFO  T8 bounded lookup (1 simple-query message): p50 0.116 ms, p95 0.383 ms, p99 0.648 ms
+PASS  T8 normal path: 1 000 bounded lookups succeed
+PASS  no uncaught exceptions or unhandled rejections in the whole run -- 0
+
+50 passed, 0 failed
