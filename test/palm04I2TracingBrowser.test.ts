@@ -28,20 +28,34 @@ const argShots = process.argv.indexOf('--shots');
 const SHOTS = argShots > 0 ? process.argv[argShots + 1] : null;
 
 // ---------------------------------------------------------------- in-memory bundle
-type Mutation = 'none' | 'stretch' | 'container' | 'bypass';
-const MUTATIONS: Record<Exclude<Mutation, 'none'>, Array<{ file: string; from: string; to: string }>> = {
+type Mutation = 'none' | 'stretch' | 'container' | 'bypass' | 'original' | 'stale-gesture' | 'ignore-release' | 'retain-revoked' | 'unhandled-limit';
+/** The reviewed P4-I2 component (head 0c1c650), before the R1 corrections: the F1-F4 witnesses must fail on it. */
+const ORIGINAL_HEAD = '0c1c6500e3bf9b4bd046772c32e5fab86e178ac7';
+const originalComponent = (): string => require('child_process').execFileSync('git', ['show', `${ORIGINAL_HEAD}:apps/web/components/palm-scan/PalmImageInput.tsx`], { cwd: ROOT, encoding: 'utf8' });
+const MUTATIONS: Record<Exclude<Mutation, 'none' | 'original'>, Array<{ file: string; from: string; to: string }>> = {
   stretch: [{ file: 'apps/web/lib/palm-analysis/tracingGeometry.ts', from: 'const scale = Math.min(box.width / imgW, box.height / imgH);\n  const width = imgW * scale;\n  const height = imgH * scale;', to: 'const width = box.width;\n  const height = box.height;' }],
   container: [{ file: 'apps/web/components/palm-scan/PalmImageInput.tsx', from: 'const c = containRect({ left: r.left, top: r.top, width: r.width, height: r.height }, imgW, imgH);', to: 'const c = { left: r.left, top: r.top, width: r.width, height: r.height };' }],
   bypass: [
     { file: 'apps/web/lib/palm-analysis/tracing.ts', from: 'if (!placement.ok) return Object.freeze({ ok: false as const, reason: placement.reason, line: view(data, id) });', to: '' },
     { file: 'apps/web/components/palm-scan/PalmImageInput.tsx', from: 'disabled={!placement?.ok}', to: 'disabled={false}' },
   ],
+  // R1 negative controls: each re-introduces one finding into the corrected component
+  'stale-gesture': [
+    { file: 'apps/web/components/palm-scan/PalmImageInput.tsx', from: 'const decide = <T,>(op: (m: TracingModel) => T): T | undefined => { invalidateGesture(); return run(op); };', to: 'const decide = <T,>(op: (m: TracingModel) => T): T | undefined => run(op);' },
+    { file: 'apps/web/components/palm-scan/PalmImageInput.tsx', from: "if (g.epoch !== gestureEpoch.current || g.model !== modelRef.current || g.line !== lineId) return;", to: "if (g.model !== modelRef.current) return;" },
+  ],
+  'ignore-release': [{ file: 'apps/web/components/palm-scan/PalmImageInput.tsx', from: 'const release = toImage(e.clientX, e.clientY);', to: 'const release = null as ReturnType<typeof toImage>;' }],
+  'retain-revoked': [
+    { file: 'apps/web/components/palm-scan/PalmImageInput.tsx', from: 'const timer = setInterval(watch, 250);', to: 'const timer = 0 as unknown as ReturnType<typeof setInterval>; void watch;' },
+    { file: 'apps/web/components/palm-scan/PalmImageInput.tsx', from: 'if (modelRef.current && !modelRef.current.isActive()) { markCleared(); return; } // a late observer callback restores nothing', to: '' },
+  ],
+  'unhandled-limit': [{ file: 'apps/web/components/palm-scan/PalmImageInput.tsx', from: "if (e instanceof TracingError) { setMessage(e.code === 'too-many-points'", to: "if (false) { setMessage(e.code === 'too-many-points'" }],
 };
 
 function bundle(entry: string, mutation: Mutation): string {
   const mods = new Map<string, string>();
   const ids = new Map<string, number>();
-  const muts = mutation === 'none' ? [] : MUTATIONS[mutation];
+  const muts = mutation === 'none' || mutation === 'original' ? [] : MUTATIONS[mutation];
   const used = new Set<number>();
   const resolve = (spec: string, from: string): string => {
     const base = path.resolve(path.dirname(from), spec);
@@ -53,7 +67,7 @@ function bundle(entry: string, mutation: Mutation): string {
     if (ids.has(file)) return ids.get(file)!;
     const id = ids.size;
     ids.set(file, id);
-    let src = fs.readFileSync(file, 'utf8');
+    let src = mutation === 'original' && file === path.join(WEB, 'components/palm-scan/PalmImageInput.tsx') ? originalComponent() : fs.readFileSync(file, 'utf8');
     muts.forEach((m, k) => {
       if (path.join(ROOT, m.file) !== file) return;
       if (!src.includes(m.from)) throw new Error(`mutation ${mutation} target not found in ${m.file}`);
@@ -362,8 +376,9 @@ async function suite(browser: any, mutation: Mutation, configs: Config[], shots:
     check(`R2 ${T} the guides now show the new photo's landmarks`, Math.hypot(wr2.left + wr2.width / 2 - want2.x, wr2.top + wr2.height / 2 - want2.y) <= 1.0 && lm2[0].x !== lm[0].x);
     // revoke while idle, then a delayed gesture and a delayed resize
     await tapN({ x: 0.6, y: 0.545 });
+    const late = toClient(await fresh(), { x: 0.61, y: 0.545 }); // where the next gesture lands (the stage may already be gone)
     await pg.evaluate(() => (window as any).__palmHarness.revoke());
-    await tapN({ x: 0.61, y: 0.545 });
+    await tap(late.x, late.y);
     await pg.setViewportSize({ width: cfg.vw, height: cfg.vh });
     await settle();
     const state = await pg.$eval('[data-testid="palm-tracing"]', (e: Element) => e.getAttribute('data-state'));
@@ -384,6 +399,288 @@ async function suite(browser: any, mutation: Mutation, configs: Config[], shots:
   }
 }
 
+// ================================================================ R1 (50347): findings F1-F4
+/**
+ * Deterministic regressions for the four findings of independent verification 50346, with native Chromium input
+ * (Playwright mouse and keyboard; Chrome DevTools mouse events with pointerType "pen"; DevTools touch events).
+ * Every check name starts with its finding (F1..F4) so the negative controls can be attributed.
+ */
+async function findingsSuite(browser: any, mutation: Mutation, verbose: boolean): Promise<Result> {
+  const res: Result = { passed: 0, failed: [] };
+  const check = (name: string, cond: boolean, detail?: unknown) => {
+    if (cond) { res.passed++; if (verbose) console.log(`OK   ${name}`); } else { res.failed.push(name); if (verbose) console.log(`FAIL ${name}${detail === undefined ? '' : ` :: ${JSON.stringify(detail).slice(0, 300)}`}`); }
+  };
+  const W = 1280, H = 960;
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: 1, hasTouch: true });
+  const pg = await ctx.newPage();
+  const errors: string[] = [];
+  pg.on('pageerror', (e: any) => errors.push(String(e).split('\n')[0]));
+  await pg.setContent(page(mutation, W, H));
+  await pg.waitForSelector('[data-testid="palm-tracing-stage"] canvas');
+  const cdp = await ctx.newCDPSession(pg);
+  const settle = () => pg.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+  const wait = (ms: number) => pg.waitForTimeout(ms);
+  const stageBox = async (): Promise<Box> => pg.$eval('[data-testid="palm-tracing-stage"]', (e: Element) => { e.scrollIntoView({ block: 'center' }); const r = e.getBoundingClientRect(); return { left: r.left, top: r.top, width: r.width, height: r.height }; });
+  const C = async () => oracleContent(await stageBox(), W, H);
+  const at = (c: Box, x: number, y: number) => ({ x: c.left + x * c.width, y: c.top + y * c.height });
+  const traceOf = async (line: string): Promise<Array<{ x: number; y: number }> | null> => pg.evaluate(([l, w, h]: [string, number, number]) => {
+    const el = document.querySelector(`[data-trace="${l}"]`);
+    return el ? (el.getAttribute('points') || '').trim().split(/\s+/).filter(Boolean).map((t) => { const [x, y] = t.split(',').map(Number); return { x: x / w, y: y / h }; }) : null;
+  }, [line, W, H]);
+  const statusOf = async (line: string) => pg.$eval(`[data-testid="palm-tracing-step-${line}"]`, (e: Element) => ({ status: e.getAttribute('data-status'), skip: e.getAttribute('data-skip-reason') })).catch(() => ({ status: 'gone', skip: null }));
+  const placement = async () => pg.$eval('[data-testid="palm-tracing-feedback"]', (e: Element) => e.getAttribute('data-placement')).catch(() => 'gone');
+  const statusText = async () => pg.$eval('[data-testid="palm-tracing-status"]', (e: Element) => e.textContent || '').catch(() => '');
+  const panelState = async () => pg.$eval('[data-testid="palm-tracing"]', (e: Element) => e.getAttribute('data-state')).catch(() => 'gone');
+  const press = async (testid: string) => { await pg.focus(`[data-testid="${testid}"]`).catch(() => {}); await pg.keyboard.press('Enter'); await settle(); };
+  const step = async (line: string) => press(`palm-tracing-step-${line}`);
+  const fresh = async () => { await pg.evaluate(() => (window as any).__palmHarness.replace()); await pg.waitForSelector('[data-testid="palm-tracing-photo"]', { timeout: 5000 }).catch(() => {}); await settle(); };
+  const HEADN: Array<[number, number]> = [[0.37, 0.56], [0.45, 0.6], [0.54, 0.62], [0.62, 0.64]];
+  const tapPts = async (pts: Array<[number, number]>) => { const c = await C(); for (const [x, y] of pts) { const q = at(c, x, y); await pg.mouse.click(q.x, q.y); } await settle(); };
+  /** Hold a mouse stroke (down + moves, no release). */
+  const holdStroke = async (pts: Array<[number, number]>) => {
+    const c = await C(); const a = at(c, pts[0][0], pts[0][1]);
+    await pg.mouse.move(a.x, a.y); await pg.mouse.down();
+    for (const [x, y] of pts.slice(1)) { const q = at(c, x, y); await pg.mouse.move(q.x, q.y, { steps: 4 }); }
+    await settle();
+  };
+  const T = '[desktop 1280x800 mouse/keyboard/pen]';
+
+  // ---------------------------------------------------------------- F1 pending gesture vs explicit decisions
+  for (const [testid, want] of [['palm-tracing-skip', { status: 'skipped', skip: 'user-skipped' }], ['palm-tracing-cannot-see', { status: 'skipped', skip: 'user-cannot-see' }]] as const) {
+    await fresh();
+    await holdStroke(HEADN.slice(0, 3));
+    await press(testid);
+    await pg.mouse.up(); await settle();
+    const st = await statusOf('heart');
+    check(`F1 ${T} hold a stroke, press ${testid.replace('palm-tracing-', '')} with Enter, release: the decision stands (no draft, no trace)`, st.status === want.status && st.skip === want.skip && (await traceOf('heart')) === null, st);
+  }
+  {
+    await fresh();
+    await tapPts([[0.37, 0.56], [0.45, 0.6]]);
+    await holdStroke(HEADN);
+    await press('palm-tracing-clear');
+    await pg.mouse.up(); await settle();
+    check(`F1 ${T} hold a stroke, Clear line, release: the line stays cleared (not started, no trace)`, (await statusOf('heart')).status === 'not-started' && (await traceOf('heart')) === null);
+  }
+  {
+    await fresh();
+    await tapPts([[0.37, 0.56], [0.45, 0.6], [0.54, 0.62]]);
+    await holdStroke(HEADN);
+    await press('palm-tracing-undo');
+    await pg.mouse.up(); await settle();
+    const t = await traceOf('heart');
+    check(`F1 ${T} hold a stroke, Undo, release: the undo stands (two points), the stroke is not applied`, !!t && t.length === 2, t?.length);
+  }
+  {
+    await fresh();
+    await tapPts(HEADN);
+    const before = await traceOf('heart');
+    await holdStroke([[0.37, 0.7], [0.5, 0.72], [0.6, 0.74]]);
+    await press('palm-tracing-confirm');
+    await pg.mouse.up(); await settle();
+    check(`F1 ${T} hold a stroke, Confirm, release: the confirmed trace is the one that was confirmed (stroke discarded)`, (await statusOf('heart')).status === 'confirmed' && JSON.stringify(await traceOf('heart')) === JSON.stringify(before));
+    await press('palm-tracing-edit');
+    await holdStroke([[0.37, 0.7], [0.5, 0.72], [0.6, 0.74]]);
+    await press('palm-tracing-confirm');
+    await pg.mouse.up(); await settle();
+    check(`F1 ${T} Edit, hold a stroke, Confirm, release: still the earlier trace, still confirmed`, (await statusOf('heart')).status === 'confirmed' && JSON.stringify(await traceOf('heart')) === JSON.stringify(before));
+  }
+  {
+    await fresh();
+    await tapPts([[0.37, 0.56]]);
+    await holdStroke(HEADN);
+    await press('palm-tracing-next');
+    await pg.mouse.up(); await settle();
+    const heart = await traceOf('heart'), head = await traceOf('head');
+    check(`F1 ${T} hold a stroke on line 1, Next line, release: neither line 1 nor line 2 is changed`, !!heart && heart.length === 1 && head === null && (await statusOf('head')).status === 'not-started');
+    await holdStroke(HEADN);
+    await press('palm-tracing-back');
+    await pg.mouse.up(); await settle();
+    check(`F1 ${T} hold a stroke on line 2, Back, release: line 2 stays untouched`, (await traceOf('head')) === null && (await statusOf('head')).status === 'not-started' && (await traceOf('heart'))!.length === 1);
+    await press('palm-tracing-skip');
+    await press('palm-tracing-retrace');
+    await holdStroke(HEADN);
+    await press('palm-tracing-skip');
+    await pg.mouse.up(); await settle();
+    check(`F1 ${T} Trace this line, hold a stroke, Skip again, release: skipped stands`, (await statusOf('heart')).status === 'skipped');
+  }
+  {
+    await fresh();
+    await holdStroke(HEADN);
+    await pg.evaluate(() => (window as any).__palmHarness.replace());
+    await settle();
+    await pg.mouse.up(); await settle();
+    check(`F1 ${T} hold a stroke, photo replaced, release: the new photo's lines are untouched`, (await statusOf('heart')).status === 'not-started' && (await traceOf('heart')) === null);
+  }
+
+  // ---------------------------------------------------------------- F2 the release position counts
+  const penOrMouse = async (kind: 'pen' | 'mouse', pts: Array<{ x: number; y: number }>, release: { x: number; y: number }) => {
+    await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: pts[0].x, y: pts[0].y, button: 'left', buttons: 1, clickCount: 1, pointerType: kind });
+    for (const q of pts.slice(1)) await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: q.x, y: q.y, button: 'left', buttons: 1, pointerType: kind });
+    await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: release.x, y: release.y, button: 'left', buttons: 0, clickCount: 1, pointerType: kind });
+    await settle();
+  };
+  for (const kind of ['pen', 'mouse'] as const) {
+    await fresh();
+    const c = await C();
+    const inside = [at(c, 0.37, 0.56), at(c, 0.45, 0.6), at(c, 0.54, 0.62)];
+    const outside = { x: c.left + c.width + 40, y: at(c, 0, 0.64).y };
+    await penOrMouse(kind, inside, outside);
+    const t = await traceOf('heart');
+    const last = t ? t[t.length - 1] : null;
+    check(`F2 ${T} ${kind}: down and moves inside, release OUTSIDE the photo with no final move -> the release position is part of the stroke (x > 1, not clamped) and I1 rejects it`, !!last && last.x > 1 && (await placement()) === 'trace-outside-image', { last, placement: await placement() });
+    check(`F2 ${T} ${kind}: that stroke cannot be confirmed (button disabled; forced click refused)`, await (async () => { const d = await pg.$eval('[data-testid="palm-tracing-confirm"]', (e: Element) => (e as HTMLButtonElement).disabled).catch(() => true); await pg.$eval('[data-testid="palm-tracing-confirm"]', (e: Element) => (e as HTMLButtonElement).click()).catch(() => {}); await settle(); return d && (await statusOf('heart')).status === 'tracing'; })());
+  }
+  {
+    await fresh();
+    const c = await C();
+    await penOrMouse('pen', [at(c, 0.37, 0.56), at(c, 0.45, 0.6)], at(c, 0.62, 0.64));
+    const t = (await traceOf('heart'))!;
+    const e = Math.hypot((t[t.length - 1].x - 0.62) * c.width, (t[t.length - 1].y - 0.64) * c.height);
+    check(`F2 ${T} pen: release INSIDE at a new position with no final move -> the stroke ends exactly at the release (${e.toFixed(3)} px) and is usable`, e <= 0.6 && (await placement()) === 'ok');
+    await fresh();
+    const c2 = await C();
+    await penOrMouse('pen', [at(c2, 0.62, 0.64), at(c2, 0.5, 0.62), at(c2, 0.3, 0.6)], { x: c2.left, y: at(c2, 0, 0.6).y });
+    const t2 = (await traceOf('heart'))!;
+    check(`F2 ${T} pen: release exactly on the photo's left edge -> recorded at x = 0 (to float precision) and treated as on the photo (not outside-image)`, Math.abs(t2[t2.length - 1].x) < 1e-6 && (await placement()) !== 'trace-outside-image', t2[t2.length - 1]);
+  }
+  {
+    await fresh();
+    const c = await C();
+    await tapPts([[0.37, 0.56]]);
+    const before = await traceOf('heart');
+    const a = at(c, 0.45, 0.6), b = at(c, 0.6, 0.62);
+    await pg.mouse.move(a.x, a.y); await pg.mouse.down(); await pg.mouse.move(b.x, b.y, { steps: 5 });
+    await pg.$eval('[data-testid="palm-tracing-stage"]', (e: Element) => { const s = e as HTMLElement; for (const id of [1, 0, 2]) { try { if (s.hasPointerCapture(id)) s.releasePointerCapture(id); } catch { /* not captured */ } } });
+    await settle();
+    await pg.mouse.up(); await settle();
+    check(`F2 ${T} lost pointer capture mid-stroke -> nothing changes, even when the button is released afterwards`, JSON.stringify(await traceOf('heart')) === JSON.stringify(before));
+    await pg.mouse.move(a.x, a.y); await pg.mouse.down(); await pg.mouse.move(b.x, b.y, { steps: 5 });
+    await pg.$eval('[data-testid="palm-tracing-stage"]', (e: Element) => e.dispatchEvent(new PointerEvent('pointercancel', { pointerId: 1, isPrimary: true, bubbles: true })));
+    await pg.mouse.up(); await settle();
+    check(`F2 ${T} pointercancel mid-stroke -> nothing changes, release afterwards ignored`, JSON.stringify(await traceOf('heart')) === JSON.stringify(before) && /interrupted/i.test(await statusText()));
+  }
+  {
+    await fresh();
+    let c = await C();
+    const a = at(c, 0.37, 0.56);
+    await pg.mouse.move(a.x, a.y); await pg.mouse.down();
+    await pg.mouse.move(at(c, 0.45, 0.6).x, at(c, 0.45, 0.6).y, { steps: 3 });
+    await pg.setViewportSize({ width: 900, height: 700 }); await settle(); await settle();
+    c = oracleContent(await pg.$eval('[data-testid="palm-tracing-stage"]', (e: Element) => { const r = e.getBoundingClientRect(); return { left: r.left, top: r.top, width: r.width, height: r.height }; }), W, H);
+    const end = at(c, 0.62, 0.64);
+    await pg.mouse.move(end.x, end.y, { steps: 3 }); await pg.mouse.up(); await settle();
+    const t = (await traceOf('heart'))!;
+    const e = t ? Math.hypot((t[t.length - 1].x - 0.62) * c.width, (t[t.length - 1].y - 0.64) * c.height) : 99;
+    check(`F2 ${T} layout change during a gesture -> later positions map through the new geometry (end error ${e.toFixed(2)} px)`, e <= 0.8);
+    await pg.setViewportSize({ width: 1280, height: 800 }); await settle();
+  }
+  {
+    // touch: the release is reported at the last touch position; a stroke ending off the photo is judged, not clamped
+    await fresh();
+    const c = await C();
+    const pts = [at(c, 0.37, 0.56), at(c, 0.5, 0.6), { x: c.left + c.width + 30, y: at(c, 0, 0.62).y }];
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ ...pts[0], id: 1 }] });
+    for (const q of pts.slice(1)) await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ ...q, id: 1 }] });
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await settle();
+    check(`F2 ${T} touch: a stroke ending off the photo is kept off the photo and rejected by I1`, (await placement()) === 'trace-outside-image');
+  }
+
+  // ---------------------------------------------------------------- F3 revocation without interaction
+  {
+    await fresh();
+    await tapPts(HEADN);
+    await press('palm-tracing-confirm');
+    await pg.evaluate(() => { (window as any).__photoR1 = document.querySelector('[data-testid="palm-tracing-photo"]'); (window as any).__palmHarness.revoke(); });
+    await wait(700);
+    const cleared = await pg.evaluate(() => ({ state: document.querySelector('[data-testid="palm-tracing"]')?.getAttribute('data-state'), traces: document.querySelectorAll('[data-trace]').length, photo: !!document.querySelector('[data-testid="palm-tracing-photo"]'), w: (window as any).__photoR1.width, h: (window as any).__photoR1.height }));
+    check(`F3 ${T} standalone revocation, no interaction: within 0.7 s the confirmed trace, guides and photo are gone and the photo copy is emptied`, cleared.state === 'cleared' && cleared.traces === 0 && !cleared.photo && cleared.w === 0 && cleared.h === 0, cleared);
+    await pg.setViewportSize({ width: 1000, height: 760 });
+    await pg.evaluate(() => { window.dispatchEvent(new Event('resize')); window.dispatchEvent(new Event('orientationchange')); });
+    await wait(400);
+    check(`F3 ${T} revocation followed by resize and delayed observer callbacks: nothing is restored`, (await panelState()) === 'cleared' && (await pg.$$('[data-trace]')).length === 0 && (await pg.$$('[data-testid="palm-tracing-photo"]')).length === 0);
+    await pg.setViewportSize({ width: 1280, height: 800 });
+  }
+  {
+    await fresh();
+    const c = await C();
+    const a = at(c, 0.37, 0.56);
+    await pg.mouse.move(a.x, a.y); await pg.mouse.down(); await pg.mouse.move(at(c, 0.5, 0.6).x, at(c, 0.5, 0.6).y, { steps: 4 });
+    await pg.evaluate(() => (window as any).__palmHarness.revoke());
+    await wait(700);
+    const mid = await panelState();
+    await pg.mouse.move(at(c, 0.62, 0.64).x, at(c, 0.62, 0.64).y, { steps: 2 }); await pg.mouse.up(); await settle();
+    check(`F3 ${T} revocation during an active gesture: the panel clears by itself, and the release restores nothing`, mid === 'cleared' && (await panelState()) === 'cleared' && (await pg.$$('[data-trace]')).length === 0 && (await pg.$$('[data-draft]')).length === 0);
+    await fresh();
+    const w = await pg.$eval('[data-testid="palm-tracing-photo"]', (e: Element) => (e as HTMLCanvasElement).width).catch(() => 0);
+    check(`F3 ${T} replacement after revocation: a fresh, working panel with the photo drawn again`, (await panelState()) === 'active' && w === W && (await statusOf('heart')).status === 'not-started');
+  }
+  {
+    const cycles: boolean[] = [];
+    for (let k = 0; k < 3; k++) {
+      await pg.evaluate(() => { (window as any).__photoCycle = document.querySelector('[data-testid="palm-tracing-photo"]'); (window as any).__palmHarness.unmount(); });
+      await settle();
+      const gone = await pg.evaluate(() => !document.querySelector('[data-testid="palm-tracing"]') && (window as any).__photoCycle.width === 0);
+      await pg.evaluate(() => (window as any).__palmHarness.mountAgain());
+      await pg.waitForSelector('[data-testid="palm-tracing-photo"]', { timeout: 5000 }).catch(() => {});
+      await settle();
+      await tapPts([[0.37, 0.56]]);
+      cycles.push(gone && (await panelState()) === 'active' && (await traceOf('heart'))?.length === 1);
+    }
+    check(`F3 ${T} repeated teardown and mounting (3 cycles): each teardown empties the photo copy, each mount starts fresh and works`, cycles.every(Boolean), cycles);
+  }
+
+  // ---------------------------------------------------------------- F4 the model's point limit, handled
+  {
+    await fresh();
+    const c = await C();
+    // 998 taps as native PointerEvents dispatched in the page (fast), then real Chromium clicks around the limit
+    await pg.evaluate(([box, n]: [Box, number]) => {
+      const st = document.querySelector('[data-testid="palm-tracing-stage"]')!;
+      for (let i = 0; i < n; i++) {
+        const x = box.left + (0.4 + 0.2 * ((i * 37) % 100) / 100) * box.width, y = box.top + (0.55 + 0.08 * ((i * 61) % 100) / 100) * box.height;
+        st.dispatchEvent(new PointerEvent('pointerdown', { pointerId: 1, isPrimary: true, pointerType: 'mouse', button: 0, clientX: x, clientY: y, bubbles: true, cancelable: true }));
+        st.dispatchEvent(new PointerEvent('pointerup', { pointerId: 1, isPrimary: true, pointerType: 'mouse', button: 0, clientX: x, clientY: y, bubbles: true, cancelable: true }));
+      }
+    }, [c, 998] as [Box, number]);
+    await settle();
+    const n = async () => ((await traceOf('heart')) ?? []).length;
+    check(`F4 ${T} below the limit: 998 points accepted`, (await n()) === 998, await n());
+    await tapPts([[0.41, 0.57]]);
+    const at999 = await n();
+    await tapPts([[0.42, 0.57]]);
+    check(`F4 ${T} immediately below and exactly at the model's limit: points 999 and 1000 are accepted (real clicks)`, at999 === 999 && (await n()) === 1000);
+    const errsBefore = errors.length;
+    await tapPts([[0.43, 0.57]]);
+    check(`F4 ${T} beyond the limit: the 1001st tap is refused with no exception; the trace keeps 1000 points`, (await n()) === 1000 && errors.length === errsBefore && (await panelState()) === 'active', errors.slice(errsBefore));
+    const msg = await statusText();
+    check(`F4 ${T} the refusal is announced in the live region and says Undo, Clear line or retrace`, /point limit/i.test(msg) && /Undo/.test(msg) && /Clear line/.test(msg), msg);
+    await tapPts([[0.44, 0.57], [0.45, 0.57], [0.46, 0.57]]);
+    check(`F4 ${T} repeated input after the limit: still refused, still no exception, still 1000 points`, (await n()) === 1000 && errors.length === errsBefore);
+    const confirmDisabled = await pg.$eval('[data-testid="palm-tracing-confirm"]', (e: Element) => (e as HTMLButtonElement).disabled).catch(() => false);
+    await pg.$eval('[data-testid="palm-tracing-confirm"]', (e: Element) => (e as HTMLButtonElement).click()).catch(() => {}); await settle();
+    check(`F4 ${T} an over-I1-limit trace cannot be confirmed (I1: too many points), and nothing was truncated into an eligible trace`, confirmDisabled && (await placement()) === 'trace-too-many-points' && (await statusOf('heart')).status === 'tracing');
+    await press('palm-tracing-undo');
+    const afterUndo = await n();
+    await tapPts([[0.47, 0.57]]);
+    check(`F4 ${T} Undo recovers below the limit (999) and input works again (1000)`, afterUndo === 999 && (await n()) === 1000 && errors.length === errsBefore);
+    await press('palm-tracing-clear');
+    await tapPts(HEADN);
+    check(`F4 ${T} Clear line and retrace: a fresh usable trace`, (await n()) === 4 && (await placement()) === 'ok');
+    // a very long drag is reduced to a bounded stroke, never a model overflow
+    const c2 = await C();
+    const a = at(c2, 0.37, 0.56);
+    await pg.mouse.move(a.x, a.y); await pg.mouse.down();
+    for (let i = 1; i <= 1500; i++) { const t = i / 1500; await pg.mouse.move(a.x + t * 0.25 * c2.width, a.y + t * 0.08 * c2.height + Math.sin(i / 9) * 1.5); }
+    await pg.mouse.up(); await settle();
+    check(`F4 ${T} a 1,500-move drag becomes one bounded stroke (<= 24 points), with no exception`, (await n()) >= 2 && (await n()) <= 24 && errors.length === errsBefore);
+  }
+  check(`F* ${T} no uncaught page errors in the whole findings run`, errors.length === 0, errors);
+  await ctx.close();
+  return res;
+}
+
 async function main() {
   if (SHOTS) fs.mkdirSync(SHOTS, { recursive: true });
   const channel = process.env.PALM_BROWSER_CHANNEL || undefined;
@@ -391,11 +688,27 @@ async function main() {
   console.log(`browser: ${channel ?? 'playwright chromium'} ${browser.version()}`);
   let ok = true;
   try {
-    const real = await suite(browser, 'none', CONFIGS, SHOTS);
+    const real = process.env.PALM_I2_FINDINGS_ONLY ? { passed: 0, failed: [] } : await suite(browser, 'none', CONFIGS, SHOTS);
     console.log(`\nPALM-04-I2 browser: ${real.passed} passed, ${real.failed.length} failed`);
     if (real.failed.length) ok = false;
+    const r1 = await findingsSuite(browser, 'none', true);
+    console.log(`\nPALM-04-I2 R1 findings (F1-F4): ${r1.passed} passed, ${r1.failed.length} failed`);
+    if (r1.failed.length) ok = false;
+    // the reviewed P4-I2 component (0c1c650) must fail every finding
+    const orig = await findingsSuite(browser, 'original', false);
+    const per = (r: Result) => ['F1', 'F2', 'F3', 'F4'].map((f) => `${f}:${r.failed.filter((n) => n.startsWith(f + ' ')).length}`).join(' ');
+    const origAll = ['F1', 'F2', 'F3', 'F4'].every((f) => orig.failed.some((n) => n.startsWith(f + ' ')));
+    console.log(`${origAll ? 'OK  ' : 'FAIL'} witnesses on the reviewed component ${ORIGINAL_HEAD.slice(0, 7)}: every finding reproduces (${per(orig)} failing checks; ${orig.passed} pass)`);
+    if (!origAll) ok = false;
+    for (const [m, f] of [['stale-gesture', 'F1'], ['ignore-release', 'F2'], ['retain-revoked', 'F3'], ['unhandled-limit', 'F4']] as Array<[Mutation, string]>) {
+      if (!(MUTATIONS as any)[m].length) { console.log(`note: negative control ${m} not defined yet`); continue; }
+      const r = await findingsSuite(browser, m, false);
+      const hit = r.failed.filter((n) => n.startsWith(f + ' '));
+      console.log(`${hit.length ? 'OK  ' : 'FAIL'} negative control ${m}: ${hit.length} ${f} checks fail (${per(r)}), ${r.passed} pass`);
+      if (!hit.length) ok = false;
+    }
     // negative controls: each broken bundle must fail checks in its own category
-    const controls: Array<[Exclude<Mutation, 'none'>, RegExp]> = [['stretch', /^(G1|G2|G4|T1|L1|L3) /], ['container', /^(T1|D1|L4|M1) /], ['bypass', /^V2 /]];
+    const controls: Array<[Exclude<Mutation, 'none'>, RegExp]> = process.env.PALM_I2_FINDINGS_ONLY ? [] : [['stretch', /^(G1|G2|G4|T1|L1|L3) /], ['container', /^(T1|D1|L4|M1) /], ['bypass', /^V2 /]];
     for (const [m, expect] of controls) {
       const r = await suite(browser, m, CONFIGS.slice(0, 3), null);
       const hit = r.failed.filter((n) => expect.test(n));

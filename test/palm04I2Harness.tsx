@@ -106,5 +106,7 @@ render();
   remount() { remountKey += 1; render(); },
   rerender() { render(); },
   unmount() { mounted = false; render(); },
+  /** Mount again after unmount, on a fresh context (repeated mount / unmount cycles). */
+  mountAgain() { current?.revoke(); current = makeContext(); mounted = true; remountKey += 1; render(); },
   closed: false,
 };

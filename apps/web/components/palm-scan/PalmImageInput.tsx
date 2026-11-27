@@ -11,6 +11,7 @@ import {
   createTracingModel,
   resampleStroke,
   spaceStroke,
+  MAX_TRACE_INPUT_POINTS,
   TRACE_POINT_LIMITS,
   TracingError,
   TRACING_LINE_NAMES,
@@ -376,6 +377,8 @@ export const PLACEMENT_TEXT: Partial<Record<LineUnassessedReason, string>> = {
   'trace-tortuous': 'The trace winds too much. Follow the line more directly.',
   'frame-unavailable': 'The palm area could not be measured on this photo, so traces cannot be checked. You can skip lines or mark them as not visible.',
 };
+/** Shown when the model's input cap (MAX_TRACE_INPUT_POINTS) refuses another point; nothing is added or truncated. */
+export const POINT_LIMIT_TEXT = `This line has reached the point limit (${MAX_TRACE_INPUT_POINTS} points), so nothing was added. Use Undo, Clear line, or retrace the line with one drag.`;
 export const PLACEMENT_OK_TEXT = 'The shape and position of this trace can be used. Confirm it if it follows the line you see.';
 const placementText = (r: LineUnassessedReason) => PLACEMENT_TEXT[r] ?? 'This trace cannot be used yet.';
 
@@ -395,7 +398,16 @@ export interface PalmTracingPanelProps {
   onClose?: () => void;
 }
 
-type Gesture = { id: number; model: TracingModel; line: PalmLineId; pts: TracingPoint[]; startClient: { x: number; y: number }; moved: boolean };
+/**
+ * A pointer gesture in progress. Its `epoch` is the panel's gesture epoch when it began. GESTURE CONTRACT (R1):
+ *   - a gesture can only ever complete into the model, line and epoch it started on;
+ *   - every explicit decision (Confirm, Edit, Trace this line, Skip, I can't see this line, Clear line, Undo, Back,
+ *     Next, a step button), a new context (photo replacement), revocation and teardown invalidate it first: the epoch
+ *     moves on, the draft is dropped and pointer capture is released, so a later release changes nothing;
+ *   - the release position is part of the stroke (it is mapped through the same geometry and judged by I1);
+ *   - pointercancel or lost capture discard it.
+ */
+type Gesture = { id: number; epoch: number; model: TracingModel; line: PalmLineId; pts: TracingPoint[]; startClient: { x: number; y: number }; moved: boolean };
 
 const isCleared = (e: unknown) => e instanceof TracingError && e.code === 'context-cleared';
 
@@ -427,27 +439,37 @@ export function PalmTracingPanel({ context, imageSource, onClose }: PalmTracingP
   const [draft, setDraft] = useState<TracingPoint[] | null>(null);
   const [message, setMessage] = useState('');
   const gesture = useRef<Gesture | null>(null);
+  const gestureEpoch = useRef(0);
+  const stageRef = useRef<HTMLDivElement | null>(null);
+
+  /** Invalidate any pending gesture (see the gesture contract): an explicit decision always wins over a held pointer. */
+  const invalidateGesture = useCallback(() => {
+    gestureEpoch.current += 1;
+    const g = gesture.current;
+    gesture.current = null;
+    setDraft(null);
+    if (g) { try { stageRef.current?.releasePointerCapture(g.id); } catch { /* not captured */ } }
+  }, []);
 
   // A new context (photo replacement) starts over: fresh model, first step, no gesture, no draft.
   useEffect(() => {
-    gesture.current = null;
-    setDraft(null);
+    invalidateGesture();
     setStep(0);
     setMessage('');
     const v = readViews(model);
     setViews(v);
     try { setGuides(model ? model.guides() : null); } catch { setGuides(null); }
     setCleared(!v || !data);
-  }, [model, data, readViews]);
+  }, [model, data, readViews, invalidateGesture]);
 
   const markCleared = useCallback(() => {
-    gesture.current = null;
-    setDraft(null);
+    invalidateGesture();
+    try { modelRef.current?.lines(); } catch { /* a revoked model discards its own traces on this call */ }
     setViews(null);
     setGuides(null);
     setCleared(true);
     setMessage('This photo was replaced or removed, so its traces were cleared.');
-  }, []);
+  }, [invalidateGesture]);
 
   /** Run a model operation; refresh the views; a revoked context clears the panel. */
   const run = useCallback(<T,>(op: (m: TracingModel) => T): T | undefined => {
@@ -459,12 +481,24 @@ export function PalmTracingPanel({ context, imageSource, onClose }: PalmTracingP
       return out;
     } catch (e) {
       if (isCleared(e)) { markCleared(); return undefined; }
+      // Model refusals are controlled outcomes, never uncaught errors; the model state is unchanged.
+      if (e instanceof TracingError) { setMessage(e.code === 'too-many-points' ? POINT_LIMIT_TEXT : 'That change could not be made. Nothing was changed.'); return undefined; }
       throw e;
     }
   }, [cleared, markCleared]);
+  /** An explicit user decision: invalidate any pending gesture first, then apply it. */
+  const decide = <T,>(op: (m: TracingModel) => T): T | undefined => { invalidateGesture(); return run(op); };
+
+  // The context can be revoked while the panel is idle (the photo was cleared elsewhere): watch it, so a revoked
+  // photo and its traces never stay on screen and no later event can bring them back.
+  useEffect(() => {
+    if (cleared || !model) return;
+    const watch = () => { if (!model.isActive()) markCleared(); };
+    const timer = setInterval(watch, 250);
+    return () => clearInterval(timer);
+  }, [model, cleared, markCleared]);
 
   // ---------------------------------------------------------------- layout (one geometry for drawing and input)
-  const stageRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   // The stage element is tracked as state so the measurement re-attaches whenever it (re)mounts.
   const [stageEl, setStageEl] = useState<HTMLDivElement | null>(null);
@@ -474,6 +508,7 @@ export function PalmTracingPanel({ context, imageSource, onClose }: PalmTracingP
     const el = stageEl;
     if (!el) return;
     const measure = () => {
+      if (modelRef.current && !modelRef.current.isActive()) { markCleared(); return; } // a late observer callback restores nothing
       const r = el.getBoundingClientRect();
       setStageBox((prev) => (prev.width === r.width && prev.height === r.height ? prev : { width: r.width, height: r.height }));
     };
@@ -488,7 +523,7 @@ export function PalmTracingPanel({ context, imageSource, onClose }: PalmTracingP
       window.removeEventListener('resize', measure);
       window.removeEventListener('orientationchange', measure);
     };
-  }, [stageEl]);
+  }, [stageEl, markCleared]);
   const content = useMemo(() => containRect({ left: 0, top: 0, width: stageBox.width, height: stageBox.height }, imgW, imgH), [stageBox, imgW, imgH]);
   const hasContent = content !== null;
 
@@ -503,8 +538,8 @@ export function PalmTracingPanel({ context, imageSource, onClose }: PalmTracingP
     return () => { c.width = 0; c.height = 0; };
   }, [imageSource, imgW, imgH, cleared, hasContent]);
 
-  // Teardown: drop the gesture (the model goes with the component).
-  useEffect(() => () => { gesture.current = null; }, []);
+  // Teardown: invalidate the gesture (the model goes with the component).
+  useEffect(() => () => { invalidateGesture(); }, [invalidateGesture]);
 
   /** Pointer position -> normalised image coordinate, through the stage's CURRENT box and the contain geometry. */
   const toImage = useCallback((clientX: number, clientY: number) => {
@@ -531,7 +566,7 @@ export function PalmTracingPanel({ context, imageSource, onClose }: PalmTracingP
     if (!p || !p.inside) { setMessage('Start the trace on the photo.'); return; }
     e.preventDefault();
     try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* capture is best-effort */ }
-    gesture.current = { id: e.pointerId, model: m, line: lineId, pts: [{ x: p.x, y: p.y }], startClient: { x: e.clientX, y: e.clientY }, moved: false };
+    gesture.current = { id: e.pointerId, epoch: gestureEpoch.current, model: m, line: lineId, pts: [{ x: p.x, y: p.y }], startClient: { x: e.clientX, y: e.clientY }, moved: false };
     setDraft([{ x: p.x, y: p.y }]);
   };
 
@@ -550,8 +585,15 @@ export function PalmTracingPanel({ context, imageSource, onClose }: PalmTracingP
     if (!g || e.pointerId !== g.id) return;
     gesture.current = null;
     setDraft(null);
-    // A gesture that began on another model (photo replaced) or another step changes nothing.
-    if (g.model !== modelRef.current || g.line !== lineId) return;
+    // A gesture invalidated by a later decision, or begun on another model (photo replaced) or step, changes nothing.
+    if (g.epoch !== gestureEpoch.current || g.model !== modelRef.current || g.line !== lineId) return;
+    // The release position is part of the gesture, even without a final pointermove (never clamped; I1 judges it).
+    const release = toImage(e.clientX, e.clientY);
+    if (release) {
+      const last = g.pts[g.pts.length - 1];
+      if (last.x !== release.x || last.y !== release.y) g.pts.push({ x: release.x, y: release.y });
+      if (!g.moved && Math.hypot(e.clientX - g.startClient.x, e.clientY - g.startClient.y) > TRACING_TAP_SLOP_PX) g.moved = true;
+    }
     run((m) => {
       if (m.line(g.line).status !== 'tracing') m.start(g.line);
       if (!g.moved) m.addPoint(g.line, g.pts[0]);
@@ -573,17 +615,17 @@ export function PalmTracingPanel({ context, imageSource, onClose }: PalmTracingP
   };
 
   // ---------------------------------------------------------------- actions (all keyboard-accessible buttons)
-  const confirm = () => run((m) => {
+  const confirm = () => decide((m) => {
     const r = m.confirm(lineId);
     setMessage(r.ok ? `${LINE_COPY[lineId].title} confirmed.` : `Not confirmed. ${placementText(r.reason)}`);
   });
-  const skip = (reason: 'user-skipped' | 'user-cannot-see') => run((m) => {
+  const skip = (reason: 'user-skipped' | 'user-cannot-see') => decide((m) => {
     m.skip(lineId, reason);
     setMessage(reason === 'user-cannot-see' ? `${LINE_COPY[lineId].title} marked as not visible. It is not assessed.` : `${LINE_COPY[lineId].title} skipped. It is not assessed.`);
   });
-  const reopen = () => run((m) => { m.start(lineId); setMessage(`Editing the ${LINE_COPY[lineId].title.toLowerCase()}. Confirm it again when it is ready.`); });
-  const clearLine = () => run((m) => { m.reset(lineId); setMessage(`${LINE_COPY[lineId].title} cleared.`); });
-  const undo = () => run((m) => {
+  const reopen = () => decide((m) => { m.start(lineId); setMessage(`Editing the ${LINE_COPY[lineId].title.toLowerCase()}. Confirm it again when it is ready.`); });
+  const clearLine = () => decide((m) => { m.reset(lineId); setMessage(`${LINE_COPY[lineId].title} cleared.`); });
+  const undo = () => decide((m) => {
     const before = m.lines();
     if (!m.undo()) { setMessage('Nothing to undo.'); return; }
     const after = m.lines();
@@ -592,7 +634,7 @@ export function PalmTracingPanel({ context, imageSource, onClose }: PalmTracingP
     setMessage(`Undid the last change${changed >= 0 ? ` (${LINE_COPY[TRACING_LINES[changed]].title})` : ''}.`);
   });
   const go = (k: number) => {
-    if (gesture.current) return;
+    invalidateGesture();
     setStep(Math.max(0, Math.min(TRACING_LINES.length - 1, k)));
     setMessage('');
   };
