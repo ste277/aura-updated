@@ -131,8 +131,11 @@ async function main() {
   token = createSessionToken(user.id, user.email);
   process.env.NEXT_PUBLIC_AURA_MY_PEOPLE = '0';
   const NO_CHART = ['name', 'relationshipType'];
-  const TRIO = ['birthDate', 'birthTime', 'birthTimezone', 'name', 'relationshipType'];
-  const WITH_CITY = ['birthCityName', 'birthDate', 'birthLatitude', 'birthLongitude', 'birthTime', 'birthTimezone', 'name', 'relationshipType'];
+  // AURA-MP-1 R4 P3 (62014): these two lists used to include 'relationshipType' although these cases never choose
+  // a relationship -- that expectation pinned the implicit PARTNER default (62012 P3). An untouched relationship is
+  // now omitted (API default OTHER). Cases that DO choose one (name-only, FRIEND) still expect it.
+  const TRIO = ['birthDate', 'birthTime', 'birthTimezone', 'name'];
+  const WITH_CITY = ['birthCityName', 'birthDate', 'birthLatitude', 'birthLongitude', 'birthTime', 'birthTimezone', 'name'];
 
   for (const on of [true, false]) {
     setServer(on);

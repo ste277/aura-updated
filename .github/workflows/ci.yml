@@ -1665,3 +1665,9 @@ jobs:
       # switch states, and no implicit default location ever persisted.
       - name: Run AURA-MP-1 R3 optional birth location DB test
         run: npx ts-node --project tsconfig.jsdom-tests.json test/myPeopleR3Db.test.ts
+      # AURA-MP-1 R4 (62014) -- the Add / Edit field-handling contract: an
+      # untouched relationship is omitted (API default OTHER), coordinates
+      # saved without a city survive unrelated edits, and the form never
+      # submits a timezone + location combination the API rejects (bare UTC).
+      - name: Run AURA-MP-1 R4 form contract and chart preservation DB test
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/myPeopleR4Db.test.ts
