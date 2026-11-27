@@ -31,7 +31,10 @@ const SHOTS = argShots > 0 ? process.argv[argShots + 1] : null;
 type Mutation = 'none' | 'stretch' | 'container' | 'bypass' | 'original' | 'stale-gesture' | 'ignore-release' | 'retain-revoked' | 'unhandled-limit';
 /** The reviewed P4-I2 component (head 0c1c650), before the R1 corrections: the F1-F4 witnesses must fail on it. */
 const ORIGINAL_HEAD = '0c1c6500e3bf9b4bd046772c32e5fab86e178ac7';
-const originalComponent = (): string => require('child_process').execFileSync('git', ['show', `${ORIGINAL_HEAD}:apps/web/components/palm-scan/PalmImageInput.tsx`], { cwd: ROOT, encoding: 'utf8' });
+const originalComponent = (): string => {
+  try { return require('child_process').execFileSync('git', ['show', `${ORIGINAL_HEAD}:apps/web/components/palm-scan/PalmImageInput.tsx`], { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }); }
+  catch { throw new Error(`the reviewed commit ${ORIGINAL_HEAD} is not in this clone; fetch it first: git fetch --no-tags --depth=1 origin ${ORIGINAL_HEAD}`); }
+};
 const MUTATIONS: Record<Exclude<Mutation, 'none' | 'original'>, Array<{ file: string; from: string; to: string }>> = {
   stretch: [{ file: 'apps/web/lib/palm-analysis/tracingGeometry.ts', from: 'const scale = Math.min(box.width / imgW, box.height / imgH);\n  const width = imgW * scale;\n  const height = imgH * scale;', to: 'const width = box.width;\n  const height = box.height;' }],
   container: [{ file: 'apps/web/components/palm-scan/PalmImageInput.tsx', from: 'const c = containRect({ left: r.left, top: r.top, width: r.width, height: r.height }, imgW, imgH);', to: 'const c = { left: r.left, top: r.top, width: r.width, height: r.height };' }],
