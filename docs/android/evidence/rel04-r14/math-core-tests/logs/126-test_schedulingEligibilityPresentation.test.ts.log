@@ -1,0 +1,20 @@
+$ npx ts-node test/schedulingEligibilityPresentation.test.ts
+# job=math-core-tests step=Run Scheduling eligibility presentation test env={}
+OK   1. every real code is recognized
+OK   2. an unrelated Move-only code (e.g. CONFLICT) is NOT recognized as a scheduling-eligibility code
+OK   3. undefined is not recognized
+OK   4. null is not recognized
+OK   5. a non-string value is not recognized
+OK   6. an empty string is not recognized
+OK   7. every code produces a non-empty headline and detail, and echoes its own code back
+OK   8. the 3 genuine scheduling-conflict codes are severity "conflict"
+OK   9. the 2 pre-A3a "blocked" codes are severity "blocked", never "conflict"
+OK   10. DAILY_CAPACITY_EXCEEDED copy mentions "day", never implies a second session should just be created
+OK   11. CAPACITY_EXCEEDED (weekly) copy mentions "week" and explicitly does NOT recommend trying a different time as the fix (this ticket's own section 3)
+OK   12. DAILY_ATTRIBUTION_UNRESOLVED copy explicitly says Aura cannot confirm/safely tell, and never claims to auto-retry or bypass (this ticket's own section 4)
+OK   13. GOAL_NOT_ACTIVE keeps the exact pre-A3b server message verbatim
+OK   14. GOAL_ACTIVITY_NOT_AVAILABLE keeps the exact pre-A3b server message verbatim
+OK   15. no headline/detail leaks a raw code, a stack trace, or a DB-shaped term (never-leak-internals discipline, same as HPG3-A3a)
+ALL SCHEDULING ELIGIBILITY PRESENTATION CHECKS PASSED
+
+# exit=0 signal=

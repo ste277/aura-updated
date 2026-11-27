@@ -1,0 +1,38 @@
+$ npx ts-node test/dayConstructorPreviewItemClient.test.ts
+# job=math-core-tests step=Run day constructor preview item client test env={}
+OK   1. window fields serialize to ISO strings, never Date instances
+OK   2. window.date/timezone/source pass through verbatim
+OK   3. item fields serialize to ISO strings
+OK   4. item.intentId/activityId/title/placementSource pass through verbatim
+OK   5. acceptanceToken is the ORIGINAL token, never derived
+OK   6. candidateStart is the requested new instant, serialized to ISO
+OK   7. the built request has exactly four top-level keys (window, item, acceptanceToken, candidateStart) -- no duration, no second candidateEnd
+OK   8. a FIXED_CONSTRAINT item serializes its placementSource verbatim too
+OK   9. JSON.stringify round-trips the request body without losing any field
+OK   10. a valid UPDATED body parses successfully
+OK   11. item.start/end become real Date instances
+OK   12. item.start carries the correct new instant
+OK   13. acceptanceToken is carried through as the NEW token
+OK   14. intentId/title/placementSource/activityId are preserved verbatim
+OK   15. requiresConfirmation is always true on the revived item
+OK   16. UPDATED with a missing acceptanceToken is rejected as UNKNOWN_RESPONSE (never silently treated as success)
+OK   17. UPDATED with an unparseable start is rejected as UNKNOWN_RESPONSE
+OK   17b. UPDATED with an invalid placementSource is rejected as UNKNOWN_RESPONSE
+OK   18. a plain INVALID_REQUEST rejection at HTTP 200 parses as REJECTED
+OK   19. a STALE_PREVIEW rejection at HTTP 200 parses with its detail preserved
+OK   20. an UNAVAILABLE rejection parses correctly
+OK   21. CRITICAL: a TIMING_CHECK_FAILED rejection sent with HTTP 500 (preview-item/route.ts's own one asymmetric case) still parses as REJECTED, never HTTP_ERROR
+OK   22. the TIMING_CHECK_FAILED/HTTP-500 result carries the correct reason
+OK   23. a REJECTED body with an unrecognized reason string is UNKNOWN_RESPONSE, not silently accepted
+OK   24. a REJECTED body with a missing reason is UNKNOWN_RESPONSE
+OK   25. a plain {error} 401 envelope (no status field) is HTTP_ERROR 401
+OK   26. a plain {error} 404 envelope is HTTP_ERROR 404
+OK   27. a plain {error} 400 envelope (malformed JSON body) is HTTP_ERROR 400
+OK   28. a non-object body at HTTP 200 is UNKNOWN_RESPONSE
+OK   29. a null body at HTTP 200 is UNKNOWN_RESPONSE
+OK   30. an unrecognized status string at HTTP 200 is UNKNOWN_RESPONSE
+OK   31. an unrecognized status string at a non-200 HTTP status falls back to HTTP_ERROR
+
+ALL DAY CONSTRUCTOR PREVIEW ITEM CLIENT CHECKS PASSED
+
+# exit=0 signal=

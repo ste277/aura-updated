@@ -1,0 +1,61 @@
+$ npx ts-node test/mcpOAuthS8.test.ts
+# job=math-core-tests step=Run I2b-S8 offline security test env={}
+OK   R-6 valid RS256, PS256 and ES256 keys are accepted
+OK   R-6 ephemeral (local) keys still validate
+OK   R-6 a key without alg is refused
+OK   R-6 alg that does not match kty is refused
+OK   R-6 inconsistent RSA key refused: random d, dp, dq (S3 reproduction: signs tokens that do not verify)
+OK   R-6 inconsistent RSA key refused: only d randomised
+OK   R-6 inconsistent RSA key refused: only dp randomised
+OK   R-6 inconsistent RSA key refused: only qi randomised
+OK   R-6 inconsistent RSA key refused: p and q swapped with a foreign prime
+OK   R-6 RSA public exponent other than 65537 is refused
+OK   R-6 EC key whose public point is not derived from d is refused
+OK   R-6 a public-only key is refused
+OK   R-6 CSPRNG secrets (base64url) are accepted
+OK   R-6 CSPRNG secrets (hex, 64 chars) are accepted
+OK   R-6 weak cookie key refused: 32 x "a" (S3 reproduction)
+OK   R-6 weak audit key refused: 32 x "a" (S3 reproduction)
+OK   R-6 weak cookie key refused: 32 x "b"
+OK   R-6 weak audit key refused: 32 x "b"
+OK   R-6 weak cookie key refused: 32 x "0"
+OK   R-6 weak audit key refused: 32 x "0"
+OK   R-6 weak cookie key refused: "ab" repeated
+OK   R-6 weak audit key refused: "ab" repeated
+OK   R-6 weak cookie key refused: "0123456789" repeated (periodic)
+OK   R-6 weak audit key refused: "0123456789" repeated (periodic)
+OK   R-6 weak cookie key refused: a short word repeated
+OK   R-6 weak audit key refused: a short word repeated
+OK   R-6 entropy estimate: 32 x "a" is 0 bits, a 32-byte base64url secret is >= 128
+OK   S3-5 long blank runs (incl. the quadratic "x"+64,000 blanks+"x", 2.9 s before) are rejected in < 20 ms
+OK   S3-5 normal values with surrounding OWS still parse
+OK   S3-7 shard key encodes ceiling and shard count
+OK   S3-7 a different configuration uses a different row
+OK   S3-6 address bucket is a keyed hash: no address text in the key
+OK   S3-6 instances sharing the key agree; the /64 grouping is preserved
+OK   S3-6 different networks get different keys
+OK   S3-6 a different key gives unrelated buckets
+OK   S3-6 the shared unresolved bucket stays readable
+OK   S3-6 a short bucket key is refused
+OK   S3-4 unset: AS uses the TCP peer (local dev), /api/mcp uses none
+OK   S3-4 configured: the AS and /api/mcp use the SAME source
+OK   S3-4 an unsupported source still throws (fail closed)
+OK   S5 confirmed COMMIT resolves and returns the connection cleanly
+OK   S5 a COMMIT answered with the ROLLBACK tag is a failure (StoreUnavailableError), connection destroyed
+OK   S5 a COMMIT result without a tag is not treated as confirmed
+OK   S5 a COMMIT that never answers fails at the COMMIT deadline (unknown outcome -> failure), connection destroyed
+OK   S5 commitConfirmed only for the COMMIT tag
+OK   S3-8 transaction BEGIN sets idle_in_transaction_session_timeout locally
+OK   R-3 discovery with forged Host/X-Forwarded-*: issuer and every endpoint URL use the configured origin
+OK   R-3 discovery body never contains the forged host
+OK   R-3 RFC 8414 metadata likewise pinned
+OK   R-3 full flow with forged origin headers on every request completes and delivers a code
+OK   R-3 no redirect in the flow (interaction, resume, callback) points at the forged host
+OK   R-3 absolute redirects use the configured origin (or the registered redirect URI)
+OK   S3-3 interaction page with the store unavailable: 503 (was 400 "Request expired"), retry-after, no Location
+OK   S3-3 a genuinely unknown interaction still answers 400 (unchanged)
+
+All 54 AURA-MCP-02-I2b-S8 offline security checks passed.
+oidc-provider WARNING: Unsupported runtime. Use Node.js v22.x LTS, or a later LTS release.
+
+# exit=0 signal=

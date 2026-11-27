@@ -1,0 +1,60 @@
+$ npx ts-node test/constructionBasis.test.ts
+# job=math-core-tests step=Run construction basis test env={}
+=== the pure module: contents, candidate-entry semantics, ownership ===
+OK   READY with exactly the documented top-level fields (planningDate, window, intents, blockedIntervals, initialCandidates, finalCandidates, fixedConstraints) -- no policy, evidence, facts, pressure or source field
+OK   INTENTS: request order, ids / titles / importance / deadline / duration / flexibility / originalOrder preserved exactly; decision facts, activity family and DayIntent source are NOT carried; nothing renumbered
+OK   ABSENT optional fields stay ABSENT (no `undefined` keys): an intent without activityId / deadline has neither key
+OK   WINDOW: date, timezone and both instants copied; the window `source` kind (unread by the Constructor) is not carried
+OK   BLOCKERS and FIXED authority copied exactly (blocker source tag, fixed constraint instants and intent id)
+OK   CANDIDATE ENTRY SEMANTICS: A and N have entries, F (never searched) has none; N's entry is an EMPTY list ("searched, nothing usable") -- absent and empty are distinguished, in request order, in BOTH collections
+OK   INITIAL vs FINAL: the initial list keeps both candidates exactly (timingFit, candidateOrder 0 and 1) while the final list holds the terminal one -- the two are captured separately and not merged or reordered
+OK   OWNERSHIP: the basis shares NO object, array or Date with any source (intents, candidate maps, fixed constraints, blockers, window, even the T1 capture)
+OK   INITIAL and FINAL candidate objects are separately owned (no object is shared between the two collections), though they may be equal by value
+OK   EVERY DATE-BEARING PATH (10 audited: window start/end, blocker start/end, FIXED start/end, initial candidate start/end, final candidate start/end): basisDate !== sourceDate and basisDate.getTime() === sourceDate.getTime()
+OK   DEEP FREEZE: the basis, every array, every nested object and every (owned) Date is frozen; writes at every depth throw
+OK   THE FREEZE CAVEAT IS REAL AND NOT RELIED ON: `Object.freeze(new Date(...))` does NOT stop `setTime` -- (demonstrated in this test only); basis Dates are protected by OWNERSHIP plus the #208 no-Date-mutator guard, which is why no test here mutates a basis Date and calls it safe
+OK   SOURCE MUTATION AFTER CREATION (test only): pushing to a source array, changing source fields and calling setTime on SOURCE Dates leaves the basis byte-identical
+=== the pure module: fail-closed and semantics ===
+OK   DUPLICATE INTENT IDS make the neutral authority ambiguous: UNAVAILABLE / DUPLICATE_INTENT_ID, never a last-write-wins basis
+OK   a missing T1 capture (it could not be taken) is UNAVAILABLE / ASSEMBLY_FAILED -- never a basis without its initial authority
+OK   a non-Date where a Date must be copied makes the whole basis UNAVAILABLE (no partial basis, nothing thrown out of the module)
+OK   INVALID DATE: baseline semantics are preserved, not normalized -- an Invalid Date candidate copies as an Invalid Date (the Constructor classifies it MALFORMED_CANDIDATE itself); the basis is a NEW instance
+OK   NO CANDIDATE INVENTION: an intent absent from the candidate map gets no entry in either collection; an empty list stays an empty entry
+OK   COLLECTION ORDER follows the intent (request) order, never object-key or insertion order of the candidate map
+OK   NO CLOCK: assembling and capturing call Date.now zero times (all time values are copies of existing instants)
+OK   ASSEMBLY DOES NOT MUTATE ITS SOURCE: the source intents (including their decision facts), candidate maps and fixed constraints are unchanged by an assembly
+=== REAL orchestrator: the replenishment case closes the P4b0 hand-off gap ===
+OK   REPLENISHED (real): B's INITIAL list still holds the 11:00 slot it lost, while its FINAL list is the replenished authority (empty) -- the overwritten list exists only because it was captured at T1, with no search repeated
+OK   the real search log proves the capture came from the ORIGINAL search: B was searched twice (initial, then replenished with a larger exclusion), A once; the basis holds the first of B's results and the last
+OK   NO EXTRA WORK: the number of timing searches, blocker / duration / availability loader calls and Constructor passes is IDENTICAL with and without the basis (searches 3, Constructor passes 2)
+OK   BASELINE IDENTITY: the Constructor / orchestrator result with the basis is deep-identical to the plain orchestration, and the signed preview body (every acceptance token included) is byte-identical
+OK   NOT PUBLIC: the orchestration result carries no basis; the basis (and, since O5 P4b1b, the baseline placements) are only on the internal diagnostics outcome
+=== REAL orchestrator: multi-round replenishment ===
+OK   MULTI-ROUND (real, scripted search from the P3b fixture): more than one replenishment search ran; for EVERY flexible intent the basis's initial list equals its FIRST search result and its final list equals its LAST
+OK   the multi-round run is untouched by the basis: identical result, searches and Constructor passes
+=== REAL orchestrator: a mixed day (FIXED + FLEXIBLE + external blocker + empty search) ===
+OK   MIXED DAY: intents in request order with FIXED / FLEXIBLE preserved; the external blocker carried (plan blocker copy; the search already excluded it, so A's list has no 15:00 slot); the FIXED constraint carried; FIXED X has NO candidate entry while searched N has an EMPTY one
+OK   the window, planning date and durations are the baseline's own (no recomputation): 09:00-17:00 UTC on the request date, durations 60, originalOrder untouched
+OK   NO POLICY / SOURCE / FACTS ANYWHERE: no key or value anywhere in the basis names pressure, promotion, owner, facts, evidence, shadow, Goal, recurrence or opportunity
+OK   DETACHED FROM THE BASELINE WORKING STATE: none of the 40 objects / Dates in the basis is reachable from the recorded Constructor inputs (the live candidate map, intents, blockers, FIXED constraints, window), the Constructor result (Proposed / Deferred), the resolved intents, the request or the loader-supplied plans
+OK   CONSTRUCTOR-RESULT DETACHMENT: A's Proposed interval equals its selected candidate by value but shares no Date with the basis (the Proposed item aliases the orchestrator's own candidate Date, not the basis copy)
+OK   SOURCE MUTATION (test only): after the run, setTime on the SOURCE window / blocker / FIXED / Proposed / candidate Dates, emptying the live candidate lists and rewriting the live intents leaves the basis byte-identical
+OK   DEEP FREEZE on the real basis: every object, array and (owned) Date reachable from it is frozen
+OK   DETERMINISM: an identical run assembles a byte-identical basis
+OK   ORDER: collection order follows the REQUEST order (reversing the request reverses the intents and the candidate-list order) and never the candidate map's key order
+=== REAL orchestrator: no-replenishment, FIXED-only, no-candidate, source parity ===
+OK   NO REPLENISHMENT: initial and final lists are equal by value for every intent yet are separately owned objects
+OK   FIXED-ONLY DAY: deterministic -- the FIXED constraint is captured, both candidate collections are empty (nothing was searched), and no search ran
+OK   NO-CANDIDATE FLEXIBLE: the intent has an entry with an EMPTY list in both collections (searched, found nothing), not an absent entry
+OK   SOURCE NEUTRALITY: ids shaped like automatic Goal demand, a manual hand-off and a generic typed intent assemble structurally identical bases (the basis sees ids and neutral scheduling fields only)
+=== the basis can never affect the baseline ===
+OK   NORMAL PATH COST: `orchestrateConstructDay` (the preview's entry point) performs no basis capture and no assembly -- zero calls
+OK   the diagnostics entry performs exactly one T1 capture and one T4 assembly, through the same orchestration
+OK   FAILURE ISOLATION (assembly throws): the baseline result is deep-identical to the plain run, the signed body is unchanged, and the basis is UNAVAILABLE / ASSEMBLY_FAILED -- no partial basis
+OK   FAILURE ISOLATION (the T1 capture throws): same -- the baseline is untouched and the basis is UNAVAILABLE (never built without its initial authority)
+OK   DUPLICATE REQUEST IDS: the baseline result is exactly what the plain orchestration returns, and the basis fails closed -- UNAVAILABLE / DUPLICATE_INTENT_ID
+OK   a run that is not READY (here a missing timezone) has no basis: UNAVAILABLE / RUN_NOT_READY, result untouched
+OK   a timing-search failure (a typed domain outcome) still returns its own result and a basis that is UNAVAILABLE -- the optional basis never changes what the baseline reports
+ALL CONSTRUCTION BASIS CHECKS PASSED
+
+# exit=0 signal=

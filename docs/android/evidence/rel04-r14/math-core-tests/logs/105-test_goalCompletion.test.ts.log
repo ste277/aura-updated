@@ -1,0 +1,52 @@
+$ npx ts-node test/goalCompletion.test.ts
+# job=math-core-tests step=Run Goal completion test env={}
+OK   exactly three completion kinds
+OK   COMPLETION_KINDS is exactly DONE/DURATION/MEASURED_TARGET
+OK   isCompletionKind accepts DONE
+OK   isCompletionKind accepts DURATION
+OK   isCompletionKind accepts MEASURED_TARGET
+OK   isCompletionKind rejects CHECKLIST (deferred, never a kind in G2.1)
+OK   isCompletionKind rejects COUNT (collapsed into MEASURED_TARGET, not its own kind)
+OK   isCompletionKind rejects QUANTITY (collapsed into MEASURED_TARGET, not its own kind)
+OK   isCompletionKind rejects STEPS
+OK   isCompletionKind rejects BOOLEAN
+OK   isCompletionKind rejects PERCENTAGE
+OK   isCompletionKind rejects non-string input
+OK   isCompletionKind rejects null
+OK   valid: DONE
+OK   valid: DURATION 30
+OK   valid: DURATION 10
+OK   valid: MEASURED_TARGET 8 glasses
+OK   valid: MEASURED_TARGET 20 pages
+OK   valid: MEASURED_TARGET 6000 steps
+OK   valid: MEASURED_TARGET 5 km
+OK   valid: MEASURED_TARGET 2.5 km -- fractional target preserved EXACTLY, not floored/rounded
+OK   valid: DURATION 12.5 -- fractional minutes also preserved exactly
+OK   invalid: DONE + target
+OK   invalid: DONE + unit
+OK   invalid: DURATION without target
+OK   invalid: DURATION target = 0
+OK   invalid: DURATION target < 0
+OK   invalid: DURATION target NaN
+OK   invalid: DURATION + unit
+OK   invalid: MEASURED_TARGET without target
+OK   invalid: MEASURED_TARGET target = 0
+OK   invalid: MEASURED_TARGET target < 0
+OK   invalid: MEASURED_TARGET without unit
+OK   invalid: MEASURED_TARGET blank unit (empty string)
+OK   invalid: MEASURED_TARGET whitespace-only unit
+OK   invalid: unknown kind
+OK   invalid: missing kind
+OK   DONE_COMPLETION_REQUIREMENT is the canonical singleton shape
+OK   toPersistedCompletionRequirement(DONE) -> all-null (indistinguishable from legacy/unset)
+OK   toPersistedCompletionRequirement(DURATION) persists kind+target, null unit
+OK   toPersistedCompletionRequirement(MEASURED_TARGET) persists all three
+OK   16. legacy GoalActivity with no completion fields (completionKind null) -> canonical DONE
+OK   legacy row with stray non-null target/unit but null kind still normalizes to DONE (kind is authoritative)
+OK   a persisted row that would fail validation (e.g. DURATION with a unit, defensive/should-never-happen) falls back to DONE rather than throwing
+OK   a persisted row with an unrecognized kind string falls back to DONE
+OK   normalize round-trips a genuinely valid persisted DURATION row
+OK   normalize round-trips a genuinely valid persisted MEASURED_TARGET row, fractional value preserved
+ALL GOAL COMPLETION CHECKS PASSED
+
+# exit=0 signal=

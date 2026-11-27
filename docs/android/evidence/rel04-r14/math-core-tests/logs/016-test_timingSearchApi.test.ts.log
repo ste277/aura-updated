@@ -1,0 +1,44 @@
+$ npx ts-node test/timingSearchApi.test.ts
+# job=math-core-tests step=Run timing search API validation test env={}
+OK   Valid FIND request is accepted
+OK   FIND request carries mode FIND
+OK   FIND request carries taskTitle, not activityId (free text)
+OK   FIND request carries the resolved context untouched
+OK   FIND request carries the requested horizon
+OK   FIND request carries the requested limit
+OK   FIND request with activityId omits taskTitle from the built request
+OK   FIND request with an explicit dateRange is accepted
+OK   FIND request carries the dateRange, not a horizon
+OK   Valid CHECK request is accepted
+OK   CHECK request carries the exact candidateStart
+OK   CHECK request without candidateStart is rejected
+OK   CHECK rejection uses 400
+OK   Valid COMPARE request is accepted
+OK   COMPARE request carries both candidateStarts in order
+OK   COMPARE request with fewer than 2 candidates is rejected
+OK   Missing mode is rejected
+OK   Unknown mode is rejected
+OK   Missing both activityId and taskTitle is rejected
+OK   Duration below the minimum is rejected
+OK   Duration above the maximum is rejected
+OK   Non-numeric duration is rejected
+OK   Invalid time preference is rejected
+OK   Malformed dateRange (not YYYY-MM-DD) is rejected
+OK   dateRange with end before start is rejected
+OK   dateRange spanning more than 90 days is rejected
+OK   CUSTOM horizon without custom dates is rejected
+OK   Invalid horizon is rejected
+OK   CHECK with a non-date candidateStart is rejected
+OK   COMPARE with a non-array candidateStarts is rejected
+OK   COMPARE with more than 6 candidates is rejected
+OK   activityId longer than 100 characters is rejected
+OK   taskTitle longer than 200 characters is rejected
+OK   FIND request validation is timezone-agnostic (context passes through unchanged for non-IST users)
+OK   dateRange exactly at the 90-day cap is accepted
+OK   dateRange of zero days (start === end) is accepted
+OK   A body with no timePreference field validates OK and defaults to 'ANY'
+OK   That real request, run end to end, still lands every Date Night candidate in the evening (17:00-21:00 IST)
+
+ALL TIMING SEARCH API CHECKS PASSED
+
+# exit=0 signal=

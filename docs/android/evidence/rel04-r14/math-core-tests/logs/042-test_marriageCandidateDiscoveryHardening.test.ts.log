@@ -1,0 +1,43 @@
+$ npx ts-node test/marriageCandidateDiscoveryHardening.test.ts
+# job=math-core-tests step=Run Marriage candidate discovery hardening test env={}
+OK   Marriage has karanaAuthoritative IMPLEMENTED
+OK   Marriage has yogaAuthoritative IMPLEMENTED
+OK   Griha Pravesh has karanaAuthoritative MISSING
+OK   Griha Pravesh has yogaAuthoritative MISSING
+OK   Engagement has karanaAuthoritative MISSING
+OK   Engagement has yogaAuthoritative MISSING
+OK   start-journey (REUSABLE_BASE_RULE) has karanaAuthoritative MISSING
+OK   start-journey (REUSABLE_BASE_RULE) has yogaAuthoritative MISSING
+OK   Marriage receives at least one Karana-transition-derived candidate on 2026-03-02 (New York) that Tithi/Nakshatra alone would not produce
+OK   A/D (coverage-aware + deterministic): start-journey's candidate minutes are a SUBSET of Griha Pravesh's on repeated, deterministic execution -- proven by construction (both walk identical Tithi/Nakshatra transitions; only Griha's authoritative avoid-Tithi/Nakshatra gate can ever add an extra minute)
+OK   B (non-authoritative comparison): start-journey never acquires Griha Pravesh's authoritative avoid-Tithi/Nakshatra exclusion merely by sharing the same underlying astronomical transitions -- its own coverage can never be authoritative for either factor
+OK   C (coverage-aware exclusion, not a fixture-pinned timestamp): Griha Pravesh genuinely has at least one extra candidate minute beyond start-journey's on this date, and the mechanism producing it is Griha's own authoritative, data-driven avoid-Tithi/Nakshatra coverage gate (coverage.tithi === IMPLEMENTED with a real, non-empty avoid list) -- not an incidental equal count
+OK   Engagement (no Karana/Yoga coverage) candidate minutes also match the Tithi/Nakshatra-only walk
+OK   2026-05-01 New York 30min: Finder discovers at least one eligible candidate in the Vishti->Bava run
+OK   ...and the winning window falls on 2026-05-01 itself (New York local date), consistent with the audit's morning-recovery finding
+OK   2026-05-01 New York 15min: no longer a false-zero result
+OK   2026-05-01 New York 30min: no longer a false-zero result
+OK   2026-05-01 New York 60min: no longer a false-zero result
+OK   2026-02-26 Chennai 60min: Finder discovers the eligible window (Yoga-transition recovery)
+OK   2026-04-20 Chennai 15min: no longer a false-zero result (Yoga-transition recovery)
+OK   2026-04-20 Chennai 30min: no longer a false-zero result (Yoga-transition recovery)
+OK   2026-04-20 Chennai 60min: no longer a false-zero result (Yoga-transition recovery)
+OK   2026-12-05 Chennai 15min: second control produces a result (Yoga-transition recovery)
+OK   2026-12-05 Chennai 30min: second control produces a result (Yoga-transition recovery)
+OK   2026-12-05 Chennai 60min: second control produces a result (Yoga-transition recovery)
+OK   2026-03-02 New York 60min: a SECOND same-day Karana transition candidate is now discovered (minute ~1140, the Vishti-ending boundary the old walk could never reach)
+OK   Sanity: a raw (unfiltered) solar slot genuinely claims minute ~303 on 2026-11-21 Dubai
+OK   ...but that specific slot cannot host a 60-minute block (correctly excluded by duration-fit filtering)
+OK   The Karana transition candidate at minute ~303 survives dedup and is generated (previously dropped)
+OK   2026-11-21 Dubai 60min: Finder now returns a non-empty result (was false-zero before this PR)
+OK   Sanity: a genuine Karana transition exists on 2026-11-21 (Dubai local day)
+OK   Transition rounding: the candidate lands on the CEIL minute, not the FLOOR (never claims clean before the value genuinely changed)
+OK   AVOID entry (Vanija->Vishti) transition-start candidate at minute ~447 is present
+OK   SAFE->AVOID latest-valid-start candidate at minute ~386 (447-60, before the avoid Karana begins) is present
+OK   isAuthoritativeAvoidKarana confirms Vishti is genuinely avoid for Marriage (the precondition for this candidate to exist at all)
+OK   isAuthoritativeAvoidYoga confirms Atiganda is genuinely avoid for Marriage
+OK   At least one Yoga-derived candidate minute exists for 2026-05-17 Chennai (transition-start and/or latest-valid-start)
+
+ALL MARRIAGE CANDIDATE DISCOVERY HARDENING CHECKS PASSED
+
+# exit=0 signal=

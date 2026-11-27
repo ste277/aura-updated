@@ -1,0 +1,14 @@
+$ (apps/web) npx prisma generate
+Prisma schema loaded from prisma/schema.prisma
+
+✔ Generated Prisma Client (v5.22.0) to ./node_modules/@prisma/client in 316ms
+
+Start by importing your Prisma Client (See: https://pris.ly/d/importing-client)
+
+Help us improve the Prisma ORM for everyone. Share your feedback in a short 2-min survey: https://pris.ly/orm/survey/release-5-22
+
+# exit=0
+$ (apps/web) npx tsc --noEmit -p tsconfig.json
+# exit=0
+$ npx tsc --noEmit -p tsconfig.web.json
+# exit=0

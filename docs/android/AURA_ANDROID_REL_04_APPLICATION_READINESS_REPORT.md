@@ -2,7 +2,13 @@
 
 **Date:** 2026-11-26 (R9) · **PR:** #392 · **Branch:** `aura-android-rel04-app-readiness`, cut from `main` `ad49e6a`
 
-**Revision:** **R13** (ticket 39250): queue integrity corrections for verification 39249, which was NO-GO at `6373fd9`.
+**Revision:** **R14** (ticket 39253): unified outcome reconciliation for verification 39252, which was NO-GO at `f6a8cbe`.
+- **Correction:** one durable-state reconciliation (`requestState`) for the gate and for lost-acknowledgement recovery; decisions record the server's answer; one authoritative physical verification. Closes F1–F3.
+- **Implementation:** `0df08780bd75e16b676efda6c99c1738bc72681b`.
+- **Evidence:** `docs/android/evidence/rel04-r14/`. Handover: `docs/android/AURA_ANDROID_REL_04_R14_VERIFICATION_HANDOVER.md`, which supersedes §R9–§R13 where they differ.
+- **CI:** automatic run 46002683525 was **8/9**. The failure is a separate wall-clock finding in `weeklyPlanReviewClientDb`.
+
+**Previous revision:** **R13** (ticket 39250): queue integrity corrections for verification 39249, which was NO-GO at `6373fd9`.
 - **Correction:**
   - account-bound claims, with claim/lease agreement before sending (E1);
   - queue-write outcomes that match storage: a refusal aborts the transaction, a commit is reconciled from storage, and an uncertain outcome is reported as such (E2);
@@ -71,7 +77,7 @@ R5, R4 and R3 sections are kept as history.
 
 ## 1. Verdict
 
-**R13 READY FOR INDEPENDENT VERIFICATION** (39249 E1–E4 addressed; ticket 39243 OPEN; the N2 origin/rollback allowlist and unreadable-v2 recovery are mandatory release conditions).
+**R14 READY FOR INDEPENDENT VERIFICATION** (39252 F1–F3 addressed; ticket 39243 OPEN; CI 8/9 because of a separate wall-clock finding; the N2 allowlist and unreadable-v2 recovery are mandatory release conditions).
 
 | Disposition | State |
 |---|---|

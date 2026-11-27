@@ -1,0 +1,39 @@
+$ npx ts-node test/decisionFactsThreadingDb.test.ts
+# job=day-constructor-acceptance-db-tests step=Run Decision Facts V1 threading DB test env={}
+=== REAL PIPELINE: RHYTHM FACTS -> GENERIC DECISION FACTS ===
+OK   preview is READY through the real boundary with the real provider wired
+OK   generic facts are present on the resolved intent
+OK   facts equal the canonical Candidate A1 Rhythm output, translated (target 3, 0 completed, 0 committed, 3 remaining)
+OK   O3: the real provider carries the INCLUSIVE civil-date week bounds through the real preview path (Tuesday is a Tuesday -> Mon Monday .. Sun Sunday)
+OK   the generic fact carries no Goal identity
+OK   a typed (non-Goal) intent in the same request carries no facts
+=== SERIALIZATION: VISIBLE TO THE CLIENT, NEVER AUTHORITATIVE ===
+OK   facts cross the preview HTTP body (server -> client visibility)
+OK   the accept request body never echoes decision facts back (no client authority path)
+=== TRUST: FACTS ARE SERVER-DERIVED FOR THE AUTHENTICATED USER ONLY ===
+OK   another user's GoalActivity id yields no facts (provider is scoped to the authenticated user)
+OK   MANUAL Goal handoff rows (plan-day-goal-<id>) carry no facts -- Decision Facts V1 covers automatic Goal demand only (classification B)
+OK   an automatic id encoded for a different planning date yields no facts
+=== O3: PERIOD BOUNDS ARE SERVER-DERIVED FROM EACH USER'S OWN TIMEZONE ===
+OK   positive offset: UTC Sunday is already Monday in Kolkata -> bounds next Monday..next Sunday (not the UTC-date week)
+OK   negative offset: the same instant is still Sunday in Los Angeles -> bounds Monday..Sunday
+OK   cross-user: each user's bounds come from their OWN authoritative timezone, same instant, different weeks
+OK   period consistency: each planning date lies within its own bounds
+OK   fact consistency: remaining = max(0, target - completed - committed) for both users
+OK   cross-user: a user's own targets are unaffected (Kolkata 3/week, Los Angeles 2/week)
+OK   forged client bounds/counts/timezone are ignored: facts are the server-derived Monday..Sunday, target 3
+=== NO PERSISTENCE BEFORE ACCEPTANCE ===
+OK   zero PlannedActivity/GoalActivityOccurrence/GoalActivityExecution rows after fact resolution and previews
+=== WEEKLY EXHAUSTION: INELIGIBLE ACTIVITY IS NEVER OFFERED (ELIGIBILITY STAYS UPSTREAM) ===
+OK   exhaustion cycle (2026-12-29): accepted
+OK   after one completion the carried facts reflect canonical accounting (1 completed, 2 remaining)
+OK   exhaustion cycle (2026-12-30): accepted
+OK   exhaustion cycle (2026-12-31): accepted
+OK   Candidate A no longer reports the exhausted activity eligible
+OK   no facts are produced for the now-ineligible activity (the policy seam never receives it to suppress it)
+=== WEEK RESET (canonical Rhythm engine, no pre-generated rows) ===
+OK   O3: next week the bounds advance with the counts (next Monday..next Sunday)
+OK   next week the carried facts reset to the full target
+ALL DECISION FACTS THREADING CHECKS PASSED
+
+# exit=0 signal=

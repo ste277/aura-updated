@@ -1,0 +1,28 @@
+$ npx ts-node test/goalDemandProvenanceAuthorizationDb.test.ts
+# job=day-constructor-acceptance-db-tests step=Run Goal demand provenance authorization DB test env={}
+OK   37/39a. verified automatic intent + matching client link -> SAVED
+OK   37. exactly the existing expected GoalActivityOccurrence/PlannedActivity association is created
+OK   20. verified automatic intent + missing client link -> server derives the link, SAVED
+OK   20b. the derived link actually materialized a real occurrence for the correct GoalActivity
+OK   21. verified automatic intent + conflicting client link -> REJECTED
+OK   22. conflict causes zero GoalActivityOccurrence/PlannedActivity writes
+OK   23. a VALIDLY SIGNED item whose intentId is a malformed reserved identity -> REJECTED
+OK   24. malformed identity causes zero writes
+OK   25. decoded planning date differs from the verified constructionWindow.date -> REJECTED
+OK   26. date mismatch causes zero writes
+OK   27. an unsigned goal-demand-looking intentId is rejected by signature verification itself, never reaching this ticket's own authorization step
+OK   28 (DB). the accompanying (unverified) client link also never persists anything
+OK   40. one invalid automatic provenance among valid siblings -> the WHOLE accept is rejected
+OK   40b. zero writes for ANY item, including the otherwise-valid sibling (atomicity preserved)
+OK   34. a verified automatic item decoding to a DIFFERENT user's GoalActivity still fails at the existing transactional ownership check (defense-in-depth preserved)
+OK   34b. zero writes result from this cross-user attempt
+OK   35 setup: first 1/week occurrence SAVED
+OK   35. a second automatic suggestion for an already-committed GoalActivity -> rejected by the existing eligibility gate, exactly as before
+OK   35b. zero additional writes from the rejected second attempt
+OK   36. exactly ONE of two concurrent automatic accepts for the same 1/week GoalActivity succeeds
+OK   36b. exactly one occurrence exists after both concurrent attempts resolve
+OK   29/30. an ordinary (typed/Quick-Pick-shaped) intent with no Goal link saves normally, unaffected by this ticket
+OK   29b. no GoalActivityOccurrence is created for a non-Goal item
+ALL GOAL DEMAND PROVENANCE AUTHORIZATION DB CHECKS PASSED
+
+# exit=0 signal=

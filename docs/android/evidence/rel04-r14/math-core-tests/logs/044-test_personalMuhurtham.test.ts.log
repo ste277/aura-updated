@@ -1,0 +1,27 @@
+$ npx ts-node test/personalMuhurtham.test.ts
+# job=math-core-tests step=Run Personal Muhurtham test env={}
+OK   GENERAL (findMuhurthams) produces byte-identical results whether or not context.personalContext happens to be present
+OK   GENERAL returns a non-empty result (sanity)
+OK   PERSONAL with no personalContext returns a typed PERSONAL_PROFILE_INCOMPLETE state, not a silent GENERAL fallback
+OK   PERSONAL_PROFILE_INCOMPLETE names the minimum required fields (birthDate/birthTime/birthTimezone only -- not lat/lng/Lagna/Navamsha)
+OK   PERSONAL with a personalContext object that lacks natalNakshatraIndex is still treated as incomplete
+OK   PERSONAL with a complete profile returns status OK
+OK   PERSONAL scope field is always "PERSONAL"
+OK   Every PERSONAL date has generalScore/personalScore/combinedScore on the 0-10 scale
+OK   combinedScore is the same value as bestWindow.score (the actual ranking key)
+OK   Every PERSONAL date carries a structured taraBala factor
+OK   Every taraBala factor's tara name matches getTaraBala() called directly for that date (reused, not re-derived)
+OK   Provenance separates AURA_MUHURTA_V1 from AURA_PERSONAL_FIT_V1 (brief section 16 -- never merged)
+OK   Reasons include personal (Tara/element) reasons alongside general Panchanga reasons for at least one date
+OK   Across a 30-day range, both SUPPORT and CAUTION Tara Bala states are observed (Tara genuinely varies by date)
+OK   A SUPPORT Tara Bala date scores personalScore=7.6 (favorable baseline, 76/10) for start-journey
+OK   A CAUTION Tara Bala date scores personalScore=4.0 (unfavorable baseline, 48/10, minus the high-importance penalty since start-journey requiresFreshStart) or 4.8 without it
+OK   No PERSONAL best/alternate window ever carries a FRICTION_WINDOW_BLOCKED conflict (hard blocks are personalContext-independent)
+OK   PERSONAL re-ranks relative to GENERAL for the same activity/range/natal nakshatra (genuine re-ranking, not just a label change)
+OK   Regression fixture: 2026-09-07 generally outscores 2026-09-28
+OK   Regression fixture: PERSONAL flips this -- 2026-09-28 (Tara SUPPORT) outranks 2026-09-07 (Tara CAUTION) once personalized
+OK   Regression fixture: neither date carries a Lunar Tithi caution -- this flip is attributable to Tara Bala personalization alone, not Tithi rules
+
+ALL PERSONAL MUHURTHAM CHECKS PASSED
+
+# exit=0 signal=
