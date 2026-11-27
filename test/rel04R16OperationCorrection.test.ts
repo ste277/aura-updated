@@ -294,7 +294,6 @@ async function main() {
     return res;
   };
   async function page(opts: { keepStore?: boolean } = {}) {
-    Date.now = realNow;
     if (!opts.keepStore) { resetStore(); storage.clear(); await pageQ.__resetQueueDbForTests(); await clearQueueDb(); }
     pageAcct.__resetAccountSessionForTests(`page-${seq++}`);
     dev.signIn(A);
@@ -349,6 +348,15 @@ async function main() {
       return r;
     } finally { pageRecon.findRecoverableOperation = realFind; ackHtml = 'off'; }
   }
+  // Deterministic clock for the Calendar cases (the modal refuses FUTURE timestamps and the entry is "10:00 today"):
+  // the page runs on a fixed afternoon of a fixed day; time still advances (claims, timers) from that instant.
+  const RealDate = Date;
+  const clockOffset = new RealDate(2026, 10, 27, 15, 0, 0).getTime() - RealDate.now();
+  class FixedDayDate extends RealDate {
+    constructor(...a: any[]) { if (a.length === 0) super(RealDate.now() + clockOffset); else super(...(a as [any])); }
+    static now() { return RealDate.now() + clockOffset; }
+  }
+  (global as any).Date = (window as any).Date = FixedDayDate;
   {
     const neg = await calendarRun('negative control (shared recovery contract disabled)', { negative: true });
     check('N11 disabling the shared recovery contract is detected: the identical Calendar re-entry after remount sends a second request and creates a fresh-id duplicate (2 rows, 2 ids)', neg.opened && neg.firstUnresolved && !neg.blocked && neg.afterReentry.rows === 2 && neg.afterReentry.ids === 2);
@@ -360,6 +368,7 @@ async function main() {
     const rst = await calendarRun('restart', { restart: true });
     check('G6 restart (page remounted: memory gone, durable store kept; every answer still unverifiable): the identical re-entry is withheld (no POST, 1 row); Retry resumes the original id -> 1 row, 1 id', rst.opened && rst.firstUnresolved && rst.blocked && rst.afterReentry.rows === 1 && rst.recovered && rst.afterRecovery.rows === 1 && rst.afterRecovery.ids === 1);
   }
+  (global as any).Date = (window as any).Date = RealDate;
   {
     // Home and Timeline go through the SAME contract: an open operation for "Workout" (from durable storage)
     // withholds Timeline's / Home's fresh submission; the error names that operation.

@@ -1,0 +1,13 @@
+$ npx ts-node test/clientId.test.ts
+# job=math-core-tests step=Run M2 client request id test env={}
+OK   fast path: returns a valid RFC 4122 v4 UUID
+OK   fast path: 10,000 calls produce 10,000 unique ids
+OK   fallback path: returns a valid RFC 4122 v4 UUID
+OK   fallback path: 10,000 calls produce 10,000 unique ids
+OK   throwing-function path: still returns a valid RFC 4122 v4 UUID
+OK   source calls crypto.getRandomValues
+OK   source never references Math.random
+
+All clientId tests passed.
+
+# exit=0 signal=

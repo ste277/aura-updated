@@ -1,0 +1,57 @@
+OK   getActivityProfileById("deep-work") returns the exact canonical ActivityProfile
+OK   getActivityProfileById(unknown id) returns undefined
+OK   getActivityProfileById("") returns undefined
+OK   getActivityProfileById does not match by title ("Deep Work", the display title, is not a valid id)
+OK   getActivityProfileById does not match by alias ("deep work", a real alias of deep-work per personalizedTasks.ts) -- exact id only, not alias text
+OK   getActivityProfileById does not fuzzy/substring match ("deep" is a substring of "deep-work" but not equal to it)
+OK   findActivityIntent (the pre-existing alias lookup) DOES match "deep work" by alias -- confirming getActivityProfileById is a deliberately different, stricter lookup
+OK   All 42 FULL_ACTIVITY_CATALOG activity ids are unique (no duplicates)
+OK   FULL_ACTIVITY_CATALOG is non-empty (sanity check the catalog itself loaded)
+OK   A valid catalog id passes validation and resolves to the canonical id
+OK   An unknown id is rejected (not ok), never silently nullified or passed through
+OK   An unknown id rejection uses HTTP 400
+OK   An unknown id rejection never reaches "validatedActivityId" at all (the reject branch has no such field)
+OK   Omitted activityId (undefined) is valid and resolves to null
+OK   null activityId is valid and resolves to null
+OK   Empty-string activityId is valid and resolves to null (not rejected as "unknown")
+OK   Whitespace-only activityId is valid and resolves to null
+OK   A valid canonical id ("deep-work") is accepted regardless of what activityTitle the request also carries -- validation never inspects/compares title at all
+OK   The card-style display title and the catalog title are genuinely different strings, confirming this is a real mismatch case, not a coincidental match
+OK   validateActivityId takes exactly 1 parameter (activityId only) -- structurally cannot read logSource or activitySignificance
+OK   getActivityProfileById is exported from personalizedTasks.ts
+OK   getActivityProfileById uses FULL_ACTIVITY_CATALOG.find with exact id equality, no alias/title reference
+OK   POST /api/habit-logs imports getActivityProfileById from the catalog module
+OK   POST /api/habit-logs rejects an unknown activityId with HTTP 400 "Unknown activity."
+OK   POST /api/habit-logs persists only the VALIDATED activity.id (activity.id), never the raw client-submitted string
+OK   POST /api/habit-logs never requires/compares activityTitle against the resolved activity's own title
+OK   createHabitLog is called with activityId: validatedActivityId
+OK   createHabitLog does NOT perform its own catalog lookup/validation (no getActivityProfileById/FULL_ACTIVITY_CATALOG reference inside db.ts)
+OK   createHabitLog's INSERT column list includes "activityId"
+OK   HomeDashboard.tsx's onLogActivity type gained an activityId parameter
+OK   HomeDashboard.tsx passes card.activityId (not card.id) into onLogActivity at the logging call site
+OK   HomeDashboard.tsx never passes card.id as the activityId argument
+OK   page.tsx's handleLogActivity signature gained an activityId parameter
+OK   page.tsx's POST payload includes activityId, sourced only from the propagated parameter (not re-derived)
+OK   The abhijit-meal curated card (no catalog counterpart) has no activityId field in its own definition
+OK   The abhijit-meal card uses immediateAction: 'LOG_NOW' instead of a fabricated activityId
+OK   PastActivityModal.tsx (manual/free-text logging) was not modified for C2 -- contains no activityId reference at all
+OK   PastActivityModal.tsx never calls findActivityIntent/classifyTask/getActivityProfileById to infer identity from typed text
+OK   habit-logs route source never assigns habitId to activityId or vice versa
+OK   The recurring-Habit completion route (apps/web/app/api/habits/[habitId]/log/route.ts) was NOT modified for C2 -- no activityId reference
+OK   InsightsView.tsx contains no reference to HabitLog.activityId (Insights isolation, C1 remains the active calculation)
+OK   The insights route contains no reference to activityId
+OK   insightsWindowAlignment.ts (C1) was not modified for C2 -- no activityId reference
+OK   No evaluateActivityFit/evaluatePersonalMuhurtaFit reference anywhere in the touched route
+OK   Migration adds activityId via a plain nullable ALTER TABLE ADD COLUMN
+OK   Migration has no DEFAULT clause for activityId
+OK   Migration has no NOT NULL clause for activityId
+OK   Migration contains no UPDATE/backfill statement
+OK   Migration contains no CREATE INDEX statement
+OK   Migration contains no UNIQUE constraint
+OK   Migration contains no FOREIGN KEY/REFERENCES clause
+OK   Migration touches only the HabitLog table
+OK   schema.prisma declares HabitLog.activityId as nullable (String?, no @default, no @unique)
+OK   schema.prisma's HabitLog.activityId has no @relation (plain string, not a foreign key)
+OK   habitId (the separate recurring-Habit FK) remains completely unmodified in schema.prisma
+
+ALL HABITLOG ACTIVITY IDENTITY CHECKS PASSED

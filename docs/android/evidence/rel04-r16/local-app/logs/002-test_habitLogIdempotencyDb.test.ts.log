@@ -1,0 +1,20 @@
+$ npx ts-node test/habitLogIdempotencyDb.test.ts
+# job=rel04-next-app-rendering step=Run HabitLog idempotency + R15 row-binding DB test env={}
+OK   A sequential retry with the SAME clientRequestId returns the SAME row id
+OK   Exactly one HabitLog row exists for this clientRequestId after the retry (no duplicate)
+OK   A genuine concurrent race with the SAME clientRequestId still resolves to the SAME row id
+OK   Exactly one HabitLog row exists after the concurrent race (unique index + catch(23505) fallback both held)
+OK   Two different clientRequestIds for the same user create two independent rows
+OK   The same clientRequestId string for two different users creates two independent rows
+OK   Looking up the shared id scoped to the OTHER user's own id returns their own row, not the first user's
+OK   Looking up the shared id scoped to the owner's own id returns the owner's row, not the other user's
+OK   Two calls with clientRequestId omitted both persist (null does not dedupe against itself)
+OK   clientRequestId reads back null for a legacy/non-idempotent call
+OK   R15 the real persisted row (as JSON) binds to its exact operation (account + request id + persisted intent; server-derived activeWindow excluded)
+OK   R15 a reused request id with a DIFFERENT payload gets the EXISTING row back (one row), and the client refuses it as evidence (reason intent)
+OK   R15 two separate operations with IDENTICAL payloads and different ids persist two rows (never deduplicated by payload)
+OK   R15 GET evidence uses the SAME binding: the collection row binds; another account's row with the same request id never does (reason account)
+
+ALL HABITLOG IDEMPOTENCY DB CHECKS PASSED
+
+# exit=0 signal=

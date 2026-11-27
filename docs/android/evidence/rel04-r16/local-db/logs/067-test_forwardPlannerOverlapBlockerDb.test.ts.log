@@ -1,0 +1,70 @@
+$ npx ts-node test/forwardPlannerOverlapBlockerDb.test.ts
+# job=day-constructor-acceptance-db-tests step=Run Forward Planner overlap blocker DB test env={}
+=== PRIMARY FIXTURE: UPCOMING plan that STARTS the day before the requested range and overlaps the top option ===
+OK   control (no plans): READY, one option on 15 Oct, the top option is 11:45-12:00 IST
+OK   control: no candidate survives to need a plan, or the plan load is a single call (never more than one)
+   [diag] primary: status=NO_SUITABLE_WINDOW options= overlapCalls=[1] startScopedCalls=0
+OK   PRIMARY: the prior-start plan (14 Oct 20:00 -> 15 Oct 12:30) is loaded: exactly one overlap load returning that one row, and the start-scoped loader is never called
+OK   PRIMARY: the 11:45-12:00 option inside the user's own UPCOMING plan is NOT recommended
+OK   PRIMARY: with no other suitable candidate the result is NO_SUITABLE_WINDOW
+OK   the blocker load range is the requested civil range, derived with the canonical helper (the candidate lies inside it, so no widening)
+OK   the load is scoped to the requesting user
+=== SAME-DAY CONTROL, FULL SPAN, ELAPSED ===
+OK   same-day UPCOMING plan covering the top option still excludes it (unchanged behavior)
+OK   FULL SPAN: a prior-day -> next-day UPCOMING plan loads once and no conflicting option survives
+OK   ELAPSED UPCOMING plan (ended before the range): not loaded, does not affect the result
+=== LIFECYCLE of a prior-start overlapping row (policy unchanged: only UPCOMING blocks) ===
+OK   prior-start UPCOMING plan covering the option: blocks it (NO_SUITABLE_WINDOW)
+OK   prior-start LOGGED plan covering the option: does NOT block it (still offered) -- existing policy preserved, recorded as separate policy debt
+OK   prior-start CANCELLED plan covering the option: does NOT block it (still offered)
+OK   prior-start SKIPPED plan covering the option: does NOT block it (still offered)
+OK   prior-start MOVED plan covering the option: does NOT block it (still offered)
+=== CROSS-USER ===
+OK   another user's covering prior-start plan is not loaded and does not affect the result
+=== BOUNDARIES of the load range [requested from, requested to) ===
+OK   ends EXACTLY at the range start: does not overlap: 0 row(s) loaded
+OK   ends ONE ms after the range start: overlaps, loaded: 1 row(s) loaded
+OK   starts EXACTLY at the range end: does not overlap (the old BETWEEN loaded it): 0 row(s) loaded
+OK   starts ONE ms before the range end and extends beyond: loaded: 1 row(s) loaded
+OK   PRIOR-DAY FULL SPAN: loaded: 1 row(s) loaded
+OK   ENTIRELY BEFORE the range: not loaded: 0 row(s) loaded
+OK   ENTIRELY AFTER the range: not loaded: 0 row(s) loaded
+=== MULTIPLE BLOCKERS, MULTIPLE DATES, ONE QUERY ===
+OK   precondition: the seven-day control offers several dated options
+OK   SEVEN_DAYS: the options on both blocked dates (one by a prior-start plan, one by a same-day plan) are removed
+OK   SEVEN_DAYS: ONE plan load covers every candidate date (no per-date query), both blockers returned
+OK   SEVEN_DAYS: the options on both blocked dates (one by a prior-start plan, one by a same-day plan) are removed
+OK   SEVEN_DAYS: ONE plan load covers every candidate date (no per-date query), both blockers returned
+OK   MULTIPLE blockers: the result is identical whichever order the rows were inserted
+=== CANDIDATE EXTENT: the load range is the union of the requested range and the actual candidate intervals ===
+OK   precondition: a real FIND candidate is available as a template for hand-built candidates
+OK   hand-built candidate crossing the range END (23:30 -> 00:30): with no blocker it is recommended; the load range was widened to its end
+OK   a blocker overlapping ONLY the extended portion (starts at 00:10, after the requested range ends) is still loaded and filters the candidate
+OK   a blocker starting EXACTLY at the extended load end does not overlap: not loaded, candidate kept
+OK   a blocker starting ONE ms before the extended load end is loaded and filters the candidate
+OK   candidate starting BEFORE the requested range: a blocker overlapping only that earlier portion is loaded (range widened at the start) and filters it
+OK   a candidate wholly inside the requested range does NOT widen the load: the range is exactly the requested civil range
+OK   ZERO candidates: NO_SUITABLE_WINDOW exactly as before, and the plan query is skipped (nothing to filter; no invented bounds)
+=== DST AND OTHER TIMEZONES (requested range derived with the canonical civil-date helpers) ===
+OK   [LA spring-forward day (23h)] control: READY with an option on the requested date
+OK   [LA spring-forward day (23h)] the prior-start plan is loaded and the option inside it is not recommended (08 Mar, 23:30-08 Mar, 23:45)
+OK   [LA spring-forward day (23h)] the load range is the canonical civil day of the requested date (23h)
+OK   [LA fall-back day (25h)] control: READY with an option on the requested date
+OK   [LA fall-back day (25h)] the prior-start plan is loaded and the option inside it is not recommended (01 Nov, 01:00-01 Nov, 01:15)
+OK   [LA fall-back day (25h)] the load range is the canonical civil day of the requested date (25h)
+OK   [Auckland tomorrow (+13 DST)] control: READY with an option on the requested date
+OK   [Auckland tomorrow (+13 DST)] the prior-start plan is loaded and the option inside it is not recommended (15 Oct, 19:15-15 Oct, 19:30)
+OK   [Auckland tomorrow (+13 DST)] the load range is the canonical civil day of the requested date (24h)
+OK   [Auckland spring-forward day (23h)] control: READY with an option on the requested date
+OK   [Auckland spring-forward day (23h)] the prior-start plan is loaded and the option inside it is not recommended (27 Sept, 19:15-27 Sept, 19:30)
+OK   [Auckland spring-forward day (23h)] the load range is the canonical civil day of the requested date (23h)
+=== ROW VOLUME, QUERY COUNT, READ-ONLY ===
+   [info] 158 historical plans + 1 prior-start blocker: overlap loader returned 1 row(s); whole request 78 ms (local characterization only)
+OK   ROW VOLUME: with 158 historical plans the overlap query returns only the relevant prior-start blocker (1 row), not the history
+OK   the prior-start blocker is honored with 158 rows of history
+OK   QUERY COUNT / no N+1: exactly one plan-blocker load for the whole request
+OK   ZERO WRITES: every PlannedActivity column of every row is byte-identical after the request
+
+ALL FORWARD PLANNER OVERLAP BLOCKER DB CHECKS PASSED
+
+# exit=0 signal=

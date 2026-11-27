@@ -1,0 +1,37 @@
+$ npx ts-node test/activeResultMaterializerDb.test.ts
+# job=day-constructor-acceptance-db-tests step=Run active result materializer DB test env={}
+     real-data incidence: {"runs":49,"ready":49,"evaluated":49,"withObservations":37,"accepts":1,"apply":1,"materialized":0,"unavailable":{"DEFERRED_DIAGNOSTIC_UNRESOLVED":1},"noChange":{"NO_ACCEPT":48},"baselineIdentity":49,"violations":0,"nonZeroSqlPure":0,"bodyMismatch":0,"writes":0,"evidenceLines":49,"evidenceMismatch":0,"invariantNotPass":0,"technicalFailure":0}
+     real-data observation outcomes: {"REJECT:OWNER_WOULD_BE_UNPLACED":63,"REJECT:OWNER_TIMING_DEGRADED":1,"ACCEPT":1,"GENERATION_UNAVAILABLE:NO_ACTIONABLE_PROMOTION_SLOT":1}
+     real-data SHADOW evidence (selector/gate/materializer/invariant: runs): {"NO_ACCEPT/NOT_EVALUATED/NOT_EVALUATED/NOT_EVALUATED":48,"APPLY/DEFERRED_DIAGNOSTIC_UNRESOLVED/NOT_EVALUATED/NOT_EVALUATED":1}
+OK   every broad scenario ran the real preview boundary to a READY 200 with a captured same-run shadow observation (HTTP, snapshot, Goal facts and real orchestrator deps)
+OK   PARITY: the preview body with the observation in the loop equals the plain preview body for every scenario (the active pieces consume the run, they do not change it)
+OK   NO WRITES: the domain row counts are unchanged by every run
+OK   PURE ON REAL DATA: the selector and the materializer sent ZERO SQL statements in every scenario
+OK   SHADOW EVIDENCE ON REAL DATA: exactly one evidence line per evaluated run (49), the emitted selector / materializer categories agree with the independent pipeline in every run, every READY materialization passes the invariant check, and no technical failure was recorded (mismatches 0, READY-but-not-PASS 0, technical failures 0)
+OK   the pipeline output is the BASELINE or exactly ONE materialized result in every evaluated scenario: 49 baseline + 0 materialized = 49 evaluated
+OK   EVERY MATERIALIZED RESULT ON REAL DATA satisfies the property oracle (0 materialized, 0 violations)
+     directed family trace (combo:http:ACCEPTs): 5-6-60-240:200:0 4-10-120-240:200:0 0-1-60-240:200:0 10-6-60-240:200:1
+OK   A DETERMINISTIC REAL ACCEPT: the directed real-pipeline fixture (availability-constrained contention, ordered family, first combination with exactly one real P4b3 ACCEPT) found one after 4 of 220 combinations (10-6-60-240)
+OK   DIRECTED BASELINE: the owner is placed and the pressured candidate is the ONLY Deferred item (NO_CANDIDATES) -- real contention, nothing else to explain
+OK   P4c1: the observation set holds exactly one ACCEPT and the selector APPLYs it for the Deferred candidate
+OK   P4c2a: the materializability gate reports MATERIALIZABLE (the candidate is the sole Deferred item) and P4c3 returns READY
+OK   PURE ON THE DIRECTED RUN: the selector, the gate and the materializer sent ZERO SQL statements
+OK   BASELINE UNCHANGED: the preview body with the observation in the loop equals the plain preview body, and the domain rows are unchanged by the selector / materializer
+     directed SHADOW evidence line (real data): {"mode":"SHADOW","run":"READY","observations":1,"generationReady":1,"generationUnavailable":{},"accepted":1,"rejected":{},"acceptanceUnavailable":{},"latency":"LT_50_MS","pressured":"TWO","pressuredContested":"ONE","evidence":{"selector":"APPLY","gate":"MATERIALIZABLE","materializer":"READY","invariant":"PASS","failure":"NONE"},"shadowOverheadLatency":"LT_50_MS"}
+OK   DIRECTED FUNNEL (real data, one aggregate line): positive pressure on at least one intent, the candidate lost real contention, one promotion input prepared and ONE real P4b3 ACCEPT
+OK   DIRECTED EVIDENCE: selector APPLY -> gate MATERIALIZABLE -> materializer READY -> invariants PASS, no technical failure (the active pieces reached READY INTERNALLY on the real run)
+OK   EXTERNAL RESULT == BASELINE: the SHADOW response body equals the plain preview body byte for byte and still shows the candidate Deferred (the materialized day was discarded)
+OK   SAME-RUN COMPOSITION: re-deriving the evidence from the evidence run's OWN baseline result and OWN observation set (the very objects the boundary used) yields exactly the emitted categories, and its own selector APPLYs the same candidate as the earlier captured run
+OK   NO SQL OF ITS OWN AND NO WRITE: the SHADOW run with the evidence funnel sent the IDENTICAL SQL sequence as the plain run, and no Plan / GoalActivityOccurrence / GoalActivity / HabitLog row changed
+OK   LATENCY BUCKETS: the existing latency and the SHADOW-attributable overhead are both closed buckets
+OK   SAME-RUN BASELINE BINDING (real stack): this run's authority with a second real run's structurally identical baseline is BASELINE_PROVENANCE_MISMATCH (never READY), while its own baseline materializes
+OK   DIRECTED RESULT: both Goal activities are Proposed, nothing is Deferred, the candidate holds the first window and the owner was RELOCATED into the second window with a timing fit no worse than before
+OK   PROPERTY ORACLE on the directed real result (conservation, preservation, owner relocation, timing, order, capacity, window, overlap, frozen, detached): 0 violations
+OK   SIGNING: every item of the directed materialized result carries a token that the acceptance-side gate verifies
+OK   EXISTING ACCEPTANCE VALIDATION (pure evaluator, injected dependencies): ACCEPTABLE with 2 write intents
+OK   REAL ACCEPTANCE PERSISTENCE: the verified Goal provenance is authorized and the REAL persistAcceptedConstructedDay SAVES the materialized day (SAVED)
+OK   GOAL-OCCURRENCE EVIDENCE: exactly two UPCOMING Plans exist, each linked by a real GoalActivityOccurrence to its own Goal activity, at exactly the materialized instants (candidate in the first window, relocated owner in the second)
+     real-data ACCEPT incidence: 1 ACCEPT observations across 49 runs, 1 APPLY, 0 materialized
+ALL ACTIVE MATERIALIZER DB CHECKS PASSED
+
+# exit=0 signal=

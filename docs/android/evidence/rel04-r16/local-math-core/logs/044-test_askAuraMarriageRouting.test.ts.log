@@ -1,0 +1,194 @@
+$ npx ts-node test/askAuraMarriageRouting.test.ts
+# job=math-core-tests step=Run Ask Aura Marriage routing test env={}
+OK   findActivityIntent("marriage") resolves to marriage
+OK   findActivityIntent("wedding") resolves to marriage
+OK   findActivityIntent("wedding ceremony") resolves to marriage
+OK   findActivityIntent("get married") resolves to marriage
+OK   findActivityIntent("getting married") resolves to marriage
+OK   findActivityIntent("marry") resolves to marriage
+OK   findActivityIntent("married") resolves to marriage
+OK   findActivityIntent("marriage ceremony") resolves to marriage
+OK   findActivityIntent("best marriage date") resolves marriage, not dating
+OK   findActivityIntent("marriage dates") resolves marriage, not dating
+OK   findActivityIntent("good dates for marriage") resolves marriage, not dating
+OK   findActivityIntent("date for my wedding") resolves marriage, not dating
+OK   findActivityIntent("wedding date") resolves marriage, not dating
+OK   findActivityIntent("best date to get married") resolves marriage, not dating
+OK   findActivityIntent("plan a date tonight") still resolves date-night
+OK   findActivityIntent("best time for a date") still resolves dating
+OK   findActivityIntent("date night with priya") still resolves date-night
+OK   findActivityIntent("romantic dinner with priya") still resolves dating
+OK   "When should I get married?" -> activityId=marriage
+OK   "When should I get married?" -> TIMING_FIND (parser label; execution redirect verified separately below)
+OK   "Find a wedding muhurtham." -> MUHURTHAM_SEARCH, marriage
+OK   "Best marriage date." -> MUHURTHAM_SEARCH, activityId=marriage, NOT dating, NOT PLAN_OPEN
+OK   "Good dates for my wedding." -> MUHURTHAM_SEARCH, marriage
+OK   "When is a good muhurtham for my wedding?" -> MUHURTHAM_SEARCH, marriage, NOT PANCHANG_QUERY
+OK   "Find an auspicious wedding date." -> MUHURTHAM_SEARCH, marriage
+OK   "Best time to get married next month." -> marriage, NEXT_MONTH
+OK   "Find a 90 minute marriage muhurtham next month." -> marriage, duration=90, NEXT_MONTH
+OK   "when is Rahu Kalam" stays PANCHANG_QUERY
+OK   "what is Rahu Kalam" stays PANCHANG_EXPLAIN
+OK   "what is marriage muhurtham" stays PANCHANG_EXPLAIN (informational, not a search)
+OK   "what does a wedding muhurtham mean" stays PANCHANG_EXPLAIN
+OK   "what does Panchang say about marriage" stays PANCHANG_EXPLAIN
+OK   "Why is marriage timing important?" does not become MUHURTHAM_SEARCH
+OK   "What is a good wedding?" does not become MUHURTHAM_SEARCH
+OK   "Help me plan my wedding." does not become MUHURTHAM_SEARCH
+OK   "Add wedding planning to my day." does not become MUHURTHAM_SEARCH
+OK   "Remind me about the wedding." does not become MUHURTHAM_SEARCH
+OK   "I attended a wedding yesterday." does not become MUHURTHAM_SEARCH
+OK   "Best time for deep work." activity is not Muhurtham-eligible
+OK   "Best time for deep work." executes as TIMING_FIND (not redirected to MUHURTHAM_SEARCH)
+OK   "Best time to work out." activity is not Muhurtham-eligible
+OK   "Best time to work out." executes as TIMING_FIND (not redirected to MUHURTHAM_SEARCH)
+OK   "When should I study?" activity is not Muhurtham-eligible
+OK   "When should I study?" executes as TIMING_FIND (not redirected to MUHURTHAM_SEARCH)
+OK   GENERAL "Find a wedding muhurtham." executes MUHURTHAM_SEARCH
+OK   Zero-result message is the canonical Muhurtham zero-result message, not an UNKNOWN/parser-failure message
+OK   "When should I get married?" parses as TIMING_FIND
+OK   "When should I get married?" EXECUTES through canonical Muhurtham (response.intent === MUHURTHAM_SEARCH)
+OK   "Best time to get married next month." parses as TIMING_FIND
+OK   "Best time to get married next month." EXECUTES through canonical Muhurtham (response.intent === MUHURTHAM_SEARCH)
+OK   "Best time to start my business." parses as TIMING_FIND, activityId=business-start
+OK   "Best time to start my business." EXECUTES through canonical Muhurtham (proves generic capability-driven redirect, not marriage-specific)
+OK   "Find a griha pravesh muhurtham." still parses MUHURTHAM_SEARCH directly
+OK   "Find a griha pravesh muhurtham." still executes MUHURTHAM_SEARCH
+OK   "Best time to start a journey." parses TIMING_FIND, activityId=start-journey
+OK   "Best time to start a journey." executes through canonical Muhurtham
+OK   "When should I make a financial decision?" parses TIMING_FIND, activityId=financial-decision
+OK   "When should I make a financial decision?" executes through canonical Muhurtham
+OK   "Best time for property purchase." parses TIMING_FIND, activityId=property-purchase
+OK   "Best time for property purchase." executes through canonical Muhurtham
+OK   No explicit duration: parsed.durationMinutes is undefined
+OK   No explicit duration: canonical Muhurtham default (60 min) window returned
+OK   "90 minute" explicit duration: parsed as 90
+OK   "90 minute" explicit duration: returned window is exactly 90 minutes (11:57 AM - 1:27 PM), not the 60-min default
+OK   "for 30 minutes" explicit duration: parsed as 30
+OK   "for 30 minutes" explicit duration: returned window is exactly 30 minutes (12:26 PM - 12:56 PM)
+OK   "Find a wedding muhurtham with Priya." -> MUHURTHAM_SEARCH, marriage, SHARED, personNameQuery=priya
+OK   "Wedding muhurtham for us." (no resolvable partner) -> UNKNOWN, never a silent GENERAL-equivalent Muhurtham search
+OK   Turn 1 "Find a wedding muhurtham." -> MUHURTHAM_SEARCH, marriage
+OK   Follow-up "What about next week?" preserves marriage + MUHURTHAM_SEARCH, changes only horizonPhrase
+OK   Follow-up "What about morning?" preserves marriage + MUHURTHAM_SEARCH, sets timePreference=MORNING
+OK   "Best marriage date." -> MUHURTHAM_SEARCH, activityId=marriage
+OK   "Best wedding date." -> MUHURTHAM_SEARCH, activityId=marriage
+OK   "Good dates for marriage." -> MUHURTHAM_SEARCH, activityId=marriage
+OK   "Good wedding dates." -> MUHURTHAM_SEARCH, activityId=marriage
+OK   "Best date to get married." -> MUHURTHAM_SEARCH, activityId=marriage
+OK   "Best marriage time." -> MUHURTHAM_SEARCH, activityId=marriage
+OK   "Best auspicious wedding date." -> MUHURTHAM_SEARCH, activityId=marriage
+OK   "Best griha pravesh date." -> MUHURTHAM_SEARCH, activityId=griha-pravesh
+OK   "Best griha pravesh date." executes through canonical Muhurtham
+OK   "Best date to start my business." -> MUHURTHAM_SEARCH, activityId=business-start
+OK   "Best date to start my business." executes through canonical Muhurtham
+OK   "Best date for property purchase." -> MUHURTHAM_SEARCH, activityId=property-purchase
+OK   "Best date for property purchase." executes through canonical Muhurtham
+OK   "Plan my wedding." does not become MUHURTHAM_SEARCH
+OK   "Help me plan my wedding." does not become MUHURTHAM_SEARCH
+OK   "Open wedding planning." does not become MUHURTHAM_SEARCH
+OK   "Wedding planning." does not become MUHURTHAM_SEARCH
+OK   "Best time for a date." still resolves dating (via pre-existing FIND_VERB_RE, unaffected)
+OK   "Plan a date tonight." still resolves date-night, unaffected
+OK   "Date night with Priya." still resolves date-night, unaffected
+OK   "Romantic dinner with Priya." still resolves dating via PLAN_OPEN, unaffected
+OK   "When is Rahu Kalam?" stays PANCHANG_QUERY, unaffected
+OK   "What is Rahu Kalam?" stays PANCHANG_EXPLAIN, unaffected
+OK   "What is marriage muhurtham?" stays PANCHANG_EXPLAIN, unaffected
+OK   "What does a wedding muhurtham mean?" stays PANCHANG_EXPLAIN, unaffected
+OK   RESOLVED: "When should Priya and I get married?" now resolves scope=SHARED, personNameQuery=priya
+OK   KNOWN LIMITATION (B): "Find our best wedding date." does not resolve a SHARED scope ("our" not immediately adjacent to a recognized ceremonial noun)
+OK   "Is September 20 good for marriage?" with no timezone supplied -> still UNKNOWN (natural-date parsing needs a timezone)
+OK   KNOWN LIMITATION (C, named Event Location, untouched): "Find a wedding muhurtham in Chennai." carries no location field (Ask Aura has no city-parsing path)
+OK   "Is now a good time to get married?" parses TIMING_CHECK, activityId=marriage
+OK   "Is now a good time to get married?" response stays TIMING_CHECK (no new intent introduced)
+OK   "Is now a good time to get married?" response is CHECK-shaped, never FIND/search wording ("Best dates for")
+OK   "Is now a good time to get married?" response says either "strong time" or "avoid this time", conservative wording only
+OK   "Is now a good time to get married?" card carries a single "requested" candidate (no FIND-shaped "best"/"others"/date list)
+OK   "Is this a good time to get married?" parses TIMING_CHECK, activityId=marriage
+OK   "Is this a good time to get married?" response stays TIMING_CHECK (no new intent introduced)
+OK   "Is this a good time to get married?" response is CHECK-shaped, never FIND/search wording ("Best dates for")
+OK   "Is this a good time to get married?" response says either "strong time" or "avoid this time", conservative wording only
+OK   "Is this a good time to get married?" card carries a single "requested" candidate (no FIND-shaped "best"/"others"/date list)
+OK   "Should I get married tomorrow?" -> FORWARD_PLAN, marriage, no exactTime (was a fabricated-instant CHECK)
+OK   "Should I get married tomorrow?" executes through the canonical Muhurtham search (never a fabricated single instant)
+OK   "Can I get married tomorrow?" -> FORWARD_PLAN, marriage, no exactTime (was a fabricated-instant CHECK)
+OK   "Can I get married tomorrow?" executes through the canonical Muhurtham search (never a fabricated single instant)
+OK   "Should I get married at 10 AM tomorrow?" -> TIMING_CHECK, exactTime=10:00, unaffected
+OK   "Should I get married at 10 AM tomorrow?" response stays TIMING_CHECK via the ceremonial evaluator
+OK   "Is tomorrow good for marriage?" (FIND) executes MUHURTHAM_SEARCH
+OK   "Should I get married tomorrow?" now parses FORWARD_PLAN (no exact clock stated)
+OK   "Should I get married tomorrow?" executes MUHURTHAM_SEARCH -- the SAME canonical engine as the bare FIND phrasing, never a fabricated single instant
+OK   "Should I get married at 10 AM tomorrow?" parses TIMING_CHECK, exactTime=10:00
+OK   "Should I get married at 10 AM tomorrow?" stays TIMING_CHECK via the ceremonial evaluator (never "Best dates for" wording)
+OK   "Should I do griha pravesh tomorrow?" -> FORWARD_PLAN, activityId=griha-pravesh, no exactTime (was a fabricated-instant CHECK)
+OK   "Should I do griha pravesh tomorrow?" executes through the canonical Muhurtham search, never generic-only or a fabricated instant
+OK   "Should I start my business tomorrow?" -> FORWARD_PLAN, activityId=business-start, no exactTime (was a fabricated-instant CHECK)
+OK   "Should I start my business tomorrow?" executes through the canonical Muhurtham search, never generic-only or a fabricated instant
+OK   "Should I do griha pravesh at 10 AM tomorrow?" parses TIMING_CHECK, activityId=griha-pravesh, exactTime=10:00, unaffected
+OK   "Should I do griha pravesh at 10 AM tomorrow?" response is CHECK-shaped (ceremonial evaluator used, not generic-only)
+OK   "Should I start my business at 10 AM tomorrow?" parses TIMING_CHECK, activityId=business-start, exactTime=10:00, unaffected
+OK   "Should I start my business at 10 AM tomorrow?" response is CHECK-shaped (ceremonial evaluator used, not generic-only)
+OK   "Can I work out now?" activity is not Muhurtham-eligible
+OK   "Can I work out now?" uses the UNCHANGED generic CHECK wording ("You can."/"I'd hold off for now.")
+OK   "Should I do deep work now?" activity is not Muhurtham-eligible
+OK   "Should I do deep work now?" uses the UNCHANGED generic CHECK wording ("You can."/"I'd hold off for now.")
+OK   "Is this a good time for meditation?" activity is not Muhurtham-eligible
+OK   "Is this a good time for meditation?" uses the UNCHANGED generic CHECK wording ("You can."/"I'd hold off for now.")
+OK   "Should I go on a date tonight?" resolves dating, not marriage, -> TIMING_FIND (no exact clock stated)
+OK   "Should I go on a date tonight?" executes generic Timing Search FIND, never a Muhurtham search
+OK   "Should I go on a date at 7 PM tonight?" -> TIMING_CHECK, dating, exactTime=19:00, unaffected
+OK   "Should I go on a date at 7 PM tonight?" uses the unchanged generic CHECK wording
+OK   "Can I get married for me?" parses TIMING_CHECK, scope=PERSONAL, marriage
+OK   "Can I get married for me?" executes the ceremonial CHECK path (never "Best dates for")
+OK   "Should I get married tomorrow for 90 minutes?" -> FORWARD_PLAN, durationMinutes=90, no exactTime
+OK   Executes through the canonical Muhurtham search with duration preserved
+OK   "Should I get married at 10 AM tomorrow for 90 minutes?" -> TIMING_CHECK, exactTime=10:00, durationMinutes=90, unaffected
+OK   "Should I get married at 10 AM tomorrow for 90 minutes?" evaluates a genuinely 90-minute span, not the default
+OK   "Is 10 AM tomorrow good for marriage?" parses TIMING_CHECK, exactTime=10:00, activityId=marriage
+OK   Response intent remains TIMING_CHECK (no new intent, no MUHURTHAM_SEARCH)
+OK   Response is CHECK-shaped, never "Best dates for" (no full-day search)
+OK   No FIND/search-shaped card fields ("dates" list or "best") -- single requested candidate only
+OK   The requested candidate's LOCAL display time is exactly 10:00 AM (never silently substituted, e.g. never 12:55 PM)
+OK   The requested candidate's UTC instant corresponds to 10:00 America/New_York on 2026-06-12 (EDT, UTC-4) -- 2026-06-12T14:00:00.000Z
+OK   "Is 10 AM tomorrow good for marriage with Priya?" -> TIMING_CHECK, scope=SHARED, personNameQuery=priya, exactTime=10:00
+OK   "Is 10 AM tomorrow good for marriage for me?" -> TIMING_CHECK, scope=PERSONAL, exactTime=10:00
+OK   PERSONAL exact-time CHECK executes the ceremonial evaluator (never "Best dates for")
+OK   "Is 10 AM tomorrow good for griha pravesh?" executes the ceremonial evaluator with the exact requested time
+OK   Griha Pravesh exact-time CHECK requested candidate is exactly 10:00 AM local
+OK   "Is 10 AM on June 12 good for marriage?" resolves customDate=2026-06-12
+OK   Both parse identically otherwise (intent, exactTime, activityId)
+OK   Month-name date "June 12" executes through the SAME ceremonial evaluator and produces the identical requested instant as "tomorrow"
+OK   "Is 10 AM on June 12 2026 good for marriage?" also resolves 2026-06-12
+OK   "Is September 20 good for marriage?" (with timezone) parses FORWARD_PLAN, customDate=2026-09-20
+OK   Executes through canonical Muhurtham (capability redirect, unaffected by this PR)
+OK   "Is Saturday good for marriage?" at a UTC/local calendar-date boundary resolves against LOCAL 2026-09-05, not UTC 2026-09-04
+OK   Ceremonial date-only explicit past date -> UNKNOWN at the parser (no timezone here; see the timezone-supplied case below)
+OK   Ceremonial date-only explicit past date (timezone supplied) -> UNKNOWN at the parser
+OK   -> UNKNOWN response, never a silent MUHURTHAM_SEARCH zero-result message
+OK   No "Plan this" or "Open Muhurtham Finder" action for a historical instant
+OK   Ceremonial exact-time explicit past date -> UNKNOWN at the parser
+OK   -> UNKNOWN response, never a silent CAUTION verdict for a historical instant
+OK   No "Plan this" action for a historical instant
+OK   Ceremonial date-only explicit FUTURE date routes to FORWARD_PLAN (still redirected to Muhurtham below)
+OK   Executes through canonical Muhurtham, not UNKNOWN
+OK   "...for us next month." (no resolvable partner) parses UNKNOWN
+OK   Orchestrator response is UNKNOWN -- never a GENERAL Muhurtham search
+OK   No OPEN_MUHURTHAM action for a GENERAL result masquerading as SHARED
+OK   No dates/search card at all
+OK   "...together next month." (no resolvable partner) parses UNKNOWN
+OK   Orchestrator response is UNKNOWN -- never a GENERAL Muhurtham search
+OK   No OPEN_MUHURTHAM action
+OK   "...for us to get married?" (no resolvable partner) parses UNKNOWN
+OK   Orchestrator response is UNKNOWN -- never a GENERAL ceremonial CHECK evaluation
+OK   No PLAN_THIS action for an unresolved-partner instant
+OK   No requested-candidate card at all
+OK   "...next month." (no SHARED signal at all) parses GENERAL, unaffected
+OK   Executes through canonical Muhurtham as GENERAL, unaffected
+OK   "...for me next month." parses PERSONAL, unaffected
+OK   Executes through canonical Muhurtham as PERSONAL, unaffected
+OK   "Plan our wedding" (no timing signal) parses PLAN_OPEN, unaffected
+
+ALL ASK AURA MARRIAGE ROUTING CHECKS PASSED
+
+# exit=0 signal=

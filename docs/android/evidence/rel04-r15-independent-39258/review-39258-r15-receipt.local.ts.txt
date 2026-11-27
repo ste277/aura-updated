@@ -1,0 +1,39 @@
+import { Device, addUser, openTab, payload, queueDump, logsOf, closeAllTabs, clearQueueDb } from './rel04AccountIsolationHarness';
+
+const owner = 'review-r15-receipt-owner';
+const dev = new Device();
+addUser(owner, 'review-r15-receipt@example.invalid');
+
+async function main() {
+  await clearQueueDb();
+  dev.signIn(owner);
+  const t = openTab('review-r15-receipt');
+  await t.acct.fetchVerifiedSession(dev.fetch as any);
+  const q = t.q;
+  const id = 'receipt-inconsistent-intent';
+  const body = payload('Original activity', id);
+  await q.enqueueOwned({ ...body, tempId: 'first', ownerUserId: owner });
+  const snapshot = await queueDump();
+  const canonical = q.canonicalPayload({ ...body, tempId: 'first' });
+  const marker = {
+    recordId: ['d', owner, id].join(String.fromCharCode(0)), ownerUserId: owner, clientRequestId: id,
+    payload: canonical, decision: 'settled', serverOutcome: 'accepted', fmt: 'r8', possiblySent: true, at: Date.now(),
+    receipt: { v: 1, kind: 'accepted', owner, crid: id, payload: canonical, serverRecordId: 'different-intent-row', at: Date.now(),
+      row: { id: 'different-intent-row', userId: owner, clientRequestId: id, activityTitle: 'Different activity' } },
+  };
+  const db: IDBDatabase = await q.__openQueueDbForTests();
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction('tombstones', 'readwrite');
+    tx.oncomplete = () => resolve(); tx.onerror = () => reject(tx.error);
+    tx.objectStore('tombstones').put(marker);
+  });
+  const evidence = q.decisionAuthority(marker, owner, id, canonical);
+  const operations = await q.readActivityOperations(owner);
+  const reply = await t.sync.submitActivityLog(body, 'retry', dev.fetch as any);
+  const postCount = dev.count('POST', '/api/habit-logs');
+  const rows = logsOf(owner);
+  const after = await queueDump();
+  console.log(JSON.stringify({ evidence, operations, reply, postCount, rows, beforeCopies: snapshot.records.length, afterCopies: after.records.length }));
+  if (reply.kind === 'already-recorded' && !rows.length && !postCount && operations?.[0]?.status === 'confirmed') process.exitCode = 1;
+}
+main().catch(e => { console.error(e); process.exitCode = 2; }).finally(() => closeAllTabs());

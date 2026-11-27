@@ -1,0 +1,74 @@
+$ npx ts-node test/shadowPressureEvaluation.test.ts
+# job=math-core-tests step=Run shadow pressure evaluation test env={}
+=== the stronger-than-pressure comparison is the Constructor's own comparator with originalOrder neutralised ===
+OK   EXHAUSTIVE (225 pairs of importance x deadline-today / earlier / later / none): `compareAbovePressure` is TIE exactly when the real comparator ties with originalOrder equalised
+OK   where the stronger dimensions decide, the real comparator agrees on the direction for EVERY originalOrder combination (originalOrder can never overrule them, and the helper never reads it)
+OK   the facts carry no originalOrder at all: a projection of an intent has only importance and (optionally) deadline
+OK   deadline TODAY outranks importance, then importance, then an earlier / present deadline (the three dimensions, in the comparator's own order)
+=== the gates, in order ===
+OK   ELIGIBLE (all gates pass; the owner differs only by weaker originalOrder, which the facts do not even carry): PRESSURE_ELIGIBLE_AGAINST_ALL_FINAL_OWNERS
+OK   PRESSURE GATE: pressure NONE with real contention and a final Deferral is NOT_PRESSURED (NONE can never become a promotion candidate)
+OK   PRESSURE GATE: no pressure on record for the candidate fails closed (UNAVAILABLE -> NOT_PRESSURED); pressure is never inferred
+OK   CONTENTION GATE: LAST_KNOWN_OPPORTUNITY + final Deferred + NO trace event (e.g. deferred for another reason) is NO_CONTENTION -- contention comes from the trace only
+OK   FINAL-STATE GATE: pressured, contended, but finally PROPOSED is NOT_FINAL_DEFERRED (recorded for controls, never a promotion candidate)
+OK   OWNER GATE: every historical owner is gone from the final schedule -> NO_FINAL_CONTENTION_OWNER (no promotion opportunity is inferred)
+OK   IMPORTANCE: an owner with higher importance BLOCKS pressure (BLOCKED_BY_STRONGER_OWNER) -- explicit user value outranks temporal pressure
+OK   DEADLINE TODAY: an owner with its deadline today BLOCKS pressure even against a higher-importance loser
+OK   DEADLINE: with deadline-today and importance tied, an owner with a stronger (present / earlier) deadline BLOCKS pressure
+OK   a WEAKER owner on a stronger dimension (the loser outranks it) is a PRECEDENCE_ANOMALY -- classified explicitly, never silently called eligibility
+OK   ORIGINALORDER-ONLY DIFFERENCE: owners and loser that tie on every stronger dimension are eligible however originalOrder would order them (it is weaker than pressure and is not part of the facts)
+=== owners: 0..N, deduplicated, historical vs final, all-owner rule ===
+OK   MULTI-OWNER ALL-TIE: two final owners, both tie above pressure -> eligible against ALL final owners; the observation carries both owners (cardinality 2, never collapsed to one)
+OK   MULTI-OWNER MIXED: one owner ties, the other has HIGHER importance -> BLOCKED_BY_STRONGER_OWNER (not globally eligible); per-owner comparisons AND the aggregate are both recorded
+OK   an anomaly is never hidden by another owner's block: a loser-stronger owner plus an owner-stronger owner is PRECEDENCE_ANOMALY
+OK   MULTIPLE EVENTS, SAME OWNER (three attempted intervals, two rounds): the owner is compared ONCE; the event count (3) is metadata only, never strength
+OK   HISTORICAL OWNER REMOVED: A1 (stronger, but no longer Proposed) keeps its comparison as evidence yet does NOT block; the remaining FINAL owner A2 ties -> eligible against all FINAL owners
+OK   OWNER NOT IN THE FINAL RESULT AT ALL is valid history, not corruption: it is NOT_FINAL_PROPOSED and (no final owner remains) the classification is NO_FINAL_CONTENTION_OWNER
+OK   only the loser's OWN contention relationships are used: an unrelated Proposed candidate never enters the owner set
+=== fail closed ===
+OK   MISSING PRECEDENCE FACTS (loser or owner) -> INCOMPLETE_INPUT / MISSING_PRECEDENCE_FACTS, never eligible
+OK   LOSER ABSENT FROM THE FINAL RESULT -> INCOMPLETE_INPUT / LOSER_NOT_IN_FINAL_RESULT (fails closed)
+OK   DUPLICATE INTENT IDS (twice Deferred, Proposed and Deferred, or a duplicated owner) -> INCOMPLETE_INPUT / DUPLICATE_INTENT_ID: no arbitrary choice is ever made
+OK   REAL CONSTRUCTOR, DUPLICATE ID (raw `constructDay` does not reject it: the same id appears twice in the result) -> the evaluator fails closed: INCOMPLETE_INPUT / DUPLICATE_INTENT_ID
+OK   an empty trace and an empty final day produce no observations (nothing is fabricated)
+=== granularity, order, ownership, immutability ===
+OK   ONE OBSERVATION PER FINAL DEFERRED CANDIDATE, in final-result order, then any other candidate that appears as a loser in the trace -- never one independent decision per event
+OK   INPUT OWNERSHIP: evaluating mutates neither the final result, the trace, the pressure map nor the precedence facts
+OK   OUTPUT OWNERSHIP: the evaluation, its observations array, every observation, every owner array and every owner comparison are frozen; writes throw
+OK   DETACHED: no object reachable from the output is shared with any input
+OK   OUTPUT CONTENT: stable ids and enums only -- no title, activity, Goal, user, score or user-facing copy; the observation keys are exactly the documented ones
+OK   DETERMINISM: 20 evaluations are byte-identical
+OK   NO ROUND DATA: round numbers are neither read nor emitted (the P3a round-label debt is not relied on)
+OK   SOURCE-NEUTRAL: ids shaped like a Goal automatic demand, a manual hand-off and a typed row classify identically (the evaluator sees ids and enums only)
+=== REAL pipeline: basic contention, pressure, and the stronger dimensions ===
+OK   BASIC ELIGIBLE (real pipeline): B (pressured: scarce Friday, resolved duration) loses real contention to A, is finally Deferred, and differs from A only by originalOrder -> PRESSURE_ELIGIBLE_AGAINST_ALL_FINAL_OWNERS
+OK   SCHEDULING IS THE BASELINE: the shadow run's Constructor result, loader calls and searches are identical to a normal run -- A Proposed, B Deferred (NO_CANDIDATES after the conflicted replenishment)
+OK   NONE CONTROL: the same real contention with NO pressure facts (pressure NONE) is NOT_PRESSURED
+OK   IMPORTANCE CONTROL: a pressured LOW loses to HIGH -> BLOCKED_BY_STRONGER_OWNER (explicit user value is never overridden by temporal pressure)
+OK   DEADLINE-TODAY CONTROL: a pressured candidate that loses to an owner with its deadline today -> BLOCKED_BY_STRONGER_OWNER
+OK   DEADLINE CONTROL: a pressured candidate that loses to an owner with a stronger non-today deadline (importance tied) -> BLOCKED_BY_STRONGER_OWNER
+OK   REVERSE INPUT: submitting the intents in reverse order leaves the Constructor outcome (A Proposed, B Deferred) and the shadow classification unchanged
+=== REAL pipeline: multiple owners (a real P3a multi-owner trace) ===
+OK   MULTI-OWNER ALL-TIE (real): B's one attempted interval overlaps TWO Proposed owners (the trace holds two events); both tie above pressure -> eligible against ALL final owners, with both owners in the observation
+OK   MULTI-OWNER MIXED (real): one owner ties, the other has HIGHER importance -> BLOCKED_BY_STRONGER_OWNER; per-owner results are recorded
+=== REAL pipeline: historical vs final owners across replenishment rounds ===
+OK   HISTORICAL OWNER REMOVED (real): L first lost to O (round 0); O is later displaced (no longer Proposed) and L loses again to H (round 1). L's owners are {O: NOT_FINAL_PROPOSED (kept as evidence), H: FINAL_PROPOSED}; the aggregate is judged against the FINAL owner H only (tie -> eligible)
+OK   NO FINAL OWNER (real): L's only owner O is displaced and L is left with NO_CANDIDATES -> NO_FINAL_CONTENTION_OWNER; no promotion opportunity is inferred and the earlier conflict is still on record
+OK   FINAL-PROPOSED CONTROL (real): B is pressured and genuinely contended, but replenishment finds it another slot and it ends Proposed -> NOT_FINAL_DEFERRED (never a promotion candidate)
+=== REAL pipeline: controls that are NOT contention, FIXED, fallback ===
+OK   NO-CONTENTION CONTROL (real): B is pressured and finally Deferred because it has no candidate intervals (NO_CANDIDATES) -> NO_CONTENTION: a final Deferred reason or a pressured Deferral is never contention
+OK   EXTERNAL BLOCKER (real): B is pressured and Deferred only because an existing plan occupies its slot -> NO_CONTENTION (candidate-vs-blocker is not candidate-vs-candidate contention)
+OK   FIXED (real): a FIXED candidate can genuinely lose contention (it has a trace event) but is NEVER pressured -- P2b gives FIXED pressure NONE even with scarce evidence -> NOT_PRESSURED
+OK   FALLBACK CONTROL (real): a candidate whose duration comes from the generic fallback has pressure NONE upstream (the shadow stage never inspects the duration basis) -> NOT_PRESSURED
+=== source parity: automatic / manual / generic ===
+OK   AUTO / MANUAL / GENERIC PARITY: equivalent scheduling inputs with the same facts give the same pressure and the SAME shadow classification whether the ids look like automatic Goal demand, a manual hand-off or a generic typed intent (the shadow stage sees none of that)
+=== inert: normal runs never compute a shadow observation; shadow failure never touches the result ===
+OK   NORMAL PREVIEW PATH: `orchestrateConstructDay` computes no shadow observation and derives no pressure (zero calls to the evaluator or the pressure deriver)
+OK   the shadow boundary derives pressure once per resolved intent and evaluates once, after construction
+OK   FAIL OPEN (evaluator throws): the Constructor result is returned exactly as normal and the shadow outcome is UNAVAILABLE / EVALUATION_FAILED -- shadow code can never abort or alter a preview
+OK   FAIL OPEN (pressure derivation throws): same -- the result is untouched and the shadow outcome is UNAVAILABLE
+OK   a run that is not READY (here a missing timezone) returns its result untouched with the shadow outcome UNAVAILABLE / RUN_NOT_READY
+OK   TOKENS: the signed preview body, every acceptance token included, is identical with and without the shadow stage; the preview carries no shadow output
+ALL SHADOW PRESSURE EVALUATION CHECKS PASSED
+
+# exit=0 signal=
