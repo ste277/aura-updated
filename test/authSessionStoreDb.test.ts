@@ -65,6 +65,15 @@ process.on('unhandledRejection', (err) => {
 });
 
 const admin = new Pool({ connectionString: dbUrl, max: 4, application_name: 'auth-session-i1-admin' });
+/**
+ * The admin pool comes from the repository-root `pg`, while apps/web/lib
+ * resolves `pg` types from apps/web/node_modules when that is installed (as in
+ * CI). The two PoolClient types are structurally incompatible across @types/pg
+ * versions, so a client handed to the library crosses this one explicit,
+ * test-only boundary. Runtime objects are identical node-pg clients.
+ */
+type LibClient = Parameters<typeof revokeAllSessionsForUser>[0];
+const asLibClient = (c: PoolClient): LibClient => c as unknown as LibClient;
 const userIds: string[] = [];
 
 async function newUser(): Promise<string> {
@@ -163,7 +172,7 @@ async function main() {
   let revokedCount = -1;
   try {
     await c.query('BEGIN');
-    revokedCount = await revokeAllSessionsForUser(c, u1, 'logout_all');
+    revokedCount = await revokeAllSessionsForUser(asLibClient(c), u1, 'logout_all');
     await c.query('COMMIT');
   } finally {
     c.release();
@@ -177,7 +186,7 @@ async function main() {
   let txSession;
   try {
     await tx.query('BEGIN');
-    txSession = await createAuthSessionInTransaction(tx, u2);
+    txSession = await createAuthSessionInTransaction(asLibClient(tx), u2);
     await tx.query('ROLLBACK');
   } finally {
     tx.release();
@@ -228,7 +237,7 @@ async function main() {
   const holder = await admin.connect();
   try {
     await holder.query('BEGIN');
-    const ok = await recheckAuthSessionForShare(holder, b3.idHash, u5);
+    const ok = await recheckAuthSessionForShare(asLibClient(holder), b3.idHash, u5);
     const t = performance.now();
     const revoking = revokeAuthSession(pool, b3.idHash, 'logout');
     await sleep(300);
@@ -242,7 +251,7 @@ async function main() {
   const after = await admin.connect();
   try {
     await after.query('BEGIN');
-    const ok = await recheckAuthSessionForShare(after, b3.idHash, u5);
+    const ok = await recheckAuthSessionForShare(asLibClient(after), b3.idHash, u5);
     await after.query('ROLLBACK');
     check('B3: after the revoke commits, the re-check fails', ok === false);
   } finally {
@@ -292,7 +301,7 @@ async function main() {
 
   // T4 -- acquisition bound.
   {
-    const held: PoolClient[] = [];
+    const held: Array<{ release(): void }> = []; // clients of the library's own pool
     for (let i = 0; i < 5; i++) held.push(await pool.connect());
     const r = await expectUnavailable(lookupAuthSession(pool, s6.idHash, u6));
     check('T4 acquire: pool exhausted -> acquire within ~500 ms', r.reason === 'acquire' && r.ms < 1500, { reason: r.reason, ms: Math.round(r.ms) });

@@ -1,8 +1,8 @@
 # AURA-AUTH-SESSION-01-I1 — Implementation and Independent Verification Handover
 
 **Date:** 2026-11-27 · **Ticket:** 39230 / AURA-AUTH-SESSION-01-I1 (`AURA_AUTH_SESSION_01_I1_TICKET.md`) · **Design:** `AURA_AUTH_SESSION_01_REVOCATION_DESIGN.md` Rev 3
-**Branch:** `feature/aura-auth-session-01-i1`, worktree `.claude/worktrees/auth-session-01`, based on `origin/main` `477723d`. **Committed locally only.** Not pushed, no PR, no merge, no deploy.
-**Status:** IMPLEMENTED AND LOCALLY VERIFIED. Ready for independent verification. Merge requires separate approval.
+**Branch:** `feature/aura-auth-session-01-i1`, worktree `.claude/worktrees/auth-session-01`. **Draft PR [#401](https://github.com/ste277/aura-updated/pull/401)**, base `main` = `477723d` (integration base, unchanged at push). Head `29bf09d` = approved implementation `5d8a16c` + one evidence-hygiene commit. Auto-merge OFF, auto-fix OFF. No merge, no deploy.
+**Status:** READY FOR INDEPENDENT VERIFICATION. CI results are in §10. Merge requires separate approval.
 
 ---
 
@@ -165,3 +165,29 @@ There was no authentication behaviour change, credential read or rotation, sessi
 - merge approval.
 
 Once I1 is merged, migration 0055 reaches the Production database as an empty, unused table with the next authorized Production release.
+
+## 10. PR, pre-push checks and CI (2026-11-27)
+
+**Pre-push review:**
+- `git diff 477723d..5d8a16c` was confirmed as the 22 files in §3, with no change to the protected paths (V1).
+- **Secret and sensitive-data scan** of every changed file covered connection strings, passwords, `AUTH_SECRET=`, bearer and JWT tokens, private keys, personal email and home paths. It found **one** hardcoded loopback connection string in `AURA_AUTH_SESSION_01_EVIDENCE/bench.js` (throwaway, passwordless), and the synthetic benchmark id hash and user UUID in `bench-output.txt`'s query plan.
+- **Both were fixed in `29bf09d`** before the push. `bench.js` now reads `BENCH_DATABASE_URL`, refuses any database not on loopback, and redacts the plan literals; the recorded plan is redacted to match.
+- The test logs contain no emails, UUIDs, hashes or tokens; the scan was re-run and came back clean.
+- The only `postgresql://` strings left in the diff are the placeholder `USER@127.0.0.1:PORT/DB` in this handover and the pre-existing CI-only lines in `ci.yml`, which this PR doesn't change.
+
+**Preview deployment:** Vercel built an automatic **Preview** deployment for the PR (GitHub deployment `environment: Preview`, `production_environment: false`). `apps/web/scripts/vercel-build.sh` runs `prisma migrate deploy` **only when `VERCEL_ENV=production`**, so **no database was migrated**. Nothing was promoted.
+
+**How each required verification is covered:**
+
+| Required | Covered by | Result |
+|---|---|---|
+| Real `prisma migrate deploy` + `status` on a disposable DB | CI `Database migration validation`: postgres:16 service, then `migrate deploy`, `migrate status`, the "all migrations recorded" count, and the new I1 DB test | see CI table |
+| Full web production build + typecheck | CI `Next.js production build` (`next build` typechecks all of `apps/web`, including the new modules, then the bundle guards and standalone checks) | see CI table |
+| Existing auth regression suites | CI: `authRequestLinkQuotaDb`, `authLogRedactionDb`, `authMagicLinkLocalOnlyDb` (Day Constructor acceptance DB job), `signInResendChangeEmailJsdom` (Ephemeris job) and `mcpOAuthLocal` (consent cookie path) | see CI table |
+| New token, store, timeout and isolation tests | CI: `authSessionToken` and `authSessionDormancy` (Ephemeris job), `authSessionStoreDb` (migration validation job) | see CI table |
+| Extra, not in CI: other token types sharing `AUTH_SECRET` | Local: `remainingDayRecompositionIntegrity.test.ts`, **all 97 checks passed**; `guestConversion.test.ts`, **all checks passed** | PASS |
+
+Every required item is covered by CI, so no separate local run was needed. The extra local runs only add evidence that the legacy token paths are unaffected.
+
+**CI run [45973451075](https://github.com/ste277/aura-updated/actions/runs/45973451075)** on head `29bf09d`: see the table below. Per instruction, a failure of the known Rhythm Move test (CI-09) is recorded as-is: not rerun, not modified.
+
