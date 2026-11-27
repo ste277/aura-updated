@@ -28,14 +28,16 @@ const argShots = process.argv.indexOf('--shots');
 const SHOTS = argShots > 0 ? process.argv[argShots + 1] : null;
 
 // ---------------------------------------------------------------- in-memory bundle
-type Mutation = 'none' | 'stretch' | 'container' | 'bypass' | 'original' | 'stale-gesture' | 'ignore-release' | 'retain-revoked' | 'unhandled-limit';
+type Mutation = 'none' | 'stretch' | 'container' | 'bypass' | 'original' | 'stale-gesture' | 'ignore-release' | 'retain-revoked' | 'unhandled-limit' | 'r1-head' | 'tap-boundary-bypass';
+/** The R1 head reviewed by 50348 (57ef630): the R2 boundary witness must fail on it. */
+const R1_HEAD = '57ef6302a2b43fb94b7aed3c1ef3f655d074a9e6';
 /** The reviewed P4-I2 component (head 0c1c650), before the R1 corrections: the F1-F4 witnesses must fail on it. */
 const ORIGINAL_HEAD = '0c1c6500e3bf9b4bd046772c32e5fab86e178ac7';
-const originalComponent = (): string => {
-  try { return require('child_process').execFileSync('git', ['show', `${ORIGINAL_HEAD}:apps/web/components/palm-scan/PalmImageInput.tsx`], { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }); }
-  catch { throw new Error(`the reviewed commit ${ORIGINAL_HEAD} is not in this clone; fetch it first: git fetch --no-tags --depth=1 origin ${ORIGINAL_HEAD}`); }
+const originalComponent = (rev: string = ORIGINAL_HEAD): string => {
+  try { return require('child_process').execFileSync('git', ['show', `${rev}:apps/web/components/palm-scan/PalmImageInput.tsx`], { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }); }
+  catch { throw new Error(`the reviewed commit ${rev} is not in this clone; fetch it first: git fetch --no-tags --depth=1 origin ${rev}`); }
 };
-const MUTATIONS: Record<Exclude<Mutation, 'none' | 'original'>, Array<{ file: string; from: string; to: string }>> = {
+const MUTATIONS: Record<Exclude<Mutation, 'none' | 'original' | 'r1-head'>, Array<{ file: string; from: string; to: string }>> = {
   stretch: [{ file: 'apps/web/lib/palm-analysis/tracingGeometry.ts', from: 'const scale = Math.min(box.width / imgW, box.height / imgH);\n  const width = imgW * scale;\n  const height = imgH * scale;', to: 'const width = box.width;\n  const height = box.height;' }],
   container: [{ file: 'apps/web/components/palm-scan/PalmImageInput.tsx', from: 'const c = containRect({ left: r.left, top: r.top, width: r.width, height: r.height }, imgW, imgH);', to: 'const c = { left: r.left, top: r.top, width: r.width, height: r.height };' }],
   bypass: [
@@ -52,13 +54,15 @@ const MUTATIONS: Record<Exclude<Mutation, 'none' | 'original'>, Array<{ file: st
     { file: 'apps/web/components/palm-scan/PalmImageInput.tsx', from: 'const timer = setInterval(watch, 250);', to: 'const timer = 0 as unknown as ReturnType<typeof setInterval>; void watch;' },
     { file: 'apps/web/components/palm-scan/PalmImageInput.tsx', from: 'if (modelRef.current && !modelRef.current.isActive()) { markCleared(); return; } // a late observer callback restores nothing', to: '' },
   ],
+  // R2 negative control (filled in with the R2 implementation)
+  'tap-boundary-bypass': [{ file: 'apps/web/components/palm-scan/PalmImageInput.tsx', from: 'if (!g.moved && g.leftPhoto) { setMessage(TAP_OFF_PHOTO_TEXT); return; }', to: '' }],
   'unhandled-limit': [{ file: 'apps/web/components/palm-scan/PalmImageInput.tsx', from: "if (e instanceof TracingError) { setMessage(e.code === 'too-many-points'", to: "if (false) { setMessage(e.code === 'too-many-points'" }],
 };
 
 function bundle(entry: string, mutation: Mutation): string {
   const mods = new Map<string, string>();
   const ids = new Map<string, number>();
-  const muts = mutation === 'none' || mutation === 'original' ? [] : MUTATIONS[mutation];
+  const muts = mutation === 'none' || mutation === 'original' || mutation === 'r1-head' ? [] : MUTATIONS[mutation];
   const used = new Set<number>();
   const resolve = (spec: string, from: string): string => {
     const base = path.resolve(path.dirname(from), spec);
@@ -70,7 +74,7 @@ function bundle(entry: string, mutation: Mutation): string {
     if (ids.has(file)) return ids.get(file)!;
     const id = ids.size;
     ids.set(file, id);
-    let src = mutation === 'original' && file === path.join(WEB, 'components/palm-scan/PalmImageInput.tsx') ? originalComponent() : fs.readFileSync(file, 'utf8');
+    let src = (mutation === 'original' || mutation === 'r1-head') && file === path.join(WEB, 'components/palm-scan/PalmImageInput.tsx') ? originalComponent(mutation === 'r1-head' ? R1_HEAD : ORIGINAL_HEAD) : fs.readFileSync(file, 'utf8');
     muts.forEach((m, k) => {
       if (path.join(ROOT, m.file) !== file) return;
       if (!src.includes(m.from)) throw new Error(`mutation ${mutation} target not found in ${m.file}`);
@@ -684,6 +688,165 @@ async function findingsSuite(browser: any, mutation: Mutation, verbose: boolean)
   return res;
 }
 
+// ================================================================ R2 (50350): terminal boundary validation
+/**
+ * F2 residual (independent disposition 50348): a gesture that moves less than the tap slop but is RELEASED off the
+ * photo. The terminal coordinate must never be discarded by the tap path: such a gesture is refused, the existing
+ * draft is unchanged, and nothing invalid can be confirmed. Native mouse and pen (Chrome DevTools mouse events with
+ * pointerType) and touch (DevTools touch events), on two letterboxed geometries. Check names start with "B".
+ */
+async function boundarySuite(browser: any, mutation: Mutation, verbose: boolean): Promise<Result> {
+  const res: Result = { passed: 0, failed: [] };
+  const check = (name: string, cond: boolean, detail?: unknown) => {
+    if (cond) { res.passed++; if (verbose) console.log(`OK   ${name}`); } else { res.failed.push(name); if (verbose) console.log(`FAIL ${name}${detail === undefined ? '' : ` :: ${JSON.stringify(detail).slice(0, 300)}`}`); }
+  };
+  const geometries = [
+    { name: 'desktop 1280x800 @1x, photo 1280x960 (letterboxed left/right)', vw: 1280, vh: 800, dpr: 1, W: 1280, H: 960 },
+    { name: 'phone 390x844 @3x, photo 960x1280 (scaled, letterboxed top/bottom)', vw: 390, vh: 844, dpr: 3, W: 960, H: 1280 },
+  ];
+  for (const geo of geometries) {
+    const ctx = await browser.newContext({ viewport: { width: geo.vw, height: geo.vh }, deviceScaleFactor: geo.dpr, hasTouch: true });
+    const pg = await ctx.newPage();
+    const errors: string[] = [];
+    pg.on('pageerror', (e: any) => errors.push(String(e).split('\n')[0]));
+    await pg.setContent(page(mutation, geo.W, geo.H));
+    await pg.waitForSelector('[data-testid="palm-tracing-stage"] canvas');
+    const cdp = await ctx.newCDPSession(pg);
+    const T = `[${geo.name}]`;
+    const settle = () => pg.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+    const C = async (): Promise<Box> => oracleContent(await pg.$eval('[data-testid="palm-tracing-stage"]', (e: Element) => { e.scrollIntoView({ block: 'center' }); const r = e.getBoundingClientRect(); return { left: r.left, top: r.top, width: r.width, height: r.height }; }), geo.W, geo.H);
+    const at = (c: Box, x: number, y: number) => ({ x: c.left + x * c.width, y: c.top + y * c.height });
+    const trace = async (line: string): Promise<Array<{ x: number; y: number }>> => pg.evaluate(([l, w, h]: [string, number, number]) => {
+      const el = document.querySelector(`[data-trace="${l}"]`);
+      return el ? (el.getAttribute('points') || '').trim().split(/\s+/).filter(Boolean).map((t) => { const [x, y] = t.split(',').map(Number); return { x: x / w, y: y / h }; }) : [];
+    }, [line, geo.W, geo.H]);
+    const statusOf = async (line: string) => pg.$eval(`[data-testid="palm-tracing-step-${line}"]`, (e: Element) => e.getAttribute('data-status'));
+    const placement = async () => pg.$eval('[data-testid="palm-tracing-feedback"]', (e: Element) => e.getAttribute('data-placement'));
+    const statusText = async () => pg.$eval('[data-testid="palm-tracing-status"]', (e: Element) => e.textContent || '');
+    const fresh = async (shift = 0.02) => { await pg.evaluate((s: number) => (window as any).__palmHarness.replace(s), shift); await pg.waitForSelector('[data-testid="palm-tracing-photo"]'); await settle(); };
+    type Kind = 'mouse' | 'pen' | 'touch';
+    /** Press at `a`, optionally move to `m`, release at `r` -- with NO pointermove at the release position. */
+    const gesture = async (kind: Kind, a: { x: number; y: number }, r: { x: number; y: number }, m?: { x: number; y: number }) => {
+      if (kind === 'touch') {
+        await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ ...a, id: 1 }] });
+        if (m) await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ ...m, id: 1 }] });
+        // touch reports its release at the last touch position: move there, then lift
+        await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ ...r, id: 1 }] });
+        await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+      } else {
+        await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: a.x, y: a.y, button: 'left', buttons: 1, clickCount: 1, pointerType: kind });
+        if (m) await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: m.x, y: m.y, button: 'left', buttons: 1, pointerType: kind });
+        await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: r.x, y: r.y, button: 'left', buttons: 0, clickCount: 1, pointerType: kind });
+      }
+      await settle();
+    };
+    const tapAt = async (x: number, y: number) => { const c = await C(); const p = at(c, x, y); await gesture('mouse', p, p); };
+
+    // ---- the exact 50348 witness: down at x = 0.996, release at x = 1.004 (below tap slop), no final move
+    const BASE: Array<[number, number]> = [[0.75, 0.48], [0.85, 0.475], [0.93, 0.47]];
+    for (const kind of ['mouse', 'pen', 'touch'] as Kind[]) {
+      await fresh(0.255);
+      for (const [x, y] of BASE) await tapAt(x, y);
+      const before = await trace('heart');
+      const c = await C();
+      const a = at(c, 0.996, 0.47), r = at(c, 1.004, 0.47);
+      const movePx = Math.hypot(r.x - a.x, r.y - a.y);
+      await gesture(kind, a, r);
+      const after = await trace('heart');
+      check(`B1 ${T} ${kind}: 50348 witness (down x=0.996, release x=1.004, ${movePx.toFixed(3)} CSS px < ${6} px slop): the off-photo release is not discarded -- the gesture is refused, the draft is unchanged and the user is told`, movePx < 6 && JSON.stringify(after) === JSON.stringify(before) && /outside the photo/i.test(await statusText()), { movePx, before: before.length, after: after.length, msg: await statusText() });
+      await pg.$eval('[data-testid="palm-tracing-confirm"]', (e: Element) => (e as HTMLButtonElement).click()).catch(() => {});
+      await settle();
+      const conf = await statusOf('heart');
+      const confirmedTrace = await trace('heart');
+      check(`B2 ${T} ${kind}: no confirmed trace can contain the in-photo start of an off-photo tap (x=0.996)`, !(conf === 'confirmed' && confirmedTrace.some((p) => Math.abs(p.x - 0.996) < 1e-3)), { conf, last: confirmedTrace[confirmedTrace.length - 1] });
+    }
+    {
+      // the same terminal kept by a drag (above slop) is judged by I1 and rejected, never confirmable
+      await fresh(0.255);
+      for (const [x, y] of BASE) await tapAt(x, y);
+      const c = await C();
+      await gesture('pen', at(c, 0.75, 0.48), at(c, 1.004, 0.47), at(c, 0.9, 0.47));
+      check(`B3 ${T} pen: the actual terminal (x=1.004) kept by a drag is rejected by frozen I1 (trace-outside-image) and Confirm is disabled`, (await placement()) === 'trace-outside-image' && (await pg.$eval('[data-testid="palm-tracing-confirm"]', (e: Element) => (e as HTMLButtonElement).disabled)));
+    }
+
+    // ---- edges and corners: stationary taps exactly on the boundary are kept; short off-photo releases are refused
+    const EDGES: Array<{ name: string; on: [number, number]; off: [number, number] }> = [
+      { name: 'left edge', on: [0, 0.5], off: [-0.004, 0.5] },
+      { name: 'right edge', on: [1, 0.5], off: [1.004, 0.5] },
+      { name: 'top edge', on: [0.5, 0], off: [0.5, -0.003] },
+      { name: 'bottom edge', on: [0.5, 1], off: [0.5, 1.003] },
+      { name: 'top-left corner', on: [0, 0], off: [-0.003, -0.002] },
+      { name: 'top-right corner', on: [1, 0], off: [1.003, -0.002] },
+      { name: 'bottom-left corner', on: [0, 1], off: [-0.003, 1.002] },
+      { name: 'bottom-right corner', on: [1, 1], off: [1.003, 1.002] },
+    ];
+    await fresh();
+    for (const [x, y] of [[0.4, 0.6], [0.5, 0.62]] as Array<[number, number]>) await tapAt(x, y);
+    for (const e of EDGES) {
+      for (const kind of ['mouse', 'pen', 'touch'] as Kind[]) {
+        const c = await C();
+        const before = await trace('heart');
+        // "On the boundary": 0.01 CSS px inside the edge -- browsers carry pointer coordinates in reduced precision,
+        // so the exact edge position can land a hair outside (and is then, correctly, off the photo).
+        // Touch positions arrive rounded to about a whole CSS pixel, so touch uses the edge pixel (0.6 px inside).
+        const inset = kind === 'touch' ? 0.6 : 0.01;
+        const nudge = (v: number, size: number) => (v === 0 ? inset / size : v === 1 ? 1 - inset / size : v);
+        const onP = at(c, nudge(e.on[0], c.width), nudge(e.on[1], c.height));
+        await gesture(kind, onP, onP);
+        const t1 = await trace('heart');
+        const added = t1.length === before.length + 1;
+        const last = t1[t1.length - 1];
+        const tolX = (inset + 1) / c.width, tolY = (inset + 1) / c.height;
+        const okOn = added && Math.abs(last.x - e.on[0]) <= tolX && Math.abs(last.y - e.on[1]) <= tolY && last.x >= 0 && last.x <= 1 && last.y >= 0 && last.y <= 1;
+        const inside = at(c, e.on[0] === 0 ? 0.002 : e.on[0] === 1 ? 0.998 : e.on[0], e.on[1] === 0 ? 0.002 : e.on[1] === 1 ? 0.998 : e.on[1]);
+        const offP = at(c, e.off[0], e.off[1]);
+        const between = await trace('heart');
+        await gesture(kind, inside, offP);
+        const t2 = await trace('heart');
+        check(`B4 ${T} ${kind} ${e.name}: a stationary tap on the boundary (${inset} CSS px inside) is kept (${last ? `${last.x.toFixed(6)},${last.y.toFixed(6)}` : 'none'}); a short release just off the photo is refused and leaves the draft unchanged`, okOn && JSON.stringify(t2) === JSON.stringify(between), { okOn, last, n2: t2.length, n1: between.length });
+        // keep the draft short: remove the boundary point again (only if one was added)
+        if (added) { await pg.focus('[data-testid="palm-tracing-undo"]'); await pg.keyboard.press('Enter'); await settle(); }
+      }
+    }
+
+    // ---- tap slop: below / at / above, inside and off the photo
+    await fresh();
+    for (const [x, y] of [[0.37, 0.56], [0.45, 0.6]] as Array<[number, number]>) await tapAt(x, y);
+    {
+      const c = await C();
+      const n0 = (await trace('heart')).length;
+      const a = at(c, 0.54, 0.62);
+      await gesture('mouse', a, { x: a.x + 3, y: a.y });
+      const t = await trace('heart');
+      check(`B5 ${T} short in-photo movement below slop (3 px) is a tap: one point at the press position`, t.length === n0 + 1 && Math.abs(t[t.length - 1].x - 0.54) * c.width < 0.6);
+      await gesture('pen', a, a);
+      check(`B6 ${T} a stationary pen tap inside the photo still adds a point`, (await trace('heart')).length === n0 + 2);
+      await pg.focus('[data-testid="palm-tracing-undo"]'); await pg.keyboard.press('Enter'); await settle();
+      await pg.focus('[data-testid="palm-tracing-undo"]'); await pg.keyboard.press('Enter'); await settle();
+    }
+    {
+      const c = await C();
+      const before = await trace('heart');
+      // press 2 px inside the right edge, release exactly 6 px (= slop, still a tap) to the right: off the photo
+      const a = { x: c.left + c.width - 2, y: at(c, 0, 0.6).y };
+      await gesture('mouse', a, { x: a.x + 6, y: a.y });
+      check(`B7 ${T} movement exactly AT the slop (6 px) ending off the photo: refused, draft unchanged`, JSON.stringify(await trace('heart')) === JSON.stringify(before) && /outside the photo/i.test(await statusText()));
+      await gesture('mouse', a, { x: a.x + 7, y: a.y });
+      const t = await trace('heart');
+      check(`B8 ${T} movement ABOVE the slop (7 px) ending off the photo: a stroke whose real terminal (x > 1) is kept and rejected by I1 -- not confirmable`, t.length >= 2 && t[t.length - 1].x > 1 && (await placement()) === 'trace-outside-image');
+      await pg.focus('[data-testid="palm-tracing-undo"]'); await pg.keyboard.press('Enter'); await settle();
+      check(`B9 ${T} Undo after the rejected stroke restores the earlier valid draft exactly`, JSON.stringify(await trace('heart')) === JSON.stringify(before));
+      // an in-photo press whose short gesture passes off the photo and comes back inside is still a tap inside
+      const b = { x: c.left + c.width - 1, y: at(c, 0, 0.62).y };
+      await gesture('pen', b, { x: b.x - 1, y: b.y }, { x: b.x + 2, y: b.y });
+      check(`B10 ${T} a short gesture that briefly leaves the photo is refused even when released back inside (it left the photo)`, JSON.stringify(await trace('heart')) === JSON.stringify(before));
+    }
+    check(`B11 ${T} no uncaught page errors`, errors.length === 0, errors);
+    await ctx.close();
+  }
+  return res;
+}
+
 async function main() {
   if (SHOTS) fs.mkdirSync(SHOTS, { recursive: true });
   const channel = process.env.PALM_BROWSER_CHANNEL || undefined;
@@ -694,17 +857,31 @@ async function main() {
     const real = process.env.PALM_I2_FINDINGS_ONLY ? { passed: 0, failed: [] } : await suite(browser, 'none', CONFIGS, SHOTS);
     console.log(`\nPALM-04-I2 browser: ${real.passed} passed, ${real.failed.length} failed`);
     if (real.failed.length) ok = false;
-    const r1 = await findingsSuite(browser, 'none', true);
+    const r1 = process.env.PALM_I2_BOUNDARY_ONLY ? { passed: 0, failed: [] as string[] } : await findingsSuite(browser, 'none', true);
     console.log(`\nPALM-04-I2 R1 findings (F1-F4): ${r1.passed} passed, ${r1.failed.length} failed`);
     if (r1.failed.length) ok = false;
     // the reviewed P4-I2 component (0c1c650) must fail every finding
-    const orig = await findingsSuite(browser, 'original', false);
+    const orig = process.env.PALM_I2_BOUNDARY_ONLY ? { passed: 0, failed: ['F1 x', 'F2 x', 'F3 x', 'F4 x'] } : await findingsSuite(browser, 'original', false);
     const per = (r: Result) => ['F1', 'F2', 'F3', 'F4'].map((f) => `${f}:${r.failed.filter((n) => n.startsWith(f + ' ')).length}`).join(' ');
     const origAll = ['F1', 'F2', 'F3', 'F4'].every((f) => orig.failed.some((n) => n.startsWith(f + ' ')));
     console.log(`${origAll ? 'OK  ' : 'FAIL'} witnesses on the reviewed component ${ORIGINAL_HEAD.slice(0, 7)}: every finding reproduces (${per(orig)} failing checks; ${orig.passed} pass)`);
     if (!origAll) ok = false;
+    // R2: terminal boundary validation
+    const r2 = await boundarySuite(browser, 'none', true);
+    console.log(`\nPALM-04-I2 R2 boundary (B1-B11): ${r2.passed} passed, ${r2.failed.length} failed`);
+    if (r2.failed.length) ok = false;
+    const before = await boundarySuite(browser, 'r1-head', false);
+    const witnessFails = before.failed.filter((n) => /^B1 /.test(n)).length;
+    console.log(`${witnessFails ? 'OK  ' : 'FAIL'} the 50348 witness fails on the reviewed R1 head ${R1_HEAD.slice(0, 7)}: ${witnessFails} B1 checks fail (${before.failed.length} boundary checks fail in all; ${before.passed} pass)`);
+    if (!witnessFails) ok = false;
+    if ((MUTATIONS as any)['tap-boundary-bypass'].length) {
+      const nb = await boundarySuite(browser, 'tap-boundary-bypass', false);
+      const hit = nb.failed.filter((n) => /^B(1|4|7) /.test(n)).length;
+      console.log(`${hit ? 'OK  ' : 'FAIL'} negative control tap-boundary-bypass: ${hit} B1/B4/B7 checks fail (${nb.failed.length} in all), ${nb.passed} pass`);
+      if (!hit) ok = false;
+    } else console.log('note: negative control tap-boundary-bypass not defined yet');
     for (const [m, f] of [['stale-gesture', 'F1'], ['ignore-release', 'F2'], ['retain-revoked', 'F3'], ['unhandled-limit', 'F4']] as Array<[Mutation, string]>) {
-      if (!(MUTATIONS as any)[m].length) { console.log(`note: negative control ${m} not defined yet`); continue; }
+      if (!(MUTATIONS as any)[m].length || process.env.PALM_I2_BOUNDARY_ONLY) { if (!process.env.PALM_I2_BOUNDARY_ONLY) console.log(`note: negative control ${m} not defined yet`); continue; }
       const r = await findingsSuite(browser, m, false);
       const hit = r.failed.filter((n) => n.startsWith(f + ' '));
       console.log(`${hit.length ? 'OK  ' : 'FAIL'} negative control ${m}: ${hit.length} ${f} checks fail (${per(r)}), ${r.passed} pass`);
