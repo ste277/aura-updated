@@ -978,6 +978,20 @@ jobs:
       # Synthetic data only; no UI; nothing persisted or transmitted.
       - name: Run assisted-tracing foundation tests (PALM-04-I1)
         run: npx ts-node test/palm04I1Tracing.test.ts
+      - name: Run tracing UI geometry and isolation tests (PALM-04-I2)
+        run: npx ts-node test/palm04I2TracingGeometry.test.ts
+      - name: Run tracing UI component tests (PALM-04-I2, jsdom)
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/palm04I2TracingUiJsdom.test.ts
+      # PALM-04-I2-R1..R4: the browser suite replays each finding's witness on the head it was reviewed on -- F1-F4 on
+      # 0c1c650, the 50348 boundary witness on 57ef630, the 50351 sample-pipeline witness on 6ddaa65 and the R3-review
+      # geometry-loss witness on 9463431; a shallow CI checkout contains none of them, so fetch exactly those pinned
+      # commits (read-only).
+      - name: Fetch the reviewed P4-I2 commits for the witness runs (PALM-04-I2-R1..R4)
+        run: git fetch --no-tags --depth=1 origin 0c1c6500e3bf9b4bd046772c32e5fab86e178ac7 57ef6302a2b43fb94b7aed3c1ef3f655d074a9e6 6ddaa651a19cb3096a9093a16e0300e501d89c8f 94634312f4249e5edb72e008795fceabb2cca86c
+      - name: Run tracing UI browser tests (PALM-04-I2, runner's installed Google Chrome, synthetic harness, no network)
+        env:
+          PALM_BROWSER_CHANNEL: chrome
+        run: npx ts-node test/palm04I2TracingBrowser.test.ts
       # PALM-03-E1: development-only personalised interpretation engine (synthetic
       # observations only; unreviewed content). The package suite compares the engine
       # with the unmodified C1 reference oracle (python3, preinstalled on the runner):
