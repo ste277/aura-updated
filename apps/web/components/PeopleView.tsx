@@ -72,6 +72,10 @@ export function PeopleView({ onBack }: PeopleViewProps) {
   const [people, setPeople] = useState<SavedPersonRow[] | null>(null);
   const [error, setError] = useState('');
   const [myPeopleEffective, setMyPeopleEffective] = useState(false);
+  // R3: the SERVER's state decides which creations are valid (name-only is
+  // valid only when the server has My People enabled); presentation only
+  // decides which options are shown.
+  const [serverEnabled, setServerEnabled] = useState(false);
 
   const loadPeople = async () => {
     setError('');
@@ -79,6 +83,7 @@ export function PeopleView({ onBack }: PeopleViewProps) {
       const res = await fetch('/api/people');
       if (!res.ok) throw new Error('Unable to load people.');
       setMyPeopleEffective(effectiveFromResponse(res));
+      setServerEnabled(res.headers?.get(MY_PEOPLE_CAPABILITY_HEADER) === 'enabled');
       setPeople(await res.json());
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to load people.');
@@ -117,6 +122,7 @@ export function PeopleView({ onBack }: PeopleViewProps) {
         <PersonForm
           mode="ADD"
           myPeopleEffective={myPeopleEffective}
+          serverEnabled={serverEnabled}
           onSaved={() => {
             loadPeople();
             setMode({ kind: 'LIST' });
@@ -312,66 +318,111 @@ interface OriginalPerson {
   birthLongitude: number | null;
 }
 
-/** The PATCH body for an EDIT, or null when nothing changed. Exported for tests. */
-export function buildPersonEditPayload(
-  original: OriginalPerson,
-  edited: { name: string; relationshipType: RelationshipType; birthDate: string; birthTime: string; birthCity: string },
-  cities: CityOption[]
-): { ok: true; body: Record<string, unknown> | null } | { ok: false; error: string } {
+/** What the form currently holds. `birthTimezone` is its OWN control (R3). */
+export interface PersonFormValues {
+  name: string;
+  relationshipType: RelationshipType;
+  birthDate: string;
+  birthTime: string;
+  birthTimezone: string; // '' = not chosen
+  birthCity: string; // SAVED_LOCATION | NO_CITY | a city name
+}
+
+type PayloadResult = { ok: true; body: Record<string, unknown> | null } | { ok: false; error: string };
+
+/**
+ * R3 (62011): birth location is OPTIONAL in the approved contract -- a chart
+ * is the all-or-none trio birth date + time + TIMEZONE; city and
+ * coordinates are optional extras. The timezone is therefore its own
+ * control: choosing a city fills in that city's timezone (and supplies its
+ * coordinates), but no city is ever required to supply a timezone, and no
+ * city, coordinates or timezone is ever persisted unless the user chose it.
+ */
+function chartFromValues(values: PersonFormValues, cities: CityOption[], location: { city: string | null; latitude: number | null; longitude: number | null } | null): PayloadResult | { ok: true; chart: Record<string, unknown> } {
+  if (!values.birthDate || !values.birthTime) return { ok: false, error: 'Add both a birth date and a birth time, and a birth time zone -- or leave them all empty.' };
+  if (!values.birthTimezone) return { ok: false, error: 'Choose a birth time zone.' };
+  const chart: Record<string, unknown> = { birthDate: values.birthDate, birthTime: values.birthTime, birthTimezone: values.birthTimezone };
+  if (values.birthCity !== NO_CITY && values.birthCity !== SAVED_LOCATION) {
+    const chosen = cities.find((c) => c.cityName === values.birthCity);
+    if (!chosen) return { ok: false, error: 'Choose a birth location from the list, or no city.' };
+    Object.assign(chart, { birthCityName: chosen.cityName, birthLatitude: chosen.latitude, birthLongitude: chosen.longitude });
+  } else if (values.birthCity === SAVED_LOCATION && location) {
+    if (location.city) chart.birthCityName = location.city;
+    if (location.latitude != null && location.longitude != null) Object.assign(chart, { birthLatitude: location.latitude, birthLongitude: location.longitude });
+  }
+  return { ok: true, chart };
+}
+
+/**
+ * CREATE payload (R3). Name and relationship are always sent. Birth
+ * information is sent only if the user entered any of it, and then as the
+ * full trio (+ an explicitly chosen city's name and coordinates). With the
+ * server's My People DISABLED the legacy contract requires birth
+ * information; with it ENABLED a name-only person is valid.
+ */
+export function buildPersonCreatePayload(values: PersonFormValues, cities: CityOption[], serverEnabled: boolean): PayloadResult {
+  const body: Record<string, unknown> = { name: values.name, relationshipType: values.relationshipType };
+  const cityChosen = values.birthCity !== NO_CITY && values.birthCity !== SAVED_LOCATION;
+  const anyChart = Boolean(values.birthDate || values.birthTime || values.birthTimezone || cityChosen);
+  if (!anyChart) {
+    if (!serverEnabled) return { ok: false, error: 'Add both a birth date and a birth time, and a birth time zone.' };
+    return { ok: true, body };
+  }
+  const chart = chartFromValues(values, cities, null);
+  if (!chart.ok) return chart;
+  return { ok: true, body: { ...body, ...('chart' in chart ? chart.chart : {}) } };
+}
+
+/**
+ * EDIT payload (R2 F1, extended in R3). Sends only fields the user changed.
+ * Editing ANY birth field (date, time, timezone or city) sends the full
+ * all-or-none chart; the untouched location (the SAVED city/coordinates, or
+ * their absence) comes from the ORIGINAL record, never from a default. A
+ * save with no changes sends nothing (null).
+ */
+export function buildPersonEditPayload(original: OriginalPerson, values: PersonFormValues, cities: CityOption[]): PayloadResult {
   const body: Record<string, unknown> = {};
-  if (edited.name !== original.name) body.name = edited.name;
-  if (edited.relationshipType !== original.relationshipType) body.relationshipType = edited.relationshipType;
+  if (values.name !== original.name) body.name = values.name;
+  if (values.relationshipType !== original.relationshipType) body.relationshipType = values.relationshipType;
 
   const hadChart = Boolean(original.birthDate && original.birthTime && original.birthTimezone);
-  const cityChosen = edited.birthCity !== SAVED_LOCATION && edited.birthCity !== NO_CITY;
-  const dateChanged = edited.birthDate !== original.birthDate;
-  const timeChanged = edited.birthTime !== original.birthTime;
+  const initialCity = hadChart && original.birthCityName ? SAVED_LOCATION : NO_CITY;
+  const chartTouched =
+    values.birthDate !== original.birthDate ||
+    values.birthTime !== original.birthTime ||
+    values.birthTimezone !== (original.birthTimezone ?? '') ||
+    values.birthCity !== initialCity;
 
-  if (hadChart) {
-    if (dateChanged || timeChanged || cityChosen) {
-      if (!edited.birthDate || !edited.birthTime) return { ok: false, error: 'Birth date and birth time are both needed.' };
-      const chosen = cityChosen ? cities.find((c) => c.cityName === edited.birthCity) : undefined;
-      if (cityChosen && !chosen) return { ok: false, error: 'Choose a birth location from the list.' };
-      body.birthDate = edited.birthDate;
-      body.birthTime = edited.birthTime;
-      if (chosen) {
-        body.birthTimezone = chosen.timezone;
-        body.birthCityName = chosen.cityName;
-        body.birthLatitude = chosen.latitude;
-        body.birthLongitude = chosen.longitude;
-      } else {
-        // Location untouched: carry the ORIGINAL location exactly, including
-        // its absence (no city / no coordinates stay absent).
-        body.birthTimezone = original.birthTimezone;
-        if (original.birthCityName) body.birthCityName = original.birthCityName;
-        if (original.birthLatitude != null && original.birthLongitude != null) {
-          body.birthLatitude = original.birthLatitude;
-          body.birthLongitude = original.birthLongitude;
-        }
-      }
-    }
-  } else {
-    const anyChart = Boolean(edited.birthDate || edited.birthTime || cityChosen);
-    if (anyChart) {
-      if (!edited.birthDate || !edited.birthTime || !cityChosen) {
-        return { ok: false, error: 'Add both a birth date and a birth time, and a birth location -- or leave all three empty.' };
-      }
-      const chosen = cities.find((c) => c.cityName === edited.birthCity);
-      if (!chosen) return { ok: false, error: 'Choose a birth location from the list.' };
-      Object.assign(body, { birthDate: edited.birthDate, birthTime: edited.birthTime, birthTimezone: chosen.timezone, birthCityName: chosen.cityName, birthLatitude: chosen.latitude, birthLongitude: chosen.longitude });
-    }
+  if (chartTouched) {
+    if (hadChart && (!values.birthDate || !values.birthTime)) return { ok: false, error: 'Birth date and birth time are both needed.' };
+    const chart = chartFromValues(values, cities, { city: original.birthCityName, latitude: original.birthLatitude, longitude: original.birthLongitude });
+    if (!chart.ok) return chart;
+    if ('chart' in chart) Object.assign(body, chart.chart);
   }
   return { ok: true, body: Object.keys(body).length > 0 ? body : null };
 }
 
-function PersonForm({ mode, personId, onSaved, onCancel, myPeopleEffective: listEffective = false }: { mode: 'ADD' | 'EDIT'; personId?: string; onSaved: () => void; onCancel: () => void; myPeopleEffective?: boolean }) {
+/** IANA timezones for the independent birth-timezone control. */
+function timezoneOptions(extra: Array<string | null | undefined>): string[] {
+  let zones: string[] = [];
+  try {
+    zones = (Intl as unknown as { supportedValuesOf?: (k: string) => string[] }).supportedValuesOf?.('timeZone') ?? [];
+  } catch {
+    zones = [];
+  }
+  if (zones.length === 0) zones = CITY_OPTIONS.map((c) => c.timezone);
+  return Array.from(new Set([...zones, 'UTC', ...extra.filter((z): z is string => Boolean(z))])).sort();
+}
+
+function PersonForm({ mode, personId, onSaved, onCancel, myPeopleEffective: listEffective = false, serverEnabled: listServerEnabled = false }: { mode: 'ADD' | 'EDIT'; personId?: string; onSaved: () => void; onCancel: () => void; myPeopleEffective?: boolean; serverEnabled?: boolean }) {
   const [customCities, setCustomCities] = useState<CityOption[]>([]);
   const [name, setName] = useState('');
   const [relationshipType, setRelationshipType] = useState<RelationshipType>('PARTNER');
   const [birthDate, setBirthDate] = useState('');
   const [birthTime, setBirthTime] = useState('');
-  // R2 F1: no city is pre-selected as a silent default. ADD asks for an
-  // explicit choice; EDIT starts on the person's SAVED location.
+  // R3: the timezone is its own control; nothing is pre-selected on ADD.
+  const [birthTimezone, setBirthTimezone] = useState('');
+  // R2 F1 / R3: no city is pre-selected as a silent default.
   const [birthCity, setBirthCity] = useState<string>(NO_CITY);
   const [original, setOriginal] = useState<OriginalPerson | null>(null);
   const [saving, setSaving] = useState(false);
@@ -380,15 +431,15 @@ function PersonForm({ mode, personId, onSaved, onCancel, myPeopleEffective: list
   // AURA-MP-1: an EDIT of a person saved without birth details must not
   // demand them -- name/relationship can be changed on their own, and the
   // chart is then left untouched (PATCH is partial).
-  const [hadChart, setHadChart] = useState(mode === 'ADD');
+  const [hadChart, setHadChart] = useState(false);
   // R1 F2: My People options only when the public flag is on AND the server
   // confirmed it (list response for ADD, detail response for EDIT).
   const [detailEffective, setDetailEffective] = useState<boolean | null>(null);
   const myPeopleEnabled = detailEffective ?? listEffective;
-  // ADD on this (legacy) screen still asks for birth details; the name-only
-  // add flow is the My People screen (MP-2). An EDIT keeps a chart required
-  // only for a person who already has one (it can be corrected, not dropped).
-  const chartRequired = mode === 'ADD' || hadChart;
+  // R3: ADD needs birth information only where the SERVER's contract does
+  // (My People disabled). An EDIT keeps a chart required only for a person
+  // who already has one (it can be corrected, not dropped here).
+  const chartRequired = mode === 'ADD' ? !listServerEnabled : hadChart;
 
   useEffect(() => {
     fetch('/api/cities/custom')
@@ -416,13 +467,15 @@ function PersonForm({ mode, personId, onSaved, onCancel, myPeopleEffective: list
           birthLatitude: data.birthLatitude ?? null,
           birthLongitude: data.birthLongitude ?? null,
         };
+        const withChart = personHasChartDetails(data);
         setOriginal(snapshot);
         setName(snapshot.name);
         setRelationshipType(snapshot.relationshipType);
-        setHadChart(personHasChartDetails(data));
+        setHadChart(withChart);
         setBirthDate(snapshot.birthDate);
         setBirthTime(snapshot.birthTime);
-        setBirthCity(personHasChartDetails(data) ? SAVED_LOCATION : NO_CITY);
+        setBirthTimezone(snapshot.birthTimezone ?? '');
+        setBirthCity(withChart && snapshot.birthCityName ? SAVED_LOCATION : NO_CITY);
         setLoaded(true);
       })
       .catch((err: Error) => setError(err.message));
@@ -432,6 +485,15 @@ function PersonForm({ mode, personId, onSaved, onCancel, myPeopleEffective: list
     () => [...CITY_OPTIONS, ...customCities.filter((cc) => !CITY_OPTIONS.some((co) => co.cityName === cc.cityName))],
     [customCities]
   );
+  const zones = useMemo(() => timezoneOptions([original?.birthTimezone, ...combinedCities.map((c) => c.timezone)]), [original, combinedCities]);
+
+  /** Choosing a city fills in its timezone; choosing "no city" keeps the timezone. */
+  const onCityChange = (value: string) => {
+    setBirthCity(value);
+    const chosen = combinedCities.find((c) => c.cityName === value);
+    if (chosen) setBirthTimezone(chosen.timezone);
+    else if (value === SAVED_LOCATION && original?.birthTimezone) setBirthTimezone(original.birthTimezone);
+  };
 
   const save = async (method: 'POST' | 'PATCH', url: string, body: Record<string, unknown>) => {
     const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
@@ -445,26 +507,18 @@ function PersonForm({ mode, personId, onSaved, onCancel, myPeopleEffective: list
     e.preventDefault();
     setSaving(true);
     setError('');
+    const values: PersonFormValues = { name, relationshipType, birthDate, birthTime, birthTimezone, birthCity };
     try {
       if (mode === 'EDIT') {
         if (!original || !personId) throw new Error('Unable to load this person.');
-        const payload = buildPersonEditPayload(original, { name, relationshipType, birthDate, birthTime, birthCity }, combinedCities);
+        const payload = buildPersonEditPayload(original, values, combinedCities);
         if (!payload.ok) throw new Error(payload.error);
         // Nothing changed: nothing is sent, nothing is written.
         if (payload.body) await save('PATCH', `/api/people/${personId}`, payload.body);
       } else {
-        const city = combinedCities.find((c) => c.cityName === birthCity);
-        if (!city) throw new Error('Choose a birth location.');
-        await save('POST', '/api/people', {
-          name,
-          relationshipType,
-          birthDate,
-          birthTime,
-          birthTimezone: city.timezone,
-          birthCityName: city.cityName,
-          birthLatitude: city.latitude,
-          birthLongitude: city.longitude,
-        });
+        const payload = buildPersonCreatePayload(values, combinedCities, listServerEnabled);
+        if (!payload.ok) throw new Error(payload.error);
+        await save('POST', '/api/people', payload.body!);
       }
       onSaved();
     } catch (err) {
@@ -477,11 +531,6 @@ function PersonForm({ mode, personId, onSaved, onCancel, myPeopleEffective: list
   if (!loaded) return <SurfaceCard><div style={{ fontSize: 12, color: colors.textFaint }}>Loading…</div></SurfaceCard>;
 
   const relationshipOptions = RELATIONSHIP_OPTIONS.filter((o) => !o.myPeopleOnly || myPeopleEnabled || o.value === relationshipType);
-  const savedLocationLabel = original && hadChart
-    ? original.birthCityName
-      ? `${original.birthCityName} (saved)`
-      : `Saved time zone: ${original.birthTimezone}`
-    : null;
 
   return (
     <form onSubmit={handleSubmit} style={theme.surfaceCardStyle}>
@@ -513,13 +562,20 @@ function PersonForm({ mode, personId, onSaved, onCancel, myPeopleEffective: list
         </div>
 
         <div>
-          <FieldLabel htmlFor="person-birth-city">Birth location</FieldLabel>
-          <SelectInput id="person-birth-city" required={mode === 'ADD'} value={birthCity} onChange={(e) => setBirthCity(e.target.value)}>
-            {savedLocationLabel ? (
-              <option value={SAVED_LOCATION}>{savedLocationLabel}</option>
-            ) : (
-              <option value={NO_CITY}>{mode === 'ADD' ? 'Choose a city…' : 'Not set'}</option>
-            )}
+          <FieldLabel htmlFor="person-birth-timezone">Birth time zone</FieldLabel>
+          <SelectInput id="person-birth-timezone" required={chartRequired} value={birthTimezone} onChange={(e) => setBirthTimezone(e.target.value)}>
+            <option value="">{chartRequired ? 'Choose a time zone…' : 'Not set'}</option>
+            {zones.map((z) => (
+              <option key={z} value={z}>{z}</option>
+            ))}
+          </SelectInput>
+        </div>
+
+        <div>
+          <FieldLabel htmlFor="person-birth-city">Birth city (optional)</FieldLabel>
+          <SelectInput id="person-birth-city" value={birthCity} onChange={(e) => onCityChange(e.target.value)}>
+            {hadChart && original?.birthCityName && <option value={SAVED_LOCATION}>{`${original.birthCityName} (saved)`}</option>}
+            <option value={NO_CITY}>No city</option>
             {combinedCities.map((c) => (
               <option key={c.cityName} value={c.cityName}>{c.cityName}</option>
             ))}
