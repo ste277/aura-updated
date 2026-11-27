@@ -4,7 +4,7 @@
 |---|---|
 | **Ticket** | AURA-MP-1 (62005). HOLD lifted 2026-11-27 after REL-05 |
 | **Design** | [AURA_MP_01_PRODUCT_AND_ARCHITECTURE_DESIGN.md](AURA_MP_01_PRODUCT_AND_ARCHITECTURE_DESIGN.md) (D1–D10 + R1–R3 approved) · [ticket](AURA_MP_1_DATA_AND_API_FOUNDATION_TICKET.md) |
-| **Branch / PR** | `feature/aura-mp-1-data-api-foundation`, base `main` `477723d` · PR: _see §7_ |
+| **Branch / PR** | `feature/aura-mp-1-data-api-foundation`, base `main` `477723d` · [PR #400](https://github.com/ste277/aura-updated/pull/400) |
 | **State** | Implemented and tested locally. **Not merged, not deployed.** Merge and deployment need separate approval |
 | **Production** | My People is **off** (`NEXT_PUBLIC_AURA_MY_PEOPLE` unset → fail-closed). No Production, Vercel, Neon or credential action was taken |
 | **Scope** | MP-1 only. No MP-2 screens, Home card, notifications, invitations, contact import, MCP or GoalActivity link |
@@ -68,4 +68,4 @@ All runs used a disposable local Postgres 16 cluster (port 55491) with the full 
 
 ## 7. PR
 
-_Added after the PR is opened._
+[ste277/aura-updated#400](https://github.com/ste277/aura-updated/pull/400), opened 2026-11-27 from implementation commit `763c84f`. It is open and unmerged; Auto-fix and Auto-merge are off. The PR's CI results are the authoritative check for the environment-only local failures in §4.
