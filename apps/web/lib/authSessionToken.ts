@@ -26,7 +26,9 @@ import { createHash, createHmac, hkdfSync, randomBytes, timingSafeEqual } from '
 export const SESSION_TOKEN_TYPE = 'aura.session';
 export const SESSION_TOKEN_VERSION = 2;
 export const SESSION_TTL_DAYS = 30;
-export const SESSION_TTL_MS = SESSION_TTL_DAYS * 24 * 60 * 60 * 1000;
+/** The fixed lifetime is 720 ELAPSED hours from creation (R1), never calendar days. */
+export const SESSION_TTL_HOURS = SESSION_TTL_DAYS * 24;
+export const SESSION_TTL_MS = SESSION_TTL_HOURS * 60 * 60 * 1000;
 /** Tolerated forward clock skew for `iat`. */
 export const SESSION_IAT_SKEW_MS = 60 * 1000;
 export const MIN_SESSION_SECRET_LENGTH = 32;

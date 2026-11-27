@@ -1,0 +1,8 @@
+root middleware.ts imports the store :: FAILED (detected)
+root instrumentation.ts imports the store :: FAILED (detected)
+route: dynamic import with a template literal :: FAILED (detected)
+route: require with a template literal :: FAILED (detected)
+I1 module: pool created inside a top-level if block :: FAILED (detected)
+I1 module: key derived in a top-level IIFE :: FAILED (detected)
+I1 module: top-level setTimeout side effect :: FAILED (detected)
+route: export-star barrel re-export :: FAILED (detected)

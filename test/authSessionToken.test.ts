@@ -186,7 +186,8 @@ check('sqlInteger: bounds and integers only', sqlInteger(5, 1, 10) === '5' && th
 
 // --- Error contract ----------------------------------------------------------------
 const e = new SessionVerificationUnavailableError('deadline');
-check('error: fixed message, name and reason; nothing else', e.message === SESSION_UNAVAILABLE_MESSAGE && e.name === 'SessionVerificationUnavailableError' && e.reason === 'deadline' && Object.keys(e).sort().join(',') === 'name,reason' && !JSON.stringify(e).includes('@'));
+check('error: fixed message, name, reason and outcome (R1); nothing else', e.message === SESSION_UNAVAILABLE_MESSAGE && e.name === 'SessionVerificationUnavailableError' && e.reason === 'deadline' && e.outcome === 'uncertain' && Object.keys(e).sort().join(',') === 'name,outcome,reason' && !JSON.stringify(e).includes('@'));
+check('error: confirmed-failure reasons default to outcome failed', ['acquire', 'statement_timeout', 'lock_timeout', 'constraint'].every((r) => new SessionVerificationUnavailableError(r as 'acquire').outcome === 'failed'));
 
 console.log(`\n${passes} passed, ${failures} failed`);
 process.exit(failures === 0 ? 0 : 1);

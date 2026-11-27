@@ -284,7 +284,10 @@ async function main() {
   {
     const start = performance.now();
     const r = await expectUnavailable(boundedSessionQuery(pool, 'SELECT pg_sleep(5)', { statementTimeoutMs: 1000, lockTimeoutMs: 250, deadlineMs: 200 }));
-    check('T3 deadline: the caller gets deadline at ~200 ms', r.reason === 'deadline' && r.ms < 900, { reason: r.reason, ms: Math.round(r.ms) });
+    // R1: the server statement limit is clamped to the REMAINING caller budget, so PostgreSQL itself
+    // cancels at ~200 ms (confirmed statement_timeout); the client-deadline discard path is covered by
+    // authSessionR1Db A4/A5 (black-holed answers).
+    check('T3 deadline 200 ms: the operation ends at ~200 ms -- server limit clamped to the remaining budget', (r.reason === 'statement_timeout' || r.reason === 'deadline') && r.ms < 900, { reason: r.reason, ms: Math.round(r.ms) });
     const next = performance.now();
     const nextOk = (await lookupAuthSession(pool, s6.idHash, u6))?.userId === u6;
     const nextMs = performance.now() - next;

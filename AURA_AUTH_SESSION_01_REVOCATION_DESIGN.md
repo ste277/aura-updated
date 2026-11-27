@@ -48,7 +48,7 @@ CREATE TABLE "AuthSession" (
   "idHash"       TEXT           PRIMARY KEY,               -- base64url(sha256(sid)); raw sid never stored
   "userId"       TEXT           NOT NULL REFERENCES "User"(id) ON DELETE CASCADE,  -- "User".id is TEXT (0001)
   "createdAt"    TIMESTAMPTZ(3) NOT NULL DEFAULT now(),
-  "expiresAt"    TIMESTAMPTZ(3) NOT NULL,                  -- set by the DB: now() + 30 days
+  "expiresAt"    TIMESTAMPTZ(3) NOT NULL,                  -- set by the DB: now() + 720 hours (R1)
   "revokedAt"    TIMESTAMPTZ(3),
   "revokeReason" TEXT CHECK ("revokeReason" IN ('logout','logout_all','account_deleted','admin')),
   CHECK (("revokedAt" IS NULL) = ("revokeReason" IS NULL))
@@ -222,7 +222,7 @@ Logout clears it with `Path=/` and `Max-Age=0`. Expiry is checked **only against
 | Max-Age | Computed from the row's DB-set `expiresAt`. It is a client hint only. |
 | Clearing | Same name, `Secure` and `Path=/`, otherwise the browser ignores the deletion of a `__Host-` cookie. Clears `as_sid`/`__Host-as_sid` **and** legacy `as_session`. Tested. |
 
-**Server-side expiry is independent of the cookie.** `expiresAt` is set by the database (`now() + interval '30 days'`) and checked in the lookup SQL against the database's `now()`. The token's `exp` is a second, app-clock check copied from the same value. Both must pass, so clock skew can only make the check stricter. A cookie that is kept past its `Max-Age`, or edited, is still rejected.
+**Server-side expiry is independent of the cookie.** `expiresAt` is set by the database (`now() + make_interval(hours => 720)`, R1: 720 **elapsed** hours, independent of the session TimeZone; a days interval would give 719 / 721 h across a DST change) and checked in the lookup SQL against the database's `now()`. The token's `exp` is a second, app-clock check copied from the same value. Both must pass, so clock skew can only make the check stricter. A cookie that is kept past its `Max-Age`, or edited, is still rejected.
 
 ---
 
@@ -304,6 +304,24 @@ The 2-second budget must bound **work on the database server**, not just how lon
 - The design follows the MCP I2b deadline pattern (`packages/mcp-tools/src/security/deadline.ts`), reimplemented as about 60 lines and not imported, so the session code stays separate from MCP.
 
 **Writes are bounded the same way.** Revoke, revoke-all, create and cleanup use the same `BEGIN; SET LOCAL …` prefix and the same deadline. Cleanup gets a larger `statement_timeout` (5 000 ms) and keeps its `LIMIT`.
+
+**R1 clarified budgets (39233). These are maxima, not cumulative allowances.** Every phase is also limited by what **remains** of one absolute, monotonic caller deadline. The acquisition wait and the `SET LOCAL statement_timeout` / `lock_timeout` values are each `min(maximum, remaining)`.
+
+| Operation | Pool acquisition | Lock timeout | Statement timeout | Overall caller deadline |
+|---|---|---|---|---|
+| Lookup | 500 ms | 250 ms | 1 000 ms | 2 000 ms |
+| Foreground write (create, revoke) | 500 ms | 1 000 ms | 1 500 ms | 2 000 ms |
+| Background cleanup (never on an interactive path) | 500 ms | 1 000 ms | 5 000 ms | 6 000 ms |
+
+**Outcome classes:**
+- **Confirmed success.**
+- **Confirmed failure:** the statement was never sent; or PostgreSQL rejected it before COMMIT with a statement timeout (57014), lock timeout (55P03), a constraint violation (class 23) or SQLSTATE class 22 / 25 / 40 / 42 / 0A.
+- **Uncertain:** the statement was sent and its result is unknown, because the deadline passed, the socket was lost, or there was a connection or operator error.
+
+**Retry rules:**
+- `revokeAuthSession` retries **only an uncertain outcome**, at most once, and only if at least 300 ms of the **same** deadline remains. A retry never restarts or extends the deadline.
+- Lookups and creates are never retried.
+- The dedicated pool stays at five connections.
 
 **Recovery:**
 - Discarded or terminated connections are replaced on demand.

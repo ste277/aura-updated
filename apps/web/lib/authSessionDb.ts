@@ -16,9 +16,18 @@
  *                  wait (55P03), freeing backend CPU, locks and snapshot. The
  *                  settings are transaction-local, so they hold through a
  *                  transaction-mode pooler, at the cost of one round trip.
- *   L3 client   -- one absolute deadline over acquire + send + result. When it
- *                  passes, the connection is DISCARDED (release(err)), never
- *                  returned to the pool, and a late result is never used.
+ *   L3 client   -- ONE absolute, monotonic caller deadline over acquire +
+ *                  send + result (R1, 39232-01). Every phase is limited by the
+ *                  budget that REMAINS: the acquisition wait, and the SET LOCAL
+ *                  statement/lock timeouts, are min(phase maximum, remaining).
+ *                  A caller may pass its own deadlineAt (e.g. revoke's retry),
+ *                  which can only shorten, never extend, the budget. When the
+ *                  deadline passes, the connection is DISCARDED (release(err)),
+ *                  never returned to the pool, and a late result is never used.
+ *
+ * Every failure states its outcome (sessionErrors.ts): 'failed' when the
+ * statement was never sent or PostgreSQL rejected it before COMMIT, and
+ * 'uncertain' when it was sent and the result is unknown.
  *
  * Any failure becomes SessionVerificationUnavailableError (fail closed). A
  * connection that saw any error is discarded; closing it makes the server roll
@@ -34,32 +43,72 @@
  */
 import { performance } from 'perf_hooks';
 import { Pool, type PoolClient, type QueryResult } from 'pg';
-import { SessionVerificationUnavailableError, type SessionUnavailableReason } from './sessionErrors';
-import { SESSION_ID_HASH_PATTERN, USER_ID_PATTERN } from './authSessionToken';
+import {
+  SessionVerificationUnavailableError,
+  type SessionOperationOutcome,
+  type SessionUnavailableReason,
+} from './sessionErrors';
+import { SESSION_ID_HASH_PATTERN, SESSION_TTL_HOURS, USER_ID_PATTERN } from './authSessionToken';
 
 export const SESSION_POOL_APPLICATION_NAME = 'aura-session';
 
-/** L1: dedicated pool bounds. */
+/** L1: dedicated pool bounds (five connections; 500 ms acquisition). */
 export const SESSION_POOL_BOUNDS = Object.freeze({ max: 5, connectionTimeoutMillis: 500, idleTimeoutMillis: 10_000 });
 
+/**
+ * Fixed 30-day lifetime = 720 ELAPSED hours (R1). An hours interval is added
+ * to a timestamptz as absolute time, independent of the session TimeZone; a
+ * days interval would follow the calendar and give 719 / 721 hours across a
+ * daylight-saving transition.
+ */
+export const SESSION_TTL_SQL = `make_interval(hours => ${SESSION_TTL_HOURS})`;
+
+/**
+ * Per-operation MAXIMUM budgets (design §8.1, ticket). They are maxima, not
+ * cumulative allowances: each phase is additionally limited by what remains of
+ * the caller deadline.
+ */
 export interface SessionQueryBounds {
-  /** L2: server-side statement_timeout, ms. */
+  /** L1: maximum wait for a pooled connection, ms. */
+  acquireTimeoutMs?: number;
+  /** L2: maximum server-side statement_timeout, ms. */
   statementTimeoutMs: number;
-  /** L2: server-side lock_timeout, ms. */
+  /** L2: maximum server-side lock_timeout, ms. */
   lockTimeoutMs: number;
-  /** L3: client-side absolute deadline over acquire + send + result, ms. */
+  /** L3: the whole operation's absolute deadline, ms from its start. */
   deadlineMs: number;
 }
 
-/** Session lookups: the 2-second budget. */
-export const SESSION_LOOKUP_BOUNDS: Readonly<SessionQueryBounds> = Object.freeze({ statementTimeoutMs: 1000, lockTimeoutMs: 250, deadlineMs: 2000 });
-/** Create / revoke: may briefly wait behind a B3 FOR SHARE re-check. */
-export const SESSION_WRITE_BOUNDS: Readonly<SessionQueryBounds> = Object.freeze({ statementTimeoutMs: 1500, lockTimeoutMs: 1000, deadlineMs: 2000 });
-/** Bounded batch cleanup. */
-export const SESSION_CLEANUP_BOUNDS: Readonly<SessionQueryBounds> = Object.freeze({ statementTimeoutMs: 5000, lockTimeoutMs: 1000, deadlineMs: 6000 });
+export const SESSION_ACQUIRE_TIMEOUT_MS = 500;
+
+/** Lookup: acquire 500, lock 250, statement 1 000, caller deadline 2 000 ms. */
+export const SESSION_LOOKUP_BOUNDS: Readonly<Required<SessionQueryBounds>> = Object.freeze({ acquireTimeoutMs: 500, lockTimeoutMs: 250, statementTimeoutMs: 1000, deadlineMs: 2000 });
+/** Foreground writes (create / revoke): acquire 500, lock 1 000, statement 1 500, caller deadline 2 000 ms. */
+export const SESSION_WRITE_BOUNDS: Readonly<Required<SessionQueryBounds>> = Object.freeze({ acquireTimeoutMs: 500, lockTimeoutMs: 1000, statementTimeoutMs: 1500, deadlineMs: 2000 });
+/** Background cleanup (never on an interactive path): acquire 500, lock 1 000, statement 5 000, caller deadline 6 000 ms. */
+export const SESSION_CLEANUP_BOUNDS: Readonly<Required<SessionQueryBounds>> = Object.freeze({ acquireTimeoutMs: 500, lockTimeoutMs: 1000, statementTimeoutMs: 5000, deadlineMs: 6000 });
 
 export const SESSION_REVOKE_REASONS = ['logout', 'logout_all', 'account_deleted', 'admin'] as const;
 export type SessionRevokeReason = (typeof SESSION_REVOKE_REASONS)[number];
+
+/** A monotonic clock with timers. Injected only by controlled-clock tests. */
+export interface SessionClock {
+  now(): number;
+  setTimer(fn: () => void, ms: number): unknown;
+  clearTimer(handle: unknown): void;
+}
+
+export const SYSTEM_SESSION_CLOCK: SessionClock = Object.freeze({
+  now: () => performance.now(),
+  setTimer: (fn: () => void, ms: number) => setTimeout(fn, ms),
+  clearTimer: (handle: unknown) => clearTimeout(handle as ReturnType<typeof setTimeout>),
+});
+
+export interface SessionQueryOptions {
+  /** Absolute deadline on `clock` (monotonic ms). Can only shorten the operation's own budget. */
+  deadlineAt?: number;
+  clock?: SessionClock;
+}
 
 function boundedInt(name: string, value: number, min: number, max: number): number {
   if (!Number.isInteger(value) || value < min || value > max) {
@@ -68,11 +117,12 @@ function boundedInt(name: string, value: number, min: number, max: number): numb
   return value;
 }
 
-function checkBounds(b: SessionQueryBounds): SessionQueryBounds {
+function checkBounds(b: SessionQueryBounds): Required<SessionQueryBounds> {
   return {
-    statementTimeoutMs: boundedInt('statementTimeoutMs', b.statementTimeoutMs, 10, 30_000),
-    lockTimeoutMs: boundedInt('lockTimeoutMs', b.lockTimeoutMs, 10, 30_000),
-    deadlineMs: boundedInt('deadlineMs', b.deadlineMs, 10, 60_000),
+    acquireTimeoutMs: boundedInt('acquireTimeoutMs', b.acquireTimeoutMs ?? SESSION_ACQUIRE_TIMEOUT_MS, 1, 10_000),
+    statementTimeoutMs: boundedInt('statementTimeoutMs', b.statementTimeoutMs, 1, 30_000),
+    lockTimeoutMs: boundedInt('lockTimeoutMs', b.lockTimeoutMs, 1, 30_000),
+    deadlineMs: boundedInt('deadlineMs', b.deadlineMs, 1, 60_000),
   };
 }
 
@@ -130,19 +180,43 @@ export function sqlInteger(value: unknown, min: number, max: number): string {
 
 // --- Bounded execution -------------------------------------------------------
 
-function classify(err: unknown): SessionUnavailableReason {
-  if (err instanceof SessionVerificationUnavailableError) return err.reason;
+/** SQLSTATE classes PostgreSQL raises BEFORE COMMIT takes effect: the transaction did not commit. */
+const CONFIRMED_FAILURE_CLASSES = ['22', '23', '25', '40', '42', '0A'];
+
+/** Classifies an error raised AFTER the message was sent. */
+function classifySent(err: unknown): SessionVerificationUnavailableError {
+  if (err instanceof SessionVerificationUnavailableError) return err;
   const code = (err as { code?: unknown } | null)?.code;
-  if (code === '57014') return 'statement_timeout';
-  if (code === '55P03') return 'lock_timeout';
-  if (typeof code === 'string' && code.startsWith('23')) return 'constraint';
-  const message = err instanceof Error ? err.message : '';
-  // node-pg's own acquisition timeout (connectionTimeoutMillis).
-  if (/timeout exceeded when trying to connect/i.test(message)) return 'acquire';
-  return 'driver';
+  if (code === '57014') return new SessionVerificationUnavailableError('statement_timeout', 'failed');
+  if (code === '55P03') return new SessionVerificationUnavailableError('lock_timeout', 'failed');
+  if (typeof code === 'string' && code.startsWith('23')) return new SessionVerificationUnavailableError('constraint', 'failed');
+  if (typeof code === 'string' && CONFIRMED_FAILURE_CLASSES.includes(code.slice(0, 2))) {
+    return new SessionVerificationUnavailableError('driver', 'failed');
+  }
+  // No SQLSTATE (socket / protocol error), connection exceptions (08),
+  // operator intervention (57P), internal errors: the COMMIT may have run.
+  return new SessionVerificationUnavailableError('driver', 'uncertain');
 }
 
-class DeadlineExceeded extends Error {}
+/** Classifies an error raised BEFORE anything was sent: always a confirmed failure. */
+function classifyUnsent(err: unknown): SessionVerificationUnavailableError {
+  if (err instanceof SessionVerificationUnavailableError) return new SessionVerificationUnavailableError(err.reason, 'failed');
+  const message = err instanceof Error ? err.message : '';
+  // node-pg's own acquisition timeout (connectionTimeoutMillis).
+  if (/timeout exceeded when trying to connect/i.test(message)) return new SessionVerificationUnavailableError('acquire', 'failed');
+  return new SessionVerificationUnavailableError('driver', 'failed');
+}
+
+const TIMED_OUT = Symbol('timed-out');
+
+/** Resolves to TIMED_OUT after `ms` on `clock`; cancel() releases the timer. */
+function timeout(clock: SessionClock, ms: number): { promise: Promise<typeof TIMED_OUT>; cancel: () => void } {
+  let handle: unknown;
+  const promise = new Promise<typeof TIMED_OUT>((resolve) => {
+    handle = clock.setTimer(() => resolve(TIMED_OUT), Math.max(0, ms));
+  });
+  return { promise, cancel: () => clock.clearTimer(handle) };
+}
 
 export interface BoundedResult {
   rows: Record<string, unknown>[];
@@ -150,23 +224,30 @@ export interface BoundedResult {
 }
 
 /**
- * Runs ONE statement under L1-L3. Returns that statement's rows.
+ * Runs ONE statement under L1-L3 within one absolute deadline. Returns that
+ * statement's rows, or throws SessionVerificationUnavailableError with a
+ * reason and an outcome ('failed' = confirmed not applied; 'uncertain').
  *
  * `statement` must be built only from fixed SQL plus sqlLiteral()/sqlInteger()
  * values. Exported for lib/authSessionStore.ts and the bound tests only.
  */
-export async function boundedSessionQuery(pool: Pool, statement: string, bounds: SessionQueryBounds): Promise<BoundedResult> {
+export async function boundedSessionQuery(
+  pool: Pool,
+  statement: string,
+  bounds: SessionQueryBounds,
+  opts: SessionQueryOptions = {}
+): Promise<BoundedResult> {
   const b = checkBounds(bounds);
   if (typeof statement !== 'string' || statement.length === 0 || statement.includes(';')) {
     throw new TypeError('Exactly one statement, without a terminator, is required.');
   }
-  const deadlineAt = performance.now() + b.deadlineMs;
-  const remaining = () => Math.max(0, deadlineAt - performance.now());
+  const clock = opts.clock ?? SYSTEM_SESSION_CLOCK;
+  const startedAt = clock.now();
+  const deadlineAt = Math.min(startedAt + b.deadlineMs, opts.deadlineAt ?? Number.POSITIVE_INFINITY);
+  const remaining = () => deadlineAt - clock.now();
 
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const deadline = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new DeadlineExceeded()), b.deadlineMs);
-  });
+  // Nothing is sent once the caller's budget is gone.
+  if (!(remaining() > 0)) throw new SessionVerificationUnavailableError('deadline', 'failed');
 
   let client: PoolClient | null = null;
   let abandoned = false;
@@ -174,56 +255,91 @@ export async function boundedSessionQuery(pool: Pool, statement: string, bounds:
   const onClientError = (err: unknown) => {
     broken = err ?? new Error('client error');
   };
-
-  try {
-    // L1 -- acquire, within both the pool bound and the overall deadline.
-    const connecting = pool.connect();
-    connecting.then(
-      (c) => {
-        if (abandoned) c.release(new Error('session query abandoned during checkout'));
-      },
-      () => {}
-    );
-    client = await Promise.race([connecting, deadline]);
-    if (remaining() === 0) throw new DeadlineExceeded();
-    client.on('error', onClientError);
-
-    // L2 -- one message; PostgreSQL enforces the timeouts itself.
-    const text =
-      `BEGIN; SET LOCAL statement_timeout = '${b.statementTimeoutMs}ms'; ` +
-      `SET LOCAL lock_timeout = '${b.lockTimeoutMs}ms'; ${statement}; COMMIT`;
-    const running = client.query(text) as unknown as Promise<QueryResult[] | QueryResult>;
-    running.catch(() => {});
-    const results = await Promise.race([running, deadline]);
-
-    // L3 -- a result that arrives after the deadline is never used.
-    if (remaining() === 0) throw new DeadlineExceeded();
-    if (broken) throw broken;
-    if (!Array.isArray(results) || results.length !== 5) throw new SessionVerificationUnavailableError('shape');
-    const result = results[3];
-    if (!result || !Array.isArray(result.rows)) throw new SessionVerificationUnavailableError('shape');
-
-    client.off('error', onClientError);
-    client.release();
-    client = null;
-    return { rows: result.rows as Record<string, unknown>[], rowCount: result.rowCount ?? 0 };
-  } catch (err) {
-    abandoned = true;
+  const discard = (reason: string) => {
     if (client) {
-      // Discard: never return a connection that timed out, errored or may hold
-      // an open or aborted transaction. Closing it rolls back on the server.
-      // The error listener stays attached to absorb late socket errors.
-      client.release(err instanceof Error ? err : new Error('session query failed'));
+      // Never return a connection that timed out, errored or may hold an open
+      // or aborted transaction. Closing it rolls back on the server. The error
+      // listener stays attached to absorb late socket errors.
+      client.release(new Error(reason));
       client = null;
     }
-    if (err instanceof DeadlineExceeded) throw new SessionVerificationUnavailableError('deadline');
-    throw new SessionVerificationUnavailableError(classify(err));
+  };
+
+  // L1 -- acquire within min(acquisition maximum, remaining budget).
+  const connecting = pool.connect();
+  connecting.then(
+    (c) => {
+      if (abandoned) c.release(new Error('session query abandoned during checkout'));
+    },
+    () => {}
+  );
+  const acquireWait = Math.min(b.acquireTimeoutMs, remaining());
+  const acquireTimer = timeout(clock, acquireWait);
+  let acquired: PoolClient | typeof TIMED_OUT;
+  try {
+    acquired = await Promise.race([connecting, acquireTimer.promise]);
+  } catch (err) {
+    abandoned = true;
+    throw classifyUnsent(err);
   } finally {
-    if (timer) clearTimeout(timer);
+    acquireTimer.cancel();
   }
+  if (acquired === TIMED_OUT) {
+    abandoned = true;
+    throw new SessionVerificationUnavailableError(remaining() > 0 ? 'acquire' : 'deadline', 'failed');
+  }
+  client = acquired;
+  client.on('error', onClientError);
+
+  // L2 -- the server-side limits are min(phase maximum, remaining budget).
+  const left = Math.floor(remaining());
+  if (left < 1) {
+    discard('session query deadline reached before send');
+    throw new SessionVerificationUnavailableError('deadline', 'failed');
+  }
+  const statementMs = Math.min(b.statementTimeoutMs, left);
+  const lockMs = Math.min(b.lockTimeoutMs, statementMs);
+  const text =
+    `BEGIN; SET LOCAL statement_timeout = '${statementMs}ms'; ` +
+    `SET LOCAL lock_timeout = '${lockMs}ms'; ${statement}; COMMIT`;
+
+  // L3 -- from here the outcome of a failure is uncertain unless PostgreSQL
+  // itself reports a confirmed failure.
+  const sendTimer = timeout(clock, left);
+  let results: QueryResult[] | QueryResult | typeof TIMED_OUT;
+  try {
+    const running = client.query(text) as unknown as Promise<QueryResult[] | QueryResult>;
+    running.catch(() => {});
+    results = await Promise.race([running, sendTimer.promise]);
+  } catch (err) {
+    discard('session query failed');
+    throw classifySent(err);
+  } finally {
+    sendTimer.cancel();
+  }
+  if (results === TIMED_OUT || remaining() < 0) {
+    discard('session query deadline exceeded');
+    throw new SessionVerificationUnavailableError('deadline', 'uncertain');
+  }
+  if (broken) {
+    discard('session client error');
+    throw new SessionVerificationUnavailableError('driver', 'uncertain');
+  }
+  if (!Array.isArray(results) || results.length !== 5 || !results[3] || !Array.isArray(results[3].rows)) {
+    discard('unexpected session query result shape');
+    throw new SessionVerificationUnavailableError('shape', 'uncertain');
+  }
+  const result = results[3];
+  const c = client as PoolClient;
+  c.off('error', onClientError);
+  c.release();
+  client = null;
+  return { rows: result.rows as Record<string, unknown>[], rowCount: result.rowCount ?? 0 };
 }
 
-/** Maps an error from a caller-owned transaction to the fail-closed error. */
+/** Maps an error from a caller-owned transaction to the fail-closed error (with its outcome). */
 export function toSessionUnavailable(err: unknown): SessionVerificationUnavailableError {
-  return err instanceof SessionVerificationUnavailableError ? err : new SessionVerificationUnavailableError(classify(err));
+  return classifySent(err);
 }
+
+export type { SessionOperationOutcome, SessionUnavailableReason };

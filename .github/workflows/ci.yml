@@ -929,6 +929,13 @@ jobs:
         run: npx ts-node test/authSessionToken.test.ts
       - name: Run session store dormancy guard (AUTH-SESSION-01-I1)
         run: npx ts-node test/authSessionDormancy.test.ts
+      # AURA-AUTH-SESSION-01-I1 R1 (39233) -- controlled-clock tests of the single
+      # absolute caller deadline / outcome classification / revoke retry, and the
+      # compile-time provisional-vs-committed result contract. No database.
+      - name: Run session deadline and retry controlled-clock test (AUTH-SESSION-01-I1 R1)
+        run: npx ts-node test/authSessionDeadline.test.ts
+      - name: Run session provisional/committed contract test (AUTH-SESSION-01-I1 R1)
+        run: npx ts-node test/authSessionContract.test.ts
   palm-g5-upload-tests:
     # AURA-PALM-G5-C2 -- dedicated job for the development-only Upload Photo
     # pipeline suites (G5-I1..R4.3), so a Palmistry failure stays visible on
@@ -1244,6 +1251,12 @@ jobs:
       # the app.
       - name: Run session store and bounds DB test (AUTH-SESSION-01-I1)
         run: npx ts-node test/authSessionStoreDb.test.ts
+      # AURA-AUTH-SESSION-01-I1 R1 (39233) -- the same disposable database with an
+      # in-process loopback fault-injection proxy: one revoke deadline and safe
+      # retry (A), provisional vs committed sessions incl. an uncertain COMMIT
+      # acknowledgement (B), and 720-hour expiry across time zones / DST (C).
+      - name: Run session R1 deadline, durability and expiry DB test (AUTH-SESSION-01-I1 R1)
+        run: npx ts-node test/authSessionR1Db.test.ts
       - name: Verify every repository migration was recorded as applied
         run: |
           set -euo pipefail

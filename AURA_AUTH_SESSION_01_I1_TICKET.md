@@ -51,13 +51,20 @@ Add the server-side session table, the token primitives and the bounded store pr
   - Every failure is mapped to `SessionVerificationUnavailableError`.
   - The timeout values must be integers within fixed ranges.
 - `literal(value, kind)` checks the value against a strict pattern (`idHash`: 43 base64url characters; `userId`: UUID; `reason`: one of the allowed values), then applies `escapeLiteral`. Anything else throws before any SQL is built.
-- Defaults: lookups use 1 000 ms statement, 250 ms lock and 2 000 ms deadline; cleanup uses a 5 000 ms statement timeout.
+- **Budgets (R1, 39233), maxima per operation, each phase also limited by the remaining caller deadline:**
+  - lookup: acquire 500 / lock 250 / statement 1 000 / deadline 2 000 ms;
+  - foreground write: 500 / 1 000 / 1 500 / 2 000 ms;
+  - background cleanup: 500 / 1 000 / 5 000 / 6 000 ms.
+
+  `revokeAuthSession` retries only an **uncertain** outcome, once, within the same deadline, and only if ≥ 300 ms remain.
 
 **4. `apps/web/lib/authSessionStore.ts`.** Built on (3).
 
 | Function | Contract |
 |---|---|
-| `createAuthSession(pool, userId)` | INSERT … RETURNING `expiresAt`, set by the DB as `now() + interval '30 days'`. Returns `{sid, expiresAt}`. |
+| `createAuthSession(pool, userId)` | INSERT … RETURNING `expiresAt`, set by the DB as `now() + make_interval(hours => 720)` (R1). Returns a `CommittedAuthSession`. |
+| `createAuthSessionInTransaction(client, userId)` (R1) | INSERT inside the **caller's** transaction. Returns a `ProvisionalAuthSession`, which has no `sid`. The helper never sends BEGIN / COMMIT / ROLLBACK / SET. |
+| `confirmCommittedAuthSession(pool, provisional)` (R1) | After the caller's COMMIT (acknowledged or uncertain), reads the row back on an independent connection and returns a `CommittedAuthSession` or null. A cookie may be issued only from a committed session. |
 | `lookupAuthSession(pool, idHash, userId)` | Returns `{userId}` or `null`. Any failure throws the unavailable error. |
 | `lookupAuthSessionWithUser(pool, idHash, userId)` | The joined variant, same contract |
 | `revokeAuthSession(pool, idHash, reason)` | Idempotent. Returns `'revoked'` or `'already_inactive'`. One retry if the outcome is ambiguous, then throws. |

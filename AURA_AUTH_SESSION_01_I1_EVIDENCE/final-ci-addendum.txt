@@ -1,0 +1,63 @@
+AURA-AUTH-SESSION-01-I1 -- final CI evidence addendum (ticket 39230)
+Written 2026-11-27 (local, uncommitted by owner instruction: no documentation-only commit).
+
+PR:               https://github.com/ste277/aura-updated/pull/401  (draft: true, state: open, auto_merge: null, mergeable_state: clean)
+Head:             864da6f31d0daca212789c1c5ad280d82f557897
+Base branch:      main
+Branch point:     477723d42f353f4993d8e6f6732f767c16f7a05b  (merge-base; also the PR's recorded base.sha)
+Main at CI time:  555116639486baa2bd84a8c1678da96838d61213  (AURA-CI-09 #399, test-only)
+Integration SHA:  d88a59855b35544685155b186e5299113bf05a2f  (refs/pull/401/merge; parents 5551166 + 864da6f;
+                  every job checked out d88a598)
+Approved impl:    5d8a16c5d9d97af1824be402307f261a7be1a412  (apps/web/lib, prisma, ci.yml byte-identical at head)
+
+CI run 45987096338 (pull_request, attempt 1, no rerun), created 2026-11-27T11:02:15Z, completed 11:15:23Z: SUCCESS 7/7
+  SUCCESS  Ephemeris / panchang tests  (job 140465398496)
+  SUCCESS  Next.js production build  (job 140465398648)
+  SUCCESS  Palmistry upload pipeline tests (G5)  (job 140465398757)
+  SUCCESS  Day Constructor acceptance DB tests  (job 140465398798)
+  SUCCESS  MCP Server (Node 20 compatibility)  (job 140465398831)
+  SUCCESS  MCP Server  (job 140465398849)
+  SUCCESS  Database migration validation  (job 140465398922)
+
+Previously skipped / failing checks, observed in the final CI logs:
+  Ephemeris: PREF-01 11o OK; MR3 G12 OK; INS-01 S9 OK; 206 fresh-overlap ALL PASSED; 212 manual-writer ALL PASSED
+             (incl. new checks: timeout module never touches schedule-write lock; label module has no SQL)
+  Ephemeris: authSessionToken 67 passed, 0 failed; authSessionDormancy 16 passed, 0 failed; signInResendChangeEmailJsdom passed
+  Migration validation: prisma migrate deploy -> all applied; migrate status -> 55 found, up to date;
+                        ledger 55 applied == 55 directories; authSessionStoreDb 50 passed, 0 failed (T1-T8)
+  Day Constructor DB: AUTH-01 rate-limit, SEC-01 log redaction, AUTH-02 magic-link suites passed;
+                      multi-occurrence Rhythm Move capacity test ran and PASSED (no occurrence of the known failure; not rerun or modified)
+
+Earlier runs on this PR (not rerun): 45973451075 (29bf09d) 5/7; 45979973063 (81f08df, superseded) 6/7; 45980042902 (afb72e6) 6/7.
+Preview deployment only (production_environment: false); vercel-build.sh migrates only when VERCEL_ENV=production.
+
+Checksums (sha256) of the committed I1 evidence and key files at head 864da6f:
+  20c372216ad6fa3a676152984cc3743a870eee83ca8b1d57837b1ac1bdb880e6  AURA_AUTH_SESSION_01_EVIDENCE/bench-output.txt
+  f2967aff83be877d961368537efcc3ed9586f4d64551fcfc3009cec8d5b3bf6d  AURA_AUTH_SESSION_01_EVIDENCE/bench.js
+  c87b1a5a5d9b737c4fc8d8e43940a334ec8be2e08e91ed703980eee614a2790a  AURA_AUTH_SESSION_01_I1_EVIDENCE/ci-layout/authSessionDormancy.log
+  e92d3dbd03d8f00667a7404afc152bb2c2c68ffdd96bedf609c44632b9e94360  AURA_AUTH_SESSION_01_I1_EVIDENCE/ci-layout/authSessionStoreDb-run1.log
+  b0cd6b324c4b26dc1f2deec2b8d1b00719d2f2f698aafa0e6c1cefdefb0896da  AURA_AUTH_SESSION_01_I1_EVIDENCE/ci-layout/authSessionStoreDb-run2.log
+  7e8ea20a08e74a31864246ca44d79a8c86bd1e6d81afcf065367f739c87c1612  AURA_AUTH_SESSION_01_I1_EVIDENCE/ci-layout/authSessionStoreDb-run3.log
+  f1ebb4e5614de923b1ec681a35fc3db8fb62e977ebe9849a7c8f6dc8aa8a4ec5  AURA_AUTH_SESSION_01_I1_EVIDENCE/ci-layout/authSessionToken.log
+  360e2e97c15625258c163a193f379c16cd1381bf4839892c32f9342bb845732b  AURA_AUTH_SESSION_01_I1_EVIDENCE/ci-layout/availabilityPreferencesPref01.log
+  c87b1a5a5d9b737c4fc8d8e43940a334ec8be2e08e91ed703980eee614a2790a  AURA_AUTH_SESSION_01_I1_EVIDENCE/dormancy.log
+  8b0a8026b1d148474f5b370ef99d2499fcb54a5c205dc7fb61e7da5825bfce3a  AURA_AUTH_SESSION_01_I1_EVIDENCE/ephemeris-replay/ci-steps-math-core-tests.jsonl
+  6941aa2c5f7547b1f4be6b69a3d0efaa2436e8f3c939101f5283a5b6296192cd  AURA_AUTH_SESSION_01_I1_EVIDENCE/ephemeris-replay/replay1-failure-causes.txt
+  a35f1978bae0b1c4a6da7680397d99b281c3d09f8f2405771f2a41c13eee1e48  AURA_AUTH_SESSION_01_I1_EVIDENCE/ephemeris-replay/replay1-failures.txt
+  1189448a3c03160ca6731488dea0d064677a67f2850ceb28e20302c29b8fc16c  AURA_AUTH_SESSION_01_I1_EVIDENCE/ephemeris-replay/replay2-summary.txt
+  f8bd9b800d83cb25aac62fd200ff5668dac634f04851d7f2ec9348889b1609d5  AURA_AUTH_SESSION_01_I1_EVIDENCE/ephemeris-replay/run-eph.sh
+  444f0792b5edc83a5d8724b4837500c64dc0a114b6b6a3ea6af30130099ac247  AURA_AUTH_SESSION_01_I1_EVIDENCE/guard-controls/guard-negative-controls.txt
+  5741d289cfe4a184a46cae49212f60c8e26d17e970deab3b4df1d483e90d93f5  AURA_AUTH_SESSION_01_I1_EVIDENCE/storeDb-run1.log
+  6d0ab15d13f8fd358d7194bd6967224b36ff37e4bf0a13bec94124dd42da364f  AURA_AUTH_SESSION_01_I1_EVIDENCE/storeDb-run2.log
+  f334798e7586d3656ba361c0061e3b5e7a097bb7bbd62a1f774522a0fe44d271  AURA_AUTH_SESSION_01_I1_EVIDENCE/storeDb-run3.log
+  6fe084c39a6442e1747029ac898900b6a89bec19af6dc69eb6c964c781a97adc  AURA_AUTH_SESSION_01_I1_EVIDENCE/storeDb-run4.log
+  40c3d141767e27bbf75e37694fb74f30c52b12b93c4404c7f050a3416311e527  AURA_AUTH_SESSION_01_I1_EVIDENCE/storeDb-run5.log
+  f1ebb4e5614de923b1ec681a35fc3db8fb62e977ebe9849a7c8f6dc8aa8a4ec5  AURA_AUTH_SESSION_01_I1_EVIDENCE/token.log
+  f1f7f150a54643f6ac6d8e05253642e177d0b1f700f08483f3f8fbb2084f2262  AURA_AUTH_SESSION_01_I1_TICKET.md
+  5091ecae82f32a33f8f849e5677199325b1ea672704e9b83880806fdfe7fbfa8  AURA_AUTH_SESSION_01_I1_VERIFICATION_HANDOVER.md
+  b5b8716c2f7d0e03e498d63530bb2917d11678a1db2abb2e5d6eed1f797452c8  AURA_AUTH_SESSION_01_REVOCATION_DESIGN.md
+  3621be62b010b0b8623546b6399b6245e11b1d02f41fdc09a8f8a339b4ea18c5  apps/web/lib/authSessionDb.ts
+  d89a0a18d51a7b06d149c5a720d544551cfd80c03136f566dc1fa3b3ecca29c6  apps/web/lib/authSessionStore.ts
+  afe5db86fe2dec2a15a02feb1b9499bc74a593627f52ed51d00f32b86a422dff  apps/web/lib/authSessionToken.ts
+  2b6445db96d548070fbbb4391cd6e88b2cf8e1194b32392d75bb4381df433a68  apps/web/lib/sessionErrors.ts
+  021dd90dd5a80eae705c3dd7f7d960e17980e46c5d43f4affe758291865f47b0  apps/web/prisma/migrations/0055_auth_session/migration.sql
