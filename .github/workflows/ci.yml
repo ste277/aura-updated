@@ -959,6 +959,12 @@ jobs:
       # synthetic engine compatibility. Synthetic landmarks and traces only.
       - name: Run Palm feature foundation tests (PALM-03-I1)
         run: npx ts-node test/palm03I1FeatureFoundation.test.ts
+      # AURA-PALM-04-I1: in-memory hand construction context (revoked on reset, photo
+      # replacement, cancellation and teardown) and the headless assisted-tracing model,
+      # with I1 parity over the complete independent 6,548-trace synthetic corpus.
+      # Synthetic data only; no UI; nothing persisted or transmitted.
+      - name: Run assisted-tracing foundation tests (PALM-04-I1)
+        run: npx ts-node test/palm04I1Tracing.test.ts
       # PALM-03-E1: development-only personalised interpretation engine (synthetic
       # observations only; unreviewed content). The package suite compares the engine
       # with the unmodified C1 reference oracle (python3, preinstalled on the runner):
