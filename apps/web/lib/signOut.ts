@@ -88,6 +88,10 @@ export interface OwnedDiscardReport {
   unidentified?: number;
   /** R11: the discard's outcome could not be established. */
   uncertain?: number;
+  /** R13: discarded (never sent again) but whether a copy remains on this device could not be checked. */
+  discardedUnverified?: number;
+  /** R13: of `discardedUnverified`: it had been handed to the network. */
+  discardedUnverifiedPossiblySent?: number;
 }
 
 export interface SignOutDeps {
@@ -151,6 +155,10 @@ export function discardOutcomeMessage(r: SignOutResult): string | null {
         // R11: no claim about later syncing -- a kept log may be paused; nothing about it was decided here.
         parts.push(`${plural(kept, '1 activity log was', '# activity logs were')} kept on this device for this account (${why.join('; ')}); nothing about ${kept === 1 ? 'it' : 'them'} was changed, and Aura will ask again the next time you sign out of this account.`);
       }
+      const du = o.discardedUnverified ?? 0;
+      if (du > 0) parts.push(`${plural(du, '1 activity log was', '# activity logs were')} discarded and will never be sent; Aura couldn't check whether ${du === 1 ? 'a copy of it remains' : 'copies of them remain'} on this device.`);
+      const dus = o.discardedUnverifiedPossiblySent ?? 0;
+      if (du > 0 && dus > 0) parts.push(`${dus === du ? (du === 1 ? 'It' : 'They') : `${dus} of those`} may already have been sent, so ${dus === 1 ? 'it' : 'they'} may be saved to your account; discarding ${dus === 1 ? 'it' : 'them'} here doesn't undo that.`);
       const unc = o.uncertain ?? 0;
       if (unc > 0) parts.push(`Aura couldn't confirm whether ${plural(unc, '1 activity log was', '# activity logs were')} discarded; ${unc === 1 ? 'it' : 'they'} may still be on this device for this account.`);
       const cp = o.cleanupPending ?? 0;
@@ -281,7 +289,7 @@ async function run(deps: SignOutDeps): Promise<SignOutResult> {
       // R9: one logical discard -- the decisions and every IndexedDB copy in one transaction, retired
       // localStorage entries removed only after it committed (a failure keeps everything as it was).
       const d = await discardOwned(owner, snapshot, { tab: getTabId() });
-      owned = { unknown: false, removed: d.removed, removedPossiblySent: d.removedPossiblySent, keptInFlight: d.keptInFlight, failed: d.failed, cleanupPending: d.cleanupPending, cleanupPendingPossiblySent: d.cleanupPendingPossiblySent, unidentified: d.unidentified, uncertain: d.uncertain };
+      owned = { unknown: false, removed: d.removed, removedPossiblySent: d.removedPossiblySent, keptInFlight: d.keptInFlight, failed: d.failed, cleanupPending: d.cleanupPending, cleanupPendingPossiblySent: d.cleanupPendingPossiblySent, unidentified: d.unidentified, uncertain: d.uncertain, discardedUnverified: d.discardedUnverified, discardedUnverifiedPossiblySent: d.discardedUnverifiedPossiblySent };
     }
     const legacy = readLegacySnapshot();
     transition.end('signed-out');

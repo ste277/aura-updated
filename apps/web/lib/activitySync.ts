@@ -49,6 +49,11 @@ export type ActivityWriteResult =
    * established: NOTHING was stored or sent. Recoverable -- the user can try again.
    */
   | { kind: 'storage-unavailable' }
+  /**
+   * R13: the queue write's commit could not be confirmed and could not be reconciled. The activity MAY be queued on
+   * this device (it would then sync under this same request id); it must not be re-entered as a new activity.
+   */
+  | { kind: 'outcome-unknown' }
   /** The server says this bundle is out of date; the entry is kept. */
   | { kind: 'upgrade-required' };
 
@@ -96,7 +101,8 @@ export async function submitActivityLog(payload: HabitLogPayload, tempId: string
     // transaction, established its eligibility (no decision, no quarantined copy, readable retired sources) and
     // claimed it. There is no direct-network fallback: if storage cannot be read, nothing is sent.
     const stored = await enqueueOwned({ ...payload, tempId, ownerUserId: lease.account }, { claimFor: tab });
-    if (stored.status === 'failed' || stored.status === 'unavailable') return { kind: 'storage-unavailable' };
+    if (stored.status === 'failed' || stored.status === 'unavailable') return { kind: 'storage-unavailable' }; // confirmed not queued
+    if (stored.status === 'unknown') return { kind: 'outcome-unknown' }; // R13: possibly queued, never reported as not saved
     if (stored.status === 'conflict') return { kind: 'not-stored' }; // never send a second payload under one identity
     // R8: this account already settled/discarded the request, or a quarantined copy of it exists: never sent again.
     if (stored.status === 'settled' || stored.status === 'paused') return { kind: 'not-stored' };
@@ -112,9 +118,13 @@ export async function submitActivityLog(payload: HabitLogPayload, tempId: string
       await release();
       return outbox ? { kind: 'account-changed', keptForAccount: true } : { kind: 'not-stored' };
     }
+    // R13: the claimed account must be the authenticated one.
+    if (token.owner !== undefined && token.owner !== lease.account) { await release(); return { kind: 'account-changed', keptForAccount: true }; }
     // R12: the retired-storage state visible when transmission begins (synchronous; the send follows with no await).
     const tc = transmissionCheck(token);
-    if (tc !== 'clear') { await release(); return tc === 'unavailable' ? { kind: 'storage-unavailable' } : { kind: 'not-stored' }; }
+    // R13: the record is already COMMITTED to the queue here -- a refusal at this point means "kept, not sent now",
+    // never "not stored": it stays queued (paused or retried later under the same request id).
+    if (tc !== 'clear') { await release(); return lease.isCurrent() ? { kind: 'queued' } : { kind: 'account-changed', keptForAccount: true }; }
     let res: Response;
     try {
       res = await post(lease, fetchImpl, claimedBody(token, payload));
@@ -184,7 +194,8 @@ async function replayLocked(fetchImpl: typeof fetch, binding: AccountBinding): P
       if (await isTransitionActiveNow()) { result.stoppedBecause = 'transition'; break; }
       // The handoff: atomically confirm the request is still queued and not being sent, and claim it.
       // R12: bound to what was inspected -- a replaced or modified record is refused ('changed'), never claimed.
-      const claim = await claimForDispatch(head.recordId, tab, { clientRequestId: head.item.clientRequestId, payload: canonicalPayload(head.item) });
+      // R13: ... including the inspected ACCOUNT (an account-only replacement is refused as well).
+      const claim = await claimForDispatch(head.recordId, tab, { ownerUserId: lease.account, clientRequestId: head.item.clientRequestId, payload: canonicalPayload(head.item) });
       if (claim.status === 'failed') { result.stoppedBecause = 'unreadable'; break; }
       if (claim.status !== 'claimed') continue; // settled/discarded/changed meanwhile, or another attempt is sending it
       const token = claim.claim;
@@ -194,6 +205,7 @@ async function replayLocked(fetchImpl: typeof fetch, binding: AccountBinding): P
         result.stoppedBecause = lease.isCurrent() ? 'transition' : 'account-changed';
         break;
       }
+      if (token.owner !== lease.account) { await releaseClaim(token); continue; } // R13: claim/lease account agreement
       const tc = transmissionCheck(token); // R12: synchronous, immediately before the send
       if (tc !== 'clear') { await releaseClaim(token); if (tc === 'unavailable') { result.stoppedBecause = 'unreadable'; break; } continue; }
       const { tempId: _t, ownerUserId: _o, queuedAt: _q, recordId: _r, ...cached } = head.item;

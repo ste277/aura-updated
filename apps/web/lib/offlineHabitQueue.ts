@@ -595,6 +595,11 @@ export type EnqueueResult =
   | { status: 'paused' }
   /** R9: eligibility cannot be established (localStorage unreadable, or an unidentifiable retired entry): not stored, NOT to be sent. */
   | { status: 'unavailable' }
+  /**
+   * R13: the transaction's commit could not be confirmed AND a reconciliation read could not establish whether the
+   * request is queued. It may be queued (and would then replay under this same request id); never resubmit it as new.
+   */
+  | { status: 'unknown' }
   | { status: 'conflict' }
   | { status: 'failed' };
 
@@ -659,36 +664,72 @@ async function eligibilityGate(st: Stores, owner: string, crid: string, payload:
 /**
  * Stores one ACTIVE record for its owner, atomically with the eligibility gate and (claimFor) the sender's claim.
  */
+/** R13: a refusal decided INSIDE the transaction aborts it, so nothing it wrote commits. */
+class EnqueueRefusal extends Error { constructor(readonly result: EnqueueResult) { super('enqueue refused'); } }
+
+/**
+ * Stores one ACTIVE record for its owner, atomically with the eligibility gate and (claimFor) the sender's claim.
+ *
+ * R13 -- transaction outcomes (each result is CONFIRMED unless it says otherwise):
+ *   stored              committed: queued (claim = this attempt's token, or null when another attempt holds one)
+ *   settled / paused / conflict / unavailable
+ *                       confirmed NOT queued by this call: the transaction aborted before commit (a refusal at the
+ *                       claim's linearization point aborts it, so a newly added record never survives a refusal)
+ *   failed              confirmed not queued: storage could not be opened / the transaction never ran / it failed
+ *                       before issuing any write, or the reconciliation read proved no copy was committed
+ *   unknown             the commit could not be confirmed and the reconciliation read failed: possibly queued
+ * A commit that is confirmed by the reconciliation read is reported as 'stored' (without a claim), never as a
+ * rejection; it then replays under the same request id.
+ */
 export async function enqueueOwned(item: OwnedQueuedHabitLog, { claimFor }: { claimFor?: string } = {}): Promise<EnqueueResult> {
   if (!item.ownerUserId || !item.clientRequestId) return { status: 'failed' };
+  const owner = item.ownerUserId;
+  const mine = canonicalPayload(item);
+  let started = false;
+  let wrote = false; // a write request was issued in the transaction (only then can a commit be uncertain)
+  let addedRecordId: string | null = null;
   try {
     const now = Date.now();
-    const owner = item.ownerUserId;
-    const mine = canonicalPayload(item);
     // R9: the retired sources are inspected BEFORE the transaction. A discard writes its decision and only then
     // removes a source, so either this inspection still sees the source (paused) or the decision is already
     // committed and the transaction below sees it (settled): no interleaving admits a discarded request.
     const q = inspectQuarantine(owner);
     if (q.state !== 'ok' || q.opaque) return { status: 'unavailable' };
     return await tx('readwrite', async (st) => {
+      started = true;
       const g = await eligibilityGate(st, owner, item.clientRequestId, mine, q);
-      if (g.status !== 'eligible') return { status: g.status } as const;
+      if (g.status !== 'eligible') return { status: g.status } as const; // nothing written
       let recordId: string;
       if (g.copies.length > 0) {
         recordId = g.copies[0].recordId;
       } else {
         recordId = randomId();
+        addedRecordId = recordId;
+        wrote = true;
         const rec: Stored = { recordId, ownerUserId: owner, clientRequestId: item.clientRequestId, item: { ...item, recordId }, queuedAt: now, fmt: ACTIVE_RECORD_FORMAT };
         await asPromise(st.records.add(rec));
       }
       const stored = g.copies.length > 0 ? g.copies[0].item : { ...item, recordId };
+      if (claimFor) wrote = true;
       const claim = claimFor ? await takeClaim(st, owner, item.clientRequestId, claimFor, now, { payload: mine, recordId, item: stored }) : null;
-      if (claim === 'blocked') return { status: 'paused' } as const;
-      if (claim === 'unavailable') return { status: 'unavailable' } as const;
+      // R13: abort -> the record added above does NOT commit; the result is exactly what storage holds.
+      if (claim === 'blocked') throw new EnqueueRefusal({ status: 'paused' });
+      if (claim === 'unavailable') throw new EnqueueRefusal({ status: 'unavailable' });
       return { status: 'stored', recordId, claim } as const;
     });
-  } catch {
-    return { status: 'failed' };
+  } catch (e) {
+    if (e instanceof EnqueueRefusal) return e.result;
+    if (!started || !wrote) return { status: 'failed' }; // never ran, or failed before issuing any write: nothing can have committed
+    // The commit could not be confirmed: reconcile from storage, never from the error.
+    try {
+      const found = await tx('readonly', async (st) => {
+        const copies = await activeCopies(st, owner, item.clientRequestId, mine);
+        return copies.find((c) => c.recordId === addedRecordId) ?? copies[0] ?? null;
+      });
+      return found ? { status: 'stored', recordId: found.recordId, claim: null } : { status: 'failed' };
+    } catch {
+      return { status: 'unknown' };
+    }
   }
 }
 
@@ -700,11 +741,11 @@ export type ClaimResult = { status: 'claimed'; claim: ClaimToken } | { status: '
  * (token) and the dispatch is recorded (before the send). Only 'claimed' permits sending.
  */
 /**
- * R12: `expected` binds the claim to what the caller inspected (request id + canonical payload). If the record at
+ * R12/R13: `expected` binds the claim to what the caller inspected (account + request id + canonical payload). If the record at
  * `recordId` was replaced or modified since, the stale operation is refused ('changed') -- never claimed for a
  * different record or identity.
  */
-export async function claimForDispatch(recordId: string, tab: string, expected?: { clientRequestId: string; payload: string }): Promise<ClaimResult> {
+export async function claimForDispatch(recordId: string, tab: string, expected?: { ownerUserId?: string; clientRequestId: string; payload: string }): Promise<ClaimResult> {
   try {
     const now = Date.now();
     return await tx('readwrite', async (st) => {
@@ -713,7 +754,9 @@ export async function claimForDispatch(recordId: string, tab: string, expected?:
       const id = recordIdentity(rec.ownerUserId, rec);
       if (id.kind !== 'valid' || !isActive(rec)) return { status: 'paused' } as const; // R8/R11: never sent
       const payload = canonicalPayload(rec.item);
-      if (expected && (id.crid !== expected.clientRequestId || payload !== expected.payload)) return { status: 'changed' } as const;
+      // R13: the inspected ACCOUNT is part of the binding: a record replaced by another account's record (even with the
+      // same record id, request id and payload) never inherits the inspection's eligibility.
+      if (expected && ((expected.ownerUserId !== undefined && rec.ownerUserId !== expected.ownerUserId) || id.crid !== expected.clientRequestId || payload !== expected.payload)) return { status: 'changed' } as const;
       const q = inspectQuarantine(rec.ownerUserId);
       if (q.state !== 'ok') return { status: 'failed' } as const; // the request's quarantine state is unknown: never send
       // R11: the SAME gate as direct submission, at the final transmission boundary.
@@ -879,6 +922,10 @@ export interface LogicalDiscardResult {
   cleanupPending: number;
   /** Of `cleanupPending`: it had been handed to the network. */
   cleanupPendingPossiblySent: number;
+  /** R13: discarded (decision recorded, never sent again) but whether a copy remains could not be verified. */
+  discardedUnverified: number;
+  /** Of `discardedUnverified`: it had been handed to the network. */
+  discardedUnverifiedPossiblySent: number;
   /** Another context was sending it at that moment: nothing decided, nothing deleted. */
   keptInFlight: number;
   /** NOT discarded: the transaction did not record a decision (verified afterwards); kept exactly as before. */
@@ -906,9 +953,11 @@ export interface DiscardSnapshot {
 async function remainingCopies(owner: string, crids: Set<string>): Promise<{ crids: Set<string>; unidentifiedRecordIds: string[]; unidentifiedKeys: string[] } | null> {
   if (crids.size === 0) return { crids: new Set(), unidentifiedRecordIds: [], unidentifiedKeys: [] };
   try {
+    const rows = await tx('readonly', (st) => relevantRecords(st, owner));
+    // R13: retired storage is inspected AFTER the IndexedDB read completed, synchronously with computing the result
+    // (no await between): a retired write visible to this context at the reporting boundary is never missed.
     const q = inspectQuarantine(owner);
     if (q.state !== 'ok') return null;
-    const rows = await tx('readonly', (st) => relevantRecords(st, owner));
     const left = new Set<string>(), unidentifiedRecordIds: string[] = [], unidentifiedKeys: string[] = [];
     for (const r of rows) {
       const id = recordIdentity(owner, r);
@@ -943,7 +992,7 @@ async function remainingCopies(owner: string, crids: Set<string>): Promise<{ cri
  *     even that read fails the outcome is uncertain. Nothing is ever reported as rolled back without that read.
  */
 export async function discardOwned(owner: string, snap: DiscardSnapshot, { tab }: { tab: string }): Promise<LogicalDiscardResult> {
-  const out: LogicalDiscardResult = { removed: 0, removedPossiblySent: 0, cleanupPending: 0, cleanupPendingPossiblySent: 0, keptInFlight: 0, failed: 0, uncertain: 0, unidentified: 0, alreadyGone: 0 };
+  const out: LogicalDiscardResult = { removed: 0, removedPossiblySent: 0, cleanupPending: 0, cleanupPendingPossiblySent: 0, discardedUnverified: 0, discardedUnverifiedPossiblySent: 0, keptInFlight: 0, failed: 0, uncertain: 0, unidentified: 0, alreadyGone: 0 };
   const own = (key: string) => QUARANTINED_PREFIXES.some((p) => key === `${p}${owner}` || key.startsWith(`${p}${owner}:`));
   const sources = snap.quarantined.filter((x) => own(x.key));
   const sourceCrids = new Set(sources.flatMap((x) => x.crids));
@@ -1001,7 +1050,8 @@ export async function discardOwned(owner: string, snap: DiscardSnapshot, { tab }
     // Decided ones: no cleanup is attempted after an unconfirmed commit; report by what PHYSICALLY remains (R12).
     const remaining = await remainingCopies(owner, new Set(found.keys()));
     for (const [crid, sent] of found) {
-      if (remaining === null || remaining.crids.has(crid)) { out.cleanupPending++; if (sent) out.cleanupPendingPossiblySent++; }
+      if (remaining === null) { out.discardedUnverified++; if (sent) out.discardedUnverifiedPossiblySent++; } // R13: unknown, not "a copy remains"
+      else if (remaining.crids.has(crid)) { out.cleanupPending++; if (sent) out.cleanupPendingPossiblySent++; }
       else { out.removed++; if (sent) out.removedPossiblySent++; }
     }
     return out;
@@ -1026,8 +1076,9 @@ export async function discardOwned(owner: string, snap: DiscardSnapshot, { tab }
   const snapshotKeys = new Set(sources.map((x) => x.key));
   if (remaining) out.unidentified += remaining.unidentifiedRecordIds.filter((id) => !snapshotCorrupt.has(id)).length + remaining.unidentifiedKeys.filter((k) => !snapshotKeys.has(k)).length;
   for (const [crid, sent] of committed.decided) {
-    if (pendingCleanup.has(crid) || remaining === null || remaining.crids.has(crid)) { out.cleanupPending++; if (sent) out.cleanupPendingPossiblySent++; }
-    else { out.removed++; if (sent) out.removedPossiblySent++; }
+    if (pendingCleanup.has(crid) || remaining?.crids.has(crid)) { out.cleanupPending++; if (sent) out.cleanupPendingPossiblySent++; } // a copy is KNOWN to remain
+    else if (remaining === null) { out.discardedUnverified++; if (sent) out.discardedUnverifiedPossiblySent++; } // R13: physical state unknown
+    else { out.removed++; if (sent) out.removedPossiblySent++; } // observed absent at the reporting boundary
   }
   return out;
 }

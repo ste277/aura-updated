@@ -1,0 +1,15 @@
+555116639486baa2bd84a8c1678da96838d61213 refs/review/main no affected keys
+477723d42f353f4993d8e6f6732f767c16f7a05b 477723d no affected keys
+a39f3982eda3004862f360534ad606deb4599985 a39f398 no affected keys
+ac46fc315771685abefc38783be311745b007f2c ac46fc3 no affected keys
+7a9af83d84d71ceab2fd4208367441319fae533a 7a9af83 no affected keys
+37c4e487b5ec3cdc74edbb57e3fbc8c1ffc3f82c v1.0.0 no affected keys
+d0f41059d1c826e741016c80f2919b80b2bade56 v1.1.0 no affected keys
+Live alias: {'alias': 'aura-updated.vercel.app', 'deploymentId': 'dpl_x9NB8B9N5vVvPxVWRM8bRcxjTxqM'}
+READY Production target after first writer: {'uid': 'dpl_x9NB8B9N5vVvPxVWRM8bRcxjTxqM', 'created': 1795714984007, 'state': 'READY', 'sha': 'a39f3982eda3004862f360534ad606deb4599985', 'ref': 'HEAD'} no affected keys
+Historical READY Preview: {'uid': 'dpl_6RdvBPNt6JZjp5uGDcJdYNL9UWiZ', 'created': 1795682335793, 'state': 'READY', 'target': None, 'sha': '7cae58a6f7273060433388f6f1c6ddf446f46c4b'}
+Historical READY Preview: {'uid': 'dpl_4vpqB1W7zPUraspDt7YxA14sn841', 'created': 1795612411571, 'state': 'READY', 'target': None, 'sha': 'fc6536e6ef779f0610529bb1e158e4e5028171db'}
+Historical READY Preview: {'uid': 'dpl_8nmYSaodgsedMmiDgX3ypuKT24hF', 'created': 1795608131675, 'state': 'READY', 'target': None, 'sha': 'b323d2a9dfd8ddc1a0ea430357611ebe25dd90b4'}
+Historical READY Preview: {'uid': 'dpl_EqykZU8uqwGpSF9VzC5rf4R46S7C', 'created': 1795601157180, 'state': 'READY', 'target': None, 'sha': 'db8607e58a1d7f0a6407455c2823b0529be5bf6b'}
+Historical READY Preview: {'uid': 'dpl_4XR6gJUAEFwAho4RVnTfqbtHRnf3', 'created': 1795541308181, 'state': 'READY', 'target': None, 'sha': 'd09449b655d21c213f8bbb29cf90f5bdc71c208e'}
+Public releases with attached builds: v1.0.0	0

@@ -1525,7 +1525,9 @@ function DashboardPageInner() {
         throw new Error('Unable to log this activity.');
       }
 
-      if (outcome.kind === 'queued') {
+      // R13: an unconfirmed queue write may have committed: keep the row pending under the SAME request id (it syncs
+      // if it was queued; the reload merge drops it if it was not) -- never invite a duplicate re-entry.
+      if (outcome.kind === 'queued' || outcome.kind === 'outcome-unknown') {
         // Pending Activity Reload Visibility V1 -- clientRequestId is stamped
         // so loadUserDataAndLogs's merge can tell this still-queued pending
         // row apart from one whose replay was permanently rejected.
