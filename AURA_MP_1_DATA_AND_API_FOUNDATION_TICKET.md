@@ -16,7 +16,10 @@ Make a person **name-only-capable and special-day-aware** at the data and API le
 
 ### 1. Migration `0056_my_people_foundation` (additive only)
 
-The number was coordinated at start: 0054 is the latest on `main`, and 0055 is reserved for AUTH-SESSION-01 I1, so My People uses 0056. A later 0055 still applies cleanly after 0056 (verified with `prisma migrate deploy` and `migrate status`; see the handover).
+**Numbering (owner-confirmed 2026-11-27):** AUTH-SESSION-01 I1 has reserved **`0055_auth_session`**, so My People uses **`0056_my_people_foundation`**.
+- 0056 was confirmed available on 2026-11-27. `main` (`477723d`) ends at `0054`. No remote branch or open PR other than this one has 0055–0059. `0055_auth_session` exists only, unpushed, in the AUTH-SESSION worktree.
+- A later 0055 applies cleanly after 0056 (`prisma migrate deploy`, then `migrate status` up to date; see the handover). Either PR can merge first.
+- **Re-check before merge (required):** with `git fetch`, confirm that `origin/main` and every open PR have no migration numbered 0056, and that 0055 is still AUTH-SESSION's. If 0056 is taken, renumber to the next free number, then re-run `db-migration-validation` and the 0055-after-0056 order check.
 
 - **`SavedPerson`:**
   - `birthDate`, `birthTime`, `birthTimezone` `DROP NOT NULL`, plus an all-or-none CHECK on the three.

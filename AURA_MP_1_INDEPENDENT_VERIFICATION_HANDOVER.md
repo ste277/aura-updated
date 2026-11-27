@@ -37,7 +37,8 @@
 
 ## 3. Migration number
 
-- `main` latest is `0054`. `0055` is reserved for AUTH-SESSION-01 I1 (its worktree is on current main and has not created it). So MP-1 uses **0056**.
+- `main` latest is `0054`. **`0055_auth_session` is reserved for AUTH-SESSION-01 I1** (owner-confirmed 2026-11-27; it exists only, unpushed, in that worktree). So MP-1 uses **0056**. On 2026-11-27 no remote branch or open PR other than #400 had 0055–0059.
+- **Before merge:** re-check `origin/main` and open PRs for any 0056, as the ticket §1 requires.
 - Verified on a scratch database: apply through 0056, then add a dummy 0055 → `prisma migrate deploy` applies it, and `prisma migrate status` reports "up to date". Either PR can merge first.
 
 ## 4. Local evidence

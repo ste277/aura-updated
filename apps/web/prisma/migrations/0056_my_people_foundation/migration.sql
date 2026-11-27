@@ -4,8 +4,8 @@
 -- every current SavedPerson keeps its full chart details, and every new
 -- column is nullable or has a constant default.
 --
--- Migration number: 0055 is reserved for AUTH-SESSION-01 I1 (coordinated
--- 2026-11-27), so My People uses 0056. Neither migration touches the
+-- Migration number: 0055_auth_session is reserved for AUTH-SESSION-01 I1
+-- (owner-confirmed 2026-11-27), so My People uses 0056. Neither migration touches the
 -- other's tables, and `prisma migrate deploy` applies any unapplied
 -- migration regardless of which one lands first.
 
