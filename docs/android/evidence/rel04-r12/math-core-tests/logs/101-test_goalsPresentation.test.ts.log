@@ -1,0 +1,53 @@
+$ npx ts-node test/goalsPresentation.test.ts
+# job=math-core-tests step=Run Goals presentation test env={}
+OK   11. GET_FITTER -> "Get fitter"
+OK   11. MEDITATE_REGULARLY -> "Meditate regularly"
+OK   11. FINISH_PROJECT -> "Finish a project"
+OK   11. STUDY_CONSISTENTLY -> "Study consistently"
+OK   Y. every template label is human text, never the raw enum string itself
+OK   every real GoalTemplateCategory has exactly one dropdown option
+OK   11/12. "Start from scratch" is present as its own option with value null (never a GoalTemplateCategory)
+OK   12. "Start from scratch" is listed last (reads as "or do it yourself", not the default suggestion)
+OK   exactly 5 template options total (4 real categories + scratch)
+OK   K/17. SUGGESTED renders no badge at all (a normal actionable row, not a labeled one)
+OK   L/17. PLANNED -> "Planned"
+OK   M/17. COMPLETED -> "Completed"
+OK   DISMISSED -> "Dismissed" (human label, distinct from the raw enum casing/word)
+OK   J. "0 of 3 completed"
+OK   J. "1 of 3 completed"
+OK   J. "3 of 3 completed"
+OK   J. zero activities reads as "No activities yet", never "0 of 0 completed"
+OK   R4. hasOngoingRhythmActivity suppresses the progress label to null, regardless of total/completed
+OK   53. finite-only Goal (every activity NONE): hasOngoingRhythmActivity false -- existing N-of-M progress unchanged
+OK   53. Rhythm-only Goal (one N_PER_WEEK activity, just completed its only weekly session): hasOngoingRhythmActivity true -- never shows a misleading "1 of 1"
+OK   53. mixed Goal (one finite NONE + one N_PER_WEEK): hasOngoingRhythmActivity true -- never a misleading universal N-of-M
+OK   53. zero activities: hasOngoingRhythmActivity false (vacuously -- nothing ongoing to misrepresent)
+OK   G. "2026-09-25" displays as "Sep 25"
+OK   G. a year-boundary date displays correctly ("2026-01-01" -> "Jan 1")
+OK   G. a last-day-of-month date displays correctly ("2026-12-31" -> "Dec 31")
+OK   G. isValidCivilDateString (reused directly from lib/goals.ts) accepts the exact format the UI submits
+OK   G. isValidCivilDateString rejects a browser-locale date string, so the UI cannot accidentally submit one
+OK   32. DONE + currentValue null -> null (no line)
+OK   45. legacy-normalized DONE -> null, no crash
+OK   33. DURATION 30 / null -> "30 min"
+OK   34. DURATION 30 / 30 (matching, COMPLETED) -> compact "30 min", no redundant 30/30
+OK   35. DURATION 30 / 18 (differs) -> "18 / 30 min"
+OK   36. DURATION 30 / 45 (above target) -> "45 / 30 min", no clamp
+OK   37. DURATION 30 / 0 (zero, execution exists) -> "0 / 30 min", never treated as missing
+OK   38. MEASURED_TARGET 20 pages / null -> "20 pages"
+OK   39. MEASURED_TARGET 20 pages / 12 -> "12 / 20 pages"
+OK   40. MEASURED_TARGET 20 pages / 25 (above) -> "25 / 20 pages", no clamp
+OK   41. MEASURED_TARGET 20 pages / 0 -> "0 / 20 pages"
+OK   MEASURED_TARGET matching target (symmetric with DURATION's own compact-match rule) -> "20 pages", not "20 / 20 pages"
+OK   42. DURATION 12.5 / null -> "12.5 min"
+OK   42. MEASURED_TARGET 1.25 km / null -> "1.25 km"
+OK   42. MEASURED_TARGET 1.25 km / 0.75 -> "0.75 / 1.25 km"
+OK   42. a whole-number target never grows a trailing ".0"
+OK   16. unit "glasses" rendered verbatim
+OK   16. unit "reps" rendered verbatim
+OK   17. DURATION unit is always the implicit "min", never a persisted completionUnit (DURATION never carries one per G2.1)
+OK   21/43. currentValue (25) > target (20) produces a plain factual string -- the formatter has no derivedState parameter to threshold against
+OK   22/43. currentValue (12) < target (20) produces a plain factual string, never "Partial"/"Failed"/"Incomplete"/"Missed target"
+ALL GOALS PRESENTATION CHECKS PASSED
+
+# exit=0 signal=

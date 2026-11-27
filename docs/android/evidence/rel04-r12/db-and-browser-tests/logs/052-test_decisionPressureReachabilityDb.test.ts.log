@@ -1,0 +1,39 @@
+$ npx ts-node test/decisionPressureReachabilityDb.test.ts
+# job=day-constructor-acceptance-db-tests step=Run decision pressure reachability DB test env={}
+=== NO SOURCE: every catalog activity as REAL Goal demand through BOTH real entry paths ===
+OK   the fixture: one Goal with 42 recurrence-eligible catalog activities and one untyped activity, no stored preference and no habit log (so no duration source exists but the catalog)
+[info] real producers, Friday, no explicit duration: 24 candidates RESOLVED by a catalog default, 19 GENERIC_FALLBACK, 24 LAST_KNOWN_OPPORTUNITY
+OK   P0a IDENTITY, ALL ACTIVITIES: for every one of the 43 Goal activities the canonical manual hand-off row IS the automatic row (the pre-P0a defect -- facts for automatic demand, none for manual -- cannot return unseen)
+OK   REAL EVIDENCE, ALL ACTIVITIES: both entry paths prepared real recurrence AND opportunity evidence for every candidate (no candidate silently lacks facts)
+OK   MANUAL/AUTOMATIC PARITY, ALL ACTIVITIES: the canonical manual hand-off and the automatic entry produce deeply equal evidence (distinct objects) and identical pressure, for every activity
+OK   DEFAULT-DURATION MATRIX (real): every catalog activity WITH a default reaches RESOLVED at exactly that default; FALLBACK MATRIX (real): every one WITHOUT stays GENERIC_FALLBACK at its suggested minutes or the 45-minute floor; the untyped Goal activity is the 45-minute GENERIC_FALLBACK
+OK   PRESSURE REACHABILITY (real, scarce Friday): LAST_KNOWN_OPPORTUNITY for exactly the RESOLVED candidates and NONE for every fallback one -- duration reachability and pressure reachability coincide here only because Friday is scarce for all of them
+=== NON-scarce control: Wednesday ===
+OK   on a Wednesday (Thursday and Friday still viable) the RESOLVED candidates are NONE on both entry paths -- RESOLVED is necessary, never sufficient
+=== SOURCE 1: explicit requested duration (the four core classes) ===
+OK   automatic + manual, explicit duration on an activity with NO catalog default (workout): both RESOLVED at exactly 60 minutes, deeply equal evidence, identical pressure LAST_KNOWN_OPPORTUNITY
+OK   automatic + manual, explicit duration on UNTYPED demand (untyped): both RESOLVED at exactly 60 minutes, deeply equal evidence, identical pressure LAST_KNOWN_OPPORTUNITY
+OK   automatic + manual, explicit duration overriding a catalog default (meditation): both RESOLVED at exactly 60 minutes, deeply equal evidence, identical pressure LAST_KNOWN_OPPORTUNITY
+OK   FOUR-CLASS MATRIX, no explicit duration: workout (no default) is GENERIC_FALLBACK/NONE on both paths; meditation (catalog default) is RESOLVED/LAST_KNOWN_OPPORTUNITY on both paths; untyped is GENERIC_FALLBACK/NONE on both paths
+OK   NEGATIVE CONTROL: with the SAME scarce Friday opportunity facts, the only difference between workout-without-duration (NONE) and workout-with-60-minutes (LAST_KNOWN_OPPORTUNITY) is the duration basis and minutes
+=== SOURCE 2: stored UserActivityPreference ===
+OK   REAL PATH: a real stored preference row -> the real duration context -> RESOLVED evidence at the stored 90 minutes (deep-work has no catalog default and a 30-minute suggestion), on both entry paths with deeply equal evidence
+OK   POSITIVE PRESSURE CONTROL (stored preference): the RESOLVED, scarce Friday candidate is LAST_KNOWN_OPPORTUNITY on both entry paths
+OK   a stored preference outranks the catalog default (meditation: 25, not 15) and the basis stays RESOLVED
+OK   clearing the preference returns the activity to the catalog chain: deep-work is GENERIC_FALLBACK again (30-minute suggestion, NONE) and meditation is back to its 15-minute default
+=== SOURCE 3: behavioral typical duration (real HabitLog rows -> the real duration context) ===
+OK   REACHABLE FOR CANONICAL GOAL DEMAND: three recent logs of the activity (40, 45, 50 minutes, within 30 minutes of each other) -> the real duration context derives a behavioral typical duration -> RESOLVED evidence at the median 45 (learning has no catalog default; its suggestion is 20), on both entry paths
+OK   POSITIVE PRESSURE CONTROL (behavioral duration): the RESOLVED, scarce Friday candidate is LAST_KNOWN_OPPORTUNITY on both entry paths
+OK   BEHAVIORAL BOUND (evidence floor): two logs are not enough -> GENERIC_FALLBACK (the 20-minute suggestion), NONE
+OK   BEHAVIORAL BOUND (consistency): three logs spread by more than 30 minutes (20 / 45 / 80) are not "typical" -> GENERIC_FALLBACK, NONE (never a false-precision average)
+OK   BEHAVIORAL BOUND (recency): three consistent logs older than the 60-day window are ignored -> GENERIC_FALLBACK, NONE
+OK   BEHAVIORAL BOUND (the real loader reads only the 50 MOST RECENT habit logs): three consistent logs pushed out of that window by 50 newer logs of another activity no longer count -> GENERIC_FALLBACK, NONE (a documented limit of the real source, characterized here and NOT changed by P2c)
+OK   removing the behavioral evidence returns the activity to GENERIC_FALLBACK (the fixture, not the activity, supplied the duration)
+=== inert and write-free ===
+OK   a single preview (with logs and a preference present) changes no row in ANY table the duration context reads or the Goal-demand loaders touch
+OK   ZERO WRITES: no plan, occurrence, goal-activity, habit-log or preference row was created or changed by any preview or derivation (only this fixture's own setup rows differ)
+OK   every preview was READY
+OK   previews carry no pressure anywhere (nothing is wired): no response, resolved intent or item mentions it
+ALL DECISION PRESSURE REACHABILITY DB CHECKS PASSED
+
+# exit=0 signal=

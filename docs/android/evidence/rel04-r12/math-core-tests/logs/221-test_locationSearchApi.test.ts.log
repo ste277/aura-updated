@@ -1,0 +1,25 @@
+$ npx ts-node test/locationSearchApi.test.ts
+# job=math-core-tests step=Run location search API test env={}
+OK   search: authenticated via the session cookie (getSessionFromRequest), 401 when absent
+OK   search: rate-limited per authenticated user (keyed by session.userId, never by raw request body)
+OK   search: degrades gracefully (503, not a 500 crash) when the provider key is not configured
+OK   search: provider failures return a clear, non-crashing error (502), never leak the raw provider error to the client
+OK   search: never writes to the database -- read-only resolution, saving only happens through the existing PATCH /api/users/location
+OK   reverse: authenticated via the session cookie (getSessionFromRequest), 401 when absent
+OK   reverse: rate-limited per authenticated user (keyed by session.userId, never by raw request body)
+OK   reverse: degrades gracefully (503, not a 500 crash) when the provider key is not configured
+OK   reverse: provider failures return a clear, non-crashing error (502), never leak the raw provider error to the client
+OK   reverse: never writes to the database -- read-only resolution, saving only happens through the existing PATCH /api/users/location
+OK   search: rejects a missing/empty query with 400 before ever calling the provider
+OK   search: rejects an unreasonably long query (query-length abuse guard)
+OK   reverse: validates latitude/longitude against the SAME bounds the rest of the app already uses (MIN/MAX_VALID_LAT/LNG from lib/cities.ts) -- no second, divergent validation rule
+OK   reverse: rejects non-finite or out-of-range coordinates with 400
+OK   reverse: a geocode result with no usable place (provider returned nothing) is a 404, never a fabricated result
+OK   search rate limit: the 21st+ request within the window is blocked (20/min, matching the route's own constant)
+OK   reverse rate limit: the 11th+ request within the window is blocked (10/min, matching the route's own constant)
+OK   rate limit is per-user: a second, different user starts with a fresh bucket, unaffected by user A exhausting theirs
+OK   reverse route bounds are literally the same imported constants as cities.ts -- cannot silently diverge from the custom-location form's own validation
+
+ALL LOCATION SEARCH API CHECKS PASSED
+
+# exit=0 signal=

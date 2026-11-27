@@ -2,7 +2,14 @@
 
 **Date:** 2026-11-26 (R9) · **PR:** #392 · **Branch:** `aura-android-rel04-app-readiness`, cut from `main` `ad49e6a`
 
-**Revision:** **R11** (ticket 39245): structural queue correction for independent review 39244, which was OPEN at `4a37173`.
+**Revision:** **R12** (ticket 39248): queue concurrency correction for verification 39247, which was OPEN at `d150327`.
+- **Correction:** one concurrency model across inspection, claim, transmission, settlement, discard and cleanup. Claim-bound transmission and settlement; retired-storage checks at the claim and transmission linearization points; scans of every record that names the account; incomplete keys never trusted; removal reported only after the physical state is verified. Closes N1–N6.
+- **Implementation:** `02e283e836638bd86763cd8447b370538d8050e2`.
+- **Evidence:** `docs/android/evidence/rel04-r12/`. Handover: `docs/android/AURA_ANDROID_REL_04_R12_VERIFICATION_HANDOVER.md`, which supersedes §R9–§R11 where they differ.
+- **CI:** automatic run 45974613839, 9/9.
+- **Open owner decision:** the N2 cross-storage residual.
+
+**Previous revision:** **R11** (ticket 39245): structural queue correction for independent review 39244, which was OPEN at `4a37173`.
 - **Correction:** one identity-resolution contract, one transmission gate shared by submission and replay, a discard bound to the confirmed snapshot, and verified per-activity outcomes that keep the prior-send fact. It closes D1–D7 and P3.
 - **Implementation:** `abdd9d8192b77b9fcb844e9ad1e98cddded9b230`.
 - **Evidence:** `docs/android/evidence/rel04-r11/`. Reviewer evidence: `docs/android/evidence/rel04-r10-independent-39244/`.
@@ -54,7 +61,7 @@ R5, R4 and R3 sections are kept as history.
 
 ## 1. Verdict
 
-**R11 READY FOR INDEPENDENT VERIFICATION** (39244 D1–D7 and P3 addressed; ticket 39243 open; the unrelated CI wall-clock failure is documented separately).
+**R12 READY FOR INDEPENDENT VERIFICATION** (39247 N1–N6 addressed; ticket 39243 open; the N2 cross-storage residual awaits an owner decision; CI-09 separate).
 
 | Disposition | State |
 |---|---|

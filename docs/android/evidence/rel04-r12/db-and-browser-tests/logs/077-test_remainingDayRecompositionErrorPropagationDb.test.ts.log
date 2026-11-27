@@ -1,0 +1,15 @@
+$ npx ts-node test/remainingDayRecompositionErrorPropagationDb.test.ts
+# job=day-constructor-acceptance-db-tests step=Run Recomposition error propagation DB test env={}
+OK   setup: occurrence #1 created today, filling the week to its own target (1 of 1)
+OK   setup: occurrence #2 created in a distant, unrelated week (unaffected by this week already being full)
+OK   setup: exactly 2 occurrence rows exist before the rejected Move is attempted
+OK   1. a Move that violates the destination week's existing capacity is REJECTED (SAVE_FAILED)
+OK   2/3. the rejection carries the CORRECT typed conflict code through to the function's own return value (not just "it failed")
+OK   4. ZERO partial writes: total PlannedActivity count is unchanged
+OK   5. the ORIGINAL activity placement is unchanged: still UPCOMING, still at its original (distant-week) slot
+OK   6. NO duplicate GoalActivityOccurrence was created: still exactly 2 rows, both still pointing at their original plans
+OK   7. an UNRELATED failure (the acceptance clock cannot be read -- not a MovePlanError) retains the ORIGINAL bare, codeless SAVE_FAILED fallback
+ALL RECOMPOSITION ERROR PROPAGATION DB CHECKS PASSED
+day/recompose/accept: unexpected failure clock unavailable
+
+# exit=0 signal=
