@@ -154,19 +154,64 @@ model SavedPerson {
   name            String
   relationshipType String  @default("OTHER") // "PARTNER" | "SPOUSE" | "FAMILY" | "FRIEND" | "OTHER"
 
-  birthDate       DateTime @db.Timestamptz(3)
-  birthTime       String   // "HH:MM", 24h, local to birthTimezone -- required, see module note above
-  birthTimezone   String   // IANA name -- required
+  // AURA-MP-1 (migration 0056): chart details are OPTIONAL but all-or-none
+  // (DB CHECK "SavedPerson_chart_all_or_none"). A person may be name-only.
+  // Every natal read goes through natalContextForSavedPerson()
+  // (lib/savedPersonNatalContext.ts), which returns null without them.
+  birthDate       DateTime? @db.Timestamptz(3)
+  birthTime       String?  // "HH:MM", 24h, local to birthTimezone
+  birthTimezone   String?  // IANA name
   birthCityName   String?
   birthLatitude   Float?
   birthLongitude  Float?
 
+  // AURA-MP-1 -- My People fields, all optional. notes is private free
+  // text: never logged, never in ProductEvents, included in the export.
+  relationshipLabel String?
+  locationName      String?
+  timezone          String?  // IANA name, display hints only
+  interests         String[] @default([])
+  notes             String?
+
   createdAt       DateTime @default(now()) @db.Timestamptz(3)
   updatedAt       DateTime @updatedAt @db.Timestamptz(3)
 
-  auraMoments     AuraMoment[]
+  auraMoments       AuraMoment[]
+  occasions         PersonOccasion[]
+  plannedActivities PlannedActivity[]
+
+  @@unique([id, ownerUserId])
+  @@index([ownerUserId])
+}
+
+// AURA-MP-1 -- a person's special days. Civil (calendar-day) dates with an
+// optional year. "Upcoming" is derived on read in the USER's timezone
+// (lib/personOccasions.ts); nothing about an occurrence is stored. The
+// composite FK (savedPersonId, ownerUserId) means a special day can never
+// belong to another user's person. `calendar` is GREGORIAN only for now;
+// month/day are required by a calendar-specific DB CHECK rather than NOT
+// NULL, so a future calendar type (e.g. tithi-dated days) is additive.
+// Migration 0056 also creates a partial unique index (one BIRTHDAY per
+// person), which is raw-SQL-only, same convention as AuraMoment.
+model PersonOccasion {
+  id               String   @id @default(uuid())
+  ownerUserId      String
+  savedPersonId    String
+  person           SavedPerson @relation(fields: [savedPersonId, ownerUserId], references: [id, ownerUserId], onDelete: Cascade)
+
+  kind             String   // "BIRTHDAY" | "ANNIVERSARY" | "OTHER"
+  label            String?  // required for OTHER
+  calendar         String   @default("GREGORIAN")
+  month            Int?
+  day              Int?
+  year             Int?
+  remindDaysBefore Int?     @default(7) // null = don't surface ahead; 0 = on the day only
+
+  createdAt        DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt        DateTime @updatedAt @db.Timestamptz(3)
 
   @@index([ownerUserId])
+  @@index([savedPersonId])
 }
 
 // A snapshot of a selected Muhurtham recommendation, shared via an opaque
@@ -530,6 +575,13 @@ model PlannedActivity {
   // columns on PlannedActivity; the plannedActivityId FK lives entirely on
   // GoalActivityOccurrence.
   goalActivityOccurrence GoalActivityOccurrence?
+
+  // AURA-MP-1 (migration 0056) -- optional link to a My People person,
+  // written only when My People is enabled (lib/myPeopleGate.ts). Deleting
+  // the person keeps the plan (title unchanged, D6) and clears the link.
+  // Migration 0056 adds a partial index on (userId, savedPersonId).
+  savedPersonId   String?
+  savedPerson     SavedPerson? @relation(fields: [savedPersonId], references: [id], onDelete: SetNull)
 
   @@index([userId, plannedStartAt])
   @@index([userId, status])

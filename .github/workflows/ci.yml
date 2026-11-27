@@ -155,6 +155,14 @@ jobs:
         run: npx ts-node test/savedPersonRequest.test.ts
       - name: Run SavedPerson natal context test
         run: npx ts-node test/savedPersonNatalContext.test.ts
+      # AURA-MP-1 -- My People API contracts (switch on/off), the feature
+      # switch itself, and special-day validation. Pure, no database.
+      - name: Run AURA-MP-1 My People request validation test
+        run: npx ts-node test/myPeopleRequest.test.ts
+      # AURA-MP-1 -- special-day date logic: unknown year, 29 Feb, rollover,
+      # the user's local midnight, surfacing windows. Pure, no database.
+      - name: Run AURA-MP-1 special-day date logic test
+        run: npx ts-node test/personOccasions.test.ts
       - name: Run Shared Muhurtham test
         run: npx ts-node test/sharedMuhurtham.test.ts
       - name: Run everyday shared timing fit test
@@ -335,6 +343,11 @@ jobs:
       # cancel, validation, failed/duplicate saves, pause/resume.
       - name: Run MR3 My Rhythm preferences editor (jsdom) test
         run: npx ts-node --project tsconfig.jsdom-tests.json test/myRhythmPreferencesEditorJsdom.test.ts
+      # AURA-MP-1 -- the existing People screen with a person saved WITHOUT
+      # birth details (switch-off rollback safety): renders, edits without
+      # sending chart keys, chart people unchanged.
+      - name: Run AURA-MP-1 People screen null-chart (jsdom) test
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/peopleViewNullChartJsdom.test.ts
       # AURA-REM-01 (PV-F03) -- mounted DeviceNotificationSettings in every
       # permission/availability state (never "on" without a running
       # scheduler), dispatch auth, too-late cutoff, no page-load prompt.
@@ -1650,3 +1663,49 @@ jobs:
       # end-to-end, including the display/commit-consistency guarantee.
       - name: Run Daily Guidance orchestrator DB test
         run: npx ts-node test/dailyGuidanceOrchestratorDb.test.ts
+      # AURA-MP-1 -- My People data and API foundation on a real Postgres
+      # with migration 0056 applied: partial PATCH preserves chart details,
+      # special days, account isolation on every route (incl. the composite
+      # owner FK and the owner-checked plan link), atomic delete with an
+      # injected failure, and export contents.
+      - name: Run AURA-MP-1 My People DB test
+        run: npx ts-node test/myPeopleDb.test.ts
+      # AURA-MP-1 -- feature switch on -> off -> on with a name-only person:
+      # People APIs, Shared Muhurtham (friendly 422), everyday shared timing,
+      # Day Builder, Ask Aura, plans and export keep working; no data lost.
+      - name: Run AURA-MP-1 My People switch rollback DB test
+        run: npx ts-node test/myPeopleSwitchRollbackDb.test.ts
+      # The existing SavedPerson CRUD + ownership suite, never wired into CI
+      # (it needs a live database); run here now that SavedPerson changed.
+      - name: Run SavedPerson DB test
+        run: npx ts-node test/savedPersonDb.test.ts
+      # AURA-MP-1 R1 (62007) -- F1-F5 on real Postgres: legacy relationship
+      # edits while disabled, the authoritative server flag, controlled 400s
+      # for impossible dates / coordinates, DETERMINISTIC special-day update
+      # races and concurrent-create limits, DB date CHECKs, list contract.
+      - name: Run AURA-MP-1 R1 corrections DB test
+        run: npx ts-node test/myPeopleR1Db.test.ts
+      # AURA-MP-1 R1 F1/F2 -- the real legacy People editor (jsdom) driving
+      # the real route handlers and database: what it submits, what the API
+      # accepts, enable/disable/re-enable preservation, graceful degradation.
+      - name: Run AURA-MP-1 R1 legacy People editor DB test
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/peopleViewLegacyEditorDb.test.ts
+      # AURA-MP-1 R2 (62009) -- F1: the real People editor + real API + real
+      # database never changes unrelated birth/location data (full-record
+      # before/after comparison, exact payload keys) across disabled /
+      # enabled / re-enabled states; F4: direct-SQL INSERT and UPDATE matrix
+      # for the Gregorian CHECK (NULL month/day refused, unknown year kept).
+      - name: Run AURA-MP-1 R2 profile preservation and Gregorian integrity DB test
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/myPeopleR2Db.test.ts
+      # AURA-MP-1 R3 (62011) -- the real Add / Edit form + real API + real
+      # database: birth city is OPTIONAL (date + time + an independent
+      # timezone are the chart), exact payloads and persisted records in both
+      # switch states, and no implicit default location ever persisted.
+      - name: Run AURA-MP-1 R3 optional birth location DB test
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/myPeopleR3Db.test.ts
+      # AURA-MP-1 R4 (62014) -- the Add / Edit field-handling contract: an
+      # untouched relationship is omitted (API default OTHER), coordinates
+      # saved without a city survive unrelated edits, and the form never
+      # submits a timezone + location combination the API rejects (bare UTC).
+      - name: Run AURA-MP-1 R4 form contract and chart preservation DB test
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/myPeopleR4Db.test.ts

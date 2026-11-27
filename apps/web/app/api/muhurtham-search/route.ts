@@ -3,7 +3,8 @@ import { getSessionFromRequest } from '../../../lib/session';
 import { getSavedPersonForOwner, getUserById } from '../../../lib/db';
 import { parseJsonObject } from '../../../lib/request';
 import { resolveTzOffsetMinutes } from '../../../lib/timezone';
-import { buildPersonalMuhurtaContextForUser, natalContextFromBirthDetails } from '../../../lib/natalContext';
+import { buildPersonalMuhurtaContextForUser } from '../../../lib/natalContext';
+import { CHART_DETAILS_REQUIRED, chartDetailsRequiredMessage, natalContextForSavedPerson } from '../../../lib/savedPersonNatalContext';
 import { handleMuhurthamSearchBody, handleSharedMuhurthamSearchBody, validateEventLocation } from '../../../lib/muhurthamSearchRequest';
 import { DailyAssistantContext } from '../../../../../packages/recommendation/src/dailyAssistant';
 import { recordProductEvent } from '../../../lib/productEvents';
@@ -39,14 +40,6 @@ function muhurthamResultCount(result: { dates: unknown[] } | { status: string; d
  * route returns a plain 404 without ever revealing whether that id exists
  * for someone else (brief section 11).
  */
-
-function formatUTCDateString(dateInput: Date | string): string {
-  if (typeof dateInput === 'string') return dateInput.split('T')[0];
-  const year = dateInput.getUTCFullYear();
-  const month = String(dateInput.getUTCMonth() + 1).padStart(2, '0');
-  const day = String(dateInput.getUTCDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-}
 
 export async function POST(req: NextRequest) {
   const session = getSessionFromRequest(req);
@@ -102,10 +95,16 @@ export async function POST(req: NextRequest) {
     const person = await getSavedPersonForOwner(session.userId, savedPersonId);
     if (!person) return NextResponse.json({ error: 'Person not found.' }, { status: 404 });
 
+    // AURA-MP-1: a person without chart details cannot take part in SHARED
+    // Muhurtham -- a friendly 422, never a crash on null birth fields.
+    const partnerContext = natalContextForSavedPerson(person);
+    if (!partnerContext) {
+      return NextResponse.json({ error: chartDetailsRequiredMessage(person.name), code: CHART_DETAILS_REQUIRED }, { status: 422 });
+    }
     const partner = {
       savedPersonId: person.id,
       name: person.name,
-      context: natalContextFromBirthDetails(formatUTCDateString(person.birthDate), person.birthTime, person.birthTimezone),
+      context: partnerContext,
     };
 
     const sharedStartedAt = Date.now();

@@ -233,32 +233,109 @@ export async function updateBirthProfile(
   return result.rows[0];
 }
 
-export type SavedPersonRelationshipType = 'PARTNER' | 'SPOUSE' | 'FAMILY' | 'FRIEND' | 'OTHER';
+export type SavedPersonRelationshipType = 'PARTNER' | 'SPOUSE' | 'FAMILY' | 'FRIEND' | 'OTHER' | 'PARENT' | 'CHILD' | 'SIBLING';
 
+/** AURA-MP-1: the chart fields (birthDate/birthTime/birthTimezone) are
+ * nullable and all-or-none (DB CHECK "SavedPerson_chart_all_or_none"). A
+ * name-only person has all three null. Natal context must ONLY be derived
+ * via natalContextForSavedPerson() (savedPersonNatalContext.ts). */
 export interface SavedPerson {
   id: string;
   ownerUserId: string;
   name: string;
   relationshipType: SavedPersonRelationshipType;
-  birthDate: Date;
-  birthTime: string;
-  birthTimezone: string;
+  birthDate: Date | null;
+  birthTime: string | null;
+  birthTimezone: string | null;
   birthCityName: string | null;
   birthLatitude: number | null;
   birthLongitude: number | null;
+  relationshipLabel: string | null;
+  locationName: string | null;
+  timezone: string | null;
+  interests: string[];
+  notes: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
 
-export interface SavedPersonInput {
-  name: string;
-  relationshipType: SavedPersonRelationshipType;
+/** A complete set of chart details. Written whole or cleared whole, never piecemeal. */
+export interface SavedPersonChartInput {
   birthDate: string; // 'YYYY-MM-DD'
   birthTime: string; // 'HH:MM'
   birthTimezone: string;
+  birthCityName?: string | null;
+  birthLatitude?: number | null;
+  birthLongitude?: number | null;
+}
+
+/** CREATE input (and the legacy full-replace UPDATE shape). The chart
+ * fields are flat for backward compatibility with every existing caller;
+ * either all three of birthDate/birthTime/birthTimezone are present or
+ * none are (validated by savedPersonRequest.ts, enforced by the DB CHECK). */
+export interface SavedPersonInput {
+  name: string;
+  relationshipType: SavedPersonRelationshipType;
+  birthDate?: string; // 'YYYY-MM-DD'
+  birthTime?: string; // 'HH:MM'
+  birthTimezone?: string;
   birthCityName?: string;
   birthLatitude?: number;
   birthLongitude?: number;
+  relationshipLabel?: string | null;
+  locationName?: string | null;
+  timezone?: string | null;
+  interests?: string[];
+  notes?: string | null;
+}
+
+/** PARTIAL update (AURA-MP-1). An absent key leaves that column unchanged.
+ * `chart` absent = chart untouched; `chart: null` = clear all six chart
+ * columns together; a chart object = replace all six together. */
+export interface SavedPersonUpdate {
+  name?: string;
+  relationshipType?: SavedPersonRelationshipType;
+  chart?: SavedPersonChartInput | null;
+  relationshipLabel?: string | null;
+  locationName?: string | null;
+  timezone?: string | null;
+  interests?: string[];
+  notes?: string | null;
+}
+
+export const SAVED_PERSON_LIMIT_PER_OWNER = 200;
+
+export function savedPersonHasChartDetails(person: Pick<SavedPerson, 'birthDate' | 'birthTime' | 'birthTimezone'>): boolean {
+  return person.birthDate != null && person.birthTime != null && person.birthTimezone != null;
+}
+
+/** Normalizes a legacy flat input into the partial-update shape. Existing
+ * callers (and the switch-off legacy API contract) pass the flat shape;
+ * a legacy body that carries the chart fields replaces the chart whole,
+ * exactly as before, and NEVER touches the My People-only columns. */
+function toSavedPersonUpdate(source: SavedPersonUpdate | SavedPersonInput): SavedPersonUpdate {
+  if ('chart' in source) return source as SavedPersonUpdate;
+  const { birthDate, birthTime, birthTimezone, birthCityName, birthLatitude, birthLongitude, ...rest } = source as SavedPersonInput;
+  if (birthDate === undefined && birthTime === undefined && birthTimezone === undefined) return rest;
+  // Never let an incomplete legacy body silently CLEAR or half-write a chart.
+  if (!(birthDate && birthTime && birthTimezone)) throw new Error('Incomplete chart details.');
+  return { ...rest, chart: { birthDate, birthTime, birthTimezone, birthCityName: birthCityName ?? null, birthLatitude: birthLatitude ?? null, birthLongitude: birthLongitude ?? null } };
+}
+
+/** B2 + AURA-MP-1: the ONLY path a SavedPerson chart takes to SQL -- the
+ * six chart column values, with the civil birth date as the explicit
+ * UTC-midnight surrogate (never a bare date string). `null` = no chart:
+ * all six columns null together (the DB CHECK requires all-or-none). */
+function savedPersonChartParams(chart: SavedPersonChartInput | null): [string | null, string | null, string | null, string | null, number | null, number | null] {
+  if (!chart) return [null, null, null, null, null, null];
+  return [
+    canonicalizeCivilBirthDate(chart.birthDate),
+    chart.birthTime,
+    chart.birthTimezone,
+    chart.birthCityName ?? null,
+    chart.birthLatitude ?? null,
+    chart.birthLongitude ?? null,
+  ];
 }
 
 /** All CRUD below is scoped by ownerUserId on every query -- never by id
@@ -274,6 +351,11 @@ export async function listSavedPeople(ownerUserId: string): Promise<SavedPerson[
   return result.rows;
 }
 
+export async function countSavedPeople(ownerUserId: string): Promise<number> {
+  const result = await pool.query(`SELECT count(*)::int AS n FROM "SavedPerson" WHERE "ownerUserId" = $1`, [ownerUserId]);
+  return result.rows[0].n;
+}
+
 export async function getSavedPersonForOwner(ownerUserId: string, personId: string): Promise<SavedPerson | null> {
   const result = await pool.query(
     `SELECT * FROM "SavedPerson" WHERE id = $1 AND "ownerUserId" = $2`,
@@ -282,60 +364,388 @@ export async function getSavedPersonForOwner(ownerUserId: string, personId: stri
   return result.rows[0] ?? null;
 }
 
-export async function createSavedPerson(ownerUserId: string, input: SavedPersonInput): Promise<SavedPerson> {
+export async function createSavedPerson(ownerUserId: string, input: SavedPersonInput, executor: Pool | PoolClient = pool): Promise<SavedPerson> {
   const id = randomUUID();
-  const result = await pool.query(
+  const { chart = null, ...fields } = toSavedPersonUpdate(input);
+  const result = await executor.query(
     `INSERT INTO "SavedPerson"
-       (id, "ownerUserId", name, "relationshipType", "birthDate", "birthTime", "birthTimezone", "birthCityName", "birthLatitude", "birthLongitude")
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+       (id, "ownerUserId", name, "relationshipType", "birthDate", "birthTime", "birthTimezone", "birthCityName", "birthLatitude", "birthLongitude",
+        "relationshipLabel", "locationName", timezone, interests, notes)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
      RETURNING *`,
     [
       id,
       ownerUserId,
       input.name,
       input.relationshipType,
-      canonicalizeCivilBirthDate(input.birthDate), // B2: explicit UTC-midnight surrogate, never a bare date string
-      input.birthTime,
-      input.birthTimezone,
-      input.birthCityName ?? null,
-      input.birthLatitude ?? null,
-      input.birthLongitude ?? null,
+      ...savedPersonChartParams(chart),
+      fields.relationshipLabel ?? null,
+      fields.locationName ?? null,
+      fields.timezone ?? null,
+      fields.interests ?? [],
+      fields.notes ?? null,
     ]
   );
   return result.rows[0];
 }
 
-export async function updateSavedPerson(ownerUserId: string, personId: string, input: SavedPersonInput): Promise<SavedPerson> {
+export class SavedPersonLimitError extends Error {
+  constructor(limit: number) {
+    super(`You can save up to ${limit} people.`);
+  }
+}
+
+/** R1 F4: run `work` in ONE transaction under a per-owner advisory lock, so
+ * count-then-write limit checks for that owner are serialized (no TOCTOU
+ * window between concurrent requests). Released at COMMIT/ROLLBACK. */
+async function withOwnerPeopleLock<T>(ownerUserId: string, work: (client: PoolClient) => Promise<T>): Promise<T> {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`aura-my-people:${ownerUserId}`]);
+    const out = await work(client);
+    await client.query('COMMIT');
+    return out;
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/** R1 F4: CREATE with the per-account limit enforced atomically: the count
+ * and the insert happen in one transaction under the owner's lock. Throws
+ * SavedPersonLimitError at the limit. */
+export async function createSavedPersonWithinLimit(ownerUserId: string, input: SavedPersonInput, limit: number = SAVED_PERSON_LIMIT_PER_OWNER): Promise<SavedPerson> {
+  return withOwnerPeopleLock(ownerUserId, async (client) => {
+    const count = (await client.query(`SELECT count(*)::int AS n FROM "SavedPerson" WHERE "ownerUserId" = $1`, [ownerUserId])).rows[0].n;
+    if (count >= limit) throw new SavedPersonLimitError(limit);
+    return createSavedPerson(ownerUserId, input, client);
+  });
+}
+
+/** PARTIAL update (AURA-MP-1). Builds the SET list only from the keys
+ * present, so chart details are never touched unless `chart` is given
+ * (legacy flat callers that send all three chart fields replace the chart
+ * whole, exactly as before). Accepts both shapes, see toSavedPersonUpdate. */
+export async function updateSavedPerson(ownerUserId: string, personId: string, input: SavedPersonUpdate | SavedPersonInput): Promise<SavedPerson> {
+  const update = toSavedPersonUpdate(input);
+  const sets: string[] = [];
+  const values: unknown[] = [personId, ownerUserId];
+  const set = (column: string, value: unknown) => {
+    values.push(value);
+    sets.push(`${column} = $${values.length}`);
+  };
+  if (update.name !== undefined) set('name', update.name);
+  if (update.relationshipType !== undefined) set('"relationshipType"', update.relationshipType);
+  if (update.chart !== undefined) {
+    const [birthDate, birthTime, birthTimezone, birthCityName, birthLatitude, birthLongitude] = savedPersonChartParams(update.chart);
+    set('"birthDate"', birthDate);
+    set('"birthTime"', birthTime);
+    set('"birthTimezone"', birthTimezone);
+    set('"birthCityName"', birthCityName);
+    set('"birthLatitude"', birthLatitude);
+    set('"birthLongitude"', birthLongitude);
+  }
+  if (update.relationshipLabel !== undefined) set('"relationshipLabel"', update.relationshipLabel);
+  if (update.locationName !== undefined) set('"locationName"', update.locationName);
+  if (update.timezone !== undefined) set('timezone', update.timezone);
+  if (update.interests !== undefined) set('interests', update.interests);
+  if (update.notes !== undefined) set('notes', update.notes);
+  sets.push('"updatedAt" = now()');
+
   const result = await pool.query(
-    `UPDATE "SavedPerson"
-     SET name = $3, "relationshipType" = $4, "birthDate" = $5, "birthTime" = $6,
-         "birthTimezone" = $7, "birthCityName" = $8, "birthLatitude" = $9, "birthLongitude" = $10,
-         "updatedAt" = now()
-     WHERE id = $1 AND "ownerUserId" = $2
-     RETURNING *`,
-    [
-      personId,
-      ownerUserId,
-      input.name,
-      input.relationshipType,
-      canonicalizeCivilBirthDate(input.birthDate), // B2: explicit UTC-midnight surrogate, never a bare date string
-      input.birthTime,
-      input.birthTimezone,
-      input.birthCityName ?? null,
-      input.birthLatitude ?? null,
-      input.birthLongitude ?? null,
-    ]
+    `UPDATE "SavedPerson" SET ${sets.join(', ')} WHERE id = $1 AND "ownerUserId" = $2 RETURNING *`,
+    values
   );
   if (result.rows.length === 0) throw new Error('Person not found.');
   return result.rows[0];
 }
 
+/** AURA-MP-1: deletion and every associated reference clean-up happen in
+ * ONE transaction -- either all of it happens or none of it does.
+ *   - the person row is locked first, scoped by owner (404 otherwise);
+ *   - their id is removed from User.dayBuilderPriorityPersonIds (TEXT[], no FK);
+ *   - their DayBuilderDismissal rows (personId, no FK) are deleted;
+ *   - ReminderAttention rows for their special days are deleted;
+ *   - the person is deleted: PersonOccasion cascades; PlannedActivity and
+ *     AuraMoment links are SET NULL by FK (plans and moments are kept, D6). */
 export async function deleteSavedPerson(ownerUserId: string, personId: string): Promise<void> {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const locked = await client.query(
+      `SELECT id FROM "SavedPerson" WHERE id = $1 AND "ownerUserId" = $2 FOR UPDATE`,
+      [personId, ownerUserId]
+    );
+    if (locked.rows.length === 0) throw new Error('Person not found.');
+
+    await client.query(
+      `UPDATE "User" SET "dayBuilderPriorityPersonIds" = array_remove("dayBuilderPriorityPersonIds", $2) WHERE id = $1`,
+      [ownerUserId, personId]
+    );
+    await client.query(`DELETE FROM "DayBuilderDismissal" WHERE "userId" = $1 AND "personId" = $2`, [ownerUserId, personId]);
+    await client.query(
+      `DELETE FROM "ReminderAttention"
+       WHERE "userId" = $1 AND "scheduledItemType" = 'PERSON_OCCASION'
+         AND "scheduledItemId" IN (SELECT id FROM "PersonOccasion" WHERE "savedPersonId" = $2 AND "ownerUserId" = $1)`,
+      [ownerUserId, personId]
+    );
+    await client.query(`DELETE FROM "SavedPerson" WHERE id = $1 AND "ownerUserId" = $2`, [personId, ownerUserId]);
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+// ============================================================
+// AURA-MP-1 -- PersonOccasion (special days). Every query is scoped by
+// BOTH ownerUserId and savedPersonId; the composite FK additionally makes
+// it impossible at the database level to attach a special day to another
+// user's person.
+// ============================================================
+
+export type PersonOccasionKind = 'BIRTHDAY' | 'ANNIVERSARY' | 'OTHER';
+
+export interface PersonOccasion {
+  id: string;
+  ownerUserId: string;
+  savedPersonId: string;
+  kind: PersonOccasionKind;
+  label: string | null;
+  calendar: 'GREGORIAN';
+  month: number | null;
+  day: number | null;
+  year: number | null;
+  remindDaysBefore: number | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface PersonOccasionInput {
+  kind: PersonOccasionKind;
+  label?: string | null;
+  month: number;
+  day: number;
+  year?: number | null;
+  remindDaysBefore?: number | null;
+}
+
+export type PersonOccasionUpdate = Partial<PersonOccasionInput>;
+
+export const PERSON_OCCASION_LIMIT_PER_PERSON = 10;
+
+export class PersonOccasionConflictError extends Error {
+  constructor() {
+    super('This person already has a birthday saved.');
+  }
+}
+
+export class PersonOccasionLimitError extends Error {
+  constructor(limit: number) {
+    super(`Up to ${limit} special days per person.`);
+  }
+}
+
+/** A special day that is invalid as a WHOLE (merged-record validation, or
+ * the database's own date-integrity CHECKs). Always a client error (400). */
+export class PersonOccasionInvalidError extends Error {}
+
+function isUniqueViolation(err: unknown): boolean {
+  return typeof err === 'object' && err !== null && (err as { code?: string }).code === '23505';
+}
+
+function isCheckViolation(err: unknown): boolean {
+  return typeof err === 'object' && err !== null && (err as { code?: string }).code === '23514';
+}
+
+function mapOccasionWriteError(err: unknown): unknown {
+  if (isUniqueViolation(err)) return new PersonOccasionConflictError();
+  if (isCheckViolation(err)) return new PersonOccasionInvalidError('This special day is not a valid date.');
+  return err;
+}
+
+export async function listPersonOccasions(ownerUserId: string, personId: string): Promise<PersonOccasion[]> {
   const result = await pool.query(
-    `DELETE FROM "SavedPerson" WHERE id = $1 AND "ownerUserId" = $2`,
-    [personId, ownerUserId]
+    `SELECT * FROM "PersonOccasion" WHERE "ownerUserId" = $1 AND "savedPersonId" = $2 ORDER BY month ASC NULLS LAST, day ASC NULLS LAST, "createdAt" ASC`,
+    [ownerUserId, personId]
   );
-  if (result.rowCount === 0) throw new Error('Person not found.');
+  return result.rows;
+}
+
+export async function listAllPersonOccasionsForOwner(ownerUserId: string): Promise<PersonOccasion[]> {
+  const result = await pool.query(`SELECT * FROM "PersonOccasion" WHERE "ownerUserId" = $1`, [ownerUserId]);
+  return result.rows;
+}
+
+export async function countPersonOccasions(ownerUserId: string, personId: string): Promise<number> {
+  const result = await pool.query(
+    `SELECT count(*)::int AS n FROM "PersonOccasion" WHERE "ownerUserId" = $1 AND "savedPersonId" = $2`,
+    [ownerUserId, personId]
+  );
+  return result.rows[0].n;
+}
+
+/** R1 F4: CREATE with the per-person limit enforced atomically. The
+ * person row is locked (FOR UPDATE, owner-scoped) for the transaction, so
+ * concurrent creates for one person serialize on count-then-insert. Returns
+ * null when the person does not exist or is not this owner's; throws
+ * PersonOccasionLimitError / PersonOccasionConflictError /
+ * PersonOccasionInvalidError. */
+export async function createPersonOccasion(ownerUserId: string, personId: string, input: PersonOccasionInput, limit: number = PERSON_OCCASION_LIMIT_PER_PERSON): Promise<PersonOccasion | null> {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const person = await client.query(`SELECT id FROM "SavedPerson" WHERE id = $1 AND "ownerUserId" = $2 FOR UPDATE`, [personId, ownerUserId]);
+    if (person.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return null;
+    }
+    const count = (await client.query(`SELECT count(*)::int AS n FROM "PersonOccasion" WHERE "ownerUserId" = $1 AND "savedPersonId" = $2`, [ownerUserId, personId])).rows[0].n;
+    if (count >= limit) throw new PersonOccasionLimitError(limit);
+    const result = await client.query(
+      `INSERT INTO "PersonOccasion" (id, "ownerUserId", "savedPersonId", kind, label, month, day, year, "remindDaysBefore")
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+       RETURNING *`,
+      [
+        randomUUID(),
+        ownerUserId,
+        personId,
+        input.kind,
+        input.label ?? null,
+        input.month,
+        input.day,
+        input.year ?? null,
+        input.remindDaysBefore === undefined ? 7 : input.remindDaysBefore,
+      ]
+    );
+    await client.query('COMMIT');
+    return result.rows[0];
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw mapOccasionWriteError(err);
+  } finally {
+    client.release();
+  }
+}
+
+export async function getPersonOccasionForOwner(ownerUserId: string, personId: string, occasionId: string): Promise<PersonOccasion | null> {
+  const result = await pool.query(
+    `SELECT * FROM "PersonOccasion" WHERE id = $1 AND "ownerUserId" = $2 AND "savedPersonId" = $3`,
+    [occasionId, ownerUserId, personId]
+  );
+  return result.rows[0] ?? null;
+}
+
+/**
+ * R1 F4: partial UPDATE as ONE atomic read-merge-validate-write. The row is
+ * locked FOR UPDATE (owner- and person-scoped), the patch is merged onto the
+ * CURRENT committed values, and `validateMerged` judges the whole merged
+ * record before anything is written. Two concurrent partial updates
+ * therefore serialize: the second is validated against the first's result,
+ * so a contradictory date (e.g. 29 Feb in a non-leap year) can never be
+ * persisted. The database's own date-integrity CHECKs (migration 0056) back
+ * this up. Returns null when not found; throws PersonOccasionInvalidError
+ * (validator or CHECK) or PersonOccasionConflictError.
+ */
+export async function updatePersonOccasion(
+  ownerUserId: string,
+  personId: string,
+  occasionId: string,
+  update: PersonOccasionUpdate,
+  validateMerged?: (merged: PersonOccasionInput) => string | null
+): Promise<PersonOccasion | null> {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const current = await client.query(
+      `SELECT * FROM "PersonOccasion" WHERE id = $1 AND "ownerUserId" = $2 AND "savedPersonId" = $3 FOR UPDATE`,
+      [occasionId, ownerUserId, personId]
+    );
+    const row: PersonOccasion | undefined = current.rows[0];
+    if (!row || row.month == null || row.day == null) {
+      await client.query('ROLLBACK');
+      return null;
+    }
+    const merged: PersonOccasionInput = {
+      kind: update.kind ?? row.kind,
+      label: update.label !== undefined ? update.label : row.label,
+      month: update.month ?? row.month,
+      day: update.day ?? row.day,
+      year: update.year !== undefined ? update.year : row.year,
+      remindDaysBefore: update.remindDaysBefore !== undefined ? update.remindDaysBefore : row.remindDaysBefore,
+    };
+    const invalid = validateMerged ? validateMerged(merged) : null;
+    if (invalid) throw new PersonOccasionInvalidError(invalid);
+    const result = await client.query(
+      `UPDATE "PersonOccasion"
+       SET kind = $4, label = $5, month = $6, day = $7, year = $8, "remindDaysBefore" = $9, "updatedAt" = now()
+       WHERE id = $1 AND "ownerUserId" = $2 AND "savedPersonId" = $3
+       RETURNING *`,
+      [occasionId, ownerUserId, personId, merged.kind, merged.label ?? null, merged.month, merged.day, merged.year ?? null, merged.remindDaysBefore ?? null]
+    );
+    await client.query('COMMIT');
+    return result.rows[0] ?? null;
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw mapOccasionWriteError(err);
+  } finally {
+    client.release();
+  }
+}
+
+/** Deletes the special day and its dismissal (ReminderAttention) rows in
+ * one transaction. Returns false when not found for this owner and person. */
+export async function deletePersonOccasion(ownerUserId: string, personId: string, occasionId: string): Promise<boolean> {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const deleted = await client.query(
+      `DELETE FROM "PersonOccasion" WHERE id = $1 AND "ownerUserId" = $2 AND "savedPersonId" = $3`,
+      [occasionId, ownerUserId, personId]
+    );
+    if (deleted.rowCount === 0) {
+      await client.query('ROLLBACK');
+      return false;
+    }
+    await client.query(
+      `DELETE FROM "ReminderAttention" WHERE "userId" = $1 AND "scheduledItemType" = 'PERSON_OCCASION' AND "scheduledItemId" = $2`,
+      [ownerUserId, occasionId]
+    );
+    await client.query('COMMIT');
+    return true;
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/** AURA-MP-1 export: every person this owner has, with chart details (when
+ * present), My People fields, notes and special days. Owner-scoped. Derived
+ * natal context is never exported (it is never stored). */
+export async function listAllSavedPeopleForExport(ownerUserId: string): Promise<Array<SavedPerson & { occasions: PersonOccasion[] }>> {
+  const [people, occasions] = await Promise.all([listSavedPeople(ownerUserId), listAllPersonOccasionsForOwner(ownerUserId)]);
+  return people.map((person) => ({
+    ...person,
+    occasions: occasions.filter((o) => o.savedPersonId === person.id),
+  }));
+}
+
+/** The export payload for people (R1): the owner's internal user id is
+ * omitted at EVERY level -- person and nested special day -- since the
+ * export is the owner's own data and the id adds nothing. Special days keep
+ * their own id and savedPersonId (which identify records within the file). */
+export function toPeopleExportPayload(rows: Array<SavedPerson & { occasions: PersonOccasion[] }>) {
+  return rows.map(({ ownerUserId: _owner, occasions, ...person }) => ({
+    ...person,
+    occasions: occasions.map(({ ownerUserId: _o, ...occasion }) => occasion),
+  }));
 }
 
 export type AuraMomentScope = 'GENERAL' | 'PERSONAL' | 'SHARED';
@@ -713,6 +1123,8 @@ export interface PlannedActivity {
    * Timing Location was used (see the schema's own doc comment). */
   eventTimezone: string | null;
   eventLocationName: string | null;
+  /** AURA-MP-1: optional My People link (null when unlinked or the person was deleted). */
+  savedPersonId?: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -745,6 +1157,11 @@ export interface CreatePlannedActivityInput {
   eventLocationName?: string | null;
   /** F1: persisted after `parseSchedulingMode` (anything unrecognised becomes null = protected). Omitted = null: this helper never grants FLEXIBLE by default; each creation path states its own mode. */
   schedulingMode?: PlannedActivitySchedulingMode | null;
+  /** AURA-MP-1: optional My People link. Persisted ONLY if that person
+   * belongs to `userId` (owner-checked subselect in the INSERT itself), so a
+   * foreign or unknown id is stored as NULL, never as a cross-owner link.
+   * The route validates ownership first and returns 404. */
+  savedPersonId?: string | null;
 }
 
 export async function createHabit(input: {
@@ -1475,8 +1892,9 @@ export async function createPlannedActivity(input: CreatePlannedActivityInput, e
     `INSERT INTO "PlannedActivity"
        (id, "userId", title, "activityType", icon, "plannedStartAt", "plannedEndAt",
         "durationMinutes", "windowType", "windowLabel", "matchLabel", score,
-        recommendation, "calendarUrl", "eventTimezone", "eventLocationName", "schedulingMode", "activityId")
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+        recommendation, "calendarUrl", "eventTimezone", "eventLocationName", "schedulingMode", "activityId", "savedPersonId")
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18,
+             (SELECT sp.id FROM "SavedPerson" sp WHERE sp.id = $19 AND sp."ownerUserId" = $2))
      RETURNING *`,
     [
       id,
@@ -1497,6 +1915,7 @@ export async function createPlannedActivity(input: CreatePlannedActivityInput, e
       input.eventLocationName ?? null,
       parseSchedulingMode(input.schedulingMode),
       input.activityId ?? null,
+      input.savedPersonId ?? null,
     ]
   );
   return result.rows[0];
@@ -1543,8 +1962,9 @@ export async function createPlannedActivityWithClient(client: PoolClient, input:
     `INSERT INTO "PlannedActivity"
        (id, "userId", title, "activityType", icon, "plannedStartAt", "plannedEndAt",
         "durationMinutes", "windowType", "windowLabel", "matchLabel", score,
-        recommendation, "calendarUrl", "eventTimezone", "eventLocationName", "schedulingMode", "activityId")
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+        recommendation, "calendarUrl", "eventTimezone", "eventLocationName", "schedulingMode", "activityId", "savedPersonId")
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18,
+             (SELECT sp.id FROM "SavedPerson" sp WHERE sp.id = $19 AND sp."ownerUserId" = $2))
      RETURNING *`,
     [
       id,
@@ -1565,6 +1985,7 @@ export async function createPlannedActivityWithClient(client: PoolClient, input:
       input.eventLocationName ?? null,
       parseSchedulingMode(input.schedulingMode),
       input.activityId ?? null,
+      input.savedPersonId ?? null,
     ]
   );
   return result.rows[0];

@@ -2,7 +2,8 @@ import type { DailyAgenda } from './dailyAgenda';
 import { resolveDailyStoryPhase } from './dailyStory';
 import { User, listSavedPeople, listDayBuilderDismissals } from './db';
 import { resolveTzOffsetMinutes, getMinuteOfDayInTimezone } from './timezone';
-import { buildPersonalMuhurtaContextForUser, natalContextFromBirthDetails } from './natalContext';
+import { buildPersonalMuhurtaContextForUser } from './natalContext';
+import { natalContextForSavedPerson } from './savedPersonNatalContext';
 import { DailyAssistantContext } from '../../../packages/recommendation/src/dailyAssistant';
 import { runTimingSearch } from '../../../packages/recommendation/src/timingSearch';
 import { findEverydaySharedTiming } from '../../../packages/recommendation/src/everydayTimingFit';
@@ -198,13 +199,6 @@ function pickDiverseFittingCandidates<T extends { start: string; end: string }>(
   return kept;
 }
 
-function formatUTCDateString(date: Date): string {
-  const year = date.getUTCFullYear();
-  const month = String(date.getUTCMonth() + 1).padStart(2, '0');
-  const day = String(date.getUTCDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-}
-
 export async function buildIntentionalDaySuggestions(input: {
   user: User;
   agenda: DailyAgenda;
@@ -294,7 +288,8 @@ export async function buildIntentionalDaySuggestions(input: {
       // person, or no person at all, remains a genuinely different
       // suggestion and is never blocked by this.
       if (person && !dismissedKeys.has(dismissalKey(activityId, person.id))) {
-        const partnerContext = natalContextFromBirthDetails(formatUTCDateString(person.birthDate), person.birthTime, person.birthTimezone);
+        // AURA-MP-1: undefined for a person without chart details -> neutral partner side.
+        const partnerContext = natalContextForSavedPerson(person) ?? undefined;
         const outcome = findEverydaySharedTiming({
           activityId,
           durationMinutes,

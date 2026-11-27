@@ -33,7 +33,7 @@ import { summarizeReasonsPlainly } from '../../../packages/muhurta/src/muhurtaPl
 import { getPanchangForDate } from '../../../packages/panchang/src/panchangDay';
 import { isSolarError } from '../../../packages/astronomy/src/ephemeris';
 import { localDateTimeToUTC } from '../../../packages/panchang/src/localDate';
-import { natalContextFromBirthDetails } from './natalContext';
+import { chartDetailsRequiredMessage, natalContextForSavedPerson } from './savedPersonNatalContext';
 import { listSavedPeople, SavedPerson, User } from './db';
 import { CITY_OPTIONS, CityOption } from './cities';
 import { resolveTzOffsetMinutes, addDaysToDateStr } from './timezone';
@@ -709,11 +709,8 @@ async function handleEverydaySharedTimingCheck(
   }
 
   const person = resolution.person;
-  const partnerContext = natalContextFromBirthDetails(
-    person.birthDate.toISOString().slice(0, 10),
-    person.birthTime,
-    person.birthTimezone
-  );
+  // AURA-MP-1: undefined for a person without chart details -> neutral partner side.
+  const partnerContext = natalContextForSavedPerson(person) ?? undefined;
 
   const profile = profileFromActivity(activity);
   const activityTitle = activity.title;
@@ -880,11 +877,11 @@ async function handleMuhurthamTimingCheck(parsed: ParsedAskAuraRequest, deps: As
       };
     }
     const person = resolution.person;
-    const partnerContext = natalContextFromBirthDetails(
-      person.birthDate.toISOString().slice(0, 10),
-      person.birthTime,
-      person.birthTimezone
-    );
+    const partnerContext = natalContextForSavedPerson(person);
+    if (!partnerContext) {
+      // AURA-MP-1: SHARED Muhurtham needs the person's chart details.
+      return { intent: 'TIMING_CHECK', message: chartDetailsRequiredMessage(person.name), context: parsed };
+    }
     const outcome = evaluateMuhurthamCandidateAt({
       activityId: parsed.activityId,
       start,
@@ -1002,11 +999,8 @@ async function handleTimingFind(parsed: ParsedAskAuraRequest, deps: AskAuraOrche
       };
     }
     const person = resolution.person;
-    const partnerContext = natalContextFromBirthDetails(
-      person.birthDate.toISOString().slice(0, 10),
-      person.birthTime,
-      person.birthTimezone
-    );
+    // AURA-MP-1: undefined for a person without chart details -> neutral partner side.
+    const partnerContext = natalContextForSavedPerson(person) ?? undefined;
     const dateRange = resolveHorizonToDateRange(parsed.horizonPhrase, parsed.customDate, deps.context);
     const outcome = findEverydaySharedTiming({
       activityId: activity.id,
@@ -1431,11 +1425,11 @@ async function handleMuhurthamSearch(parsed: ParsedAskAuraRequest, deps: AskAura
       };
     }
     const person = resolution.person;
-    const partnerContext = natalContextFromBirthDetails(
-      person.birthDate.toISOString().slice(0, 10),
-      person.birthTime,
-      person.birthTimezone
-    );
+    const partnerContext = natalContextForSavedPerson(person);
+    if (!partnerContext) {
+      // AURA-MP-1: SHARED Muhurtham needs the person's chart details.
+      return { intent: 'MUHURTHAM_SEARCH', message: chartDetailsRequiredMessage(person.name), context: parsed };
+    }
     const outcome = handleSharedMuhurthamSearchBody(
       { activityId: parsed.activityId, scope: 'SHARED', dateRange, durationMinutes: parsed.durationMinutes, savedPersonId: person.id },
       effectiveContext,

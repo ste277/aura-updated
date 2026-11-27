@@ -3,7 +3,8 @@ import { getSessionFromRequest } from '../../../../lib/session';
 import { getSavedPersonForOwner, getUserById } from '../../../../lib/db';
 import { parseJsonObject } from '../../../../lib/request';
 import { resolveTzOffsetMinutes } from '../../../../lib/timezone';
-import { buildPersonalMuhurtaContextForUser, natalContextFromBirthDetails } from '../../../../lib/natalContext';
+import { buildPersonalMuhurtaContextForUser } from '../../../../lib/natalContext';
+import { natalContextForSavedPerson } from '../../../../lib/savedPersonNatalContext';
 import { findEverydaySharedTiming } from '../../../../../../packages/recommendation/src/everydayTimingFit';
 import { isDateOnlyString } from '../../../../lib/timingSearchRequest';
 import { recordProductEvent } from '../../../../lib/productEvents';
@@ -21,14 +22,6 @@ import { DailyAssistantContext } from '../../../../../../packages/recommendation
  * activityId works fine (it's just Timing Search under the hood), so there
  * is no strictness concern in either direction.
  */
-
-function formatUTCDateString(dateInput: Date | string): string {
-  if (typeof dateInput === 'string') return dateInput.split('T')[0];
-  const year = dateInput.getUTCFullYear();
-  const month = String(dateInput.getUTCMonth() + 1).padStart(2, '0');
-  const day = String(dateInput.getUTCDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-}
 
 export async function POST(req: NextRequest) {
   const session = getSessionFromRequest(req);
@@ -69,7 +62,9 @@ export async function POST(req: NextRequest) {
   // SHARED handling).
   const person = await getSavedPersonForOwner(session.userId, savedPersonId);
   if (!person) return NextResponse.json({ error: 'Person not found.' }, { status: 404 });
-  const partnerContext = natalContextFromBirthDetails(formatUTCDateString(person.birthDate), person.birthTime, person.birthTimezone);
+  // AURA-MP-1: null for a person without chart details -- the partner side
+  // then scores neutral (no personal adjustment), never an error.
+  const partnerContext = natalContextForSavedPerson(person) ?? undefined;
 
   const now = new Date();
   const context: DailyAssistantContext = {
