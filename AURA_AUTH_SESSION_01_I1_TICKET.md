@@ -64,7 +64,9 @@ Add the server-side session table, the token primitives and the bounded store pr
 |---|---|
 | `createAuthSession(pool, userId)` | INSERT … RETURNING `expiresAt`, set by the DB as `now() + make_interval(hours => 720)` (R1). Returns a `CommittedAuthSession`. |
 | `createAuthSessionInTransaction(client, userId)` (R1) | INSERT inside the **caller's** transaction. Returns a `ProvisionalAuthSession`, which has no `sid`. The helper never sends BEGIN / COMMIT / ROLLBACK / SET. |
-| `confirmCommittedAuthSession(pool, provisional)` (R1) | After the caller's COMMIT (acknowledged or uncertain), reads the row back on an independent connection and returns a `CommittedAuthSession` or null. A cookie may be issued only from a committed session. |
+| `commitAuthSessionTransaction(client, provisional)` (R2, 39235) | The caller invokes it **as** its COMMIT. It first checks, inside the caller's transaction, that the transaction is still open and holds the row; then it sends COMMIT and classifies the caller's commit as `committed` (acknowledged; carries a `CommitAuthorization`), `rolled_back` (confirmed) or `ambiguous`. For anything but `committed`, the raw id is destroyed. |
+| `releaseCommittedAuthSession(pool, authorization)` (R2) | **Confirmed commit only.** It reads the row back on an independent connection and returns a `CommittedAuthSession` (with the raw id) only for a live, matching row. Missing, expired, revoked or mismatched rows give null. It releases at most once. |
+| `classifyAmbiguousCommit(pool, provisional)` (R2) | After an **ambiguous** commit only. Returns `committed_undisclosed` or `not_committed` and **never** session material. **No cookie may ever be issued after an ambiguous commit**, whatever the read-back finds. |
 | `lookupAuthSession(pool, idHash, userId)` | Returns `{userId}` or `null`. Any failure throws the unavailable error. |
 | `lookupAuthSessionWithUser(pool, idHash, userId)` | The joined variant, same contract |
 | `revokeAuthSession(pool, idHash, reason)` | Idempotent. Returns `'revoked'` or `'already_inactive'`. One retry if the outcome is ambiguous, then throws. |

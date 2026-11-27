@@ -1253,8 +1253,9 @@ jobs:
         run: npx ts-node test/authSessionStoreDb.test.ts
       # AURA-AUTH-SESSION-01-I1 R1 (39233) -- the same disposable database with an
       # in-process loopback fault-injection proxy: one revoke deadline and safe
-      # retry (A), provisional vs committed sessions incl. an uncertain COMMIT
-      # acknowledgement (B), and 720-hour expiry across time zones / DST (C).
+      # retry (A), commit authorization -- session material only after an
+      # acknowledged caller COMMIT, never after a rolled-back or ambiguous one,
+      # whatever a read-back finds (B, R2 39235), and 720-hour expiry (C).
       - name: Run session R1 deadline, durability and expiry DB test (AUTH-SESSION-01-I1 R1)
         run: npx ts-node test/authSessionR1Db.test.ts
       - name: Verify every repository migration was recorded as applied

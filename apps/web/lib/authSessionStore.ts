@@ -12,23 +12,40 @@
  * caller deadline per operation (R1, 39232-01). Operations that must sit
  * inside a caller's transaction (provisional create, revoke-all during account
  * deletion, the B3 FOR SHARE re-check) take that caller's client: the CALLER
- * owns the transaction, its BEGIN / COMMIT / ROLLBACK and its SET LOCAL
- * statement_timeout / lock_timeout, and these helpers never commit, roll back
- * or change those settings.
+ * owns the transaction -- BEGIN, every statement in it, when to commit, any
+ * ROLLBACK, and its SET LOCAL statement_timeout / lock_timeout. These helpers
+ * never begin, roll back or change those settings; the one exception is
+ * commitAuthSessionTransaction(), which sends COMMIT only when the caller
+ * invokes it AS its commit (below).
  *
- * Committed vs provisional (R1, 39232-02):
- *   - createAuthSession() returns a CommittedAuthSession: its own transaction
- *     committed and was acknowledged.
- *   - createAuthSessionInTransaction() returns a ProvisionalAuthSession: the
- *     INSERT succeeded inside the caller's still-open transaction, which may
- *     yet roll back or fail to commit. It carries NO raw session id, so it
- *     cannot be turned into a token or cookie. After its own COMMIT -- whether
- *     acknowledged or uncertain -- the caller passes it to
- *     confirmCommittedAuthSession(), which reads the row back on an
- *     INDEPENDENT connection and only then releases the raw id inside a
- *     CommittedAuthSession. A cookie may be issued only from a
- *     CommittedAuthSession; a missing row or an unavailable answer means no
- *     session.
+ * Commit authorization (R1 39232-02, corrected in R2 39235). Five separate facts:
+ *   1. createAuthSessionInTransaction() -> ProvisionalAuthSession: the INSERT
+ *      succeeded inside the caller's still-open transaction. NO raw session id;
+ *      nothing cookie-issuable.
+ *   2. commitAuthSessionTransaction(client, provisional) commits the caller's
+ *      transaction and classifies the CALLER'S COMMIT:
+ *        'committed'   -- PostgreSQL acknowledged COMMIT. Only this outcome
+ *                         carries a CommitAuthorization.
+ *        'rolled_back' -- confirmed: this session did not commit (COMMIT
+ *                         answered ROLLBACK for an aborted transaction,
+ *                         PostgreSQL rejected it at commit, the caller's open
+ *                         transaction no longer holds the row, or the
+ *                         connection failed before COMMIT was sent).
+ *        'ambiguous'   -- the outcome is unknown (connection lost, deadline).
+ *      For every outcome except 'committed' the raw id is destroyed at once:
+ *      no later call can ever release it.
+ *   3. releaseCommittedAuthSession(pool, authorization) reads the row back on an
+ *      independent connection. Session material (CommittedAuthSession, with the
+ *      raw id) is released ONLY for a confirmed commit AND a live matching row
+ *      (same idHash and userId, not revoked, not expired). Missing / expired /
+ *      revoked / mismatched -> null. Unavailable -> throws.
+ *   4. classifyAmbiguousCommit(pool, provisional) may tell, after an ambiguous
+ *      commit, whether the row exists ('committed_undisclosed') or not
+ *      ('not_committed'). It NEVER releases session material: an undisclosed
+ *      committed row is acceptable (its raw id never left the server, so it can
+ *      never authenticate; it expires and is cleaned up).
+ *   5. A cookie may be issued ONLY from a CommittedAuthSession -- i.e. never
+ *      after a rolled-back or ambiguous commit, however the read-back turns out.
  *
  * DORMANT: nothing in the application imports this module yet
  * (test/authSessionDormancy.test.ts). Sign-in, logout and the as_session
@@ -71,8 +88,10 @@ export interface CommittedAuthSession {
 
 /**
  * A session row INSERTed inside a caller's open transaction -- not yet
- * committed. It deliberately has no `sid`: the raw id is held privately until
- * confirmCommittedAuthSession() establishes that the caller's COMMIT took effect.
+ * committed. It deliberately has no `sid`: the raw id is held privately and is
+ * released only through an acknowledged commit (commitAuthSessionTransaction ->
+ * CommitAuthorization -> releaseCommittedAuthSession); any other commit outcome
+ * destroys it.
  */
 export interface ProvisionalAuthSession {
   readonly state: 'provisional';
@@ -82,7 +101,7 @@ export interface ProvisionalAuthSession {
   readonly expiresAt: Date;
 }
 
-/** Raw ids of provisional sessions, reachable only through confirmCommittedAuthSession(). */
+/** Raw ids of OPEN provisional sessions; moved to an authorization on an acknowledged commit, otherwise deleted. */
 const provisionalSids = new WeakMap<ProvisionalAuthSession, string>();
 
 function committed(sid: string, idHash: string, userId: string, expiresAt: Date): CommittedAuthSession {
@@ -165,12 +184,13 @@ export async function createAuthSession(pool: Pool, userId: string, opts: Sessio
  * result: not a committed session, and no raw id.
  *
  * Caller responsibilities (I2):
- *   - own BEGIN / COMMIT / ROLLBACK -- this helper never sends any of them;
+ *   - own BEGIN and any ROLLBACK -- this helper sends neither, nor any SET;
  *   - set the transaction's own SET LOCAL statement_timeout / lock_timeout;
- *   - after COMMIT (acknowledged OR uncertain), call
- *     confirmCommittedAuthSession() and issue a cookie ONLY from the
- *     CommittedAuthSession it returns -- never after a failed, rolled-back or
- *     unconfirmed commit;
+ *   - commit THROUGH commitAuthSessionTransaction() (never a bare COMMIT), and
+ *     release session material only via releaseCommittedAuthSession() with the
+ *     CommitAuthorization that a 'committed' outcome carries -- never after a
+ *     'rolled_back' or 'ambiguous' outcome;
+ *   - after 'ambiguous', discard the connection (its state is unknown);
  *   - keep the existing B3 rule: session-sensitive operations re-check with
  *     recheckAuthSessionForShare() inside their own transaction.
  * Failures propagate as SessionVerificationUnavailableError; the caller's
@@ -189,28 +209,161 @@ export async function createAuthSessionInTransaction(client: PoolClient, userId:
   if (rows.length !== 1) throw new SessionVerificationUnavailableError('shape');
   const provisional = Object.freeze({ state: 'provisional' as const, idHash, userId, expiresAt: asDate(rows[0].expiresAt) });
   provisionalSids.set(provisional, sid);
+  provisionalStates.set(provisional, 'open');
   return provisional;
 }
 
+// --- Commit authorization (R2, 39235) ----------------------------------------------
+
+/** Not exported: no code outside this module can construct a CommitAuthorization. */
+declare const AUTHORIZED: unique symbol;
+
+/** Proof that PostgreSQL ACKNOWLEDGED the caller's COMMIT for one provisional session. */
+export interface CommitAuthorization {
+  readonly kind: 'commit_authorization';
+  readonly idHash: string;
+  readonly userId: string;
+  readonly [AUTHORIZED]: true;
+}
+
+/** The caller's COMMIT, classified. Only 'committed' carries an authorization. */
+export type CallerCommitDecision =
+  | { readonly outcome: 'committed'; readonly authorization: CommitAuthorization }
+  | { readonly outcome: 'rolled_back'; readonly reason: 'aborted_transaction' | 'rejected_at_commit' | 'session_not_in_transaction' | 'commit_not_sent' }
+  | { readonly outcome: 'ambiguous'; readonly reason: 'connection' | 'deadline' | 'unexpected_reply' };
+
+/** What a read-back after an AMBIGUOUS commit may say. Never session material. */
+export type AmbiguousCommitClassification = 'committed_undisclosed' | 'not_committed';
+
+type ProvisionalState = 'open' | 'committing' | 'committed' | 'rolled_back' | 'ambiguous';
+const provisionalStates = new WeakMap<ProvisionalAuthSession, ProvisionalState>();
+const authorizedSids = new WeakMap<CommitAuthorization, string>();
+
+/** SQLSTATE classes with which PostgreSQL rejects a COMMIT that therefore did not commit. */
+const ROLLED_BACK_AT_COMMIT = ['23', '25', '40'];
+
 /**
- * After the caller's COMMIT (acknowledged or uncertain), establishes on an
- * independent connection whether the provisional row is durably committed and
- * live. Returns the CommittedAuthSession (with its raw id) only then; null
- * means "not committed" (or already revoked / expired) and no cookie may be
- * issued. Throws SessionVerificationUnavailableError if that cannot be
- * established -- which also means no cookie.
+ * Commits the caller's transaction (the caller invokes this AS its COMMIT) and
+ * classifies the outcome. Never throws for a commit failure: it returns
+ * 'rolled_back' or 'ambiguous'. For anything but an acknowledged COMMIT the
+ * provisional raw id is destroyed, so it can never be released afterwards.
+ * Bounded by the foreground write deadline (2 000 ms) on top of the caller's
+ * own SET LOCAL timeouts. After 'ambiguous', or after 'rolled_back' with reason
+ * 'commit_not_sent', the caller must discard the client; after
+ * 'session_not_in_transaction' the caller still owns (and must end) its transaction.
  */
-export async function confirmCommittedAuthSession(
+export async function commitAuthSessionTransaction(
+  client: PoolClient,
+  provisional: ProvisionalAuthSession,
+  opts: SessionOperationOptions = {}
+): Promise<CallerCommitDecision> {
+  const sid = provisionalSids.get(provisional);
+  if (!sid || provisionalStates.get(provisional) !== 'open') {
+    throw new TypeError('Not an open provisional session from createAuthSessionInTransaction().');
+  }
+  provisionalStates.set(provisional, 'committing');
+  const clock = opts.clock ?? SYSTEM_SESSION_CLOCK;
+  let handle: unknown;
+  const deadline = new Promise<'deadline'>((resolve) => {
+    handle = clock.setTimer(() => resolve('deadline'), SESSION_WRITE_BOUNDS.deadlineMs);
+  });
+  const finish = (decision: CallerCommitDecision): CallerCommitDecision => {
+    clock.clearTimer(handle);
+    if (decision.outcome !== 'committed') {
+      provisionalSids.delete(provisional); // the raw id is gone for good
+      provisionalStates.set(provisional, decision.outcome);
+    }
+    return Object.freeze(decision);
+  };
+  // Before COMMIT: the caller's transaction must still be open and hold THIS
+  // row. Otherwise a bare COMMIT on a connection with no transaction (e.g.
+  // after the caller's own ROLLBACK) would be acknowledged without committing
+  // anything. Nothing is committed by this check.
+  try {
+    const pre = (await Promise.race([
+      client.query(
+        `SELECT txid_current_if_assigned() IS NOT NULL AS in_tx, EXISTS (SELECT 1 FROM "AuthSession" WHERE "idHash" = $1 AND "userId" = $2) AS mine`,
+        [provisional.idHash, provisional.userId]
+      ),
+      deadline,
+    ])) as { rows?: Array<{ in_tx?: unknown; mine?: unknown }> } | 'deadline';
+    // COMMIT was never sent, so this session cannot have committed; the caller must discard the client.
+    if (pre === 'deadline') return finish({ outcome: 'rolled_back', reason: 'commit_not_sent' });
+    const row = pre.rows?.[0];
+    if (!(row?.in_tx === true && row?.mine === true)) return finish({ outcome: 'rolled_back', reason: 'session_not_in_transaction' });
+  } catch (err) {
+    const code = (err as { code?: unknown } | null)?.code;
+    // 25P02: the transaction is aborted -- COMMIT below will answer ROLLBACK.
+    // Anything else: COMMIT was never sent, so this session cannot have committed.
+    if (code !== '25P02') return finish({ outcome: 'rolled_back', reason: 'commit_not_sent' });
+  }
+  let reply: { command?: unknown } | 'deadline';
+  try {
+    const running = client.query('COMMIT') as unknown as Promise<{ command?: unknown }>;
+    running.catch(() => {});
+    reply = await Promise.race([running, deadline]);
+  } catch (err) {
+    const code = (err as { code?: unknown } | null)?.code;
+    if (typeof code === 'string' && ROLLED_BACK_AT_COMMIT.includes(code.slice(0, 2))) {
+      return finish({ outcome: 'rolled_back', reason: 'rejected_at_commit' });
+    }
+    return finish({ outcome: 'ambiguous', reason: 'connection' });
+  }
+  if (reply === 'deadline') return finish({ outcome: 'ambiguous', reason: 'deadline' });
+  if (reply?.command === 'ROLLBACK') return finish({ outcome: 'rolled_back', reason: 'aborted_transaction' });
+  if (reply?.command !== 'COMMIT') return finish({ outcome: 'ambiguous', reason: 'unexpected_reply' });
+  clock.clearTimer(handle);
+  const authorization = Object.freeze({ kind: 'commit_authorization', idHash: provisional.idHash, userId: provisional.userId }) as unknown as CommitAuthorization;
+  authorizedSids.set(authorization, sid);
+  provisionalSids.delete(provisional);
+  provisionalStates.set(provisional, 'committed');
+  return Object.freeze({ outcome: 'committed', authorization });
+}
+
+/**
+ * Releases session material for a CONFIRMED commit only: reads the row back on
+ * an independent connection and returns a CommittedAuthSession (with the raw
+ * id) only if it is live and matches (idHash AND userId; not revoked, not
+ * expired). null = no session, permanently. Throws
+ * SessionVerificationUnavailableError if the read-back cannot be completed (the
+ * authorization stays usable for one more attempt only while it is unreleased).
+ * Released at most once.
+ */
+export async function releaseCommittedAuthSession(
+  pool: Pool,
+  authorization: CommitAuthorization,
+  opts: SessionOperationOptions = {}
+): Promise<CommittedAuthSession | null> {
+  const sid = authorizedSids.get(authorization);
+  if (!sid) throw new TypeError('Not an unreleased CommitAuthorization from commitAuthSessionTransaction().');
+  const live = await lookupAuthSession(pool, authorization.idHash, authorization.userId, opts);
+  authorizedSids.delete(authorization);
+  if (!live) return null;
+  return committed(sid, authorization.idHash, authorization.userId, live.expiresAt);
+}
+
+/**
+ * After an AMBIGUOUS commit only: classifies the database outcome. Returns a
+ * label, never session material -- the raw id was destroyed when the commit
+ * was found ambiguous, so no read-back can turn it into an issuable session.
+ * Throws SessionVerificationUnavailableError if the database cannot answer.
+ */
+export async function classifyAmbiguousCommit(
   pool: Pool,
   provisional: ProvisionalAuthSession,
   opts: SessionOperationOptions = {}
-): Promise<CommittedAuthSession | null> {
-  const sid = provisionalSids.get(provisional);
-  if (!sid || provisional.state !== 'provisional') throw new TypeError('Not a provisional session from createAuthSessionInTransaction().');
-  const live = await lookupAuthSession(pool, provisional.idHash, provisional.userId, opts);
-  if (!live) return null;
-  provisionalSids.delete(provisional);
-  return committed(sid, provisional.idHash, provisional.userId, live.expiresAt);
+): Promise<AmbiguousCommitClassification> {
+  if (provisionalStates.get(provisional) !== 'ambiguous') {
+    throw new TypeError('Only a provisional session whose commit was ambiguous can be classified.');
+  }
+  if (!validIdHash(provisional.idHash) || !validUserId(provisional.userId)) throw new TypeError('Malformed provisional session.');
+  const { rows } = await boundedSessionQuery(
+    pool,
+    `SELECT 1 AS found FROM "AuthSession" WHERE "idHash" = ${sqlLiteral(provisional.idHash, 'idHash')} AND "userId" = ${sqlLiteral(provisional.userId, 'userId')}`,
+    SESSION_LOOKUP_BOUNDS,
+    { clock: opts.clock }
+  );
+  return rows.length === 1 ? 'committed_undisclosed' : 'not_committed';
 }
 
 // --- Lookup --------------------------------------------------------------------------

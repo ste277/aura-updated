@@ -1,0 +1,11 @@
+Compile-time negative controls: each of the 10 '// @ts-expect-error' assertions removed one at a time; ts-node must then fail to compile.
+#1 'a provisional session has no raw session id' -> error TS2339: Property 'sid' does not exist on type 'ProvisionalAuthSession'
+#2 'a provisional session is not a committed one' -> error TS2739: Type 'ProvisionalAuthSession' is missing the following properties from type 'CommittedAuth
+#3 'a committed session cannot be fabricated from a plain object (private brand)' -> error TS2741: Property '[COMMITTED]' is missing in type '{ state: "committed"; sid: string; idHash: stri
+#4 'a commit authorization cannot be fabricated from a plain object (private brand)' -> error TS2741: Property '[AUTHORIZED]' is missing in type '{ kind: "commit_authorization"; idHash: string
+#5 'release takes an authorization, never a provisional session' -> error TS2345: Argument of type 'ProvisionalAuthSession' is not assignable to parameter of type 'CommitAu
+#6 'a decision cannot be used as an authorization without narrowing to 'committed'' -> error TS2339: Property 'authorization' does not exist on type 'CallerCommitDecision'
+#7 'an ambiguous commit carries no authorization' -> error TS2339: Property 'authorization' does not exist on type '{ readonly outcome: "ambiguous"; readonly
+#8 'a rolled-back commit carries no authorization' -> error TS2339: Property 'authorization' does not exist on type '{ readonly outcome: "rolled_back"; readon
+#9 'a read-back classification is a label, never session material' -> error TS2322: Type 'string' is not assignable to type 'CommittedAuthSession'
+#10 'a classification has no sid' -> error TS2339: Property 'sid' does not exist on type 'AmbiguousCommitClassification'
