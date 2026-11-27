@@ -1,0 +1,21 @@
+071761878a63c423d09ae47389eb4cf6016e7ef9b602e41040ede8f994bfe197 apps/web/lib/offlineHabitQueue.ts
+31238bfff6ff58378ffd9ea502a9695902b5a25f866fd425473d1138315ca0fc apps/web/lib/activitySync.ts
+8d312ef423a806623221ecf3f4ec78413df2ad9ddad84a25f3dadfe876dfd98c apps/web/lib/signOut.ts
+8ccffcc45b829675af1577b128e56316e678d1e5e8f35efac687e5ecbe5b2177 apps/web/app/page.tsx
+15d67a4f30d660fb713254595427db24ddca97c9268009765c1337011e6ecbee test/rel04R13QueueIntegrity.test.ts
+a324c91738a00b7d3227e15059dc8a5b25645a6065b8eeb79bb4a15f9c5d94b1 test/fixtures/rel04-r12-head/offlineHabitQueue.ts.txt
+a827609e6909800448c4f6fd9f6a98fa118f7826d1bda2cd34716fae8a3f47c1 test/fixtures/rel04-r12-head/activitySync.ts.txt
+4334527a9ec98fd72f6a6be7ce19ddac7297252125262686fc44056cbd1f7508 test/fixtures/rel04-r12-head/signOut.ts.txt
+2355dd2ea1915ed65e972076774eefe2dbf6cca7b1118aa77005a5222b5ed15b docs/android/evidence/rel04-r12-independent-39249/SHA256SUMS
+64466004fe48db8dd8fc3f226bf60abc9ce97007d6b4ae7e2b8cf2e6d3f08841 docs/android/evidence/rel04-r13/README.md
+966ad6f025368ee3583ae2465052da0173eb57ce2cf28799b311b71a10f53493 docs/android/evidence/rel04-r13/math-core-tests/manifest.json
+bce774621d2631bbd0695c4a3881081f8965eb5a4788b22370c5a83f8ec881e1 docs/android/evidence/rel04-r13/db-and-browser-tests/manifest.json
+d99771a493f4efca1ce59507d115f5b1f0efb4b8e89379fe1816edcd1badc959 docs/android/evidence/rel04-r13/typecheck/typecheck.log
+662948fe4236568dfba993cf92a4b9bb5acd7c53e347c8ef8582e46db4acdc37 docs/android/evidence/rel04-r13/math-core-tests/logs/250-test_rel04R13QueueIntegrity.test.ts.log
+3c6759ffe1a1e1198240542bc4727da4841143c226159eeccec1d0ad151e0563 docs/android/evidence/rel04-r13/review-r12-independent.on-6373fd9.log
+d7a6c0766ddddf376adc2aa169480dc333132680cb014983b81de7e9560a550c docs/android/evidence/rel04-r13/review-r12-independent.on-r13.log
+34 preserved R12 manifest entries and original bytes verified
+Changed runtime files: ['apps/web/app/page.tsx', 'apps/web/lib/activitySync.ts', 'apps/web/lib/offlineHabitQueue.ts', 'apps/web/lib/signOut.ts']
+All 343 handover paths are reports/evidence. No historical assertion edited; 3 fixture sources match unchanged R12.
+math-core-tests 254 pinned workflow commands with zero exits and matching log hashes {'math-core-tests': 254}
+db-and-browser-tests 78 pinned workflow commands with zero exits and matching log hashes {'rel04-chromium-multitab': 1, 'rel04-next-app-rendering': 1, 'day-constructor-acceptance-db-tests': 76}

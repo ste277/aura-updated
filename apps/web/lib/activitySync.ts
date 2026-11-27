@@ -42,8 +42,9 @@ export type ActivityWriteResult =
   | { kind: 'rejected'; status: number }
   /** The bound account stopped being current, or the session belongs to someone else; kept for its account if stored. */
   | { kind: 'account-changed'; keptForAccount: boolean }
-  /** Unresolved and could not be stored on this device. */
-  | { kind: 'not-stored' }
+  /** Unresolved and could not be stored on this device. R14: `reason: 'discarded'` = this exact request was durably
+   *  discarded on this device (it will not be sent; never a success, never a storage failure). */
+  | { kind: 'not-stored'; reason?: 'discarded' }
   /**
    * R9: this device's activity storage could not be read reliably, so the activity's eligibility could not be
    * established: NOTHING was stored or sent. Recoverable -- the user can try again.
@@ -54,8 +55,25 @@ export type ActivityWriteResult =
    * this device (it would then sync under this same request id); it must not be re-entered as a new activity.
    */
   | { kind: 'outcome-unknown' }
+  /** R14: this exact request (account + request id + payload) was already accepted by the server (a durable settlement). */
+  | { kind: 'already-recorded' }
+
   /** The server says this bundle is out of date; the entry is kept. */
   | { kind: 'upgrade-required' };
+
+/**
+ * R14 -- the ONE mapping from a durable decision to a submission outcome:
+ *   settled + accepted  -> already-recorded  (success: the server holds this exact request)
+ *   settled + rejected  -> rejected          (the server's definitive refusal)
+ *   settled, answer not recorded (decisions written before R14) -> outcome-unknown (unresolved, never "not saved")
+ *   discarded           -> not-stored, reason 'discarded'  (never a success; it will not be sent)
+ */
+function outcomeOfDecision(d: { decision?: 'settled' | 'discarded'; serverOutcome?: 'accepted' | 'rejected' }): ActivityWriteResult {
+  if (d.decision === 'discarded') return { kind: 'not-stored', reason: 'discarded' };
+  if (d.decision === 'settled' && d.serverOutcome === 'accepted') return { kind: 'already-recorded' };
+  if (d.decision === 'settled' && d.serverOutcome === 'rejected') return { kind: 'rejected', status: 0 };
+  return { kind: 'outcome-unknown' };
+}
 
 /** Statuses meaning "this session can't write this entry now" -- keep it for its account. */
 const ACCOUNT_HOLD = new Set([401, 403, 409, 428]);
@@ -104,14 +122,15 @@ export async function submitActivityLog(payload: HabitLogPayload, tempId: string
     if (stored.status === 'failed' || stored.status === 'unavailable') return { kind: 'storage-unavailable' }; // confirmed not queued
     if (stored.status === 'unknown') return { kind: 'outcome-unknown' }; // R13: possibly queued, never reported as not saved
     if (stored.status === 'conflict') return { kind: 'not-stored' }; // never send a second payload under one identity
-    // R8: this account already settled/discarded the request, or a quarantined copy of it exists: never sent again.
-    if (stored.status === 'settled' || stored.status === 'paused') return { kind: 'not-stored' };
+    // R14: a DURABLE decision for this exact request decides the outcome (same evidence, same answer, every path).
+    if (stored.status === 'settled') return outcomeOfDecision(stored);
+    if (stored.status === 'paused') return { kind: 'not-stored' }; // a quarantined copy exists: never sent
     // The identical request is already queued and another attempt is sending it: never send it twice at once.
     if (!stored.claim) return lease.isCurrent() ? { kind: 'queued' } : { kind: 'account-changed', keptForAccount: true };
     const outbox: string | null = stored.recordId;
     const token = stored.claim;
     // R5: release and settlement are fenced by THIS attempt's token.
-    const settle = async () => { if (outbox) await settleRecords([outbox], token, { owner: lease.account }); };
+    const settle = async (serverOutcome: 'accepted' | 'rejected') => { if (outbox) await settleRecords([outbox], token, { owner: lease.account, serverOutcome }); };
     const release = async () => { if (token) await releaseClaim(token); };
     // Final checks with no await before the send.
     if (!lease.isCurrent() || isTransitionActive()) {
@@ -136,9 +155,9 @@ export async function submitActivityLog(payload: HabitLogPayload, tempId: string
     if (await isUpgradeRefusal(res)) { await release(); reportUpgradeRequired(); return outbox ? { kind: 'upgrade-required' } : { kind: 'not-stored' }; }
     if (ACCOUNT_HOLD.has(res.status)) { await release(); return { kind: 'account-changed', keptForAccount: Boolean(outbox) }; }
     if (res.status >= 500) { await release(); return outbox ? { kind: 'queued' } : { kind: 'not-stored' }; }
-    if (!res.ok) { await settle(); return { kind: 'rejected', status: res.status }; }
+    if (!res.ok) { await settle('rejected'); return { kind: 'rejected', status: res.status }; }
     const serverLog = await res.json().catch(() => ({}));
-    await settle();
+    await settle('accepted');
     if (!lease.isCurrent()) return { kind: 'account-changed', keptForAccount: false };
     return { kind: 'confirmed', serverLog };
   }, binding);
@@ -224,7 +243,7 @@ async function replayLocked(fetchImpl: typeof fetch, binding: AccountBinding): P
       if (outcome === 'retry') { await releaseClaim(token); continue; } // no response or 5xx: ambiguous, keep
       if (outcome === 'confirmed') result.confirmed++;
       // Settled: R12 -- bound to the claim: only copies still carrying the claimed identity and payload are removed.
-      const r = await settleRecords([token.recordId ?? head.recordId], token, { owner: lease.account });
+      const r = await settleRecords([token.recordId ?? head.recordId], token, { owner: lease.account, serverOutcome: outcome === 'confirmed' ? 'accepted' : 'rejected' });
       result.removed += r.removed;
       result.removeFailed += r.failed;
     }

@@ -1525,6 +1525,13 @@ function DashboardPageInner() {
         throw new Error('Unable to log this activity.');
       }
 
+      // R14: the server already holds this exact request (settled by another tab / an earlier attempt): a success.
+      // Keep the row under the SAME request id and refresh, so the server row replaces it -- never a retry.
+      if (outcome.kind === 'already-recorded') {
+        setLogEntries((prev) => prev.map((item) => (item.id === tempId ? { ...item, syncStatus: 'pending', clientRequestId } : item)));
+        void loadUserDataAndLogs();
+        return 'confirmed';
+      }
       // R13: an unconfirmed queue write may have committed: keep the row pending under the SAME request id (it syncs
       // if it was queued; the reload merge drops it if it was not) -- never invite a duplicate re-entry.
       if (outcome.kind === 'queued' || outcome.kind === 'outcome-unknown') {
@@ -1542,8 +1549,10 @@ function DashboardPageInner() {
         // change mid-request and a device that couldn't store the entry.
         setLogEntries((prev) => prev.filter((item) => item.id !== tempId));
         if (outcome.kind === 'rejected') throw new Error(`Unable to log this activity (server responded ${outcome.status}).`);
+        if (outcome.kind === 'not-stored' && outcome.reason === 'discarded') throw new Error("This activity was discarded on this device when you signed out, so it won't be sent.");
         if (outcome.kind === 'not-stored') throw new Error("You're offline and this device couldn't keep the activity. Try again when you're back online.");
         // R9: storage could not be read, so the activity's eligibility was not established: nothing was stored or sent.
+        // R14: a durable discard is not a success and not a storage failure.
         if (outcome.kind === 'storage-unavailable') throw new Error("Aura couldn't safely read this device's storage, so this activity wasn't saved or sent. Try again in a moment.");
         if (outcome.kind === 'upgrade-required') throw new Error(UPGRADE_MESSAGE);
         // account-changed: kept (if stored) in the ORIGINAL account's queue.
@@ -1597,7 +1606,7 @@ function DashboardPageInner() {
       loadGuidance();
       return 'confirmed';
     },
-    [activeType, loadMyDay, loadGuidance]
+    [activeType, loadMyDay, loadGuidance, loadUserDataAndLogs]
   );
 
   // AURA-ANDROID-REL-04 -- signed out only once the server has removed the

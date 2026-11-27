@@ -1,0 +1,9 @@
+Palmistry upload pipeline tests (G5) attempt1 140473871426 success 2026-11-27T11:20:17Z 2026-11-27T11:22:43Z attempt2 140485743874 success 2026-11-27T11:20:17Z 2026-11-27T11:22:43Z same execution metadata True
+MCP Server (Node 20 compatibility) attempt1 140473871643 success 2026-11-27T11:20:17Z 2026-11-27T11:20:44Z attempt2 140485774957 success 2026-11-27T11:20:17Z 2026-11-27T11:20:44Z same execution metadata True
+Day Constructor acceptance DB tests attempt1 140473871726 success 2026-11-27T11:20:17Z 2026-11-27T11:32:24Z attempt2 140485700004 success 2026-11-27T11:20:17Z 2026-11-27T11:32:24Z same execution metadata True
+REL-04 Next.js app rendering tests attempt1 140473871762 success 2026-11-27T11:20:17Z 2026-11-27T11:22:01Z attempt2 140485743734 success 2026-11-27T11:20:17Z 2026-11-27T11:22:01Z same execution metadata True
+Next.js production build attempt1 140473871807 success 2026-11-27T11:20:17Z 2026-11-27T11:21:01Z attempt2 140485743503 success 2026-11-27T11:20:17Z 2026-11-27T11:21:01Z same execution metadata True
+Ephemeris / panchang tests attempt1 140473871872 failure 2026-11-27T11:20:17Z 2026-11-27T11:34:44Z attempt2 140485698496 success 2026-11-27T11:45:54Z 2026-11-27T12:01:09Z same execution metadata False
+REL-04 Chromium multi-tab tests attempt1 140473871975 success 2026-11-27T11:20:17Z 2026-11-27T11:21:22Z attempt2 140485700119 success 2026-11-27T11:20:17Z 2026-11-27T11:21:22Z same execution metadata True
+MCP Server attempt1 140473871994 success 2026-11-27T11:20:17Z 2026-11-27T11:20:46Z attempt2 140485766652 success 2026-11-27T11:20:17Z 2026-11-27T11:20:46Z same execution metadata True
+Database migration validation attempt1 140473872013 success 2026-11-27T11:20:17Z 2026-11-27T11:23:48Z attempt2 140485701089 success 2026-11-27T11:20:17Z 2026-11-27T11:23:48Z same execution metadata True

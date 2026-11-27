@@ -593,6 +593,40 @@ async function main() {
       await context.close();
     }
     deploy.sw = NEW_SW;
+
+    // ------------------------------------------------------------ CH16 (R14) lost enqueue acknowledgement while ANOTHER real tab settles the request
+    {
+      store.logs.length = 0;
+      const { context, open, signIn } = await newContext();
+      await signIn('alicesynth@example.invalid');
+      const [t1, t2] = [await open(), await open()];
+      for (const t of [t1, t2]) await t.evaluate(async () => { await (window as any).aura.acct.fetchVerifiedSession(); });
+      const mark = serverLog.length;
+      // t1: the next read-write transaction commits in REAL Chromium IndexedDB, but its acknowledgement is withheld and
+      // then delivered as an error (a synthetic lost acknowledgement at the caller boundary).
+      await t1.evaluate(() => {
+        const w = window as any;
+        const orig = IDBDatabase.prototype.transaction;
+        IDBDatabase.prototype.transaction = function (this: IDBDatabase, ...a: any[]) {
+          const t = (orig as any).apply(this, a);
+          if (t.mode === 'readwrite') {
+            IDBDatabase.prototype.transaction = orig;
+            t.addEventListener('complete', () => { const onerror = t.onerror; t.oncomplete = null; w.__releaseAck = () => onerror?.call(t, new Event('error')); });
+          }
+          return t;
+        };
+        w.__submission = w.aura.sync.submitActivityLog({ activityTitle: 'CH16 activity', activeWindow: 'NEUTRAL', logTimestamp: '2026-11-27T06:00:00.000Z', clientRequestId: 'ch16-req' }, 'tmp');
+      });
+      await t1.waitForFunction(() => typeof (window as any).__releaseAck === 'function');
+      // t2 (same profile, real shared IndexedDB): past the claim lifetime, replays and settles the committed request.
+      const rp = await t2.evaluate(async () => { const t0 = Date.now(); Date.now = () => t0 + 61_000; return (window as any).aura.sync.replayOfflineQueue(); });
+      const kind = await t1.evaluate(async () => { (window as any).__releaseAck(); return (await (window as any).__submission).kind; });
+      const posts = serverLog.slice(mark).filter((x) => x.path === '/api/habit-logs' && x.method === 'POST').length;
+      const rows = store.logs.filter((l: any) => l.clientRequestId === 'ch16-req').length;
+      console.log('CH16', JSON.stringify({ replay: rp, kind, posts, rows }));
+      check(`CH16 (R14, real Chromium) commit + lost acknowledgement + another tab settles it -> the original caller gets already-recorded (never "not saved"); exactly 1 POST and 1 server row for the original request id (kind ${kind}, posts ${posts}, rows ${rows})`, rp.confirmed === 1 && kind === 'already-recorded' && posts === 1 && rows === 1 && store.logs.length === 1);
+      await context.close();
+    }
   } finally {
     await browser.close();
     server.close();

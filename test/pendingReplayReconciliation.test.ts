@@ -253,7 +253,8 @@ check(
     const classify = src.indexOf('const outcome = classifyHabitLogSyncOutcome(status);');
     const keepRetry = src.indexOf("if (outcome === 'retry') { await releaseClaim(token); continue; }", classify);
     // R12: the settlement is bound to the claim token (its claimed record, identity and payload).
-    const removeSettled = src.indexOf('const r = await settleRecords([token.recordId ?? head.recordId], token, { owner: lease.account });', keepRetry);
+    // R14: the claim-bound settlement also records the server's definitive answer (accepted / rejected).
+    const removeSettled = src.indexOf("const r = await settleRecords([token.recordId ?? head.recordId], token, { owner: lease.account, serverOutcome: outcome === 'confirmed' ? 'accepted' : 'rejected' });", keepRetry);
     return classify > 0 && keepRetry > classify && removeSettled > keepRetry && !/removeOwnedEntries|setItem\(|localStorage/.test(src);
   })()
 );

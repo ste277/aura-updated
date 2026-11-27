@@ -147,7 +147,7 @@ export interface QueueRecord {
  *   `blocked`      every request id it may stand for, incl. conflicting candidates: never eligible;
  *   `payloads`     crid -> canonical payload, only for a COMPLETE valid entry.
  */
-export interface QuarantinedSource { key: string; raw: string; entries: number; crids: string[]; unidentified: number; blocked: string[]; payloads?: Record<string, string> }
+export interface QuarantinedSource { key: string; raw: string; entries: number; crids: string[]; unidentified: number; blocked: string[]; payloads?: Record<string, string>; /** R14: entries that name NO request id (unparseable / id-less): they may hold any request -- physical absence can never be concluded while they exist. */ unattributable?: number }
 
 export type QueueRead =
   | {
@@ -233,7 +233,7 @@ type Dispatch = { key: string; attempts: number; lastAt: number };
  * `possiblySent` (R11): the request had been handed to the network before this decision -- kept with the decision
  * so the fact survives the removal of its dispatch mark and later cleanup retries.
  */
-type Decision = { recordId: string; ownerUserId: string; clientRequestId: string; payload: string | null; decision: 'settled' | 'discarded'; at: number; fmt: typeof ACTIVE_RECORD_FORMAT; possiblySent?: boolean };
+type Decision = { recordId: string; ownerUserId: string; clientRequestId: string; payload: string | null; decision: 'settled' | 'discarded'; at: number; fmt: typeof ACTIVE_RECORD_FORMAT; possiblySent?: boolean; /** R14: a settlement records the server's definitive answer. */ serverOutcome?: 'accepted' | 'rejected' };
 type Stores = Record<'records' | 'claims' | 'dispatches' | 'tombstones', IDBObjectStore>;
 const STORES = ['records', 'claims', 'dispatches', 'tombstones'] as const;
 
@@ -368,14 +368,14 @@ async function activeCopies(st: Stores, owner: string, crid: string, payload: st
  * Records `owner`'s final decision about the logical request. The first decision wins (never replaced); R11: a
  * later write only adds `possiblySent` -- the prior-send fact is never lost.
  */
-async function writeDecision(st: Stores, owner: string, crid: string, payload: string | null, decision: Decision['decision'], at: number, possiblySent = false): Promise<Decision> {
+async function writeDecision(st: Stores, owner: string, crid: string, payload: string | null, decision: Decision['decision'], at: number, possiblySent = false, serverOutcome?: Decision['serverOutcome']): Promise<Decision> {
   const key = decisionKey(owner, crid);
   const prior = (await asPromise(st.tombstones.get(key))) as Decision | undefined;
   if (prior) {
     if (possiblySent && !prior.possiblySent) { const merged = { ...prior, possiblySent: true }; await asPromise(st.tombstones.put(merged)); return merged; }
     return prior;
   }
-  const d: Decision = { recordId: key, ownerUserId: owner, clientRequestId: crid, payload, decision, at, fmt: ACTIVE_RECORD_FORMAT, possiblySent };
+  const d: Decision = { recordId: key, ownerUserId: owner, clientRequestId: crid, payload, decision, at, fmt: ACTIVE_RECORD_FORMAT, possiblySent, ...(serverOutcome ? { serverOutcome } : {}) };
   await asPromise(st.tombstones.put(d));
   return d;
 }
@@ -453,19 +453,19 @@ function inspectQuarantine(owner: string): Quarantine {
     let opaque = false;
     const classify = (key: string, raw: string, values: unknown[], outer: string | null | undefined, partial?: string): QuarantinedSource => {
       const crids = new Set<string>(), blocked = new Set<string>(), payloads: Record<string, string> = {};
-      let unidentified = 0;
+      let unidentified = 0, unattributable = 0;
       for (const v of values) {
         const id = resolveIdentity(owner, owner, outer, v, partial);
         for (const c of id.candidates) blocked.add(c);
         if (id.kind === 'valid' || id.kind === 'damaged') { crids.add(id.crid!); if (isQueuedHabitLog(v) && v.clientRequestId === id.crid) payloads[id.crid!] = canonicalPayload(v); }
-        else unidentified++;
+        else { unidentified++; if (id.candidates.length === 0) unattributable++; }
       }
-      return { key, raw, entries: values.length, crids: [...crids], unidentified, blocked: [...blocked], payloads };
+      return { key, raw, entries: values.length, crids: [...crids], unidentified, blocked: [...blocked], payloads, unattributable };
     };
     const v2 = s.getItem(QUEUE_V2_PREFIX + owner);
     if (v2 !== null) {
       const a = parse(v2);
-      if (!Array.isArray(a)) { opaque = true; sources.push({ key: QUEUE_V2_PREFIX + owner, raw: v2, entries: 1, crids: [], unidentified: 1, blocked: [], payloads: {} }); }
+      if (!Array.isArray(a)) { opaque = true; sources.push({ key: QUEUE_V2_PREFIX + owner, raw: v2, entries: 1, crids: [], unidentified: 1, blocked: [], payloads: {}, unattributable: 1 }); }
       else if (a.length > 0) sources.push(classify(QUEUE_V2_PREFIX + owner, v2, a, undefined));
     }
     // aura_q3:<owner>:<crid>     the key's request id is complete when non-empty
@@ -589,8 +589,8 @@ export async function readOfflineQueueView(ownerUserId: string | null | undefine
 
 export type EnqueueResult =
   | { status: 'stored'; recordId: string; claim: ClaimToken | null }
-  /** R8: this account already settled or discarded this request: nothing stored, nothing to send. */
-  | { status: 'settled' }
+  /** R8: this account already settled or discarded this request: nothing stored, nothing to send. R14: which. */
+  | { status: 'settled'; decision?: 'settled' | 'discarded'; serverOutcome?: 'accepted' | 'rejected' }
   /** R8: a quarantined (retired-format) copy of this request exists: never adopted, never sent. */
   | { status: 'paused' }
   /** R9: eligibility cannot be established (localStorage unreadable, or an unidentifiable retired entry): not stored, NOT to be sent. */
@@ -644,21 +644,54 @@ export function transmissionCheck(token: ClaimToken): 'clear' | 'blocked' | 'una
  * through resolveIdentity (never only the compound index, which a damaged copy may lack), so a contradiction that
  * appears before the claim is seen by it.
  */
-type Gate = { status: 'eligible'; copies: Stored[] } | { status: 'settled' } | { status: 'conflict' } | { status: 'paused' };
-async function eligibilityGate(st: Stores, owner: string, crid: string, payload: string, q: Extract<Quarantine, { state: 'ok' }>): Promise<Gate> {
+/**
+ * R14 -- THE durable-state reconciliation of one logical request (account + request id), used by the transmission
+ * gate (enqueue and claim) and by recovery after an unconfirmed commit. Evidence is read in one transaction, in
+ * this order of authority:
+ *   1. the durable DECISION for the exact account + request id: settled (with the server's answer) or discarded;
+ *      a decision whose payload differs from the caller's is a conflict
+ *   2. a quarantined / blocked retired copy (paused)
+ *   3. the IndexedDB copies that name the request: valid active copies with the same payload are the request's
+ *      live copies; any damaged, contradictory, incomplete or retired copy pauses it; a different payload conflicts
+ *   4. otherwise absent
+ * INVARIANT (all removal paths): an active copy is only ever deleted in the same transaction that writes the
+ * request's durable decision. So "absent" (no copy AND no decision) proves the request was never committed --
+ * active-copy absence alone never does.
+ */
+export type RequestState =
+  | { kind: 'decided'; decision: 'settled' | 'discarded'; serverOutcome?: 'accepted' | 'rejected'; possiblySent: boolean }
+  | { kind: 'conflict' }
+  | { kind: 'paused' }
+  | { kind: 'live'; copies: Stored[]; /** a blocking (damaged / contradictory / retired) copy also exists */ paused: boolean }
+  | { kind: 'absent' };
+async function requestState(st: Stores, owner: string, crid: string, payload: string, q: Extract<Quarantine, { state: 'ok' }>): Promise<RequestState> {
   const decided = (await asPromise(st.tombstones.get(decisionKey(owner, crid)))) as Decision | undefined;
-  if (decided) return decided.payload === null || decided.payload === payload ? { status: 'settled' } : { status: 'conflict' };
-  if (q.opaque || q.crids.has(crid)) return { status: 'paused' }; // a quarantined / blocked retired copy
+  if (decided) {
+    if (decided.payload !== null && decided.payload !== payload) return { kind: 'conflict' };
+    return { kind: 'decided', decision: decided.decision, serverOutcome: decided.serverOutcome, possiblySent: Boolean(decided.possiblySent) };
+  }
   const owned = await relevantRecords(st, owner); // R12: incl. records without (or with another) outer owner
   const copies: Stored[] = [];
+  let paused = q.opaque || q.crids.has(crid); // a quarantined / blocked retired copy
   for (const r of owned) {
     const id = recordIdentity(owner, r);
     if (id.crid !== crid && !id.candidates.includes(crid)) continue;
-    if (id.kind !== 'valid' || id.crid !== crid || !isActive(r)) return { status: 'paused' }; // damaged, contradictory, incomplete or retired copy
+    if (id.kind !== 'valid' || id.crid !== crid || !isActive(r)) { paused = true; continue; } // damaged, contradictory, incomplete or retired copy
     copies.push(r);
   }
-  if (copies.some((r) => canonicalPayload(r.item) !== payload)) return { status: 'conflict' };
-  return { status: 'eligible', copies };
+  if (copies.some((r) => canonicalPayload(r.item) !== payload)) return { kind: 'conflict' };
+  if (copies.length) return { kind: 'live', copies, paused };
+  return paused ? { kind: 'paused' } : { kind: 'absent' };
+}
+
+type Gate = { status: 'eligible'; copies: Stored[] } | { status: 'settled'; decision: 'settled' | 'discarded'; serverOutcome?: 'accepted' | 'rejected' } | { status: 'conflict' } | { status: 'paused' };
+/** R11/R14: the transmission eligibility gate = requestState, read inside the claiming transaction. */
+async function eligibilityGate(st: Stores, owner: string, crid: string, payload: string, q: Extract<Quarantine, { state: 'ok' }>): Promise<Gate> {
+  const state = await requestState(st, owner, crid, payload, q);
+  if (state.kind === 'decided') return { status: 'settled', decision: state.decision, serverOutcome: state.serverOutcome };
+  if (state.kind === 'conflict') return { status: 'conflict' };
+  if (state.kind === 'paused' || (state.kind === 'live' && state.paused)) return { status: 'paused' };
+  return { status: 'eligible', copies: state.kind === 'live' ? state.copies : [] };
 }
 
 /**
@@ -698,6 +731,7 @@ export async function enqueueOwned(item: OwnedQueuedHabitLog, { claimFor }: { cl
     return await tx('readwrite', async (st) => {
       started = true;
       const g = await eligibilityGate(st, owner, item.clientRequestId, mine, q);
+      if (g.status === 'settled') return { status: 'settled', decision: g.decision, serverOutcome: g.serverOutcome } as const; // nothing written
       if (g.status !== 'eligible') return { status: g.status } as const; // nothing written
       let recordId: string;
       if (g.copies.length > 0) {
@@ -720,13 +754,16 @@ export async function enqueueOwned(item: OwnedQueuedHabitLog, { claimFor }: { cl
   } catch (e) {
     if (e instanceof EnqueueRefusal) return e.result;
     if (!started || !wrote) return { status: 'failed' }; // never ran, or failed before issuing any write: nothing can have committed
-    // The commit could not be confirmed: reconcile from storage, never from the error.
+    // The commit could not be confirmed: reconcile from durable storage (R14: requestState -- the decision first,
+    // then the live copies), never from the error and never from active-copy absence alone.
     try {
-      const found = await tx('readonly', async (st) => {
-        const copies = await activeCopies(st, owner, item.clientRequestId, mine);
-        return copies.find((c) => c.recordId === addedRecordId) ?? copies[0] ?? null;
-      });
-      return found ? { status: 'stored', recordId: found.recordId, claim: null } : { status: 'failed' };
+      const q2 = inspectQuarantine(owner);
+      if (q2.state !== 'ok') return { status: 'unknown' };
+      const state = await tx('readonly', (st) => requestState(st, owner, item.clientRequestId, mine, q2));
+      if (state.kind === 'decided') return { status: 'settled', decision: state.decision, serverOutcome: state.serverOutcome }; // settled/discarded meanwhile
+      if (state.kind === 'live') { const c = state.copies.find((x) => x.recordId === addedRecordId) ?? state.copies[0]; return { status: 'stored', recordId: c.recordId, claim: null }; }
+      if (state.kind === 'absent') return { status: 'failed' }; // no copy AND no decision: never committed (removal invariant)
+      return { status: 'unknown' }; // conflicting or paused evidence: unresolved
     } catch {
       return { status: 'unknown' };
     }
@@ -804,7 +841,7 @@ const ownerOfToken = (token?: ClaimToken) => (token ? token.key.split('\u0000')[
  * removed; a replaced, modified or newly contradictory copy is preserved. The decision is written for the claimed
  * identity. Without a token (tests, legacy callers) each given record is re-resolved first.
  */
-export async function settleRecords(recordIds: Iterable<string>, token?: ClaimToken, opts: { owner?: string } = {}): Promise<RemovalResult> {
+export async function settleRecords(recordIds: Iterable<string>, token?: ClaimToken, opts: { owner?: string; serverOutcome?: 'accepted' | 'rejected' } = {}): Promise<RemovalResult> {
   const ids = [...recordIds];
   const owner = opts.owner ?? token?.owner ?? ownerOfToken(token);
   try {
@@ -829,7 +866,7 @@ export async function settleRecords(recordIds: Iterable<string>, token?: ClaimTo
       }
       for (const { o, crid, payload } of targets.values()) {
         for (const copy of await activeCopies(st, o, crid, payload)) { await asPromise(st.records.delete(copy.recordId)); out.removed++; }
-        await writeDecision(st, o, crid, payload, 'settled', now, true);
+        await writeDecision(st, o, crid, payload, 'settled', now, true, opts.serverOutcome);
       }
       if (token) {
         const c = (await asPromise(st.claims.get(token.key))) as Claim | undefined;
@@ -926,6 +963,8 @@ export interface LogicalDiscardResult {
   discardedUnverified: number;
   /** Of `discardedUnverified`: it had been handed to the network. */
   discardedUnverifiedPossiblySent: number;
+  /** R14: diagnostic only -- cleanup operations that errored or could not be read back (the final verification decides the outcome). */
+  cleanupErrors: number;
   /** Another context was sending it at that moment: nothing decided, nothing deleted. */
   keptInFlight: number;
   /** NOT discarded: the transaction did not record a decision (verified afterwards); kept exactly as before. */
@@ -950,17 +989,27 @@ export interface DiscardSnapshot {
  * candidates include one of them, and any retired localStorage entry that blocks one of them. null = cannot be read
  * (removal is then never reported).
  */
-async function remainingCopies(owner: string, crids: Set<string>): Promise<{ crids: Set<string>; unidentifiedRecordIds: string[]; unidentifiedKeys: string[] } | null> {
-  if (crids.size === 0) return { crids: new Set(), unidentifiedRecordIds: [], unidentifiedKeys: [] };
+/**
+ * R14 -- THE physical-state verification (cleanup reporting), per request:
+ *   remaining  a copy that names it is observed (IndexedDB or retired storage)
+ *   unknown    it could be held by storage that names no request id (an unparseable v2 array, an id-less entry or
+ *              record) -- absence is never inferred from unreadable data
+ *   absent     verified absent at this boundary (IndexedDB read, then retired storage inspected synchronously with
+ *              the result); this is an observation, not a guarantee against later writes
+ * Returns null when the verification itself cannot be completed (every request: unknown).
+ */
+async function remainingCopies(owner: string, crids: Set<string>): Promise<{ crids: Set<string>; unknown: Set<string>; unidentifiedRecordIds: string[]; unidentifiedKeys: string[] } | null> {
+  if (crids.size === 0) return { crids: new Set(), unknown: new Set(), unidentifiedRecordIds: [], unidentifiedKeys: [] };
   try {
     const rows = await tx('readonly', (st) => relevantRecords(st, owner));
-    // R13: retired storage is inspected AFTER the IndexedDB read completed, synchronously with computing the result
-    // (no await between): a retired write visible to this context at the reporting boundary is never missed.
+    // R13: retired storage is inspected AFTER the IndexedDB read completed, synchronously with computing the result.
     const q = inspectQuarantine(owner);
     if (q.state !== 'ok') return null;
     const left = new Set<string>(), unidentifiedRecordIds: string[] = [], unidentifiedKeys: string[] = [];
+    let unattributable = q.opaque || q.sources.some((x) => (x.unattributable ?? 0) > 0);
     for (const r of rows) {
       const id = recordIdentity(owner, r);
+      if ((id.kind === 'incomplete' || id.kind === 'contradictory') && id.candidates.length === 0) unattributable = true;
       const names = id.candidates.filter((c) => crids.has(c));
       if (names.length === 0) continue;
       for (const c of names) left.add(c);
@@ -972,7 +1021,8 @@ async function remainingCopies(owner: string, crids: Set<string>): Promise<{ cri
       for (const c of names) left.add(c);
       if (src.unidentified > 0) unidentifiedKeys.push(src.key);
     }
-    return { crids: left, unidentifiedRecordIds, unidentifiedKeys };
+    const unknown = new Set<string>(unattributable ? [...crids].filter((c) => !left.has(c)) : []);
+    return { crids: left, unknown, unidentifiedRecordIds, unidentifiedKeys };
   } catch {
     return null;
   }
@@ -992,7 +1042,7 @@ async function remainingCopies(owner: string, crids: Set<string>): Promise<{ cri
  *     even that read fails the outcome is uncertain. Nothing is ever reported as rolled back without that read.
  */
 export async function discardOwned(owner: string, snap: DiscardSnapshot, { tab }: { tab: string }): Promise<LogicalDiscardResult> {
-  const out: LogicalDiscardResult = { removed: 0, removedPossiblySent: 0, cleanupPending: 0, cleanupPendingPossiblySent: 0, discardedUnverified: 0, discardedUnverifiedPossiblySent: 0, keptInFlight: 0, failed: 0, uncertain: 0, unidentified: 0, alreadyGone: 0 };
+  const out: LogicalDiscardResult = { removed: 0, removedPossiblySent: 0, cleanupPending: 0, cleanupPendingPossiblySent: 0, discardedUnverified: 0, discardedUnverifiedPossiblySent: 0, cleanupErrors: 0, keptInFlight: 0, failed: 0, uncertain: 0, unidentified: 0, alreadyGone: 0 };
   const own = (key: string) => QUARANTINED_PREFIXES.some((p) => key === `${p}${owner}` || key.startsWith(`${p}${owner}:`));
   const sources = snap.quarantined.filter((x) => own(x.key));
   const sourceCrids = new Set(sources.flatMap((x) => x.crids));
@@ -1047,26 +1097,20 @@ export async function discardOwned(owner: string, snap: DiscardSnapshot, { tab }
       return out;
     }
     for (const crid of confirmed) if (!found.has(crid)) out.failed++;
-    // Decided ones: no cleanup is attempted after an unconfirmed commit; report by what PHYSICALLY remains (R12).
-    const remaining = await remainingCopies(owner, new Set(found.keys()));
-    for (const [crid, sent] of found) {
-      if (remaining === null) { out.discardedUnverified++; if (sent) out.discardedUnverifiedPossiblySent++; } // R13: unknown, not "a copy remains"
-      else if (remaining.crids.has(crid)) { out.cleanupPending++; if (sent) out.cleanupPendingPossiblySent++; }
-      else { out.removed++; if (sent) out.removedPossiblySent++; }
-    }
+    // Decided ones: no cleanup is attempted after an unconfirmed commit; report by what PHYSICALLY remains.
+    classifyPhysical(out, found, await remainingCopies(owner, new Set(found.keys())));
     return out;
   }
-  // Committed: now, and only now, remove the retired entries whose every entry is identified and decided.
-  const pendingCleanup = new Set<string>();
+  // Committed: now, and only now, remove the retired entries whose every entry is identified and decided. R14: a
+  // cleanup error is DIAGNOSTIC only -- the final verification below decides what is reported (a source that was
+  // skipped or survived is observed there; one whose read-back merely threw is verified there).
   const s = storageOrNull();
   for (const src of sources) {
-    if (src.unidentified > 0 || !src.crids.every((c) => committed!.decided.has(c))) { for (const c of src.crids) pendingCleanup.add(c); continue; }
-    let gone = false;
+    if (src.unidentified > 0 || !src.crids.every((c) => committed!.decided.has(c))) continue; // kept: observed by the final scan
     try {
       if (s && s.getItem(src.key) === src.raw) s.removeItem(src.key);
-      gone = Boolean(s) && s!.getItem(src.key) === null;
-    } catch { gone = false; }
-    if (!gone) for (const c of src.crids) pendingCleanup.add(c);
+      if (s && s.getItem(src.key) !== null) out.cleanupErrors++;
+    } catch { out.cleanupErrors++; }
   }
   // R12: report removal only after verifying what PHYSICALLY remains (IndexedDB and retired storage) for each decided
   // request; copies that appeared or changed meanwhile keep it cleanup-pending, and a newly unidentifiable copy that
@@ -1075,12 +1119,23 @@ export async function discardOwned(owner: string, snap: DiscardSnapshot, { tab }
   const snapshotCorrupt = new Set(corrupt.map((c) => c.recordId));
   const snapshotKeys = new Set(sources.map((x) => x.key));
   if (remaining) out.unidentified += remaining.unidentifiedRecordIds.filter((id) => !snapshotCorrupt.has(id)).length + remaining.unidentifiedKeys.filter((k) => !snapshotKeys.has(k)).length;
-  for (const [crid, sent] of committed.decided) {
-    if (pendingCleanup.has(crid) || remaining?.crids.has(crid)) { out.cleanupPending++; if (sent) out.cleanupPendingPossiblySent++; } // a copy is KNOWN to remain
-    else if (remaining === null) { out.discardedUnverified++; if (sent) out.discardedUnverifiedPossiblySent++; } // R13: physical state unknown
-    else { out.removed++; if (sent) out.removedPossiblySent++; } // observed absent at the reporting boundary
-  }
+  classifyPhysical(out, committed.decided, remaining);
   return out;
+}
+
+/**
+ * R14 -- the ONE physical-outcome classification for discarded requests (committed and reconciled paths alike):
+ * the FINAL verification is authoritative; earlier cleanup errors never override it.
+ *   remaining          -> cleanupPending       (a copy is known to remain)
+ *   unknown / no read  -> discardedUnverified  (decision durable; whether a copy remains could not be established)
+ *   verified absent    -> removed              (observed absent at the reporting boundary)
+ */
+function classifyPhysical(out: LogicalDiscardResult, decided: Map<string, boolean>, remaining: Awaited<ReturnType<typeof remainingCopies>>) {
+  for (const [crid, sent] of decided) {
+    if (remaining?.crids.has(crid)) { out.cleanupPending++; if (sent) out.cleanupPendingPossiblySent++; }
+    else if (remaining === null || remaining.unknown.has(crid)) { out.discardedUnverified++; if (sent) out.discardedUnverifiedPossiblySent++; }
+    else { out.removed++; if (sent) out.removedPossiblySent++; }
+  }
 }
 
 /** R9: the durable discard of the account's quarantined localStorage entries alone (decision first, then cleanup). */
