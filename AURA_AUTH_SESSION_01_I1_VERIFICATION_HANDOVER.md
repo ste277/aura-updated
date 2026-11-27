@@ -1,7 +1,7 @@
 # AURA-AUTH-SESSION-01-I1 — Implementation and Independent Verification Handover
 
 **Date:** 2026-11-27 · **Ticket:** 39230 / AURA-AUTH-SESSION-01-I1 (`AURA_AUTH_SESSION_01_I1_TICKET.md`) · **Design:** `AURA_AUTH_SESSION_01_REVOCATION_DESIGN.md` Rev 3
-**Branch:** `feature/aura-auth-session-01-i1`, worktree `.claude/worktrees/auth-session-01`. **Draft PR [#401](https://github.com/ste277/aura-updated/pull/401)**, base `main` = `477723d` (integration base, unchanged at push). Head `29bf09d` = approved implementation `5d8a16c` + one evidence-hygiene commit. Auto-merge OFF, auto-fix OFF. No merge, no deploy.
+**Branch:** `feature/aura-auth-session-01-i1`, worktree `.claude/worktrees/auth-session-01`. **Draft PR [#401](https://github.com/ste277/aura-updated/pull/401)**, base branch `main`, branched from `477723d`. Commits: approved implementation `5d8a16c`, evidence hygiene `29bf09d`, CI test fixes `81f08df`, and this handover update. Auto-merge OFF, auto-fix OFF. No merge, no deploy.
 **Status:** READY FOR INDEPENDENT VERIFICATION. CI results are in §10. Merge requires separate approval.
 
 ---
@@ -189,5 +189,31 @@ Once I1 is merged, migration 0055 reaches the Production database as an empty, u
 
 Every required item is covered by CI, so no separate local run was needed. The extra local runs only add evidence that the legacy token paths are unaffected.
 
-**CI run [45973451075](https://github.com/ste277/aura-updated/actions/runs/45973451075)** on head `29bf09d`: see the table below. Per instruction, a failure of the known Rhythm Move test (CI-09) is recorded as-is: not rerun, not modified.
+**CI run 1, [45973451075](https://github.com/ste277/aura-updated/actions/runs/45973451075), on head `29bf09d`: 5 of 7 jobs passed and 2 failed. Both failures were caused by I1 and were test-only.**
+
+| Job | Result |
+|---|---|
+| Next.js production build (full `next build` with typecheck, bundle guards, standalone checks) | ✅ success |
+| Day Constructor acceptance DB tests (including `authRequestLinkQuotaDb`, `authLogRedactionDb`, `authMagicLinkLocalOnlyDb`) | ✅ success. The known Rhythm Move capacity failure (CI-09) **did not occur**. |
+| MCP Server / MCP Server (Node 20) (including `mcpOAuthLocal`) | ✅ success |
+| Palmistry upload pipeline tests (G5) | ✅ success |
+| **Database migration validation** | ❌ `prisma migrate deploy` and `status` and every step before the I1 test **passed**. Step 18, the I1 DB test, **failed to compile** (F1). |
+| **Ephemeris / panchang tests** | ❌ Step 83, PREF-01's check **11o "No new migration"**, failed (F2). The job stopped there, so later steps (including `signInResendChangeEmailJsdom` and the two I1 unit tests) **did not run**. |
+
+**F1, a type boundary in the test only.** CI installs `apps/web/node_modules`, which contains `@types/pg` 8.20, so `apps/web/lib` resolves those types. The test's admin pool resolves the repository-root `@types/pg` 8.23, and the two `PoolClient` types are not assignable to each other (TS2345 at four call sites, plus T4's `held` array). My local runs had no `apps/web/node_modules`, so both sides resolved the same types and the error never appeared. **Fix (`81f08df`):** a single explicit cast at the boundary in the test (`asLibClient`), and T4's array typed structurally. **The library code is unchanged.**
+
+**F2, a pre-existing scope guard.** PREF-01's check 11o fails whenever *any* migration numbered 0055 or higher exists. MP-1 (#400) already narrowed it to allow its own `0056_my_people_foundation`. **Fix (`81f08df`):** the same narrowing for `0055_auth_session`; one line, with no other PREF-01 change. **Merge note:** this line also conflicts with MP-1's edit. Whichever PR merges second should allow both names: `!['0055_auth_session', '0056_my_people_foundation'].includes(d)`.
+
+**Local reproduction in CI's layout** (`npm ci` in `apps/web` from the lockfile, with no `package.json` or lockfile change, then a fresh disposable loopback PostgreSQL 16; evidence in `AURA_AUTH_SESSION_01_I1_EVIDENCE/ci-layout/`):
+
+| Check | Before fix | After fix |
+|---|---|---|
+| Real `npx prisma migrate deploy` (Prisma 5.22.0) | — | **All migrations applied** |
+| Real `npx prisma migrate status` | — | **55 found, schema up to date.** The ledger counts 55 applied, which equals 55 directories. |
+| `authSessionStoreDb.test.ts` | **TS2345, reproduced** | **50/50 ×3 runs.** Clean afterwards (0 sessions, 0 synthetic users). |
+| `authSessionToken.test.ts` / `authSessionDormancy.test.ts` | — | 67/67 · 16/16 |
+| `availabilityPreferencesPref01.test.ts` | — | **ALL PASSED** |
+| `tsc --strict` over the 4 tests in CI's layout | — | OK |
+
+The CI result on the final head is reported on PR #401 and in the owner report. Per instruction, a failure of the known Rhythm Move test (CI-09) would be recorded as-is: not rerun, not modified.
 
