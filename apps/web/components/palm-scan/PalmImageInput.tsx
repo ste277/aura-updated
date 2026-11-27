@@ -381,6 +381,8 @@ export const PLACEMENT_TEXT: Partial<Record<LineUnassessedReason, string>> = {
 export const POINT_LIMIT_TEXT = `This line has reached the point limit (${MAX_TRACE_INPUT_POINTS} points), so nothing was added. Use Undo, Clear line, or retrace the line with one drag.`;
 /** R3: any gesture (tap or drag) whose pointer left the photo at any delivered sample is refused; nothing changes. */
 export const GESTURE_OFF_PHOTO_TEXT = 'The pointer went outside the photo, so nothing was changed. Keep the whole trace on the photo.';
+/** R4: a gesture with any sample that could not be mapped to the photo (geometry unavailable, non-finite) is refused. */
+export const GESTURE_UNVERIFIABLE_TEXT = 'The photo position could not be checked during this gesture, so nothing was changed. Please trace again.';
 export const PLACEMENT_OK_TEXT = 'The shape and position of this trace can be used. Confirm it if it follows the line you see.';
 const placementText = (r: LineUnassessedReason) => PLACEMENT_TEXT[r] ?? 'This trace cannot be used yet.';
 
@@ -411,11 +413,16 @@ export interface PalmTracingPanelProps {
  *     the photo with the shared geometry BEFORE any spacing or simplification. A gesture (tap or drag) that left the
  *     photo at any sample is refused and changes nothing; coming back inside does not restore it (never clamped, never
  *     shortened into an eligible trace);
+ *   - R4: validation FAILS CLOSED -- a sample that cannot be mapped and verified (photo geometry unavailable, e.g. a
+ *     zero-size stage, or a non-finite position) invalidates the whole gesture exactly like an outside sample; restoring
+ *     the geometry or returning inside never restores it;
  *   - pointercancel or lost capture discard it.
  */
-type Gesture = { id: number; epoch: number; model: TracingModel; line: PalmLineId; pts: TracingPoint[]; startClient: { x: number; y: number }; moved: boolean; leftPhoto: boolean };
+type Gesture = { id: number; epoch: number; model: TracingModel; line: PalmLineId; pts: TracingPoint[]; startClient: { x: number; y: number }; moved: boolean; invalid: null | 'outside' | 'unverifiable' };
 
 const isCleared = (e: unknown) => e instanceof TracingError && e.code === 'context-cleared';
+/** Mark a gesture invalid; the first reason is kept and nothing ever clears it (sticky). */
+const invalidateSample = (g: Gesture, why: 'outside' | 'unverifiable') => { if (!g.invalid) g.invalid = why; };
 
 export function PalmTracingPanel({ context, imageSource, onClose }: PalmTracingPanelProps) {
   const ids = useId();
@@ -572,7 +579,7 @@ export function PalmTracingPanel({ context, imageSource, onClose }: PalmTracingP
     if (!p || !p.inside) { setMessage('Start the trace on the photo.'); return; }
     e.preventDefault();
     try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* capture is best-effort */ }
-    gesture.current = { id: e.pointerId, epoch: gestureEpoch.current, model: m, line: lineId, pts: [{ x: p.x, y: p.y }], startClient: { x: e.clientX, y: e.clientY }, moved: false, leftPhoto: false };
+    gesture.current = { id: e.pointerId, epoch: gestureEpoch.current, model: m, line: lineId, pts: [{ x: p.x, y: p.y }], startClient: { x: e.clientX, y: e.clientY }, moved: false, invalid: null };
     setDraft([{ x: p.x, y: p.y }]);
   };
 
@@ -585,8 +592,8 @@ export function PalmTracingPanel({ context, imageSource, onClose }: PalmTracingP
     const samples: Array<{ clientX: number; clientY: number }> = coalesced.length ? coalesced : [native];
     for (const sample of samples) {
       const p = toImage(sample.clientX, sample.clientY);
-      if (!p) continue;
-      if (!p.inside) g.leftPhoto = true; // validated before any spacing or simplification
+      if (!p) { invalidateSample(g, 'unverifiable'); continue; } // fail closed: an unmappable sample is never skipped
+      if (!p.inside) invalidateSample(g, 'outside'); // validated before any spacing or simplification
       g.pts.push({ x: p.x, y: p.y });
       if (!g.moved && Math.hypot(sample.clientX - g.startClient.x, sample.clientY - g.startClient.y) > TRACING_TAP_SLOP_PX) g.moved = true;
     }
@@ -602,15 +609,16 @@ export function PalmTracingPanel({ context, imageSource, onClose }: PalmTracingP
     if (g.epoch !== gestureEpoch.current || g.model !== modelRef.current || g.line !== lineId) return;
     // The release position is part of the gesture, even without a final pointermove (never clamped; I1 judges it).
     const release = toImage(e.clientX, e.clientY);
+    if (!release) invalidateSample(g, 'unverifiable'); // fail closed: an unmappable release is never skipped
     if (release) {
       const last = g.pts[g.pts.length - 1];
       if (last.x !== release.x || last.y !== release.y) g.pts.push({ x: release.x, y: release.y });
-      if (!release.inside) g.leftPhoto = true;
+      if (!release.inside) invalidateSample(g, 'outside');
       if (!g.moved && Math.hypot(e.clientX - g.startClient.x, e.clientY - g.startClient.y) > TRACING_TAP_SLOP_PX) g.moved = true;
     }
     // R3: a gesture that left the photo at any delivered sample is refused before any spacing or simplification, so
     // neither the tap/drag classification nor stroke filtering can turn it into an eligible trace; the draft is unchanged.
-    if (g.leftPhoto) { setMessage(GESTURE_OFF_PHOTO_TEXT); return; }
+    if (g.invalid) { setMessage(g.invalid === 'outside' ? GESTURE_OFF_PHOTO_TEXT : GESTURE_UNVERIFIABLE_TEXT); return; }
     run((m) => {
       if (m.line(g.line).status !== 'tracing') m.start(g.line);
       if (!g.moved) m.addPoint(g.line, g.pts[0]);

@@ -28,7 +28,9 @@ const argShots = process.argv.indexOf('--shots');
 const SHOTS = argShots > 0 ? process.argv[argShots + 1] : null;
 
 // ---------------------------------------------------------------- in-memory bundle
-type Mutation = 'none' | 'stretch' | 'container' | 'bypass' | 'original' | 'stale-gesture' | 'ignore-release' | 'retain-revoked' | 'unhandled-limit' | 'r1-head' | 'tap-boundary-bypass' | 'r2-head' | 'filter-before-validate' | 'ignore-coalesced';
+type Mutation = 'none' | 'stretch' | 'container' | 'bypass' | 'original' | 'stale-gesture' | 'ignore-release' | 'retain-revoked' | 'unhandled-limit' | 'r1-head' | 'tap-boundary-bypass' | 'r2-head' | 'filter-before-validate' | 'ignore-coalesced' | 'r3-head' | 'skip-unmappable';
+/** The R3 head reviewed by the R3 focused review (9463431): the R4 geometry-loss witness must fail on it. */
+const R3_HEAD = '94634312f4249e5edb72e008795fceabb2cca86c';
 /** The R2 head reviewed by 50351 (6ddaa65): the R3 sample-pipeline witness must fail on it. */
 const R2_HEAD = '6ddaa651a19cb3096a9093a16e0300e501d89c8f';
 /** The R1 head reviewed by 50348 (57ef630): the R2 boundary witness must fail on it. */
@@ -39,7 +41,7 @@ const originalComponent = (rev: string = ORIGINAL_HEAD): string => {
   try { return require('child_process').execFileSync('git', ['show', `${rev}:apps/web/components/palm-scan/PalmImageInput.tsx`], { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }); }
   catch { throw new Error(`the reviewed commit ${rev} is not in this clone; fetch it first: git fetch --no-tags --depth=1 origin ${rev}`); }
 };
-const MUTATIONS: Record<Exclude<Mutation, 'none' | 'original' | 'r1-head' | 'r2-head'>, Array<{ file: string; from: string; to: string }>> = {
+const MUTATIONS: Record<Exclude<Mutation, 'none' | 'original' | 'r1-head' | 'r2-head' | 'r3-head'>, Array<{ file: string; from: string; to: string }>> = {
   stretch: [{ file: 'apps/web/lib/palm-analysis/tracingGeometry.ts', from: 'const scale = Math.min(box.width / imgW, box.height / imgH);\n  const width = imgW * scale;\n  const height = imgH * scale;', to: 'const width = box.width;\n  const height = box.height;' }],
   container: [{ file: 'apps/web/components/palm-scan/PalmImageInput.tsx', from: 'const c = containRect({ left: r.left, top: r.top, width: r.width, height: r.height }, imgW, imgH);', to: 'const c = { left: r.left, top: r.top, width: r.width, height: r.height };' }],
   bypass: [
@@ -51,23 +53,28 @@ const MUTATIONS: Record<Exclude<Mutation, 'none' | 'original' | 'r1-head' | 'r2-
     { file: 'apps/web/components/palm-scan/PalmImageInput.tsx', from: 'const decide = <T,>(op: (m: TracingModel) => T): T | undefined => { invalidateGesture(); return run(op); };', to: 'const decide = <T,>(op: (m: TracingModel) => T): T | undefined => run(op);' },
     { file: 'apps/web/components/palm-scan/PalmImageInput.tsx', from: "if (g.epoch !== gestureEpoch.current || g.model !== modelRef.current || g.line !== lineId) return;", to: "if (g.model !== modelRef.current) return;" },
   ],
-  'ignore-release': [{ file: 'apps/web/components/palm-scan/PalmImageInput.tsx', from: 'const release = toImage(e.clientX, e.clientY);', to: 'const release = null as ReturnType<typeof toImage>;' }],
+  'ignore-release': [{ file: 'apps/web/components/palm-scan/PalmImageInput.tsx', from: "const release = toImage(e.clientX, e.clientY);\n    if (!release) invalidateSample(g, 'unverifiable'); // fail closed: an unmappable release is never skipped", to: 'const release = null as ReturnType<typeof toImage>; // the release is ignored entirely' }],
   'retain-revoked': [
     { file: 'apps/web/components/palm-scan/PalmImageInput.tsx', from: 'const timer = setInterval(watch, 250);', to: 'const timer = 0 as unknown as ReturnType<typeof setInterval>; void watch;' },
     { file: 'apps/web/components/palm-scan/PalmImageInput.tsx', from: 'if (modelRef.current && !modelRef.current.isActive()) { markCleared(); return; } // a late observer callback restores nothing', to: '' },
   ],
   // R2 negative control (filled in with the R2 implementation)
   // R3 negative control (filled in with the R3 implementation)
-  'filter-before-validate': [{ file: 'apps/web/components/palm-scan/PalmImageInput.tsx', from: 'if (g.leftPhoto) { setMessage(GESTURE_OFF_PHOTO_TEXT); return; }', to: 'if (spaceStroke(g.pts, imgW, imgH, Math.max(2, 0.006 * Math.max(imgW, imgH))).some((q) => q.x < 0 || q.x > 1 || q.y < 0 || q.y > 1)) { setMessage(GESTURE_OFF_PHOTO_TEXT); return; }' }],
+  // R4 negative control (filled in with the R4 implementation)
+  'skip-unmappable': [
+    { file: 'apps/web/components/palm-scan/PalmImageInput.tsx', from: "if (!p) { invalidateSample(g, 'unverifiable'); continue; }", to: 'if (!p) continue;' },
+    { file: 'apps/web/components/palm-scan/PalmImageInput.tsx', from: "if (!release) invalidateSample(g, 'unverifiable');", to: '' },
+  ],
+  'filter-before-validate': [{ file: 'apps/web/components/palm-scan/PalmImageInput.tsx', from: 'if (g.invalid) { setMessage(', to: 'if (spaceStroke(g.pts, imgW, imgH, Math.max(2, 0.006 * Math.max(imgW, imgH))).some((q) => q.x < 0 || q.x > 1 || q.y < 0 || q.y > 1)) { setMessage(' }],
   'ignore-coalesced': [{ file: 'apps/web/components/palm-scan/PalmImageInput.tsx', from: 'const samples: Array<{ clientX: number; clientY: number }> = coalesced.length ? coalesced : [native];', to: 'const samples: Array<{ clientX: number; clientY: number }> = [native]; void coalesced;' }],
-  'tap-boundary-bypass': [{ file: 'apps/web/components/palm-scan/PalmImageInput.tsx', from: 'if (g.leftPhoto) { setMessage(GESTURE_OFF_PHOTO_TEXT); return; }', to: 'if (g.moved && g.leftPhoto) { setMessage(GESTURE_OFF_PHOTO_TEXT); return; }' }],
+  'tap-boundary-bypass': [{ file: 'apps/web/components/palm-scan/PalmImageInput.tsx', from: 'if (g.invalid) { setMessage(', to: 'if (g.moved && g.invalid) { setMessage(' }],
   'unhandled-limit': [{ file: 'apps/web/components/palm-scan/PalmImageInput.tsx', from: "if (e instanceof TracingError) { setMessage(e.code === 'too-many-points'", to: "if (false) { setMessage(e.code === 'too-many-points'" }],
 };
 
 function bundle(entry: string, mutation: Mutation): string {
   const mods = new Map<string, string>();
   const ids = new Map<string, number>();
-  const muts = mutation === 'none' || mutation === 'original' || mutation === 'r1-head' || mutation === 'r2-head' ? [] : MUTATIONS[mutation];
+  const muts = mutation === 'none' || mutation === 'original' || mutation === 'r1-head' || mutation === 'r2-head' || mutation === 'r3-head' ? [] : MUTATIONS[mutation];
   const used = new Set<number>();
   const resolve = (spec: string, from: string): string => {
     const base = path.resolve(path.dirname(from), spec);
@@ -79,7 +86,8 @@ function bundle(entry: string, mutation: Mutation): string {
     if (ids.has(file)) return ids.get(file)!;
     const id = ids.size;
     ids.set(file, id);
-    let src = (mutation === 'original' || mutation === 'r1-head' || mutation === 'r2-head') && file === path.join(WEB, 'components/palm-scan/PalmImageInput.tsx') ? originalComponent(mutation === 'r1-head' ? R1_HEAD : mutation === 'r2-head' ? R2_HEAD : ORIGINAL_HEAD) : fs.readFileSync(file, 'utf8');
+    const pinned: Partial<Record<Mutation, string>> = { original: ORIGINAL_HEAD, 'r1-head': R1_HEAD, 'r2-head': R2_HEAD, 'r3-head': R3_HEAD };
+    let src = pinned[mutation] && file === path.join(WEB, 'components/palm-scan/PalmImageInput.tsx') ? originalComponent(pinned[mutation]) : fs.readFileSync(file, 'utf8');
     muts.forEach((m, k) => {
       if (path.join(ROOT, m.file) !== file) return;
       if (!src.includes(m.from)) throw new Error(`mutation ${mutation} target not found in ${m.file}`);
@@ -1010,6 +1018,102 @@ async function pipelineSuite(browser: any, mutation: Mutation, verbose: boolean)
   return res;
 }
 
+// ================================================================ R4: fail closed on unmappable samples
+/**
+ * R3 focused review (NO-GO): during a captured drag the tracing stage was resized to zero width; the next trusted
+ * pointer move or release could not be mapped to the photo and was SKIPPED, so the gesture completed from its earlier
+ * samples and could be confirmed. Contract: every delivered sample (press, move, coalesced, release) must be mapped and
+ * validated; an unmappable or unverifiable sample invalidates the whole gesture, and restoring the geometry or returning
+ * inside does not restore it. The draft is unchanged. Check names start with "Z".
+ */
+async function geometryLossSuite(browser: any, mutation: Mutation, verbose: boolean): Promise<Result> {
+  const res: Result = { passed: 0, failed: [] };
+  const check = (name: string, cond: boolean, detail?: unknown) => {
+    if (cond) { res.passed++; if (verbose) console.log(`OK   ${name}`); } else { res.failed.push(name); if (verbose) console.log(`FAIL ${name}${detail === undefined ? '' : ` :: ${JSON.stringify(detail).slice(0, 300)}`}`); }
+  };
+  const geometries = [
+    { name: 'desktop 1280x800 @1x, photo 1280x960', vw: 1280, vh: 800, dpr: 1, W: 1280, H: 960 },
+    { name: 'phone 390x844 @3x, photo 960x1280', vw: 390, vh: 844, dpr: 3, W: 960, H: 1280 },
+  ];
+  for (const geo of geometries) {
+    const ctx = await browser.newContext({ viewport: { width: geo.vw, height: geo.vh }, deviceScaleFactor: geo.dpr, hasTouch: true });
+    const pg = await ctx.newPage();
+    const errors: string[] = [];
+    pg.on('pageerror', (e: any) => errors.push(String(e).split('\n')[0]));
+    const html = page(mutation, geo.W, geo.H);
+    await pg.route('https://palm-harness.test/**', (route: any) => route.fulfill({ status: 200, contentType: 'text/html', body: html }));
+    await pg.goto('https://palm-harness.test/');
+    await pg.waitForSelector('[data-testid="palm-tracing-stage"] canvas');
+    const cdp = await ctx.newCDPSession(pg);
+    const T = `[${geo.name}]`;
+    const settle = () => pg.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+    const C = async (): Promise<Box> => oracleContent(await pg.$eval('[data-testid="palm-tracing-stage"]', (e: Element) => { e.scrollIntoView({ block: 'center' }); const r = e.getBoundingClientRect(); return { left: r.left, top: r.top, width: r.width, height: r.height }; }), geo.W, geo.H);
+    const at = (c: Box, x: number, y: number) => ({ x: c.left + x * c.width, y: c.top + y * c.height });
+    const trace = async (): Promise<Array<{ x: number; y: number }>> => pg.evaluate(([w, h]: [number, number]) => {
+      const el = document.querySelector('[data-trace="heart"]');
+      return el ? (el.getAttribute('points') || '').trim().split(/\s+/).filter(Boolean).map((t) => { const [x, y] = t.split(',').map(Number); return { x: x / w, y: y / h }; }) : [];
+    }, [geo.W, geo.H]);
+    const statusOf = async () => pg.$eval('[data-testid="palm-tracing-step-heart"]', (e: Element) => e.getAttribute('data-status')).catch(() => 'gone');
+    const statusText = async () => pg.$eval('[data-testid="palm-tracing-status"]', (e: Element) => e.textContent || '').catch(() => '');
+    const placement = async () => pg.$eval('[data-testid="palm-tracing-feedback"]', (e: Element) => e.getAttribute('data-placement')).catch(() => 'gone');
+    /** Collapse the tracing stage to zero width (the photo geometry disappears) or restore it. */
+    const collapse = async (zero: boolean) => { await pg.$eval('[data-testid="palm-tracing-stage"]', (e: Element, z: boolean) => { (e as HTMLElement).style.width = z ? '0px' : '100%'; }, zero); await settle(); };
+    const fresh = async () => { await pg.evaluate(() => (window as any).__palmHarness.replace(0.02)); await pg.waitForSelector('[data-testid="palm-tracing-photo"]'); await settle(); };
+    type Kind = 'mouse' | 'pen' | 'touch';
+    const press = async (kind: Kind, p: { x: number; y: number }) => kind === 'touch'
+      ? cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ ...p, id: 1 }] })
+      : cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: p.x, y: p.y, button: 'left', buttons: 1, clickCount: 1, pointerType: kind });
+    const move = async (kind: Kind, p: { x: number; y: number }) => { await (kind === 'touch'
+      ? cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ ...p, id: 1 }] })
+      : cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: p.x, y: p.y, button: 'left', buttons: 1, pointerType: kind })); await settle(); };
+    const release = async (kind: Kind, p: { x: number; y: number }) => { await (kind === 'touch'
+      ? cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+      : cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: p.x, y: p.y, button: 'left', buttons: 0, clickCount: 1, pointerType: kind })); await settle(); };
+    const tapAt = async (x: number, y: number) => { const c = await C(); const p = at(c, x, y); await press('mouse', p); await release('mouse', p); };
+    const HEAD: Array<[number, number]> = [[0.37, 0.56], [0.45, 0.6], [0.54, 0.62], [0.62, 0.64]];
+    const refused = /could not be checked|outside the photo/i;
+
+    for (const kind of ['mouse', 'pen', 'touch'] as Kind[]) {
+      for (const scenario of ['during a move', 'only at the release', 'during a move, restored before the release'] as const) {
+        await fresh();
+        await tapAt(0.4, 0.58); await tapAt(0.5, 0.6); // an existing (valid) two-point draft
+        const before = await trace();
+        const c = await C();
+        const P = HEAD.map(([x, y]) => at(c, x, y));
+        await press(kind, P[0]);
+        await move(kind, P[1]);
+        if (scenario === 'only at the release') {
+          await move(kind, P[2]); await move(kind, P[3]);
+          await collapse(true);
+          await release(kind, P[3]);
+        } else {
+          await collapse(true);
+          await move(kind, P[2]); // delivered while the photo geometry is unavailable
+          if (scenario === 'during a move, restored before the release') { await collapse(false); await move(kind, P[3]); }
+          await release(kind, P[3]);
+        }
+        await collapse(false);
+        const after = await trace();
+        const msg = await statusText();
+        check(`Z1 ${T} ${kind}: photo geometry lost ${scenario} -> the gesture is refused (fail-closed), the draft is unchanged and the user is told`, JSON.stringify(after) === JSON.stringify(before) && refused.test(msg), { n0: before.length, n1: after.length, msg });
+        await pg.$eval('[data-testid="palm-tracing-confirm"]', (e: Element) => (e as HTMLButtonElement).click()).catch(() => {});
+        await settle();
+        const t = await trace();
+        check(`Z2 ${T} ${kind}: geometry lost ${scenario} -> nothing from that gesture can be confirmed`, !((await statusOf()) === 'confirmed' && t.some((q) => Math.abs(q.x - 0.37) < 0.01 && Math.abs(q.y - 0.56) < 0.01)), { status: await statusOf(), t: t.length });
+      }
+      // a valid drag with stable geometry is unaffected
+      await fresh();
+      const c = await C();
+      const P = HEAD.map(([x, y]) => at(c, x, y));
+      await press(kind, P[0]); for (const q of P.slice(1)) await move(kind, q); await release(kind, P[3]);
+      check(`Z3 ${T} ${kind}: a drag with stable geometry is still accepted and usable`, (await trace()).length >= 2 && (await placement()) === 'ok');
+    }
+    check(`Z4 ${T} no uncaught page errors`, errors.length === 0, errors);
+    await ctx.close();
+  }
+  return res;
+}
+
 async function main() {
   if (SHOTS) fs.mkdirSync(SHOTS, { recursive: true });
   const channel = process.env.PALM_BROWSER_CHANNEL || undefined;
@@ -1037,6 +1141,21 @@ async function main() {
     const witnessFails = before.failed.filter((n) => /^B1 /.test(n)).length;
     console.log(`${witnessFails ? 'OK  ' : 'FAIL'} the 50348 witness fails on the reviewed R1 head ${R1_HEAD.slice(0, 7)}: ${witnessFails} B1 checks fail (${before.failed.length} boundary checks fail in all; ${before.passed} pass)`);
     if (!witnessFails) ok = false;
+    // R4: fail closed on unmappable samples
+    const r4 = await geometryLossSuite(browser, 'none', true);
+    console.log(`\nPALM-04-I2 R4 geometry loss (Z1-Z4): ${r4.passed} passed, ${r4.failed.length} failed`);
+    if (r4.failed.length) ok = false;
+    const r4before = await geometryLossSuite(browser, 'r3-head', false);
+    const z1 = r4before.failed.filter((n) => /^Z1 /.test(n)).length;
+    console.log(`${z1 ? 'OK  ' : 'FAIL'} the R4 geometry-loss witness fails on the reviewed R3 head ${R3_HEAD.slice(0, 7)}: ${z1} Z1 checks fail (${r4before.failed.length} Z checks fail in all; ${r4before.passed} pass)`);
+    if (!z1) ok = false;
+    if ((MUTATIONS as any)['skip-unmappable'].length) {
+      const nz = await geometryLossSuite(browser, 'skip-unmappable', false);
+      const hz = nz.failed.filter((n) => /^Z1 /.test(n)).length;
+      console.log(`${hz ? 'OK  ' : 'FAIL'} negative control skip-unmappable: ${hz} Z1 checks fail (${nz.failed.length} in all), ${nz.passed} pass`);
+      if (!hz) ok = false;
+    } else console.log('note: negative control skip-unmappable not defined yet');
+    if (process.env.PALM_I2_GEOMETRY_ONLY) { await browser.close(); process.exit(ok ? 0 : 1); }
     // R3: every delivered sample validated before filtering
     const r3 = await pipelineSuite(browser, 'none', true);
     console.log(`\nPALM-04-I2 R3 sample pipeline (Q1-Q7): ${r3.passed} passed, ${r3.failed.length} failed`);
