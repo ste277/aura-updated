@@ -969,10 +969,11 @@ jobs:
         run: npx ts-node test/palm04I2TracingGeometry.test.ts
       - name: Run tracing UI component tests (PALM-04-I2, jsdom)
         run: npx ts-node --project tsconfig.jsdom-tests.json test/palm04I2TracingUiJsdom.test.ts
-      # PALM-04-I2-R1: the browser suite replays the F1-F4 witnesses on the reviewed component (0c1c650), which a
-      # shallow CI checkout does not contain; fetch that one commit (read-only) so the witness run stays mandatory.
-      - name: Fetch the reviewed P4-I2 commit for the R1 witness run (PALM-04-I2-R1)
-        run: git fetch --no-tags --depth=1 origin 0c1c6500e3bf9b4bd046772c32e5fab86e178ac7
+      # PALM-04-I2-R1/R2: the browser suite replays the F1-F4 witnesses on the reviewed component (0c1c650) and the
+      # 50348 boundary witness on the reviewed R1 head (57ef630); a shallow CI checkout contains neither, so fetch
+      # exactly those two pinned commits (read-only) so both witness runs stay mandatory.
+      - name: Fetch the reviewed P4-I2 commits for the witness runs (PALM-04-I2-R1/R2)
+        run: git fetch --no-tags --depth=1 origin 0c1c6500e3bf9b4bd046772c32e5fab86e178ac7 57ef6302a2b43fb94b7aed3c1ef3f655d074a9e6
       - name: Run tracing UI browser tests (PALM-04-I2, runner's installed Google Chrome, synthetic harness, no network)
         env:
           PALM_BROWSER_CHANNEL: chrome
