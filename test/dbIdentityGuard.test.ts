@@ -199,6 +199,8 @@ function runBuild(env: Record<string, string | undefined>) {
     const log = path.join(tmp, 'calls.log');
     // Stub Palmistry scanner (covered by palm01P4VercelGuard.test.ts); records that it ran.
     fs.writeFileSync(path.join(web, 'scripts/check-palmistry-bundle.js'), `require('fs').appendFileSync(${JSON.stringify(log)}, 'scanner\\n');\n`);
+    // Stub PALM-03-E1 exclusion guard (covered by palm03E1ReleaseGuards.test.ts); records that it ran.
+    fs.writeFileSync(path.join(web, 'scripts/check-palm-e1-bundle.js'), `require('fs').appendFileSync(${JSON.stringify(log)}, 'e1-scanner\\n');\n`);
     fs.writeFileSync(path.join(tmp, 'bin/next'), `#!/bin/sh\necho "next $*" >> "${log}"\nexit 0\n`, { mode: 0o755 });
     fs.writeFileSync(path.join(tmp, 'bin/npx'), `#!/bin/sh\necho "npx $*" >> "${log}"\nexit 0\n`, { mode: 0o755 });
     const childEnv: NodeJS.ProcessEnv = { PATH: `${path.join(tmp, 'bin')}${path.delimiter}${process.env.PATH}` };
@@ -213,7 +215,7 @@ function runBuild(env: Record<string, string | undefined>) {
 
 const prod = runBuild({ VERCEL_ENV: 'production', VERCEL_PROJECT_ID: PROD_PROJECT, DATABASE_URL: PROD_URL });
 check('C1. Production project: build exits 0', prod.status === 0);
-check('C2. ... migration, then next build, then scanner (order unchanged)', prod.calls.join('|') === 'npx prisma migrate deploy|next build|scanner');
+check('C2. ... migration, then next build, then the E1 and guide scanners (migration still first)', prod.calls.join('|') === 'npx prisma migrate deploy|next build|e1-scanner|scanner');
 check('C3. ... and the guard reported a pass without disclosing anything', /DB identity check passed \(PRODUCTION_PROJECT\)/.test(prod.out) && !SECRET_FRAGMENTS.some((s) => prod.out.includes(s)));
 
 const noId = runBuild({ VERCEL_ENV: 'production', DATABASE_URL: PROD_URL });
@@ -228,7 +230,7 @@ const stagingGood = runBuild(stagingEnv({ AURA_DATABASE_URL: STG_POOLED }));
 check('C8. correctly configured but UNPINNED project is refused (no migration, no build)', typeof stagingGood.status === 'number' && stagingGood.status !== 0 && stagingGood.calls.length === 0 && /PROJECT_NOT_ALLOWLISTED/.test(stagingGood.out));
 
 const preview = runBuild({ VERCEL_ENV: 'preview' });
-check('C9. Preview without any DB credentials: build exits 0, no guard, no migration (unchanged)', preview.status === 0 && preview.calls.join('|') === 'next build|scanner' && !/DB identity/.test(preview.out));
+check('C9. Preview without any DB credentials: build exits 0, no guard, no migration (unchanged)', preview.status === 0 && preview.calls.join('|') === 'next build|e1-scanner|scanner' && !/DB identity/.test(preview.out));
 
 // ============================================================
 // E. aura-staging pin, staging DB pin, and Production reverse check

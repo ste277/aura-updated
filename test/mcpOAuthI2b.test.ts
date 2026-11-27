@@ -221,9 +221,10 @@ async function main() {
     check('keys: garbage rejected', rejects('not json') && rejects('{"keys":[]}'));
     const env = {
       AURA_MCP_OAUTH_JWKS: JSON.stringify({ keys: [ec, k1] }),
-      AURA_MCP_OAUTH_COOKIE_KEYS: 'synthetic-cookie-key-new-0123456789abcdef,synthetic-cookie-key-old-0123456789abcdef',
-      AURA_MCP_OAUTH_PAIRWISE_SALT: 'synthetic-pairwise-salt-0123456789abcdef',
-      AURA_MCP_AUDIT_KEY: 'synthetic-audit-key-x-0123456789abcdefgh',
+      // I2b-S12: the current key declares its format; the retained one stays untagged (legacy compatibility path).
+      AURA_MCP_OAUTH_COOKIE_KEYS: `base64url:${Buffer.from('synthetic-cookie-key-new-0123456789abcdef').toString('base64url')},synthetic-cookie-key-old-0123456789abcdef`,
+      AURA_MCP_OAUTH_PAIRWISE_SALT: `base64url:${Buffer.from('synthetic-pairwise-salt-0123456789abcdef').toString('base64url')}`,
+      AURA_MCP_AUDIT_KEY: `base64url:${Buffer.from('synthetic-audit-key-x-0123456789abcdefgh').toString('base64url')}`,
     };
     const loaded = loadOAuthKeysFromEnv(env);
     check('keys: env loader returns configured material, first key signs', loaded.source === 'configured' && loaded.jwks.keys[0].kid === 'ec-rotation-2' && loaded.cookieKeys.length === 2);
@@ -439,9 +440,9 @@ async function main() {
       AURA_MCP_OAUTH_DATABASE_URL: 'postgresql://synthetic@db.invalid/aura',
       AURA_MCP_CLIENT_ADDRESS_SOURCE: 'header:x-real-ip',
       AURA_MCP_OAUTH_JWKS: JSON.stringify(k.jwks),
-      AURA_MCP_OAUTH_COOKIE_KEYS: 'synthetic-cookie-key-aaaa-0123456789abcdef',
-      AURA_MCP_OAUTH_PAIRWISE_SALT: 'synthetic-pairwise-salt-0123456789abcdef',
-      AURA_MCP_AUDIT_KEY: 'synthetic-audit-key-y-0123456789abcdefgh',
+      AURA_MCP_OAUTH_COOKIE_KEYS: `base64url:${Buffer.from('synthetic-cookie-key-aaaa-0123456789abcdef').toString('base64url')}`,
+      AURA_MCP_OAUTH_PAIRWISE_SALT: `base64url:${Buffer.from('synthetic-pairwise-salt-0123456789abcdef').toString('base64url')}`,
+      AURA_MCP_AUDIT_KEY: `base64url:${Buffer.from('synthetic-audit-key-y-0123456789abcdefgh').toString('base64url')}`,
       AURA_MCP_OAUTH_CLIENTS: JSON.stringify([{ client_id: 'assistant-one', label: 'Assistant One', redirect_uris: ['https://assistant.example/cb'] }]),
     };
     const full = assessRemoteMcpReadiness(env);

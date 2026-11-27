@@ -228,7 +228,7 @@ function main() {
     '47. TOMORROW + availabilityConfigured=== false renders the Availability prerequisite as the PRIMARY state (not the ordinary intent form)',
     /const showAvailabilityPrerequisite = \(horizon === 'TOMORROW' && availabilityConfigured === false\)/.test(planDayClientSource)
   );
-  check('48. the Availability prerequisite links to the existing You tab (/?tab=you), never a new Settings route', planDayClientSource.includes("'/?tab=you'"));
+  check('48. the Availability prerequisite links to the existing You tab (deep link to its Availability card), never a new Settings route (re-baselined by AURA-PREF-01)', planDayClientSource.includes("preferenceSettingsHref('availability')"));
 
   // 49. Backend guard (P1) is never removed/bypassed -- FUTURE_AVAILABILITY_REQUIRED remains a real, distinct client status.
   check('49. FUTURE_AVAILABILITY_REQUIRED is a real member of ConstructDayPreviewClientResult, never folded into UNKNOWN_RESPONSE', dayConstructorPreviewClientSource.includes("{ status: 'FUTURE_AVAILABILITY_REQUIRED' }"));
@@ -631,7 +631,7 @@ function main() {
   check('100. Edit always returns to ENTRY via setPhase(\'ENTRY\') -- never clears rows itself (no setRows call anywhere near it)', /setPhase\('ENTRY'\)/.test(planDayClientSource));
   check('100b. submitPreview (both the initial call and every PREVIEW_ERROR retry) always reads the live `rows` state -- never a snapshot/copy that could go stale', (planDayClientSource.match(/buildRequestedIntentsForSubmission\(rows,/g) ?? []).length >= 1);
   check('101. HTTP_ERROR 401 renders a real, wired Sign in action navigating to \'/\' (this app\'s own real LoginScreen surface, this ticket\'s own section 14 -- never a claim with no action behind it)', /SIGN_IN'\)[\s\S]{0,700}window\.location\.href = '\/'/.test(planDayClientSource));
-  check('102. FUTURE_AVAILABILITY_REQUIRED / NO_USABLE_CAPACITY (Tomorrow) Configure availability action navigates to the SAME real \'/?tab=you\' destination the bootstrap-known prerequisite card already uses (this ticket\'s own section 9 -- no second/new destination invented)', (planDayClientSource.match(/\/\?tab=you/g) ?? []).length >= 2);
+  check('102. FUTURE_AVAILABILITY_REQUIRED / NO_USABLE_CAPACITY (Tomorrow) Configure availability action navigates to the SAME real \'/?tab=you\' destination the bootstrap-known prerequisite card already uses (this ticket\'s own section 9 -- no second/new destination invented)', (planDayClientSource.match(/preferenceSettingsHref\('availability'\)/g) ?? []).length >= 2);
   check('103. the RETRY action (Try again) is the ONLY action inside the PREVIEW_ERROR card that calls submitPreview again', /entryError\.actions\.includes\('RETRY'\)[\s\S]{0,700}submitPreview\(\)/.test(planDayClientSource));
   check('104. rows/IntentRowCard are never disabled by phase === \'PREVIEW_ERROR\' (only SUBMITTING disables them) -- a user can edit a row directly without first clicking Edit activities', /disabled=\{phase === 'SUBMITTING'\}/.test(planDayClientSource) && !/disabled=\{phase === 'PREVIEW_ERROR'/.test(planDayClientSource));
   check('105. this file never claims a raw ConstructDayPreviewClientResult status string in a message literal (no leaked enum names in JSX)', !/\{status\}.*outside the part/.test(planDayClientSource));

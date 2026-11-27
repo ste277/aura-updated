@@ -147,7 +147,7 @@ export function DailyRhythmSettings() {
   return (
     <SurfaceCard>
       <p style={{ ...typography.body, marginTop: 0, marginBottom: spacing.xs, color: colors.textSecondary }}>
-        Your working hours help Aura suggest better times for personal activities when you use Plan My Day.
+        Optional. On your work days, Aura suggests personal activities outside these hours and work activities inside them, in Find a Time, Plan My Day, Home and weekly planning. It&apos;s a preference, not a hard limit, and it never moves plans you&apos;ve already confirmed.
       </p>
       {load.kind === 'READY' && <p style={{ fontSize: 12, color: colors.textFaint, marginTop: 0, marginBottom: spacing.md }}>Times use your timezone: {load.timezone}</p>}
       {load.kind === 'ERROR' && <FieldError>{load.message}</FieldError>}
@@ -224,7 +224,7 @@ export function DailyRhythmSettings() {
             <div style={{ marginTop: spacing.xl, paddingTop: spacing.md, borderTop: `1px solid ${colors.borderSubtle}` }}>
               {!clearConfirming ? (
                 <TextButton onClick={() => setClearConfirming(true)} color={colors.textMuted}>
-                  Clear daily rhythm preferences
+                  Clear work hours
                 </TextButton>
               ) : (
                 <div>
@@ -233,7 +233,7 @@ export function DailyRhythmSettings() {
                   </p>
                   <div style={{ display: 'flex', gap: spacing.sm }}>
                     <DestructiveButton onClick={handleClearConfirmed} disabled={clearing}>
-                      {clearing ? 'Clearing…' : 'Clear daily rhythm preferences'}
+                      {clearing ? 'Clearing…' : 'Clear work hours'}
                     </DestructiveButton>
                     <SecondaryButton onClick={() => setClearConfirming(false)} disabled={clearing}>
                       Cancel

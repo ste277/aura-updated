@@ -1,9 +1,17 @@
 // HPG3-A2 -- live-database proof of transactional daily occurrence
 // eligibility enforcement across POST /api/plans, Day Constructor
-// acceptance, and Move. Uses fixed, explicit UTC instants anchored to
-// 2026-12-01 (a safe, uncollided future date) rather than Date.now()
-// arithmetic, so every scenario's local-day boundary (Asia/Kolkata,
-// UTC+5:30) is deterministic and easy to reason about.
+// acceptance, and Move. Every instant is a fixed offset from one anchor
+// (12:00 IST on a Tuesday), so every scenario's local-day boundary
+// (Asia/Kolkata, UTC+5:30) is deterministic and easy to reason about.
+//
+// AURA-CI-07 -- the anchor was the hard-coded 2026-12-01T06:30Z. Move
+// rejects a destination that is not in the future, so the Move scenarios
+// (6/6a/6b/7/8/9) would have failed on every run from that date. The
+// anchor is now the Tuesday of the shared lifecycleFixtureCalendar week
+// (always >= 28 days ahead): same weekday layout as before (day -1 is the
+// Monday of the same Monday-start week; days 0..+2 share that week; +9
+// crosses into the next), always in the future. Set
+// LIFECYCLE_FIXTURE_REFERENCE_NOW to simulate a run date.
 // Run with: npx ts-node test/goalActivityDailyOccurrenceEligibilityDb.test.ts
 import { POST as plansRoute } from '../apps/web/app/api/plans/route';
 import { boundHeaders } from './rel04BoundTestHeaders';
@@ -22,6 +30,7 @@ import { createSessionToken } from '../apps/web/lib/auth';
 import { movePlannedActivity, MovePlanError } from '../apps/web/lib/planMove';
 import { persistAcceptedConstructedDay } from '../apps/web/lib/dayConstructorAcceptancePersistence';
 import type { AcceptConstructedDayRequest } from '../apps/web/lib/dayConstructorAcceptance';
+import { fixtureAnchorMonday, addCivilDays, realClockReferenceForFixture } from './lifecycleFixtureCalendar';
 
 let allPassed = true;
 function check(label: string, condition: boolean) {
@@ -45,8 +54,9 @@ async function sql(t: string, p: unknown[] = []): Promise<any[]> {
   try { const r = await c.query(t, p); await c.query('COMMIT'); return r.rows; } catch (e) { await c.query('ROLLBACK').catch(() => {}); throw e; } finally { c.release(); }
 }
 
-// 2026-12-01T06:30:00Z = 2026-12-01 12:00 IST (safely mid-day, no midnight-adjacent ambiguity).
-const ANCHOR_MS = Date.parse('2026-12-01T06:30:00Z');
+// <Tuesday>T06:30:00Z = <Tuesday> 12:00 IST (safely mid-day, no midnight-adjacent ambiguity).
+const ANCHOR_TUESDAY = addCivilDays(fixtureAnchorMonday(realClockReferenceForFixture(), TZ), 1);
+const ANCHOR_MS = Date.parse(`${ANCHOR_TUESDAY}T06:30:00Z`);
 const HOUR = 3600_000;
 const DAY = 24 * HOUR;
 function plan(title: string, offsetMs: number, durationMin = 30) {
@@ -89,6 +99,92 @@ async function wipe(email: string, userId: string) {
   await sql(`DELETE FROM "PlannedActivity" WHERE "userId" = $1`, [userId]).catch(() => {});
   await sql(`DELETE FROM "Goal" WHERE "userId" = $1`, [userId]).catch(() => {});
   await sql(`DELETE FROM "User" WHERE email = $1`, [email]).catch(() => {});
+}
+
+// AURA-CI-07 -- deterministic ordering for the Move-versus-create race. A third
+// transaction holds the per-user advisory lock that both writers take; the first
+// writer is started and we wait until Postgres reports it blocked on that lock,
+// then the second, then the holder commits. Postgres grants a released lock to
+// waiters in queue order, so the first writer always wins. No retries: a writer
+// that never blocks fails the barrier and the scenario.
+async function advisoryLockWaiters(): Promise<number> {
+  return (await sql(`SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock' AND wait_event = 'advisory' AND query LIKE '%pg_advisory_xact_lock%'`))[0].n;
+}
+async function waitForAdvisoryLockWaiters(n: number): Promise<void> {
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline) {
+    if ((await advisoryLockWaiters()) >= n) return;
+    await new Promise((r) => setTimeout(r, 5));
+  }
+  throw new Error(`CI-07 barrier: ${n} writer(s) never blocked on the per-user advisory lock`);
+}
+
+async function runMoveVersusCreateRace(label: string, order: 'natural' | 'move-first' | 'create-first', userId: string, tok: string, goalActivityId: string) {
+  const setupRes = await plansRoute(req(tok, { ...plan('Strength training', -DAY), goalActivityId }));
+  const setupPlan = await setupRes.json();
+  check(`${label}. setup: an occurrence exists on day -1`, setupRes.status === 200);
+  const original = (await sql(`SELECT id, "scheduledLocalDate" FROM "GoalActivityOccurrence" WHERE "goalActivityId" = $1`, [goalActivityId]))[0];
+
+  const doMove = () => movePlannedActivity(userId, setupPlan.id, { newStartAt: new Date(ANCHOR_MS + HOUR) }).then((r) => ({ ok: true as const, r, code: 'OK' })).catch((e) => ({ ok: false as const, r: null, code: String(e?.code ?? e) }));
+  const doCreate = () => plansRoute(req(tok, { ...plan('Strength training', 3 * HOUR), goalActivityId }));
+  let moveResult: Awaited<ReturnType<typeof doMove>>;
+  let createResult: Awaited<ReturnType<typeof doCreate>>;
+  if (order === 'natural') {
+    [moveResult, createResult] = await Promise.all([doMove(), doCreate()]);
+  } else {
+    const holder = await beginTransaction();
+    try {
+      await holder.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`day-constructor-accept:${userId}`]);
+      const movePromise = order === 'move-first' ? doMove() : null;
+      const createPromise = order === 'create-first' ? doCreate() : null;
+      await waitForAdvisoryLockWaiters(1);
+      const secondMove = movePromise ?? doMove();
+      const secondCreate = createPromise ?? doCreate();
+      await waitForAdvisoryLockWaiters(2);
+      await holder.query('COMMIT');
+      [moveResult, createResult] = await Promise.all([secondMove, secondCreate]);
+    } catch (e) {
+      await holder.query('ROLLBACK').catch(() => {});
+      throw e;
+    } finally {
+      holder.release();
+    }
+  }
+  const moveSucceeded = moveResult.ok;
+  const createSucceeded = createResult.status === 200;
+
+  const occ = await sql(
+    `SELECT o.id, o."scheduledLocalDate" AS day, p.status FROM "GoalActivityOccurrence" o LEFT JOIN "PlannedActivity" p ON p.id = o."plannedActivityId" WHERE o."goalActivityId" = $1`,
+    [goalActivityId]
+  );
+  const plans = await sql(`SELECT id, status, "plannedStartAt", "rescheduledFromPlanId" FROM "PlannedActivity" WHERE "userId" = $1`, [userId]);
+  const liveOnContestedDay = occ.filter((o) => o.day === isoDateOf(0) && o.status === 'UPCOMING').length;
+  const liveTotal = occ.filter((o) => o.status === 'UPCOMING').length;
+  const moveSuccessors = plans.filter((p) => p.rescheduledFromPlanId === setupPlan.id);
+  const createdPlans = plans.filter((p) => new Date(p.plannedStartAt).getTime() === ANCHOR_MS + 3 * HOUR);
+  const originalPlanAfter = plans.find((p) => p.id === setupPlan.id);
+  const originalOccAfter = occ.find((o) => o.id === original.id);
+  // Printed on every run so a CI log always shows which writer won.
+  console.log(`     ${label}. [${order}] move=${moveResult.code} create=${createResult.status} liveOnContestedDay=${liveOnContestedDay} liveTotal=${liveTotal} occurrences=${occ.length}`);
+
+  check(`${label}. Move-into-day-0 and create-on-day-0 cannot BOTH succeed (serialized, never double-booked)`, !(moveSucceeded && createSucceeded));
+  check(`${label}. exactly ONE of Move and create succeeds (the loser is rejected by the daily cap)`, moveSucceeded !== createSucceeded);
+  if (order === 'move-first') check(`${label}. the forced ordering held: Move won`, moveSucceeded);
+  if (order === 'create-first') check(`${label}. the forced ordering held: create won`, createSucceeded);
+  check(`${label}. exactly ONE live occurrence exists on the contested day (day 0) afterward`, liveOnContestedDay === 1);
+
+  if (moveSucceeded) {
+    check(`${label}. Move won: create was rejected with 409 and persisted no plan and no occurrence`, createResult.status === 409 && createdPlans.length === 0 && occ.length === 1);
+    check(`${label}. Move won: the ORIGINAL occurrence (same id) now sits on day 0 and day -1 is free`, originalOccAfter?.day === isoDateOf(0) && originalOccAfter?.status === 'UPCOMING');
+    check(`${label}. Move won: the predecessor plan is MOVED with exactly one successor`, originalPlanAfter?.status === 'MOVED' && moveSuccessors.length === 1);
+    check(`${label}. Move won: exactly ONE live occurrence in total`, liveTotal === 1);
+  }
+  if (createSucceeded) {
+    check(`${label}. create won: Move was rejected with DAILY_CAPACITY_EXCEEDED`, moveResult.code === 'DAILY_CAPACITY_EXCEEDED');
+    check(`${label}. create won: the rejected Move persisted nothing (no successor plan; predecessor still UPCOMING)`, moveSuccessors.length === 0 && originalPlanAfter?.status === 'UPCOMING');
+    check(`${label}. create won: the legitimate day -1 occurrence is preserved, unchanged`, originalOccAfter?.day === isoDateOf(-DAY) && originalOccAfter?.status === 'UPCOMING');
+    check(`${label}. create won: exactly one new plan and occurrence on day 0 (two live in total, one per day)`, createdPlans.length === 1 && occ.length === 2 && liveTotal === 2);
+  }
 }
 
 async function main() {
@@ -172,21 +268,29 @@ async function main() {
 
   // ============================================================
   // 6. Concurrent creation versus Move (into the same day): serialized, no double-booking.
+  //
+  // AURA-CI-07 -- Move and POST /plans take the same per-user advisory lock, so
+  // whichever acquires it first wins and the other is rejected by the daily cap.
+  // Both outcomes are correct, and they leave different live totals:
+  //   Move wins   -> 1 live occurrence (moved to day 0; day -1 freed).
+  //   Create wins -> 2 live occurrences (original stays on day -1, new one on day 0).
+  // The invariant is "exactly one live occurrence on the CONTESTED day", not
+  // "one in total". 6 runs the natural race (Move usually wins); 6a and 6b force
+  // each ordering deterministically so both are proven on every run.
   // ============================================================
   {
     const { email, user, tok, ga } = await freshUserAndGoal('s6', 'Strength training', { kind: 'N_PER_WEEK', targetPerWeek: 5 });
-    const setupRes = await plansRoute(req(tok, { ...plan('Strength training', -DAY), goalActivityId: ga.id }));
-    const setupPlan = await setupRes.json();
-    check('6. setup: an occurrence exists on day -1', setupRes.status === 200);
-    const [moveResult, createResult] = await Promise.all([
-      movePlannedActivity(user.id, setupPlan.id, { newStartAt: new Date(ANCHOR_MS + HOUR) }).then((r) => ({ ok: true as const, r })).catch((e) => ({ ok: false as const, e })),
-      plansRoute(req(tok, { ...plan('Strength training', 3 * HOUR), goalActivityId: ga.id })),
-    ]);
-    const moveSucceeded = moveResult.ok;
-    const createSucceeded = createResult.status === 200;
-    check('6. Move-into-day-0 and create-on-day-0 cannot BOTH succeed (serialized, never double-booked)', !(moveSucceeded && createSucceeded));
-    const occRows = await sql(`SELECT count(*)::int AS n FROM "GoalActivityOccurrence" WHERE "goalActivityId" = $1 AND "plannedActivityId" IN (SELECT id FROM "PlannedActivity" WHERE status = 'UPCOMING')`, [ga.id]);
-    check('6. at most ONE live occurrence exists on the contested day afterward', occRows[0].n === 1);
+    await runMoveVersusCreateRace('6', 'natural', user.id, tok, ga.id);
+    await wipe(email, user.id);
+  }
+  {
+    const { email, user, tok, ga } = await freshUserAndGoal('s6a', 'Strength training', { kind: 'N_PER_WEEK', targetPerWeek: 5 });
+    await runMoveVersusCreateRace('6a', 'move-first', user.id, tok, ga.id);
+    await wipe(email, user.id);
+  }
+  {
+    const { email, user, tok, ga } = await freshUserAndGoal('s6b', 'Strength training', { kind: 'N_PER_WEEK', targetPerWeek: 5 });
+    await runMoveVersusCreateRace('6b', 'create-first', user.id, tok, ga.id);
     await wipe(email, user.id);
   }
 

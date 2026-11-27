@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { LocationPicker } from './LocationPicker';
 import { NotificationSettings } from './NotificationSettings';
 import { ReminderSettings } from './ReminderSettings';
@@ -8,6 +8,7 @@ import { DayBuilderSettings } from './DayBuilderSettings';
 import { ActivityDurationPreferences } from './ActivityDurationPreferences';
 import { AvailabilitySettings } from './AvailabilitySettings';
 import { DailyRhythmSettings } from './DailyRhythmSettings';
+import { PREFERENCE_SECTION_IDS, preferenceSectionIdFromSearch } from '../lib/preferenceLinks';
 import type { NotificationPrefs } from '../lib/windowNotifications';
 import * as theme from './theme';
 import { colors, spacing, typography, radius } from './theme';
@@ -97,6 +98,18 @@ export function YouView({
   onSignOut,
   sharedMomentsUnreadCount,
 }: YouViewProps) {
+  // AURA-PREF-01: `/?tab=you&section=availability|work-hours` (from Find a
+  // Time and Plan My Day) opens You scrolled to that settings card.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const id = preferenceSectionIdFromSearch(window.location.search);
+    if (!id) return;
+    // Scroll once now and once after the settings cards above have loaded
+    // their data (their height changes as they render).
+    const scroll = () => document.getElementById(id)?.scrollIntoView({ block: 'start' });
+    const timers = [window.setTimeout(scroll, 0), window.setTimeout(scroll, 800)];
+    return () => timers.forEach((timer) => window.clearTimeout(timer));
+  }, []);
   const [openSettingsPanel, setOpenSettingsPanel] = useState<
     'location' | 'calendar' | 'checkIn' | 'help' | 'about' | null
   >(initialOpenPanel ?? null);
@@ -256,7 +269,7 @@ export function YouView({
 
       {/* Availability Context V1 PR H2 -- a self-contained panel (owns its
        * own GET/PUT/DELETE), same pattern as Preferred durations above. */}
-      <div>
+      <div id={PREFERENCE_SECTION_IDS.availability} style={{ scrollMarginTop: 18 }}>
         <SectionHeader label="Availability" />
         <AvailabilitySettings />
       </div>
@@ -265,8 +278,8 @@ export function YouView({
        * GET/PUT/DELETE), same pattern as Availability directly above.
        * Deliberately placed inline in the existing Planning section, not
        * a new navigation section. */}
-      <div>
-        <SectionHeader label="Daily Rhythm" />
+      <div id={PREFERENCE_SECTION_IDS.workHours} style={{ scrollMarginTop: 18 }}>
+        <SectionHeader label="Work hours" />
         <DailyRhythmSettings />
       </div>
 

@@ -263,7 +263,10 @@ export async function handleRemoteMcpRequest(req: Request, deps: RemoteMcpDeps):
     const decision = await deps.preAuthRateLimiter.check(rules);
     if (!decision.allowed) {
       audit.limitedBy = decision.limitedBy;
-      if (decision.limitedBy === 'unavailable') return done(unavailable(), 'limiter_unavailable');
+      if (decision.limitedBy === 'unavailable') {
+        audit.cause = decision.cause; // I2b-S12: bounded cause code, sanitized by the audit sink
+        return done(unavailable(), 'limiter_unavailable');
+      }
       return done(jsonResponse(429, { error: 'rate_limited' }, { 'retry-after': String(Math.max(1, decision.retryAfterSeconds)) }), 'preauth_throttled');
     }
   }
@@ -306,7 +309,10 @@ export async function handleRemoteMcpRequest(req: Request, deps: RemoteMcpDeps):
     const decision = await deps.rateLimiter.check(rules);
     if (!decision.allowed) {
       audit.limitedBy = decision.limitedBy;
-      if (decision.limitedBy === 'unavailable') return done(unavailable(), 'limiter_unavailable');
+      if (decision.limitedBy === 'unavailable') {
+        audit.cause = decision.cause; // I2b-S12: bounded cause code, sanitized by the audit sink
+        return done(unavailable(), 'limiter_unavailable');
+      }
       return done(jsonResponse(429, { error: 'rate_limited' }, { 'retry-after': String(decision.retryAfterSeconds) }), 'rate_limited');
     }
   }

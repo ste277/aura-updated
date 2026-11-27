@@ -147,6 +147,12 @@ independent review that returned GO).
   window. The rerun of the identical commit passed after the day boundary had rolled over in IST. Accepted as a
   pre-existing, documented residual risk (not introduced or fixed by HPG4); a separate deterministic-clock
   stabilization is still needed. Do not disable or weaken this test to force green.
+  **AURA-CI-09 (test-only):** recurred in CI runs `45870363531` (23:26 IST) and `45872154803` (23:38 IST). Root
+  cause: a fixture defect. The lead time was clamped to at least 1 minute, so from 23:24 IST the destination ended
+  after local midnight. Acceptance then correctly returned STALE / `DESTINATION_OUTSIDE_TODAY`. The section now runs at a
+  fixed acceptance instant through the `deps.readClock` seam (same pattern as AURA-CI-02 section 53), on the
+  Wednesday after the CI-07 fixture anchor. The assertion is unchanged, and a CAPACITY_EXCEEDED negative control is
+  added. Resolved once the CI-09 PR merges.
 - P3: the Plan-tab callback's structural regression-test assertion (added in PR #275) matches a long,
   near-verbatim source-text sequence — a future, harmless refactor near those lines will likely need to update
   this regex. Future test-maintenance improvement, not a defect today.

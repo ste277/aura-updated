@@ -106,6 +106,11 @@ jobs:
       # and the review's counterexamples. No DB.
       - name: Run I2b-S11 offline remediation test
         run: npx ts-node test/mcpOAuthS11.test.ts
+      # I2b-S12 (S11 review residuals): structured redirect validation, original
+      # budget instant + limiter ROLLBACK / retry / exact-deadline boundaries
+      # under a synthetic clock, explicit secret formats, sanitized audit causes. No DB.
+      - name: Run I2b-S12 offline residual test
+        run: npx ts-node test/mcpOAuthS12.test.ts
       - name: Run panchang day service test
         run: npx ts-node test/panchangDay.test.ts
       - name: Run panchang month service test
@@ -259,6 +264,11 @@ jobs:
       # the build and that its failure fails the build. No deploy/credentials.
       - name: Run Palmistry Vercel build guard test
         run: npx ts-node test/palm01P4VercelGuard.test.ts
+      # AURA-PALM-03-E1-R2 -- the E1 exclusion guard on every release build path:
+      # CI build job, the real Vercel wrapper (fake next, planted leaks) and the
+      # Docker build stage.
+      - name: Run personalised interpretation release-guard test (PALM-03-E1)
+        run: npx ts-node test/palm03E1ReleaseGuards.test.ts
       # AURA-MCP-02-I1.5-D -- database identity guard run by vercel-build.sh
       # before `prisma migrate deploy`: fail-closed checks of DATABASE_URL and
       # AURA_DATABASE_URL against the approved staging identity, and the real
@@ -295,6 +305,19 @@ jobs:
       # timezone.ts, no new dependency).
       - name: Run Goal Rhythm weekly proposal test
         run: npx ts-node test/goalRhythmWeeklyProposal.test.ts
+      # AURA-PREF-01 (PV-F01) -- work hours and availability applied the same
+      # way across Find a Time, weekly/rhythm planning, Plan My Day and Home
+      # (real engine): new users unaffected, personal avoid / work prefer
+      # working hours, explicit choices win, Panchang ranking preserved.
+      - name: Run PREF-01 availability preferences test
+        run: npx ts-node test/availabilityPreferencesPref01.test.ts
+      # Existing work-hours suites, never wired into CI before PREF-01.
+      - name: Run Daily Rhythm scheduling test
+        run: npx ts-node test/dailyRhythmScheduling.test.ts
+      - name: Run Daily Rhythm Find a Time test
+        run: npx ts-node test/timingSearchDailyRhythm.test.ts
+      - name: Run Daily Rhythm candidate coverage test
+        run: npx ts-node test/dailyRhythmCandidateCoverageIntegration.test.ts
       # AURA-HPG-FIX-01 -- Home -> Plan -> Goals stabilization regressions
       # (V1-03 title persistence, V1-05 already-scheduled recommendations,
       # weekly-plan proposal validity, V1-09 Home refresh). Same
@@ -1060,6 +1083,25 @@ jobs:
         run: npx ts-node test/palmG5I1R2Lifecycle.test.ts
       - name: Run Palm upload production exclusion tests (G5-I1-R2)
         run: npx ts-node test/palmG5I1R2ProductionExclusion.test.ts
+      # PALM-03-I1: hand measurements, user-assisted feature representation and
+      # synthetic engine compatibility. Synthetic landmarks and traces only.
+      - name: Run Palm feature foundation tests (PALM-03-I1)
+        run: npx ts-node test/palm03I1FeatureFoundation.test.ts
+      # AURA-PALM-04-I1: in-memory hand construction context (revoked on reset, photo
+      # replacement, cancellation and teardown) and the headless assisted-tracing model,
+      # with I1 parity over the complete independent 6,548-trace synthetic corpus.
+      # Synthetic data only; no UI; nothing persisted or transmitted.
+      - name: Run assisted-tracing foundation tests (PALM-04-I1)
+        run: npx ts-node test/palm04I1Tracing.test.ts
+      # PALM-03-E1: development-only personalised interpretation engine (synthetic
+      # observations only; unreviewed content). The package suite compares the engine
+      # with the unmodified C1 reference oracle (python3, preinstalled on the runner):
+      # 7 examples x 3 modes, 5,760 essential-input derivations, 40 negative cases.
+      - name: Run personalised interpretation engine tests (PALM-03-E1)
+        working-directory: packages/palm-reading-engine/e1
+        run: node --test test/*.test.mjs
+      - name: Run personalised interpretation end-to-end tests (PALM-03-E1)
+        run: npx ts-node test/palm03E1Engine.test.ts
       # G5-R4.4: the reader differential needs libarchive's bsdtar (the reader
       # behind HR2R1-F1/F2); G5-D7-A: real xz/bzip2/zstd/lz4/7z streams and the
       # 7-Zip extraction precondition. Without them those checks report NOT RUN.
@@ -1199,6 +1241,18 @@ jobs:
       - name: Verify the palm reading engine is excluded from the build
         working-directory: apps/web
         run: node scripts/check-palm-engine-bundle.js
+      # AURA-PALM-03-E1 -- the personalised interpretation engine and its unreviewed
+      # catalogue must never be bundled; unconditional, sentinels self-checked by the
+      # E1 package tests.
+      - name: Verify the personalised interpretation engine is excluded from the build
+        working-directory: apps/web
+        run: node scripts/check-palm-e1-bundle.js
+      # AURA-PALM-03-E1-R6 -- the shipped standalone artifact actually starts: the located app root (+ static,
+      # public) is copied to an isolated temp dir, its generated server.js is started with no database or secrets on
+      # 127.0.0.1, every module must resolve inside the copy, and it must serve its build manifest; then terminated.
+      - name: Verify the standalone server artifact starts in isolation
+        working-directory: apps/web
+        run: node scripts/check-artifact-startup.js
       # AURA-MCP-02-I2a-R2 (B1) -- runs the DEPLOYABLE standalone server the
       # way deploy/Dockerfile does (`node server.js` from an isolated copy of
       # .next/standalone, outside any node_modules tree) with Docker defaults,
@@ -1363,6 +1417,12 @@ jobs:
       # A6 freeze asserted deterministically. Touches only the MCP tables.
       - name: Run I2b-S11 checked-out client and issuance DB test
         run: npx ts-node test/mcpOAuthS11Db.test.ts
+      # I2b-S12: same-status redirect replacements (code moved / duplicated /
+      # re-homed, callback or state changed) are never committed and are refused
+      # on another instance; limiter causes reach the application audit output on
+      # the OAuth path and both MCP paths. Touches only the MCP tables.
+      - name: Run I2b-S12 redirect integrity and audit cause DB test
+        run: npx ts-node test/mcpOAuthS12Db.test.ts
       - name: Verify every repository migration was recorded as applied
         run: |
           set -euo pipefail
@@ -1533,6 +1593,10 @@ jobs:
       # reload, pause/resume, and preferences flowing into scheduling.
       - name: Run MR3 My Rhythm preferences UI DB test
         run: npx ts-node test/myRhythmPreferencesUiDb.test.ts
+      # AURA-PREF-01 -- new users start unconfigured; setting, changing or
+      # clearing work hours/availability never modifies confirmed plans.
+      - name: Run PREF-01 availability preferences DB test
+        run: npx ts-node test/availabilityPreferencesPref01Db.test.ts
       # AURA-REM-01 (PV-F03) -- background reminder dispatcher on this
       # disposable DB with an injected sender: on-time delivery, duplicate and
       # concurrent runs, reschedule/cancel/complete, retry and expiry,

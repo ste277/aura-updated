@@ -1,8 +1,15 @@
 // HPG3-A3a -- live-database proof of the consistent, typed scheduling
 // eligibility error contract across all three Goal-linked write paths:
-// POST /api/plans, Day Constructor acceptance, and Move. Uses fixed,
-// explicit UTC instants anchored to 2026-12-15 (a safe, uncollided future
-// date), same convention as test/goalActivityDailyOccurrenceEligibilityDb.test.ts.
+// POST /api/plans, Day Constructor acceptance, and Move. Every instant is a
+// fixed offset from one anchor (12:00 IST on a Tuesday), same convention as
+// test/goalActivityDailyOccurrenceEligibilityDb.test.ts.
+//
+// AURA-CI-07 -- the anchor was the hard-coded 2026-12-15T06:30Z, which Move
+// (future destinations only) would have rejected from that date. It is now
+// the Tuesday two weeks after the shared lifecycleFixtureCalendar Monday
+// (always >= 28 days ahead): still a Tuesday, still 14 days after the HPG3-A2
+// file's own anchor, offsets 0..+3 days within one Monday-start week. Set
+// LIFECYCLE_FIXTURE_REFERENCE_NOW to simulate a run date.
 // Run with: npx ts-node test/schedulingEligibilityErrorContractDb.test.ts
 import { POST as plansRoute } from '../apps/web/app/api/plans/route';
 import { boundHeaders } from './rel04BoundTestHeaders';
@@ -23,6 +30,7 @@ import type { AcceptConstructedDayRequest } from '../apps/web/lib/dayConstructor
 import { signPreviewItem } from '../apps/web/lib/dayConstructorPreviewIntegrity';
 import { parseAcceptResponseBody } from '../apps/web/lib/acceptConstructedDay';
 import { classifyAcceptanceUiState } from '../apps/web/lib/dayPlanAcceptancePresentation';
+import { fixtureAnchorMonday, addCivilDays, realClockReferenceForFixture } from './lifecycleFixtureCalendar';
 
 let allPassed = true;
 function check(label: string, condition: boolean) {
@@ -46,8 +54,9 @@ async function sql(t: string, p: unknown[] = []): Promise<any[]> {
   try { const r = await c.query(t, p); await c.query('COMMIT'); return r.rows; } catch (e) { await c.query('ROLLBACK').catch(() => {}); throw e; } finally { c.release(); }
 }
 
-// 2026-12-15T06:30:00Z = 2026-12-15 12:00 IST (mid-day, no midnight-adjacent ambiguity).
-const ANCHOR_MS = Date.parse('2026-12-15T06:30:00Z');
+// <Tuesday>T06:30:00Z = <Tuesday> 12:00 IST (mid-day, no midnight-adjacent ambiguity).
+const ANCHOR_TUESDAY = addCivilDays(fixtureAnchorMonday(realClockReferenceForFixture(), TZ), 15);
+const ANCHOR_MS = Date.parse(`${ANCHOR_TUESDAY}T06:30:00Z`);
 const HOUR = 3600_000;
 const DAY = 24 * HOUR;
 function plan(title: string, offsetMs: number, durationMin = 30) {

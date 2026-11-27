@@ -1,5 +1,6 @@
 'use client';
 
+import { describeFindATimePreferenceHint } from '../lib/preferenceLinks';
 import React, { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import type { PlanningHorizon, TimePreference } from '../../../packages/recommendation/src/dailyAssistant';
 import { buildGoogleCalendarUrl } from '../../../packages/recommendation/src/dailyAssistant';
@@ -2041,6 +2042,17 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
           <div ref={findResultsHeadingRef} tabIndex={-1} style={{ outline: 'none' }}>
             <SectionHeader label="Aura's Best Moments" actionLabel={onViewDay ? 'View my day' : undefined} onAction={onViewDay} />
           </div>
+          {findResult.candidates.length > 0 && (() => {
+            // AURA-PREF-01: one optional line when a preference that would
+            // tailor these times isn't set (signed-in Find a Time only).
+            const hint = describeFindATimePreferenceHint((findResult as { constraintsApplied?: Parameters<typeof describeFindATimePreferenceHint>[0] }).constraintsApplied);
+            return hint ? (
+              <p data-testid="find-preference-hint" style={{ margin: 0, fontSize: 12, color: colors.textSecondary, lineHeight: 1.5 }}>
+                {hint.text}{' '}
+                <a href={hint.href} style={{ color: colors.accent, fontWeight: 700 }}>{hint.linkLabel}</a>
+              </p>
+            ) : null;
+          })()}
           {findResult.candidates.length === 0 && (
             <div style={emptyPlansStyle}>{presentFindATimeEmptyReason((findResult as { emptyReason?: unknown }).emptyReason) ?? 'Aura could not find a usable time for this request. Try a shorter duration, a wider date range, or a different preferred time.'}</div>
           )}

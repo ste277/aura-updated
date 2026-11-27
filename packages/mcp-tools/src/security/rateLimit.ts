@@ -28,6 +28,10 @@ export interface RateLimitRule {
   limit: number;
 }
 
+/** I2b-S12: the bounded set of limiter failure causes (also the only values the audit sink accepts). */
+export const LIMITER_UNAVAILABLE_CAUSES = ['deadline', 'commit_timeout', 'commit_late', 'commit_lost', 'commit_failed', 'checkout', 'driver', 'internal'] as const;
+export type LimiterUnavailableCause = (typeof LIMITER_UNAVAILABLE_CAUSES)[number];
+
 export interface RateLimitDecision {
   allowed: boolean;
   /** Seconds until the most-constrained key has budget again (>= 1 when rejected). */
@@ -35,20 +39,30 @@ export interface RateLimitDecision {
   /** Which namespace rejected the request ("user", "client" or "capacity"), for audit only. */
   limitedBy?: string;
   /**
-   * I2b-S11 (S10 review P2-3), diagnostics only, set when `limitedBy` is
-   * "unavailable" (the caller's answer is the same fail-closed 503 in every
-   * case):
-   *   - "deadline"        the decision deadline expired BEFORE any COMMIT was
-   *                       sent: expected load shedding, nothing was counted;
-   *   - "commit_unknown"  the deadline expired after COMMIT was sent, or the
-   *                       COMMIT was unconfirmed / acknowledged late: the
-   *                       increment MAY have landed (over-count, never
-   *                       over-admission);
-   *   - "checkout"        no connection could be checked out (pool / connect error);
-   *   - "driver"          a statement or the connection failed (SQL / driver error);
-   *   - "internal"        an invariant failed or no decision was reached.
+   * I2b-S11 / S12 (S10 review P2-3, S11 review R-P2-2), diagnostics only, set
+   * when `limitedBy` is "unavailable" (the caller's answer is the same
+   * fail-closed 503 in every case). A bounded code, never a raw error:
+   *   - "deadline"          the absolute decision deadline was reached with NO
+   *                         COMMIT sent (incl. after a ROLLBACK acknowledgement
+   *                         or before a retry): expected load shedding, nothing
+   *                         was counted;
+   *   - "commit_timeout"    COMMIT was sent and the deadline expired before its
+   *                         answer: GENUINELY AMBIGUOUS (the increment may have
+   *                         landed -- over-count, never over-admission); part of
+   *                         expected deadline shedding;
+   *   - "commit_late"       COMMIT was CONFIRMED after the deadline: counted, not
+   *                         admitted (over-count only); expected shedding;
+   *   - "commit_lost"       the connection failed AFTER COMMIT was sent:
+   *                         GENUINELY AMBIGUOUS accounting, but an infrastructure
+   *                         failure -- never counted as healthy shedding;
+   *   - "commit_failed"     the server explicitly refused the COMMIT (an error
+   *                         response, or the ROLLBACK tag): nothing was counted;
+   *                         an infrastructure failure, not shedding;
+   *   - "checkout"          no connection could be checked out;
+   *   - "driver"            a statement or the connection failed before COMMIT;
+   *   - "internal"          an invariant failed or no decision was reached.
    */
-  cause?: 'deadline' | 'commit_unknown' | 'checkout' | 'driver' | 'internal';
+  cause?: LimiterUnavailableCause;
 }
 
 export interface McpRateLimiter {

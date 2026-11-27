@@ -169,6 +169,9 @@ export async function loadFindATimeConstraintInputs(user: Pick<User, 'id' | 'ava
 export interface FindATimeConstraintSummary {
   availability: 'CONFIGURED' | 'UNCONFIGURED';
   blockedPlanCount: number;
+  /** AURA-PREF-01: whether the user's work hours (Daily Rhythm) are set --
+   * added by the route, which owns those preferences. */
+  workHours?: 'CONFIGURED' | 'UNCONFIGURED';
 }
 
 export type FindATimeEmptyReason = 'NO_ELIGIBLE_TIME' | 'NO_AVAILABILITY_IN_RANGE';

@@ -1,0 +1,669 @@
+{
+  "status": "UNREVIEWED_RESEARCH_CONTENT",
+  "synthetic": true,
+  "note": "Invented feature sets; no person, no image. Expected outputs are composed by hand from the catalogue rules and re-derived independently by check_examples.py. Capabilities 'essential' = E1-E1..E1-E5.",
+  "library": "palm-03-c1-library@0.4.0-draft",
+  "examples": [
+    {
+      "id": "R1",
+      "title": "the considered learner",
+      "source": "user-assisted",
+      "capabilities": [
+        "essential"
+      ],
+      "qualityAccepted": true,
+      "inputs": {
+        "lines.life": {
+          "provenance": "user-confirmed",
+          "value": "present"
+        },
+        "lines.head": {
+          "provenance": "user-confirmed",
+          "value": 0.16
+        },
+        "measurements.middleToPalmRatio": {
+          "provenance": "automatic-measured",
+          "value": 1.0
+        },
+        "measurements.indexToRingRatio": {
+          "provenance": "automatic-measured",
+          "value": 1.01
+        },
+        "lines.heart": {
+          "notAssessed": "user-skipped"
+        },
+        "lines.upward": {
+          "notAssessed": "not-traced"
+        },
+        "proposed.origin.gap": {
+          "notAssessed": "not-read-in-this-version"
+        },
+        "marks.other": {
+          "notAssessed": "mark-unknown"
+        }
+      },
+      "expected": {
+        "combined": {
+          "sections": {
+            "personality": [
+              "C1-WE-HEAD-SLOPING",
+              "C1-WE-FINGER-LONG"
+            ],
+            "strengths": [
+              "C1-IN-PITR-KNOWLEDGE"
+            ]
+          },
+          "overflow": [],
+          "notAssessed": {
+            "measurements.indexToRingRatio": "no-supported-content",
+            "lines.heart": "user-skipped",
+            "lines.upward": "not-traced",
+            "proposed.origin.gap": "not-read-in-this-version",
+            "marks.other": "mark-unknown"
+          },
+          "emptyResult": null
+        },
+        "indian-only": {
+          "sections": {
+            "strengths": [
+              "C1-IN-PITR-KNOWLEDGE"
+            ]
+          },
+          "overflow": [],
+          "notAssessed": {
+            "lines.head": "no-supported-content",
+            "measurements.middleToPalmRatio": "no-supported-content",
+            "measurements.indexToRingRatio": "no-supported-content",
+            "lines.heart": "user-skipped",
+            "lines.upward": "not-traced",
+            "proposed.origin.gap": "not-read-in-this-version",
+            "marks.other": "mark-unknown"
+          },
+          "emptyResult": null
+        },
+        "western-only": {
+          "sections": {
+            "personality": [
+              "C1-WE-HEAD-SLOPING",
+              "C1-WE-FINGER-LONG"
+            ]
+          },
+          "overflow": [],
+          "notAssessed": {
+            "lines.life": "no-supported-content",
+            "measurements.indexToRingRatio": "no-supported-content",
+            "lines.heart": "user-skipped",
+            "lines.upward": "not-traced",
+            "proposed.origin.gap": "not-read-in-this-version",
+            "marks.other": "mark-unknown"
+          },
+          "emptyResult": null
+        }
+      }
+    },
+    {
+      "id": "R2",
+      "title": "direction and decisiveness",
+      "source": "user-assisted",
+      "capabilities": [
+        "essential"
+      ],
+      "qualityAccepted": true,
+      "inputs": {
+        "lines.upward": {
+          "provenance": "user-confirmed",
+          "value": "middle"
+        },
+        "lines.head": {
+          "provenance": "user-confirmed",
+          "value": 0.01
+        },
+        "measurements.middleToPalmRatio": {
+          "provenance": "automatic-measured",
+          "value": 0.76
+        },
+        "measurements.indexToRingRatio": {
+          "provenance": "automatic-measured",
+          "value": 0.88
+        },
+        "lines.heart": {
+          "provenance": "user-confirmed",
+          "value": "index",
+          "nearEdge": true
+        },
+        "proposed.origin.gap": {
+          "notAssessed": "not-read-in-this-version"
+        },
+        "marks.other": {
+          "notAssessed": "mark-unknown"
+        }
+      },
+      "expected": {
+        "combined": {
+          "sections": {
+            "personality": [
+              "C1-WE-HEAD-STRAIGHT",
+              "C1-WE-FINGER-SHORT"
+            ],
+            "strengths": [
+              "C1-WE-RING-LONG"
+            ],
+            "career-working-style": [
+              "C1-IN-URDHVA-MIDDLE"
+            ]
+          },
+          "overflow": [],
+          "notAssessed": {
+            "lines.heart": "boundary",
+            "proposed.origin.gap": "not-read-in-this-version",
+            "marks.other": "mark-unknown"
+          },
+          "emptyResult": null
+        },
+        "indian-only": {
+          "sections": {
+            "career-working-style": [
+              "C1-IN-URDHVA-MIDDLE"
+            ]
+          },
+          "overflow": [],
+          "notAssessed": {
+            "lines.head": "no-supported-content",
+            "measurements.middleToPalmRatio": "not-read-in-this-version",
+            "measurements.indexToRingRatio": "no-supported-content",
+            "lines.heart": "no-supported-content",
+            "proposed.origin.gap": "not-read-in-this-version",
+            "marks.other": "mark-unknown"
+          },
+          "emptyResult": null
+        },
+        "western-only": {
+          "sections": {
+            "personality": [
+              "C1-WE-HEAD-STRAIGHT",
+              "C1-WE-FINGER-SHORT"
+            ],
+            "strengths": [
+              "C1-WE-RING-LONG"
+            ]
+          },
+          "overflow": [],
+          "notAssessed": {
+            "lines.upward": "no-supported-content",
+            "lines.heart": "boundary",
+            "proposed.origin.gap": "not-read-in-this-version",
+            "marks.other": "mark-unknown"
+          },
+          "emptyResult": null
+        }
+      }
+    },
+    {
+      "id": "R3",
+      "title": "measurements only (restraint, and an excluded record)",
+      "source": "user-assisted",
+      "capabilities": [
+        "essential"
+      ],
+      "qualityAccepted": true,
+      "inputs": {
+        "lines.heart": {
+          "notAssessed": "user-skipped"
+        },
+        "lines.head": {
+          "notAssessed": "user-skipped"
+        },
+        "lines.life": {
+          "notAssessed": "user-skipped"
+        },
+        "lines.upward": {
+          "notAssessed": "user-skipped"
+        },
+        "measurements.middleToPalmRatio": {
+          "provenance": "automatic-measured",
+          "value": 1.0
+        },
+        "measurements.indexToRingRatio": {
+          "provenance": "automatic-measured",
+          "value": 1.12
+        },
+        "marks.other": {
+          "notAssessed": "mark-unknown"
+        }
+      },
+      "expected": {
+        "combined": {
+          "sections": {
+            "personality": [
+              "C1-WE-FINGER-LONG"
+            ]
+          },
+          "overflow": [],
+          "notAssessed": {
+            "measurements.indexToRingRatio": "not-read-in-this-version",
+            "lines.heart": "user-skipped",
+            "lines.head": "user-skipped",
+            "lines.life": "user-skipped",
+            "lines.upward": "user-skipped",
+            "marks.other": "mark-unknown"
+          },
+          "emptyResult": null
+        },
+        "indian-only": {
+          "sections": {},
+          "overflow": [],
+          "notAssessed": {
+            "measurements.middleToPalmRatio": "no-supported-content",
+            "measurements.indexToRingRatio": "no-supported-content",
+            "lines.heart": "user-skipped",
+            "lines.head": "user-skipped",
+            "lines.life": "user-skipped",
+            "lines.upward": "user-skipped",
+            "marks.other": "mark-unknown"
+          },
+          "emptyResult": "say-indian-tradition-has-no-supported-reading-for-what-was-shared-point-to-guide"
+        },
+        "western-only": {
+          "sections": {
+            "personality": [
+              "C1-WE-FINGER-LONG"
+            ]
+          },
+          "overflow": [],
+          "notAssessed": {
+            "measurements.indexToRingRatio": "not-read-in-this-version",
+            "lines.heart": "user-skipped",
+            "lines.head": "user-skipped",
+            "lines.life": "user-skipped",
+            "lines.upward": "user-skipped",
+            "marks.other": "mark-unknown"
+          },
+          "emptyResult": null
+        }
+      }
+    },
+    {
+      "id": "R3Q",
+      "title": "same input, photo flagged blurry (quality gate)",
+      "source": "user-assisted",
+      "capabilities": [
+        "essential"
+      ],
+      "qualityAccepted": false,
+      "qualityIssues": [
+        "blurry"
+      ],
+      "inputs": {
+        "lines.heart": {
+          "notAssessed": "user-skipped"
+        },
+        "lines.head": {
+          "notAssessed": "user-skipped"
+        },
+        "lines.life": {
+          "notAssessed": "user-skipped"
+        },
+        "lines.upward": {
+          "notAssessed": "user-skipped"
+        },
+        "measurements.middleToPalmRatio": {
+          "provenance": "automatic-measured",
+          "value": 1.0
+        },
+        "measurements.indexToRingRatio": {
+          "provenance": "automatic-measured",
+          "value": 1.12
+        },
+        "marks.other": {
+          "notAssessed": "mark-unknown"
+        }
+      },
+      "expected": {
+        "combined": {
+          "sections": {},
+          "overflow": [],
+          "notAssessed": {
+            "measurements.middleToPalmRatio": "quality-gated",
+            "measurements.indexToRingRatio": "quality-gated",
+            "lines.heart": "user-skipped",
+            "lines.head": "user-skipped",
+            "lines.life": "user-skipped",
+            "lines.upward": "user-skipped",
+            "marks.other": "mark-unknown"
+          },
+          "emptyResult": "say-nothing-emittable-list-not-assessed-point-to-guide"
+        },
+        "indian-only": {
+          "sections": {},
+          "overflow": [],
+          "notAssessed": {
+            "measurements.middleToPalmRatio": "quality-gated",
+            "measurements.indexToRingRatio": "quality-gated",
+            "lines.heart": "user-skipped",
+            "lines.head": "user-skipped",
+            "lines.life": "user-skipped",
+            "lines.upward": "user-skipped",
+            "marks.other": "mark-unknown"
+          },
+          "emptyResult": "say-indian-tradition-has-no-supported-reading-for-what-was-shared-point-to-guide"
+        },
+        "western-only": {
+          "sections": {},
+          "overflow": [],
+          "notAssessed": {
+            "measurements.middleToPalmRatio": "quality-gated",
+            "measurements.indexToRingRatio": "quality-gated",
+            "lines.heart": "user-skipped",
+            "lines.head": "user-skipped",
+            "lines.life": "user-skipped",
+            "lines.upward": "user-skipped",
+            "marks.other": "mark-unknown"
+          },
+          "emptyResult": "say-nothing-emittable-list-not-assessed-point-to-guide"
+        }
+      }
+    },
+    {
+      "id": "R4",
+      "title": "giving (later enhancements; convergence without amplification)",
+      "source": "user-assisted",
+      "capabilities": [
+        "essential",
+        "E1-L1",
+        "E1-L2",
+        "E1-L3"
+      ],
+      "qualityAccepted": true,
+      "inputs": {
+        "proposed.selfReported.palmRaised": {
+          "provenance": "user-self-reported",
+          "value": "raised"
+        },
+        "marks.matsya": {
+          "provenance": "user-reported",
+          "value": "reported"
+        },
+        "proposed.marks.matsya.count": {
+          "provenance": "user-reported",
+          "value": "2"
+        },
+        "proposed.marks.triangle": {
+          "notAssessed": "ambiguous-in-source"
+        },
+        "lines.heart": {
+          "provenance": "user-confirmed",
+          "value": "index"
+        },
+        "proposed.measurements.thumbDistalToProximalRatio": {
+          "provenance": "automatic-measured",
+          "value": 1.18
+        },
+        "lines.head": {
+          "notAssessed": "user-skipped"
+        },
+        "lines.life": {
+          "notAssessed": "user-skipped"
+        },
+        "lines.upward": {
+          "notAssessed": "not-traced"
+        },
+        "marks.other": {
+          "notAssessed": "mark-unknown"
+        }
+      },
+      "expected": {
+        "combined": {
+          "sections": {
+            "personality": [
+              "C1-IN-PALM-RAISED-GENEROUS",
+              "C1-WE-THUMB-WILL"
+            ],
+            "strengths": [
+              "C1-IN-MATSYA-PAIR-HOSPITALITY"
+            ],
+            "emotional-relational": [
+              "C1-WE-HEART-JUPITER"
+            ]
+          },
+          "overflow": [],
+          "notAssessed": {
+            "proposed.marks.triangle": "ambiguous-in-source",
+            "lines.head": "user-skipped",
+            "lines.life": "user-skipped",
+            "lines.upward": "not-traced",
+            "marks.other": "mark-unknown"
+          },
+          "emptyResult": null
+        },
+        "indian-only": {
+          "sections": {
+            "personality": [
+              "C1-IN-PALM-RAISED-GENEROUS"
+            ],
+            "strengths": [
+              "C1-IN-MATSYA-PAIR-HOSPITALITY"
+            ]
+          },
+          "overflow": [],
+          "notAssessed": {
+            "lines.heart": "no-supported-content",
+            "proposed.measurements.thumbDistalToProximalRatio": "no-supported-content",
+            "proposed.marks.triangle": "ambiguous-in-source",
+            "lines.head": "user-skipped",
+            "lines.life": "user-skipped",
+            "lines.upward": "not-traced",
+            "marks.other": "mark-unknown"
+          },
+          "emptyResult": null
+        },
+        "western-only": {
+          "sections": {
+            "personality": [
+              "C1-WE-THUMB-WILL"
+            ],
+            "emotional-relational": [
+              "C1-WE-HEART-JUPITER"
+            ]
+          },
+          "overflow": [],
+          "notAssessed": {
+            "proposed.selfReported.palmRaised": "no-supported-content",
+            "marks.matsya": "no-supported-content",
+            "proposed.marks.matsya.count": "no-supported-content",
+            "proposed.marks.triangle": "ambiguous-in-source",
+            "lines.head": "user-skipped",
+            "lines.life": "user-skipped",
+            "lines.upward": "not-traced",
+            "marks.other": "mark-unknown"
+          },
+          "emptyResult": null
+        }
+      }
+    },
+    {
+      "id": "R5",
+      "title": "conflicting and borderline evidence",
+      "source": "user-assisted",
+      "capabilities": [
+        "essential"
+      ],
+      "qualityAccepted": true,
+      "inputs": {
+        "lines.upward": {
+          "provenance": "user-confirmed",
+          "value": "index"
+        },
+        "lines.head": {
+          "provenance": "user-confirmed",
+          "value": 0.105
+        },
+        "measurements.middleToPalmRatio": {
+          "provenance": "automatic-measured",
+          "value": 0.72
+        },
+        "proposed.origin.gap": {
+          "notAssessed": "not-read-in-this-version"
+        },
+        "proposed.measurements.thumbDistalToProximalRatio": {
+          "notAssessed": "not-requested"
+        },
+        "proposed.marks.triangle": {
+          "notAssessed": "not-requested"
+        },
+        "lines.heart": {
+          "notAssessed": "not-traced"
+        },
+        "marks.other": {
+          "notAssessed": "mark-unknown"
+        }
+      },
+      "expected": {
+        "combined": {
+          "sections": {
+            "personality": [
+              "C1-WE-FINGER-SHORT"
+            ],
+            "career-working-style": [
+              "C1-IN-URDHVA-INDEX"
+            ]
+          },
+          "overflow": [],
+          "notAssessed": {
+            "lines.head": "boundary",
+            "proposed.origin.gap": "not-read-in-this-version",
+            "proposed.measurements.thumbDistalToProximalRatio": "not-requested",
+            "proposed.marks.triangle": "not-requested",
+            "lines.heart": "not-traced",
+            "marks.other": "mark-unknown"
+          },
+          "emptyResult": null
+        },
+        "indian-only": {
+          "sections": {
+            "career-working-style": [
+              "C1-IN-URDHVA-INDEX"
+            ]
+          },
+          "overflow": [],
+          "notAssessed": {
+            "lines.head": "no-supported-content",
+            "measurements.middleToPalmRatio": "not-read-in-this-version",
+            "proposed.origin.gap": "not-read-in-this-version",
+            "proposed.measurements.thumbDistalToProximalRatio": "not-requested",
+            "proposed.marks.triangle": "not-requested",
+            "lines.heart": "not-traced",
+            "marks.other": "mark-unknown"
+          },
+          "emptyResult": null
+        },
+        "western-only": {
+          "sections": {
+            "personality": [
+              "C1-WE-FINGER-SHORT"
+            ]
+          },
+          "overflow": [],
+          "notAssessed": {
+            "lines.upward": "no-supported-content",
+            "lines.head": "boundary",
+            "proposed.origin.gap": "not-read-in-this-version",
+            "proposed.measurements.thumbDistalToProximalRatio": "not-requested",
+            "proposed.marks.triangle": "not-requested",
+            "lines.heart": "not-traced",
+            "marks.other": "mark-unknown"
+          },
+          "emptyResult": null
+        }
+      }
+    },
+    {
+      "id": "R6",
+      "title": "relationships, with skipped, unusable and absent inputs (E1-A1/A2)",
+      "source": "user-assisted",
+      "capabilities": [
+        "essential"
+      ],
+      "qualityAccepted": true,
+      "inputs": {
+        "lines.heart": {
+          "provenance": "user-confirmed",
+          "value": "index"
+        },
+        "lines.head": {
+          "notAssessed": "user-skipped"
+        },
+        "lines.life": {
+          "notAssessed": "user-cannot-see"
+        },
+        "lines.upward": {
+          "notAssessed": "trace-unusable"
+        },
+        "measurements.middleToPalmRatio": {
+          "notAssessed": "measurement-unavailable"
+        },
+        "measurements.indexToRingRatio": {
+          "notAssessed": "measurement-unavailable"
+        },
+        "marks.vedi": {
+          "notAssessed": "observed-absent"
+        },
+        "marks.other": {
+          "notAssessed": "mark-unknown"
+        }
+      },
+      "expected": {
+        "combined": {
+          "sections": {
+            "emotional-relational": [
+              "C1-WE-HEART-JUPITER"
+            ]
+          },
+          "overflow": [],
+          "notAssessed": {
+            "lines.head": "user-skipped",
+            "lines.life": "user-cannot-see",
+            "lines.upward": "trace-unusable",
+            "measurements.middleToPalmRatio": "measurement-unavailable",
+            "measurements.indexToRingRatio": "measurement-unavailable",
+            "marks.vedi": "observed-absent",
+            "marks.other": "mark-unknown"
+          },
+          "emptyResult": null
+        },
+        "indian-only": {
+          "sections": {},
+          "overflow": [],
+          "notAssessed": {
+            "lines.heart": "no-supported-content",
+            "lines.head": "user-skipped",
+            "lines.life": "user-cannot-see",
+            "lines.upward": "trace-unusable",
+            "measurements.middleToPalmRatio": "measurement-unavailable",
+            "measurements.indexToRingRatio": "measurement-unavailable",
+            "marks.vedi": "observed-absent",
+            "marks.other": "mark-unknown"
+          },
+          "emptyResult": "say-indian-tradition-has-no-supported-reading-for-what-was-shared-point-to-guide"
+        },
+        "western-only": {
+          "sections": {
+            "emotional-relational": [
+              "C1-WE-HEART-JUPITER"
+            ]
+          },
+          "overflow": [],
+          "notAssessed": {
+            "lines.head": "user-skipped",
+            "lines.life": "user-cannot-see",
+            "lines.upward": "trace-unusable",
+            "measurements.middleToPalmRatio": "measurement-unavailable",
+            "measurements.indexToRingRatio": "measurement-unavailable",
+            "marks.vedi": "observed-absent",
+            "marks.other": "mark-unknown"
+          },
+          "emptyResult": null
+        }
+      }
+    }
+  ]
+}

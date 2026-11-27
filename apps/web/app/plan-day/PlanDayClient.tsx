@@ -1,5 +1,6 @@
 'use client';
 
+import { preferenceSettingsHref } from '../../lib/preferenceLinks';
 import React, { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAndroidBackToHome } from '../../lib/useAndroidBackToHome';
@@ -572,7 +573,7 @@ export function PlanDayClient({ timezone, planningDate, horizon, availabilityCon
             {locationConfirmed === false && cityName && (
               <p style={{ margin: `${spacing.xs}px 0 0`, fontSize: 13, color: colors.textFaint }}>
                 Timing based on {cityName} (unconfirmed) ·{' '}
-                <TextButton onClick={() => { window.location.href = '/?tab=you'; }} color={colors.textFaint}>
+                <TextButton onClick={() => { window.location.href = preferenceSettingsHref('availability'); }} color={colors.textFaint}>
                   Confirm location
                 </TextButton>
               </p>
@@ -593,9 +594,9 @@ export function PlanDayClient({ timezone, planningDate, horizon, availabilityCon
             {showAvailabilityPrerequisite ? (
               <SurfaceCard style={{ marginTop: spacing.lg }}>
                 <p style={{ margin: 0, fontWeight: 700 }}>Set your availability first</p>
-                <p style={{ marginTop: spacing.xs, marginBottom: 0, color: colors.textSecondary }}>Aura needs to know when you're usually available before it can plan a future day.</p>
+                <p style={{ marginTop: spacing.xs, marginBottom: 0, color: colors.textSecondary }}>Aura needs to know when you're usually available before it can plan a future day. You can still plan today without it.</p>
                 <div style={{ marginTop: spacing.md }}>
-                  <PrimaryButton onClick={() => { window.location.href = '/?tab=you'; }}>Set availability</PrimaryButton>
+                  <PrimaryButton onClick={() => { window.location.href = preferenceSettingsHref('availability'); }}>Set availability</PrimaryButton>
                 </div>
               </SurfaceCard>
             ) : (
@@ -693,7 +694,7 @@ export function PlanDayClient({ timezone, planningDate, horizon, availabilityCon
                               </SecondaryButton>
                             )}
                             {entryError.actions.includes('CONFIGURE_AVAILABILITY') && (
-                              <PrimaryButton onClick={() => { window.location.href = '/?tab=you'; }}>Configure availability</PrimaryButton>
+                              <PrimaryButton onClick={() => { window.location.href = preferenceSettingsHref('availability'); }}>Configure availability</PrimaryButton>
                             )}
                             {entryError.actions.includes('SIGN_IN') && (
                               // This ticket's own section 14 -- `/` is this
