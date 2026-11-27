@@ -565,6 +565,24 @@ async function main() {
     for (const [label, sw] of [['R5 HEAD (a3a02b8) worker', R5_SW], ['current worker', NEW_SW]] as const) {
       deploy.sw = sw; deploy.appHtml = 'new';
       const { context, signIn } = await newContext();
+      // R15 (39257 section 10) -- DIAGNOSTIC OBSERVATION ONLY (the historical R5-worker fixture, the probe and both
+      // assertions below are unchanged): acknowledgement delivery, controller changes and worker messages are
+      // timestamped in the page; worker lifecycle, request timing and navigations are recorded over CDP.
+      await context.addInitScript(() => {
+        const w = window as any;
+        const t0 = performance.timeOrigin;
+        w.__ch15trace = [] as Array<Record<string, unknown>>;
+        const at = () => Math.round(t0 + performance.now());
+        const proto = ServiceWorker.prototype;
+        const deliver = proto.postMessage;
+        proto.postMessage = function (message: any, ...options: any[]) {
+          if (message?.type === 'AURA_ACCOUNT_BOUNDARY') w.__ch15trace.push({ t: at(), ev: 'ack-delivered', state: (this as ServiceWorker).state });
+          return Reflect.apply(deliver, this, [message, ...options]);
+        };
+        navigator.serviceWorker?.addEventListener('controllerchange', () => w.__ch15trace.push({ t: at(), ev: 'controllerchange', state: navigator.serviceWorker.controller?.state ?? null }));
+        navigator.serviceWorker?.addEventListener('message', (e: MessageEvent) => w.__ch15trace.push({ t: at(), ev: 'worker-message', type: (e.data as any)?.type ?? typeof e.data }));
+        addEventListener('beforeunload', () => w.__ch15trace.push({ t: at(), ev: 'beforeunload' }));
+      });
       await context.addInitScript(() => {
         const proto = ServiceWorker.prototype;
         const send = proto.postMessage;
@@ -579,15 +597,27 @@ async function main() {
       await signIn('alicesynth@example.invalid');
       await cur.evaluate(async () => { await caches.delete('aura-sw-state-v1'); });
       const cdp = await context.newCDPSession(cur);
+      const diag: Array<Record<string, unknown>> = [];
+      const wall = () => Date.now();
+      cdp.on('ServiceWorker.workerVersionUpdated', (e: any) => { for (const v of e.versions ?? []) diag.push({ t: wall(), ev: 'worker-version', versionId: v.versionId, runningStatus: v.runningStatus, status: v.status, controlledClients: (v.controlledClients ?? []).length }); });
+      cdp.on('ServiceWorker.workerErrorReported', (e: any) => diag.push({ t: wall(), ev: 'worker-error', message: e.errorMessage?.errorMessage }));
+      cdp.on('Network.requestWillBeSent', (e: any) => { if (/\/api\/goals|\/app$/.test(e.request?.url ?? '')) diag.push({ t: wall(), ev: 'request', id: e.requestId, url: new URL(e.request.url).pathname, type: e.type }); });
+      cdp.on('Network.responseReceived', (e: any) => { if (/\/api\/goals|\/app$/.test(e.response?.url ?? '')) diag.push({ t: wall(), ev: 'response', id: e.requestId, status: e.response.status, fromServiceWorker: Boolean(e.response.fromServiceWorker) }); });
+      await cdp.send('Network.enable').catch(() => undefined);
       await cdp.send('ServiceWorker.enable');
+      const controllerBefore = await cur.evaluate(() => navigator.serviceWorker.controller?.state ?? null);
       await cdp.send('ServiceWorker.stopAllWorkers');
+      diag.push({ t: wall(), ev: 'stopAllWorkers' });
       const before = cur.url();
       let domNavigations = 0;
-      cur.on('framenavigated', (f: any) => { if (f === cur.mainFrame()) domNavigations++; });
+      cur.on('framenavigated', (f: any) => { if (f === cur.mainFrame()) { domNavigations++; diag.push({ t: wall(), ev: 'navigation', url: f.url() }); } });
       const statuses: number[] = await cur.evaluate(async () => Promise.all(Array.from({ length: 8 }, async () => (await (window as any).__nativeFetch('/api/goals')).status))).catch(() => []);
       await cur.waitForTimeout(1600);
       const reloaded = cur.url() !== before;
       console.log(`CH15 ${label}:`, JSON.stringify({ statuses, reloaded, domNavigations }));
+      const pageTrace = await cur.evaluate(() => (window as any).__ch15trace ?? []).catch(() => 'unavailable (page navigated)');
+      const controllerAfter = await cur.evaluate(() => navigator.serviceWorker.controller?.state ?? null).catch(() => 'unavailable');
+      console.log(`CH15-diag ${label}:`, JSON.stringify({ chromium: ver, node: process.version, playwright: require('@playwright/test/package.json').version, platform: `${process.platform}-${process.arch}`, controllerBefore, controllerAfter, cdp: diag, page: pageTrace }));
       if (sw === R5_SW) check(`CH15 (R6, real Chromium) ${label} reproduces the assessment: 8 concurrent refusals + 150 ms acknowledgement -> the CURRENT page is reloaded`, statuses.length === 8 && statuses.every((x) => x === 503) && reloaded);
       else check(`CH15 (R6, real Chromium) ${label}: the same 8 concurrent refusals + 150 ms acknowledgement -> the current page is NOT reloaded (checks coalesced, acknowledgement correlated)`, statuses.length === 8 && statuses.every((x) => x === 503) && !reloaded && domNavigations === 0);
       await context.close();

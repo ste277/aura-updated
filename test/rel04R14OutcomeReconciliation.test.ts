@@ -133,7 +133,9 @@ async function main() {
     await fresh();
     const s = await tab(CUR);
     if (setup === 'discarded') await putDecision(s, A, 'x', 'discarded');
-    if (setup === 'rejected') await putDecision(s, A, 'x', 'settled', { serverOutcome: 'rejected' });
+    // R15 (39257): a recorded rejection is authoritative only with its versioned receipt (a bare pre-R15 marker
+    // proves nothing and stays unresolved -- covered by test/rel04ActivityOperationContract.test.ts C-cases).
+    if (setup === 'rejected') { const pl = s.q.canonicalPayload({ ...body('x'), tempId: 'tmp' }); await putDecision(s, A, 'x', 'settled', { payload: pl, serverOutcome: 'rejected', receipt: { v: 1, kind: 'rejected', owner: A, crid: 'x', payload: pl, status: 400, afterPossibleSend: false, at: 1 } }); }
     if (setup === 'legacy-settled') await putDecision(s, A, 'x', 'settled');
     if (setup === 'conflict') await putDecision(s, A, 'x', 'settled', { payload: 'something else', serverOutcome: 'accepted' });
     const r = await s.sync.submitActivityLog(body('x'), 'tmp', dev.fetch as any);

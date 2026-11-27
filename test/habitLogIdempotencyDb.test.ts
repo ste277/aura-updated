@@ -21,7 +21,8 @@
  * repeated runs accumulate a few extra rows for the test users rather
  * than staying flat, an accepted, low-cost tradeoff.
  */
-import { createHabitLog, getHabitLogByClientRequestId, listHabitLogs, upsertUserByEmail } from '../apps/web/lib/db';
+import { createHabitLog, getHabitLogByClientRequestId, listHabitLogs, listHabitLogsForInsights, upsertUserByEmail } from '../apps/web/lib/db';
+import { bindServerRow } from '../apps/web/lib/habitLogSyncPolicy';
 
 let allPassed = true;
 function check(label: string, condition: boolean) {
@@ -168,6 +169,30 @@ async function main() {
   });
   check('Two calls with clientRequestId omitted both persist (null does not dedupe against itself)', legacyA.id !== legacyB.id);
   check('clientRequestId reads back null for a legacy/non-idempotent call', legacyA.clientRequestId === null);
+
+  // ============================================================
+  // AURA-ANDROID-REL-04 R15 (39256) -- the client's shared row-binding rule against REAL persisted rows (the JSON
+  // the route returns is the RETURNING * row): it binds the exact operation, and refuses a row for the same request
+  // id whose persisted intent differs -- the server returns the EXISTING row for a reused id without comparing
+  // fields, so only the client's intent comparison can tell them apart.
+  // ============================================================
+  const asJson = (r: unknown) => JSON.parse(JSON.stringify(r));
+  const r15Id = `test-r15-binding-${Date.now()}`;
+  const ts = new Date('2026-11-24T06:00:00.000Z');
+  const dispatched = { activityTitle: 'Workout', logTimestamp: ts.toISOString(), durationMinutes: 30, logSource: 'AURA_DO_NOW', activitySignificance: 'MEDIUM', activeWindow: 'NEUTRAL', logMinuteOfDay: 690, clientRequestId: r15Id };
+  const persisted = await createHabitLog({ userId: owner.id, activityTitle: 'Workout', activeWindow: 'AMRIT', logMinuteOfDay: 690, logTimestamp: ts, durationMinutes: 30, logSource: 'AURA_DO_NOW', activitySignificance: 'MEDIUM', clientRequestId: r15Id });
+  const bound = bindServerRow(asJson(persisted), { account: owner.id, clientRequestId: r15Id, body: dispatched });
+  check('R15 the real persisted row (as JSON) binds to its exact operation (account + request id + persisted intent; server-derived activeWindow excluded)', bound.ok && bound.ok === true && bound.row.id === persisted.id);
+  const reused = await createHabitLog({ userId: owner.id, activityTitle: 'A different activity', activeWindow: 'NEUTRAL', logMinuteOfDay: 700, logTimestamp: new Date(ts.getTime() + 600_000), durationMinutes: 45, logSource: 'MANUAL', activitySignificance: 'HIGH', clientRequestId: r15Id });
+  const reusedBinding = bindServerRow(asJson(reused), { account: owner.id, clientRequestId: r15Id, body: { ...dispatched, activityTitle: 'A different activity', durationMinutes: 45, logSource: 'MANUAL', activitySignificance: 'HIGH', logTimestamp: new Date(ts.getTime() + 600_000).toISOString() } });
+  check('R15 a reused request id with a DIFFERENT payload gets the EXISTING row back (one row), and the client refuses it as evidence (reason intent)', reused.id === persisted.id && !reusedBinding.ok && (reusedBinding as { reason: string }).reason === 'intent' && (await listHabitLogs(owner.id)).filter((r) => r.clientRequestId === r15Id).length === 1);
+  const twinA = await createHabitLog({ userId: owner.id, activityTitle: 'Workout', activeWindow: 'NEUTRAL', logMinuteOfDay: 690, logTimestamp: ts, durationMinutes: 30, logSource: 'AURA_DO_NOW', activitySignificance: 'MEDIUM', clientRequestId: `${r15Id}-twin-a` });
+  const twinB = await createHabitLog({ userId: owner.id, activityTitle: 'Workout', activeWindow: 'NEUTRAL', logMinuteOfDay: 690, logTimestamp: ts, durationMinutes: 30, logSource: 'AURA_DO_NOW', activitySignificance: 'MEDIUM', clientRequestId: `${r15Id}-twin-b` });
+  check('R15 two separate operations with IDENTICAL payloads and different ids persist two rows (never deduplicated by payload)', twinA.id !== twinB.id);
+  const listed = (await listHabitLogsForInsights(owner.id, new Date(ts.getTime() - 86_400_000))).map(asJson);
+  const fromList = listed.filter((r: any) => r.clientRequestId === r15Id).map((r: any) => bindServerRow(r, { account: owner.id, clientRequestId: r15Id, body: dispatched }));
+  const otherAccount = bindServerRow(asJson(otherLog), { account: owner.id, clientRequestId: sharedRequestId, body: { ...dispatched, clientRequestId: sharedRequestId } });
+  check('R15 GET evidence uses the SAME binding: the collection row binds; another account\'s row with the same request id never does (reason account)', fromList.length === 1 && fromList[0].ok && !otherAccount.ok && (otherAccount as { reason: string }).reason === 'account');
 
   console.log(allPassed ? '\nALL HABITLOG IDEMPOTENCY DB CHECKS PASSED' : '\nSOME HABITLOG IDEMPOTENCY DB CHECKS FAILED');
   process.exit(allPassed ? 0 : 1);

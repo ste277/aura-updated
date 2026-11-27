@@ -190,7 +190,8 @@ check('a pending entry in the trail is visibly labeled via StatusBadge label="Pe
 // task did not modify page.tsx at all; these checks read it read-only.
 // ============================================================
 
-check('handleLogActivity in page.tsx is unchanged: still returns Promise<\'confirmed\' | \'pending\'>', /Promise<'confirmed' \| 'pending'>/.test(pageSource));
+// R15 (39257) supersedes: handleLogActivity resolves to ActivityLogResult (adds 'unresolved'; definitive failures still reject).
+check('handleLogActivity in page.tsx resolves to the shared ActivityLogResult', /\): Promise<ActivityLogResult> => \{/.test(pageSource));
 // Pending Activity Reload Visibility V1 added a clientRequestId stamp
 // alongside syncStatus: 'pending' on this same line (needed so a reload
 // can tell a still-queued pending row apart from a permanently-rejected,
@@ -199,7 +200,8 @@ check('handleLogActivity in page.tsx is unchanged: still returns Promise<\'confi
 check('handleLogActivity still sets syncStatus: \'pending\' only from the fetch-exception (network failure) branch', /syncStatus: 'pending'(, clientRequestId)? \} : item\)\)\);/.test(pageSource));
 check('handleLogActivity still clears syncStatus on confirmed success', /syncStatus: undefined,/.test(pageSource));
 // AURA-ANDROID-REL-04 IR-01: replay moved to lib/activitySync.ts (account-bound), same classification.
-check('offline-queue replay still classifies via classifyHabitLogSyncOutcome (lib/activitySync.ts, called from page.tsx)', /classifyHabitLogSyncOutcome/.test(fs.readFileSync('apps/web/lib/activitySync.ts', 'utf8')) && /replayOfflineQueue\(\)/.test(pageSource));
+// R15 (39257) supersedes: replay classifies through THE shared response decoder, never transport status alone.
+check('offline-queue replay classifies via the shared decodeHabitLogResponse (lib/activitySync.ts, called from page.tsx)', /decode: decodeHabitLogResponse/.test(fs.readFileSync('apps/web/lib/activitySync.ts', 'utf8')) && /replayOfflineQueue\(\)/.test(pageSource));
 check('page.tsx still generates clientRequestId once per log attempt (PR #86 idempotency untouched; AURA-MOBILE-01-M2-B/AND-01: generateClientRequestId(), not crypto.randomUUID() directly, which throws outside a secure context)', /const clientRequestId = generateClientRequestId\(\);/.test(pageSource));
 check('Plan logging (handlePlanLogged) remains separate and untouched in page.tsx', /const handlePlanLogged = useCallback\(async \(\) => \{/.test(pageSource));
 

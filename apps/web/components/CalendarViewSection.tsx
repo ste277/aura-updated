@@ -91,10 +91,17 @@ interface CalendarViewSectionProps {
     overrideWindowType?: string,
     durationMinutes?: number,
     logSource?: 'AURA_PLANNED' | 'AURA_DO_NOW' | 'MANUAL' | 'OVERRIDE_CAUTION',
-    activitySignificance?: 'LOW' | 'MEDIUM' | 'HIGH'
+    activitySignificance?: 'LOW' | 'MEDIUM' | 'HIGH',
     // Good Right Now / Log Activity Failure State Correctness V1 -- see
     // HomeDashboard.tsx's own copy of this comment.
-  ) => Promise<'confirmed' | 'pending'>;
+    catalogRef?: string,
+    // AURA-ANDROID-REL-04 R15 -- the operation request (retryOf / onOperation: see page.tsx handleLogActivity).
+    operation?: { retryOf?: string; onOperation?: (clientRequestId: string) => void }
+  ) => Promise<'confirmed' | 'pending' | 'unresolved'>;
+  /** R15: "Check again" for one activity operation (by request id). */
+  onCheckActivity?: (clientRequestId?: string) => Promise<'pending' | 'unresolved' | 'confirmed' | 'failed' | 'discarded'>;
+  /** R15: the ID-keyed operation projection (accepted for prop symmetry; the modal follows its own operation). */
+  operations?: unknown;
   onBack?: () => void;
 }
 
@@ -102,6 +109,7 @@ export function CalendarViewSection({
   logEntries = [],
   userLocation,
   onLogActivity,
+  onCheckActivity,
   onBack,
 }: CalendarViewSectionProps) {
   const today = useMemo(() => new Date(), []);
@@ -553,6 +561,7 @@ export function CalendarViewSection({
           userLocation={userLocation}
           onClose={() => setIsLogModalOpen(false)}
           onConfirmLog={onLogActivity}
+          onCheckActivity={onCheckActivity}
           onSuccess={() => setIsLogModalOpen(false)}
         />
       )}

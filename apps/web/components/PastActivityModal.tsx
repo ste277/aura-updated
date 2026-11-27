@@ -3,6 +3,7 @@
 import React, { useMemo, useRef, useState } from 'react';
 import { colors, radius, spacing, typography } from './theme';
 import { ModalShell, useModalA11y, PrimaryButton, SecondaryButton, ActivityChip, FieldLabel, FieldHint, TextInput, TextAreaInput, SelectInput } from './ui';
+import { UNVERIFIED_ACTIVITY_MESSAGE, type ActivityLogResult, type ActivityOperationRequest, type CheckActivity } from '../lib/pendingReplayReconciliation';
 
 interface PastActivityModalProps {
   isOpen?: boolean;
@@ -18,7 +19,12 @@ interface PastActivityModalProps {
     overrideWindowType?: string,
     durationMinutes?: number,
     logSource?: 'AURA_PLANNED' | 'AURA_DO_NOW' | 'MANUAL' | 'OVERRIDE_CAUTION',
-    activitySignificance?: 'LOW' | 'MEDIUM' | 'HIGH'
+    activitySignificance?: 'LOW' | 'MEDIUM' | 'HIGH',
+    // (unused here: a manual log carries no catalog reference)
+    catalogRef?: string,
+    // AURA-ANDROID-REL-04 R15 -- learns the operation's request id; an UNRESOLVED result keeps this modal open
+    // on that operation ("Check again") instead of inviting a second entry under a new id.
+    operation?: ActivityOperationRequest
     // Good Right Now / Log Activity Failure State Correctness V1 -- see
     // HomeDashboard.tsx's own copy of this comment. This modal treats
     // both a confirmed persist and a genuinely-queued pending write the
@@ -26,7 +32,8 @@ interface PastActivityModalProps {
     // the resulting entry's own pending/confirmed state is visible where
     // it's actually rendered (Activities/Timeline), not in this one-shot
     // form.
-  ) => Promise<'confirmed' | 'pending'>;
+  ) => Promise<ActivityLogResult>;
+  onCheckActivity?: CheckActivity;
   onSuccess?: () => void;
 }
 
@@ -50,8 +57,11 @@ export function PastActivityModal({
   recentActivities = [],
   onClose,
   onConfirmLog,
+  onCheckActivity,
   onSuccess,
 }: PastActivityModalProps) {
+  // R15: the unresolved operation this form submitted (request id; null = blocked without a known id).
+  const [unresolvedOperation, setUnresolvedOperation] = useState<{ id: string | null } | null>(null);
   const [selectedChip, setSelectedChip] = useState<string>('');
   const [customTitle, setCustomTitle] = useState<string>('');
   const [notes, setNotes] = useState<string>('');
@@ -109,7 +119,7 @@ export function PastActivityModal({
 
   const handleSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    if (!activeTitle || submitting || isFutureTimestamp) return;
+    if (!activeTitle || submitting || isFutureTimestamp || unresolvedOperation) return;
 
     setSubmitting(true);
 
@@ -121,7 +131,15 @@ export function PastActivityModal({
       const explicitSignificance = activitySignificance === 'AUTO' ? undefined : activitySignificance;
 
       if (onConfirmLog) {
-        await onConfirmLog(activeTitle, cleanNotes, targetTimestamp, undefined, durationMinutes, 'MANUAL', explicitSignificance);
+        let operationId: string | null = null;
+        let outcome: ActivityLogResult;
+        try {
+          outcome = await onConfirmLog(activeTitle, cleanNotes, targetTimestamp, undefined, durationMinutes, 'MANUAL', explicitSignificance, undefined, { onOperation: (id) => { operationId = id; } });
+        } catch (err) {
+          if (err instanceof Error && err.message === UNVERIFIED_ACTIVITY_MESSAGE) { setUnresolvedOperation({ id: operationId }); return; }
+          throw err;
+        }
+        if (outcome === 'unresolved') { setUnresolvedOperation({ id: operationId }); return; } // kept open: never a second entry
       } else {
         // Insights Correctness + Historical Integrity V1 -- activeWindow is
         // no longer sent here at all: POST /api/habit-logs now always
@@ -173,6 +191,24 @@ export function PastActivityModal({
       maxWidth={400}
     >
       <form onSubmit={handleSubmit}>
+        {unresolvedOperation && (
+          <div role="status" data-operation-state="unresolved" style={{ marginBottom: 12, padding: '9px 10px', borderRadius: 10, border: '1px solid rgba(250, 204, 21, 0.3)', color: '#facc15', fontSize: 13 }}>
+            {UNVERIFIED_ACTIVITY_MESSAGE}{' '}
+            {onCheckActivity && (
+              <button
+                type="button"
+                onClick={async () => {
+                  const next = await onCheckActivity(unresolvedOperation.id ?? undefined).catch(() => 'unresolved' as const);
+                  if (next === 'confirmed' || next === 'pending') { setUnresolvedOperation(null); if (onSuccess) onSuccess(); onClose(); }
+                  else if (next === 'failed' || next === 'discarded') setUnresolvedOperation(null);
+                }}
+                style={{ background: 'none', border: 'none', color: 'inherit', textDecoration: 'underline', cursor: 'pointer', padding: 0, fontSize: 13 }}
+              >
+                Check again
+              </button>
+            )}
+          </div>
+        )}
         {/* When -- quick offsets + a native time input */}
         <div style={{ marginBottom: spacing.xl }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: spacing.sm }}>

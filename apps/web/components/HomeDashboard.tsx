@@ -25,7 +25,7 @@ import type { TomorrowPreview } from '../lib/tomorrowPreview';
 import { deriveNextMeaningfulThing } from '../lib/nextMeaningfulThing';
 import type { PendingActivityPresentationItem } from '../lib/myDayPendingOverlay';
 import { LoggedEntryItem } from './CalendarViewSection';
-import { resolvePendingActivityStatus } from '../lib/pendingReplayReconciliation';
+import { findAttachableOperation, UNVERIFIED_ACTIVITY_MESSAGE, type ActivityLogResult, type ActivityOperationRequest, type ActivityOperations, type CheckActivity } from '../lib/pendingReplayReconciliation';
 import { DayBuilderCard } from './DayBuilderCard';
 import { PersonalizationPromptCard } from './PersonalizationPromptCard';
 import { saveUpcomingPlanFromCandidate, PlanOverlapSaveError } from './PlanWithAuraView';
@@ -143,8 +143,12 @@ interface HomeDashboardProps {
     durationMinutes?: number,
     logSource?: 'AURA_PLANNED' | 'AURA_DO_NOW' | 'MANUAL' | 'OVERRIDE_CAUTION',
     activitySignificance?: 'LOW' | 'MEDIUM' | 'HIGH',
-    activityId?: string
-  ) => Promise<'confirmed' | 'pending'>;
+    activityId?: string,
+    operation?: ActivityOperationRequest
+  ) => Promise<ActivityLogResult>;
+  /** R15: the ID-keyed operation projection (page.tsx) and "Check again". */
+  operations?: ActivityOperations;
+  onCheckActivity?: CheckActivity;
   onSubmitReflection?: (outputLevel: 'LOW' | 'MODERATE' | 'PEAK_FLOW', followedGuidance: boolean) => Promise<void>;
   onNextShiftClick?: () => void;
   /** Cross-tab handoff (DR4-D follow-up) -- Ask Aura's "See all activities"
@@ -445,6 +449,8 @@ export function HomeDashboard({
   todayReflection,
   personalContext,
   onLogActivity,
+  operations,
+  onCheckActivity,
   onSubmitReflection,
   onNextShiftClick,
   focusTimelineKey,
@@ -1858,7 +1864,7 @@ export function HomeDashboard({
           ) : (
             goodRightNow[0] && (
               <div style={{ maxWidth: 240 }}>
-                <GoodRightNowCard card={goodRightNow[0]} activeWindowName={activeWindowName} onLogActivity={onLogActivity} onPlanClick={onPlanClick} onLogged={handleCardLogged} logEntries={logEntries} cautionAppliesNow={cautionAppliesNow} activeCautionWindowNames={activeCautionWindowNames} />
+                <GoodRightNowCard card={goodRightNow[0]} activeWindowName={activeWindowName} onLogActivity={onLogActivity} operations={operations} onCheckActivity={onCheckActivity} onPlanClick={onPlanClick} onLogged={handleCardLogged} logEntries={logEntries} cautionAppliesNow={cautionAppliesNow} activeCautionWindowNames={activeCautionWindowNames} />
               </div>
             )
           )}
@@ -2247,6 +2253,8 @@ function GoodRightNowCard({
   card,
   activeWindowName,
   onLogActivity,
+  operations,
+  onCheckActivity,
   onPlanClick,
   onLogged,
   logEntries,
@@ -2256,61 +2264,116 @@ function GoodRightNowCard({
   card: ActionCard;
   activeWindowName: string;
   onLogActivity?: HomeDashboardProps['onLogActivity'];
+  operations?: ActivityOperations;
+  onCheckActivity?: CheckActivity;
   onPlanClick?: (activity?: string, activityId?: string) => void;
   onLogged?: (title: string) => void;
   logEntries?: LoggedEntryItem[];
   cautionAppliesNow?: boolean;
   activeCautionWindowNames?: string;
 }) {
-  const [status, setStatus] = useState<'idle' | 'loading' | 'logged' | 'pending' | 'error'>('idle');
+  const [status, setStatus] = useState<'idle' | 'loading' | 'logged' | 'pending' | 'unresolved' | 'error'>('idle');
   const [loggedAtLabel, setLoggedAtLabel] = useState('');
+  const [errorText, setErrorText] = useState("Couldn't log. Try again.");
   const [showDurationPicker, setShowDurationPicker] = useState(false);
   const loggingRef = useRef(false);
+  // AURA-ANDROID-REL-04 R15 -- THE operation this card started (its request id), or the still-open operation it
+  // reattaches to after a remount / refresh / restart. Its state comes ONLY from the ID-keyed projection; a list,
+  // a title match among server rows or an empty queue view never releases it.
+  const [operationId, setOperationId] = useState<string | null>(null);
 
   const definition = card.activityId ? getActivityDefinition(card.activityId) : undefined;
   const action: ImmediateAction = definition?.experience.immediateAction ?? card.immediateAction ?? 'LOG_NOW';
   const durationMode: ActivityDurationMode = definition?.experience.durationMode ?? 'USER_SELECTED';
   const catalogTitle = card.activityId ? FULL_ACTIVITY_CATALOG.find((activity) => activity.id === card.activityId)?.title : undefined;
   const planTitle = catalogTitle ?? card.title;
+  const startOfToday = useMemo(() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d.getTime(); }, []);
+  const attachable = findAttachableOperation(operations, { activityTitle: planTitle, activityId: card.activityId, logSource: 'AURA_DO_NOW', sinceMs: startOfToday });
+  const operation = operationId ? operations?.[operationId] : undefined;
 
   useEffect(() => {
-    if (status !== 'pending') return;
-    const resolved = resolvePendingActivityStatus(logEntries ?? [], planTitle.trim().toLowerCase());
-    if (resolved === 'confirmed') {
-      setStatus('logged');
-      setLoggedAtLabel(new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }));
-    } else if (resolved === 'gone') {
+    if (!operationId && attachable && status === 'idle') setOperationId(attachable.clientRequestId);
+  }, [operationId, attachable, status]);
+
+  // R15 -- the card follows its operation's outcome (by request id).
+  useEffect(() => {
+    if (!operation || status === 'loading') return;
+    if (operation.status === 'confirmed') {
+      if (status !== 'logged') { setStatus('logged'); setLoggedAtLabel(new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })); }
+    } else if (operation.status === 'pending') {
+      if (status !== 'pending') setStatus('pending');
+    } else if (operation.status === 'unresolved') {
+      if (status !== 'unresolved') setStatus('unresolved');
+    } else if (status === 'pending' || status === 'unresolved') {
+      // failed / discarded: resolved by evidence -- a separate operation may now start under a new id.
+      setOperationId(null);
       setStatus('idle');
     }
-  }, [logEntries, status, planTitle]);
+  }, [operation, status]);
 
-  const logWithDuration = async (durationMinutes: number) => {
+  const runLog = async (call: () => Promise<ActivityLogResult>) => {
     if (loggingRef.current || status === 'loading' || !onLogActivity) return;
     loggingRef.current = true;
     setStatus('loading');
     setShowDurationPicker(false);
-    onLogged?.(planTitle);
     try {
-      const outcome = await onLogActivity(planTitle, undefined, undefined, activeWindowName, durationMinutes, 'AURA_DO_NOW', definition?.muhurta.significance, card.activityId);
-      if (outcome === 'pending') {
+      const outcome = await call();
+      if (outcome === 'unresolved') {
+        setStatus('unresolved');
+      } else if (outcome === 'pending') {
         setStatus('pending');
       } else {
         setStatus('logged');
         setLoggedAtLabel(new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }));
         triggerHaptic('success');
-        trackEvent('ACTIVITY_LOGGED_NOW', {
-          metadata: {
-            ...(card.activityId ? { activityId: card.activityId } : {}),
-            source: 'HOME',
-            windowType: normalizeWindowType(activeWindowName),
-            actionType: action === 'BOTH' ? 'START_NOW' : (action as 'LOG_NOW' | 'START_NOW'),
-            durationMode,
-            durationMinutes,
-          },
-        });
+        return true;
       }
-    } catch {
+    } catch (err) {
+      const message = err instanceof Error ? err.message : '';
+      if (message === UNVERIFIED_ACTIVITY_MESSAGE) { setStatus('unresolved'); return; }
+      setErrorText("Couldn't log. Try again.");
+      setOperationId(null);
       setStatus('error');
+    } finally {
+      loggingRef.current = false;
+    }
+    return false;
+  };
+
+  const logWithDuration = async (durationMinutes: number) => {
+    if (!onLogActivity) return;
+    onLogged?.(planTitle);
+    const confirmed = await runLog(() => onLogActivity(planTitle, undefined, undefined, activeWindowName, durationMinutes, 'AURA_DO_NOW', definition?.muhurta.significance, card.activityId, { onOperation: (id) => setOperationId(id) }));
+    if (confirmed) {
+      trackEvent('ACTIVITY_LOGGED_NOW', {
+        metadata: {
+          ...(card.activityId ? { activityId: card.activityId } : {}),
+          source: 'HOME',
+          windowType: normalizeWindowType(activeWindowName),
+          actionType: action === 'BOTH' ? 'START_NOW' : (action as 'LOG_NOW' | 'START_NOW'),
+          durationMode,
+          durationMinutes,
+        },
+      });
+    }
+  };
+
+  // R15: Retry resumes THIS operation (same request id and body); never a new one.
+  const retryOperation = async () => {
+    if (!onLogActivity || !operationId) return;
+    await runLog(() => onLogActivity(planTitle, undefined, undefined, activeWindowName, undefined, 'AURA_DO_NOW', undefined, card.activityId, { retryOf: operationId }));
+  };
+  const checkOperation = async () => {
+    if (!onCheckActivity || loggingRef.current) return;
+    loggingRef.current = true;
+    try {
+      const next = await onCheckActivity(operationId ?? undefined);
+      if (next === 'confirmed') { setStatus('logged'); setLoggedAtLabel(new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })); }
+      else if (next === 'pending') setStatus('pending');
+      else if (next === 'failed' || next === 'discarded') { setOperationId(null); setStatus('idle'); }
+      else setStatus('unresolved');
+    } catch {
+      setStatus('unresolved');
     } finally {
       loggingRef.current = false;
     }
@@ -2325,6 +2388,20 @@ function GoodRightNowCard({
       setShowDurationPicker(true);
     }
   };
+
+  if (status === 'unresolved') {
+    return (
+      <div style={goodRightNowCardStyle} data-operation-state="unresolved">
+        <span style={{ fontSize: 20 }}>{card.icon ?? '✨'}</span>
+        <span style={{ marginTop: 8, color: '#f8fafc', fontSize: 12, fontWeight: 800, lineHeight: 1.3 }}>{card.title}</span>
+        <span role="status" style={{ marginTop: 'auto', paddingTop: 8, color: '#facc15', fontSize: 11, fontWeight: 850 }}>{UNVERIFIED_ACTIVITY_MESSAGE}</span>
+        <div style={{ display: 'flex', gap: 5, marginTop: 6, width: '100%' }}>
+          <button type="button" onClick={checkOperation} style={{ ...goodRightNowActionButtonStyle, flex: 1 }} aria-label={`Check again ${planTitle}`}>Check again</button>
+          {operationId && operation && <button type="button" onClick={retryOperation} style={{ ...goodRightNowActionButtonStyle, flex: 1 }} aria-label={`Retry ${planTitle}`}>Retry</button>}
+        </div>
+      </div>
+    );
+  }
 
   if (status === 'logged' || status === 'pending') {
     return (
@@ -2403,7 +2480,7 @@ function GoodRightNowCard({
             {status === 'loading' ? 'Logging…' : primaryActionLabel(durationMode)}
           </button>
         )}
-        {status === 'error' && <div style={{ color: '#fb7185', fontSize: 10, marginTop: 5 }}>Couldn&apos;t log. Try again.</div>}
+        {status === 'error' && <div style={{ color: '#fb7185', fontSize: 10, marginTop: 5 }}>{errorText}</div>}
       </div>
     </div>
   );

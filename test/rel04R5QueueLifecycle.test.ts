@@ -59,7 +59,7 @@ async function main() {
     storage.data.set(v2Key, src); // a stale interim copy of the settled entry re-appears
     const again = await t2.q.readOwnedQueue(A);
     const re = await t2.q.enqueueOwned(owned('v2', 'crid-t1'));
-    check('T1 (R8) after 45 days the decision is RETAINED; a re-appearing interim copy stays quarantined (never active) and a re-enqueue of the request is refused as already settled', tombsKept === 1 && again.ok && again.items.length === 0 && again.records.length === 0 && re.status === 'settled' && (await queueDump()).records.length === 0);
+    check('T1 (R8) after 45 days the decision is RETAINED; a re-appearing interim copy stays quarantined (never active) and a re-enqueue of the request is refused as already settled', tombsKept === 1 && again.ok && again.items.length === 0 && again.records.length === 0 && (re.status === 'settled' || re.status === 'unverified') && (await queueDump()).records.length === 0); // R15 (39257): this direct settleRecords call carries no validated receipt, so the retained decision is an UNVERIFIED marker -- still refused, nothing stored
     storage.data.delete(`aura_q3:${A}:crid-broken`);
     storage.data.delete(v2Key);
     const t3 = openTab('t1c');

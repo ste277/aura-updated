@@ -5,7 +5,7 @@ import { getActionCards, getActivityDiscoveryCards, ActionCard } from '../../../
 import { LoggedEntryItem } from './CalendarViewSection';
 import { triggerHaptic } from '../lib/haptics';
 import { StatusBadge } from './ui';
-import { resolvePendingActivityStatus } from '../lib/pendingReplayReconciliation';
+import { isOpen, UNVERIFIED_ACTIVITY_MESSAGE, type ActivityLogResult, type ActivityOperationRequest, type ActivityOperations, type CheckActivity } from '../lib/pendingReplayReconciliation';
 
 export interface TimelineWindowItem {
   name: string;
@@ -33,10 +33,18 @@ export interface TimelineViewProps {
     activityTitle: string,
     notes?: string,
     customTimestamp?: Date,
-    overrideWindowType?: string
+    overrideWindowType?: string,
     // Good Right Now / Log Activity Failure State Correctness V1 -- see
     // HomeDashboard.tsx's own copy of this comment.
-  ) => Promise<'confirmed' | 'pending'>;
+    durationMinutes?: number,
+    logSource?: 'AURA_PLANNED' | 'AURA_DO_NOW' | 'MANUAL' | 'OVERRIDE_CAUTION',
+    activitySignificance?: 'LOW' | 'MEDIUM' | 'HIGH',
+    activityId?: string,
+    operation?: ActivityOperationRequest
+  ) => Promise<ActivityLogResult>;
+  /** R15: the ID-keyed operation projection (page.tsx) and "Check again". */
+  operations?: ActivityOperations;
+  onCheckActivity?: CheckActivity;
   // HPG1 -- activityId is optional; passed only when the caller (an
   // ActionCard from getActionCards/getActivityDiscoveryCards) already has
   // a genuine, resolved catalog id. Never inferred from the title text.
@@ -141,6 +149,8 @@ export function TimelineView({
   logEntries = [],
   loggedActivitiesToday = [],
   onLogActivity,
+  operations,
+  onCheckActivity,
   onPlanActivity,
   onAskAuraClick,
 }: TimelineViewProps) {
@@ -164,26 +174,29 @@ export function TimelineView({
   // shown identically to a confirmed one.
   const [pendingLogged, setPendingLogged] = useState<string[]>([]);
 
-  // Home/Timeline Pending Replay Reconciliation V1 -- reacts whenever
-  // logEntries next changes (page.tsx's own syncOfflineLogs effect already
-  // calls loadUserDataAndLogs after every replay attempt, success or
-  // permanent failure -- see pendingReplayReconciliation.ts's own doc
-  // comment for resolvePendingActivityStatus). No polling, no new refresh
-  // call: reuses
-  // the same normalized-title identity allLoggedNormalized/loggedActivitiesToday
-  // already use for every other "is this activity logged/pending" check in
-  // this file -- handleLogActivity's own return value stays a bare
-  // 'confirmed' | 'pending' string (pinned unchanged by
-  // pendingActivityVisualConsistency.test.ts and
-  // pendingActivityReloadVisibility.test.ts), so no clientRequestId is
-  // available at this call site to key off instead.
+  // AURA-ANDROID-REL-04 R15 -- each quick log is ONE operation, tracked by its request id (title -> id). Its
+  // pending / unresolved state is released ONLY by that operation's own evidence in the ID-keyed projection
+  // (confirmed, a definitive failure or a durable discard) -- never by a title disappearing from a list.
+  const [timelineOps, setTimelineOps] = useState<Record<string, string>>({});
+  const [unverifiedTitle, setUnverifiedTitle] = useState<string | null>(null);
   useEffect(() => {
-    setPendingLogged((prev) => {
-      if (prev.length === 0) return prev;
-      const next = prev.filter((title) => resolvePendingActivityStatus(logEntries, title) === 'pending');
-      return next.length === prev.length ? prev : next;
-    });
-  }, [logEntries]);
+    if (!operations) return;
+    const resolvedTitles: string[] = [];
+    const failedTitles: string[] = [];
+    for (const [title, crid] of Object.entries(timelineOps)) {
+      const op = operations[crid];
+      if (!op || isOpen(op)) continue;
+      resolvedTitles.push(title);
+      if (op.status !== 'confirmed') failedTitles.push(title);
+    }
+    if (resolvedTitles.length === 0) return;
+    setPendingLogged((prev) => prev.filter((t) => !resolvedTitles.includes(t)));
+    if (failedTitles.length) setOptimisticLogged((prev) => prev.filter((t) => !failedTitles.includes(t)));
+    setTimelineOps((prev) => Object.fromEntries(Object.entries(prev).filter(([t]) => !resolvedTitles.includes(t))));
+    setUnverifiedTitle((t) => (t && resolvedTitles.includes(t.trim().toLowerCase()) ? null : t));
+  }, [operations, timelineOps]);
+  // Titles with a still-open operation (after a remount the local lists are empty; the projection is not).
+  const openOperationTitles = React.useMemo(() => new Set(Object.values(operations ?? {}).filter(isOpen).map((op) => op.activityTitle.trim().toLowerCase())), [operations]);
 
   const selectedWindowName = selectedWindowItem?.name || null;
   const activeWindowName = selectedWindowName || currentWindow?.name || 'NEUTRAL';
@@ -221,8 +234,12 @@ export function TimelineView({
 
     try {
       if (onLogActivity) {
-        const outcome = await onLogActivity(title, undefined, undefined, selectedWindowItem?.name);
-        if (outcome === 'pending') {
+        const outcome = await onLogActivity(title, undefined, undefined, selectedWindowItem?.name, undefined, undefined, undefined, undefined, { onOperation: (id) => setTimelineOps((prev) => ({ ...prev, [normTitle]: id })) });
+        if (outcome === 'unresolved') {
+          // R15: it may have been saved -- kept under its request id, never re-entered as a new activity.
+          setPendingLogged((prev) => [...prev, normTitle]);
+          setUnverifiedTitle(title);
+        } else if (outcome === 'pending') {
           // Good Right Now / Log Activity Failure State Correctness V1 --
           // queued after a genuine network failure, not yet confirmed by
           // the server. No success haptic: that must mean confirmed
@@ -240,7 +257,9 @@ export function TimelineView({
       // so this rollback + visible error, already written here, is now
       // actually reachable.
       console.error('Error logging activity:', err);
+      if (err instanceof Error && err.message === UNVERIFIED_ACTIVITY_MESSAGE) { setUnverifiedTitle(title); return; } // blocked: never a new id
       setOptimisticLogged((prev) => prev.filter((item) => item !== normTitle));
+      setTimelineOps((prev) => { const { [normTitle]: _gone, ...rest } = prev; return rest; });
       setLogError(`Could not log ${title}. Try again.`);
     } finally {
       setLoggingTitle(null);
@@ -480,6 +499,16 @@ export function TimelineView({
               Good choices for this window
             </span>
           </div>
+          {unverifiedTitle && (
+            <div role="status" data-operation-state="unresolved" style={{ color: '#facc15', fontSize: 12, lineHeight: 1.35, background: 'rgba(250, 204, 21, 0.08)', border: '1px solid rgba(250, 204, 21, 0.22)', borderRadius: 10, padding: '9px 10px' }}>
+              {UNVERIFIED_ACTIVITY_MESSAGE} ({unverifiedTitle}){' '}
+              {onCheckActivity && (
+                <button type="button" onClick={() => { const crid = timelineOps[unverifiedTitle.trim().toLowerCase()]; void onCheckActivity(crid).catch(() => undefined); }} style={{ background: 'none', border: 'none', color: 'inherit', textDecoration: 'underline', cursor: 'pointer', padding: 0, fontSize: 12 }}>
+                  Check again
+                </button>
+              )}
+            </div>
+          )}
           {logError && (
             <div style={{ color: '#fb7185', fontSize: 12, lineHeight: 1.35, background: 'rgba(251, 113, 133, 0.08)', border: '1px solid rgba(251, 113, 133, 0.22)', borderRadius: 10, padding: '9px 10px' }}>
               {logError}
@@ -493,7 +522,7 @@ export function TimelineView({
             // still counted as "logged" for isAlreadyLogged (no duplicate
             // submission), but must render distinguishably from a
             // confirmed log.
-            const isPendingThis = pendingLogged.includes(cardTitleNorm);
+            const isPendingThis = pendingLogged.includes(cardTitleNorm) || openOperationTitles.has(cardTitleNorm);
             const isLoggingThis = loggingTitle === card.title;
             const fitLabel = card.fit === 'BEST' ? 'Best fit' : card.fit === 'GOOD' ? 'Good fit' : card.fit === 'CAUTION' ? 'Use lightly' : 'Usable';
             const fitColor = card.fit === 'CAUTION' ? '#facc15' : card.fit === 'USABLE' ? '#7dd3fc' : '#4ade80';
@@ -893,7 +922,7 @@ export function TimelineView({
                           </button>
                         )}
                         <button type="button" onClick={(e) => { e.stopPropagation(); handleQuickLog(card.title); }} disabled={allLoggedNormalized.has(card.title.toLowerCase()) || !!loggingTitle} style={{ background: 'rgba(74, 222, 128, 0.12)', border: '1px solid rgba(74, 222, 128, 0.28)', color: '#86efac', borderRadius: 7, fontSize: 9, padding: '3px 6px' }}>
-                          {allLoggedNormalized.has(card.title.toLowerCase()) ? (pendingLogged.includes(card.title.toLowerCase()) ? 'Pending' : 'Logged') : 'Log'}
+                          {allLoggedNormalized.has(card.title.toLowerCase()) ? (pendingLogged.includes(card.title.toLowerCase()) || openOperationTitles.has(card.title.toLowerCase()) ? 'Pending' : 'Logged') : 'Log'}
                         </button>
                       </span>
                     </div>

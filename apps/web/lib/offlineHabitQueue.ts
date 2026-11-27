@@ -1,4 +1,5 @@
 import type { LoggedEntryItem } from '../components/CalendarViewSection';
+import type { BoundServerRow } from './habitLogSyncPolicy';
 
 /**
  * Pending Activity Reload Visibility V1 -- the shape page.tsx's own
@@ -220,6 +221,8 @@ export interface ClaimToken {
   readonly payload?: string;
   readonly recordId?: string;
   readonly item?: Readonly<OwnedQueuedHabitLog>;
+  /** R15: dispatches of this request recorded BEFORE this attempt (a later refusal cannot disprove an earlier send). */
+  readonly priorAttempts?: number;
 }
 
 // ------------------------------------------------------------------ IndexedDB plumbing
@@ -233,7 +236,76 @@ type Dispatch = { key: string; attempts: number; lastAt: number };
  * `possiblySent` (R11): the request had been handed to the network before this decision -- kept with the decision
  * so the fact survives the removal of its dispatch mark and later cleanup retries.
  */
-type Decision = { recordId: string; ownerUserId: string; clientRequestId: string; payload: string | null; decision: 'settled' | 'discarded'; at: number; fmt: typeof ACTIVE_RECORD_FORMAT; possiblySent?: boolean; /** R14: a settlement records the server's definitive answer. */ serverOutcome?: 'accepted' | 'rejected' };
+type Decision = { recordId: string; ownerUserId: string; clientRequestId: string; payload: string | null; decision: 'settled' | 'discarded'; at: number; fmt: typeof ACTIVE_RECORD_FORMAT; possiblySent?: boolean; /** R14: a settlement records the server's definitive answer. */ serverOutcome?: 'accepted' | 'rejected'; /** R15: the versioned settlement receipt (the only success / failure authority). */ receipt?: SettlementReceipt };
+
+/**
+ * R15 -- the versioned SETTLEMENT RECEIPT, written in the same transaction that removes the matching copies.
+ * It binds the account, the request id and the canonical payload to the validated server answer:
+ *   accepted  the server row the shared decoder validated (its record id, account, request id and persisted intent)
+ *   rejected  the route's own refusal; `afterPossibleSend` when an earlier dispatch may have committed (then it is
+ *             NOT a definitive failure: the operation stays unresolved)
+ */
+export const RECEIPT_VERSION = 1;
+export interface AcceptedReceipt { v: typeof RECEIPT_VERSION; kind: 'accepted'; owner: string; crid: string; payload: string; serverRecordId: string; row: BoundServerRow; at: number }
+export interface RejectedReceipt { v: typeof RECEIPT_VERSION; kind: 'rejected'; owner: string; crid: string; payload: string; status: number; afterPossibleSend: boolean; at: number }
+export type SettlementReceipt = AcceptedReceipt | RejectedReceipt;
+
+export function acceptedReceipt(owner: string, crid: string, payload: string, row: BoundServerRow): AcceptedReceipt {
+  return { v: RECEIPT_VERSION, kind: 'accepted', owner, crid, payload, serverRecordId: row.id, row: { ...row }, at: Date.now() };
+}
+export function rejectedReceipt(owner: string, crid: string, payload: string, status: number, afterPossibleSend: boolean): RejectedReceipt {
+  return { v: RECEIPT_VERSION, kind: 'rejected', owner, crid, payload, status, afterPossibleSend, at: Date.now() };
+}
+
+/**
+ * R15 -- what a stored decision marker PROVES about one operation. The marker key, the marker value, the operation
+ * (account + request id + payload) and the receipt are validated together:
+ *   success     a settled marker with a valid ACCEPTED receipt for exactly this operation
+ *   failed      a settled marker with a valid REJECTED receipt and no possible earlier send
+ *   discarded   a correctly bound discard (a null payload fences every payload: a damaged discarded copy)
+ *   conflict    a correctly bound marker for a DIFFERENT payload under this request id
+ *   unverified  anything else (contradictory key/value, missing payload, bare pre-R15 "accepted" marker, a refusal
+ *               after a possible send): NO success authority and NO destructive cleanup authority. It still fences
+ *               automatic sends; only positive authoritative evidence upgrades it.
+ */
+export type DecisionAuthority =
+  | { kind: 'none' }
+  | { kind: 'success'; receipt: AcceptedReceipt; possiblySent: boolean }
+  | { kind: 'failed'; status: number }
+  | { kind: 'discarded'; possiblySent: boolean }
+  | { kind: 'conflict' }
+  | { kind: 'unverified'; possiblySent: boolean; payload: string | null };
+const nonEmpty = (v: unknown): v is string => typeof v === 'string' && v.trim().length > 0;
+export function validReceipt(r: unknown, owner: string, crid: string, payload: string): SettlementReceipt | null {
+  if (!r || typeof r !== 'object') return null;
+  const x = r as Record<string, unknown>;
+  if (x.v !== RECEIPT_VERSION || x.owner !== owner || x.crid !== crid || x.payload !== payload) return null;
+  if (x.kind === 'accepted') {
+    const row = x.row as Record<string, unknown> | undefined;
+    if (!nonEmpty(x.serverRecordId) || !row || row.id !== x.serverRecordId || row.userId !== owner || row.clientRequestId !== crid) return null;
+    return x as unknown as AcceptedReceipt;
+  }
+  if (x.kind === 'rejected' && typeof x.status === 'number' && typeof x.afterPossibleSend === 'boolean') return x as unknown as RejectedReceipt;
+  return null;
+}
+export function decisionAuthority(value: unknown, owner: string, crid: string, payload?: string): DecisionAuthority {
+  if (value === undefined || value === null) return { kind: 'none' };
+  const d = value as Partial<Decision>;
+  const bound = typeof value === 'object' && d.recordId === decisionKey(owner, crid) && d.ownerUserId === owner && d.clientRequestId === crid
+    && d.fmt === ACTIVE_RECORD_FORMAT && (d.decision === 'settled' || d.decision === 'discarded') && (d.payload === null || typeof d.payload === 'string');
+  if (!bound) return { kind: 'unverified', possiblySent: true, payload: null }; // contradictory / incomplete marker
+  const sent = Boolean(d.possiblySent);
+  if (d.decision === 'discarded') {
+    if (payload !== undefined && d.payload !== null && d.payload !== payload) return { kind: 'conflict' };
+    return { kind: 'discarded', possiblySent: sent };
+  }
+  if (d.payload === null || d.payload === undefined) return { kind: 'unverified', possiblySent: true, payload: null };
+  if (payload !== undefined && d.payload !== payload) return { kind: 'conflict' };
+  const receipt = validReceipt(d.receipt, owner, crid, d.payload);
+  if (receipt?.kind === 'accepted') return { kind: 'success', receipt, possiblySent: true };
+  if (receipt?.kind === 'rejected' && !receipt.afterPossibleSend) return { kind: 'failed', status: receipt.status };
+  return { kind: 'unverified', possiblySent: true, payload: d.payload }; // proofless (pre-R15) or refusal after a possible send
+}
 type Stores = Record<'records' | 'claims' | 'dispatches' | 'tombstones', IDBObjectStore>;
 const STORES = ['records', 'claims', 'dispatches', 'tombstones'] as const;
 
@@ -368,14 +440,20 @@ async function activeCopies(st: Stores, owner: string, crid: string, payload: st
  * Records `owner`'s final decision about the logical request. The first decision wins (never replaced); R11: a
  * later write only adds `possiblySent` -- the prior-send fact is never lost.
  */
-async function writeDecision(st: Stores, owner: string, crid: string, payload: string | null, decision: Decision['decision'], at: number, possiblySent = false, serverOutcome?: Decision['serverOutcome']): Promise<Decision> {
+async function writeDecision(st: Stores, owner: string, crid: string, payload: string | null, decision: Decision['decision'], at: number, possiblySent = false, serverOutcome?: Decision['serverOutcome'], receipt?: SettlementReceipt): Promise<Decision> {
   const key = decisionKey(owner, crid);
   const prior = (await asPromise(st.tombstones.get(key))) as Decision | undefined;
   if (prior) {
-    if (possiblySent && !prior.possiblySent) { const merged = { ...prior, possiblySent: true }; await asPromise(st.tombstones.put(merged)); return merged; }
-    return prior;
+    // R15: a marker that proves nothing is upgraded ONLY by positive authoritative evidence (a validated accepted
+    // receipt) or replaced by the user's own durable discard; every valid decision stays first-write-wins.
+    const upgrade = decisionAuthority(prior, owner, crid).kind === 'unverified' && (receipt?.kind === 'accepted' || decision === 'discarded');
+    if (!upgrade) {
+      if (possiblySent && !prior.possiblySent) { const merged = { ...prior, possiblySent: true }; await asPromise(st.tombstones.put(merged)); return merged; }
+      return prior;
+    }
+    possiblySent = true; // the replaced marker said the request may have been sent
   }
-  const d: Decision = { recordId: key, ownerUserId: owner, clientRequestId: crid, payload, decision, at, fmt: ACTIVE_RECORD_FORMAT, possiblySent, ...(serverOutcome ? { serverOutcome } : {}) };
+  const d: Decision = { recordId: key, ownerUserId: owner, clientRequestId: crid, payload, decision, at, fmt: ACTIVE_RECORD_FORMAT, possiblySent, ...(serverOutcome ? { serverOutcome } : {}), ...(receipt ? { receipt } : {}) };
   await asPromise(st.tombstones.put(d));
   return d;
 }
@@ -589,8 +667,13 @@ export async function readOfflineQueueView(ownerUserId: string | null | undefine
 
 export type EnqueueResult =
   | { status: 'stored'; recordId: string; claim: ClaimToken | null }
-  /** R8: this account already settled or discarded this request: nothing stored, nothing to send. R14: which. */
-  | { status: 'settled'; decision?: 'settled' | 'discarded'; serverOutcome?: 'accepted' | 'rejected' }
+  /**
+   * R8: this account already settled or discarded this request: nothing stored, nothing to send. R15: what the
+   * VALIDATED decision proves -- success (with its receipt), a definitive failure, or a durable discard.
+   */
+  | { status: 'settled'; decision: 'settled' | 'discarded'; outcome: 'success' | 'failed' | 'discarded'; receipt?: AcceptedReceipt; httpStatus?: number; serverOutcome?: 'accepted' | 'rejected' }
+  /** R15: a durable marker exists that proves nothing (contradictory, incomplete, proofless): unresolved, never sent automatically. */
+  | { status: 'unverified' }
   /** R8: a quarantined (retired-format) copy of this request exists: never adopted, never sent. */
   | { status: 'paused' }
   /** R9: eligibility cannot be established (localStorage unreadable, or an unidentifiable retired entry): not stored, NOT to be sent. */
@@ -620,7 +703,9 @@ async function takeClaim(st: Stores, owner: string, crid: string, tab: string, n
   await claimPut;
   const d = (await asPromise(st.dispatches.get(key))) as Dispatch | undefined;
   await asPromise(st.dispatches.put({ key, attempts: (d?.attempts ?? 0) + 1, lastAt: now } satisfies Dispatch));
-  return Object.freeze({ key, attempt, owner, crid, payload: claimed?.payload, recordId: claimed?.recordId, item: claimed ? Object.freeze({ ...claimed.item }) : undefined });
+  const prior = (await asPromise(st.tombstones.get(decisionKey(owner, crid)))) as Decision | undefined;
+  const priorAttempts = (d?.attempts ?? 0) + (prior?.possiblySent ? 1 : 0);
+  return Object.freeze({ key, attempt, owner, crid, payload: claimed?.payload, recordId: claimed?.recordId, item: claimed ? Object.freeze({ ...claimed.item }) : undefined, priorAttempts });
 }
 
 /**
@@ -659,17 +744,17 @@ export function transmissionCheck(token: ClaimToken): 'clear' | 'blocked' | 'una
  * active-copy absence alone never does.
  */
 export type RequestState =
-  | { kind: 'decided'; decision: 'settled' | 'discarded'; serverOutcome?: 'accepted' | 'rejected'; possiblySent: boolean }
+  /** R15: decided, with VALIDATED authority (decisionAuthority). */
+  | { kind: 'success'; receipt: AcceptedReceipt; possiblySent: boolean }
+  | { kind: 'failed'; status: number }
+  | { kind: 'discarded'; possiblySent: boolean }
+  /** R15: a marker that proves nothing: unresolved (its live copies, if any, are kept). */
+  | { kind: 'unverified'; possiblySent: boolean; copies: Stored[] }
   | { kind: 'conflict' }
   | { kind: 'paused' }
   | { kind: 'live'; copies: Stored[]; /** a blocking (damaged / contradictory / retired) copy also exists */ paused: boolean }
   | { kind: 'absent' };
-async function requestState(st: Stores, owner: string, crid: string, payload: string, q: Extract<Quarantine, { state: 'ok' }>): Promise<RequestState> {
-  const decided = (await asPromise(st.tombstones.get(decisionKey(owner, crid)))) as Decision | undefined;
-  if (decided) {
-    if (decided.payload !== null && decided.payload !== payload) return { kind: 'conflict' };
-    return { kind: 'decided', decision: decided.decision, serverOutcome: decided.serverOutcome, possiblySent: Boolean(decided.possiblySent) };
-  }
+async function scanCopies(st: Stores, owner: string, crid: string, payload: string, q: Extract<Quarantine, { state: 'ok' }>): Promise<{ copies: Stored[]; paused: boolean; conflict: boolean }> {
   const owned = await relevantRecords(st, owner); // R12: incl. records without (or with another) outer owner
   const copies: Stored[] = [];
   let paused = q.opaque || q.crids.has(crid); // a quarantined / blocked retired copy
@@ -679,17 +764,38 @@ async function requestState(st: Stores, owner: string, crid: string, payload: st
     if (id.kind !== 'valid' || id.crid !== crid || !isActive(r)) { paused = true; continue; } // damaged, contradictory, incomplete or retired copy
     copies.push(r);
   }
-  if (copies.some((r) => canonicalPayload(r.item) !== payload)) return { kind: 'conflict' };
-  if (copies.length) return { kind: 'live', copies, paused };
-  return paused ? { kind: 'paused' } : { kind: 'absent' };
+  return { copies, paused, conflict: copies.some((r) => canonicalPayload(r.item) !== payload) };
+}
+async function requestState(st: Stores, owner: string, crid: string, payload: string, q: Extract<Quarantine, { state: 'ok' }>): Promise<RequestState> {
+  const a = decisionAuthority(await asPromise(st.tombstones.get(decisionKey(owner, crid))), owner, crid, payload);
+  if (a.kind === 'success') return { kind: 'success', receipt: a.receipt, possiblySent: a.possiblySent };
+  if (a.kind === 'failed') return { kind: 'failed', status: a.status };
+  if (a.kind === 'discarded') return { kind: 'discarded', possiblySent: a.possiblySent };
+  if (a.kind === 'conflict') return { kind: 'conflict' };
+  const scan = await scanCopies(st, owner, crid, payload, q);
+  if (a.kind === 'unverified') return { kind: 'unverified', possiblySent: a.possiblySent, copies: scan.conflict || scan.paused ? [] : scan.copies };
+  if (scan.conflict) return { kind: 'conflict' };
+  if (scan.copies.length) return { kind: 'live', copies: scan.copies, paused: scan.paused };
+  return scan.paused ? { kind: 'paused' } : { kind: 'absent' };
 }
 
-type Gate = { status: 'eligible'; copies: Stored[] } | { status: 'settled'; decision: 'settled' | 'discarded'; serverOutcome?: 'accepted' | 'rejected' } | { status: 'conflict' } | { status: 'paused' };
-/** R11/R14: the transmission eligibility gate = requestState, read inside the claiming transaction. */
-async function eligibilityGate(st: Stores, owner: string, crid: string, payload: string, q: Extract<Quarantine, { state: 'ok' }>): Promise<Gate> {
+type Decided = Extract<RequestState, { kind: 'success' | 'failed' | 'discarded' }>;
+const settledResult = (d: Decided): Extract<EnqueueResult, { status: 'settled' }> =>
+  d.kind === 'success' ? { status: 'settled', decision: 'settled', outcome: 'success', receipt: d.receipt, serverOutcome: 'accepted' }
+  : d.kind === 'failed' ? { status: 'settled', decision: 'settled', outcome: 'failed', httpStatus: d.status, serverOutcome: 'rejected' }
+  : { status: 'settled', decision: 'discarded', outcome: 'discarded' };
+
+type Gate = { status: 'eligible'; copies: Stored[] } | { status: 'settled'; state: Decided } | { status: 'conflict' } | { status: 'paused' } | { status: 'unverified' };
+/**
+ * R11/R14/R15: the transmission eligibility gate = requestState, read inside the claiming transaction. An
+ * unverified marker fences AUTOMATIC sends; only the user's explicit same-operation Retry may send it again
+ * (the server is idempotent per account + request id, so the same id and payload can only converge).
+ */
+async function eligibilityGate(st: Stores, owner: string, crid: string, payload: string, q: Extract<Quarantine, { state: 'ok' }>, explicitRetry = false): Promise<Gate> {
   const state = await requestState(st, owner, crid, payload, q);
-  if (state.kind === 'decided') return { status: 'settled', decision: state.decision, serverOutcome: state.serverOutcome };
+  if (state.kind === 'success' || state.kind === 'failed' || state.kind === 'discarded') return { status: 'settled', state };
   if (state.kind === 'conflict') return { status: 'conflict' };
+  if (state.kind === 'unverified') return explicitRetry ? { status: 'eligible', copies: state.copies } : { status: 'unverified' };
   if (state.kind === 'paused' || (state.kind === 'live' && state.paused)) return { status: 'paused' };
   return { status: 'eligible', copies: state.kind === 'live' ? state.copies : [] };
 }
@@ -714,7 +820,7 @@ class EnqueueRefusal extends Error { constructor(readonly result: EnqueueResult)
  * A commit that is confirmed by the reconciliation read is reported as 'stored' (without a claim), never as a
  * rejection; it then replays under the same request id.
  */
-export async function enqueueOwned(item: OwnedQueuedHabitLog, { claimFor }: { claimFor?: string } = {}): Promise<EnqueueResult> {
+export async function enqueueOwned(item: OwnedQueuedHabitLog, { claimFor, explicitRetry = false }: { claimFor?: string; explicitRetry?: boolean } = {}): Promise<EnqueueResult> {
   if (!item.ownerUserId || !item.clientRequestId) return { status: 'failed' };
   const owner = item.ownerUserId;
   const mine = canonicalPayload(item);
@@ -730,8 +836,8 @@ export async function enqueueOwned(item: OwnedQueuedHabitLog, { claimFor }: { cl
     if (q.state !== 'ok' || q.opaque) return { status: 'unavailable' };
     return await tx('readwrite', async (st) => {
       started = true;
-      const g = await eligibilityGate(st, owner, item.clientRequestId, mine, q);
-      if (g.status === 'settled') return { status: 'settled', decision: g.decision, serverOutcome: g.serverOutcome } as const; // nothing written
+      const g = await eligibilityGate(st, owner, item.clientRequestId, mine, q, explicitRetry);
+      if (g.status === 'settled') return settledResult(g.state); // nothing written
       if (g.status !== 'eligible') return { status: g.status } as const; // nothing written
       let recordId: string;
       if (g.copies.length > 0) {
@@ -760,9 +866,10 @@ export async function enqueueOwned(item: OwnedQueuedHabitLog, { claimFor }: { cl
       const q2 = inspectQuarantine(owner);
       if (q2.state !== 'ok') return { status: 'unknown' };
       const state = await tx('readonly', (st) => requestState(st, owner, item.clientRequestId, mine, q2));
-      if (state.kind === 'decided') return { status: 'settled', decision: state.decision, serverOutcome: state.serverOutcome }; // settled/discarded meanwhile
+      if (state.kind === 'success' || state.kind === 'failed' || state.kind === 'discarded') return settledResult(state); // settled/discarded meanwhile (validated)
       if (state.kind === 'live') { const c = state.copies.find((x) => x.recordId === addedRecordId) ?? state.copies[0]; return { status: 'stored', recordId: c.recordId, claim: null }; }
       if (state.kind === 'absent') return { status: 'failed' }; // no copy AND no decision: never committed (removal invariant)
+      if (state.kind === 'unverified') return { status: 'unverified' };
       return { status: 'unknown' }; // conflicting or paused evidence: unresolved
     } catch {
       return { status: 'unknown' };
@@ -799,7 +906,7 @@ export async function claimForDispatch(recordId: string, tab: string, expected?:
       // R11: the SAME gate as direct submission, at the final transmission boundary.
       const g = await eligibilityGate(st, rec.ownerUserId, id.crid!, payload, q);
       if (g.status === 'settled') return { status: 'gone' } as const;
-      if (g.status !== 'eligible') return { status: 'paused' } as const;
+      if (g.status !== 'eligible') return { status: 'paused' } as const; // R15: incl. an unverified marker (never sent automatically)
       const claim = await takeClaim(st, rec.ownerUserId, id.crid!, tab, now, { payload, recordId, item: rec.item });
       if (claim === 'unavailable') return { status: 'failed' } as const;
       if (claim === 'blocked') return { status: 'paused' } as const;
@@ -841,7 +948,7 @@ const ownerOfToken = (token?: ClaimToken) => (token ? token.key.split('\u0000')[
  * removed; a replaced, modified or newly contradictory copy is preserved. The decision is written for the claimed
  * identity. Without a token (tests, legacy callers) each given record is re-resolved first.
  */
-export async function settleRecords(recordIds: Iterable<string>, token?: ClaimToken, opts: { owner?: string; serverOutcome?: 'accepted' | 'rejected' } = {}): Promise<RemovalResult> {
+export async function settleRecords(recordIds: Iterable<string>, token?: ClaimToken, opts: { owner?: string; serverOutcome?: 'accepted' | 'rejected'; receipt?: SettlementReceipt } = {}): Promise<RemovalResult> {
   const ids = [...recordIds];
   const owner = opts.owner ?? token?.owner ?? ownerOfToken(token);
   try {
@@ -865,8 +972,12 @@ export async function settleRecords(recordIds: Iterable<string>, token?: ClaimTo
         if (!targets.has(k)) targets.set(k, { o: rec.ownerUserId, crid: rid.crid!, payload: p });
       }
       for (const { o, crid, payload } of targets.values()) {
+        // R15: the receipt applies only to the exact identity it was validated for; the matching copies are removed
+        // in the SAME transaction that persists it (only copies carrying this account, request id and payload).
+        const receipt = opts.receipt && validReceipt(opts.receipt, o, crid, payload) ? opts.receipt : undefined;
+        const serverOutcome = receipt ? (receipt.kind === 'accepted' ? 'accepted' : 'rejected') : opts.serverOutcome;
         for (const copy of await activeCopies(st, o, crid, payload)) { await asPromise(st.records.delete(copy.recordId)); out.removed++; }
-        await writeDecision(st, o, crid, payload, 'settled', now, true, opts.serverOutcome);
+        await writeDecision(st, o, crid, payload, 'settled', now, true, serverOutcome, receipt);
       }
       if (token) {
         const c = (await asPromise(st.claims.get(token.key))) as Claim | undefined;
@@ -878,9 +989,110 @@ export async function settleRecords(recordIds: Iterable<string>, token?: ClaimTo
         if (!stillNamed) await asPromise(st.dispatches.delete(requestKey(o, crid)));
       }
       return out;
-    });
+    }).then((out) => { notifyOperationsChanged(owner); return out; });
   } catch {
     return { removed: 0, alreadyGone: 0, failed: ids.length, foreign: 0, paused: 0 };
+  }
+}
+
+// ------------------------------------------------------------------ R15: operation evidence (one authority)
+
+/** R15: a second tab's settlement or discard is announced so other tabs re-read the account's operations. */
+const OPS_CHANNEL = 'aura-activity-operations';
+/** A channel only where it belongs to this page's own event model (a non-browser runtime's channel is skipped). */
+function openOpsChannel(): BroadcastChannel | null {
+  const C = (globalThis as { BroadcastChannel?: typeof BroadcastChannel }).BroadcastChannel;
+  if (typeof C !== 'function') return null;
+  // A server runtime's own channel (e.g. Node under a DOM shim in tests) delivers its own event objects, which a shimmed
+  // page cannot dispatch: only a browser's channel is used.
+  const proc = (globalThis as { process?: { versions?: { node?: string } } }).process;
+  if (proc?.versions?.node) return null;
+  return new C(OPS_CHANNEL);
+}
+export function notifyOperationsChanged(owner: string | undefined) {
+  if (!owner) return;
+  try { const c = openOpsChannel(); if (c) { c.postMessage({ owner }); c.close(); } } catch { /* best effort */ }
+}
+export function onOperationsChanged(owner: string, cb: () => void): () => void {
+  try {
+    const c = openOpsChannel();
+    if (!c) return () => {};
+    c.onmessage = (e: MessageEvent) => { if ((e.data as { owner?: unknown } | null)?.owner === owner) cb(); };
+    return () => c.close();
+  } catch { return () => {}; }
+}
+
+/**
+ * R15: upgrades an operation from POSITIVE authoritative evidence (a server row the shared decoder bound to this
+ * exact operation, e.g. from the authenticated GET): persists the accepted receipt and removes ONLY the matching
+ * copies, in one transaction. A valid discard / failure / other decision is never overridden.
+ */
+export async function recordVerifiedReceipt(receipt: AcceptedReceipt): Promise<boolean> {
+  try {
+    const ok = await tx('readwrite', async (st) => {
+      const a = decisionAuthority(await asPromise(st.tombstones.get(decisionKey(receipt.owner, receipt.crid))), receipt.owner, receipt.crid, receipt.payload);
+      if (a.kind === 'success') return true;
+      if (a.kind !== 'none' && a.kind !== 'unverified') return false;
+      for (const copy of await activeCopies(st, receipt.owner, receipt.crid, receipt.payload)) await asPromise(st.records.delete(copy.recordId));
+      const d = await writeDecision(st, receipt.owner, receipt.crid, receipt.payload, 'settled', Date.now(), true, 'accepted', receipt);
+      const stillNamed = (await relevantRecords(st, receipt.owner)).some((r) => recordIdentity(receipt.owner, r).candidates.includes(receipt.crid));
+      if (!stillNamed) await asPromise(st.dispatches.delete(requestKey(receipt.owner, receipt.crid)));
+      return decisionAuthority(d, receipt.owner, receipt.crid, receipt.payload).kind === 'success';
+    });
+    if (ok) notifyOperationsChanged(receipt.owner);
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
+/** R15: the durable state of one exact operation (null = it could not be read: unresolved, never "absent"). */
+export async function readOperationState(owner: string, crid: string, payload: string): Promise<RequestState | null> {
+  try {
+    const q = inspectQuarantine(owner);
+    if (q.state !== 'ok') return null;
+    return await tx('readonly', (st) => requestState(st, owner, crid, payload, q));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * R15: the account's operations as durable storage states them, keyed by request id -- the ONLY source the UI
+ * projection reattaches to after refresh, remount or restart:
+ *   pending     a copy is queued (or paused) and no decision exists
+ *   confirmed   a validated accepted receipt
+ *   failed      a validated definitive refusal
+ *   discarded   a correctly bound durable discard
+ *   unresolved  a marker that proves nothing, or conflicting evidence
+ */
+export type StoredOperationStatus = 'pending' | 'unresolved' | 'confirmed' | 'failed' | 'discarded';
+export interface StoredOperation { clientRequestId: string; status: StoredOperationStatus; body: Record<string, unknown> | null; receipt?: AcceptedReceipt; at: number }
+export async function readActivityOperations(owner: string): Promise<StoredOperation[] | null> {
+  try {
+    const q = inspectQuarantine(owner);
+    if (q.state !== 'ok') return null;
+    return await tx('readonly', async (st) => {
+      const out = new Map<string, StoredOperation>();
+      const prefix = decisionKey(owner, '');
+      const parse = (p: unknown): Record<string, unknown> | null => { if (typeof p !== 'string') return null; try { const v = JSON.parse(p); return v && typeof v === 'object' && !Array.isArray(v) ? v : null; } catch { return null; } };
+      for (const d of (await asPromise(st.tombstones.getAll())) as Array<Partial<Decision>>) {
+        if (typeof d?.recordId !== 'string' || !d.recordId.startsWith(prefix)) continue;
+        const crid = d.recordId.slice(prefix.length);
+        const a = decisionAuthority(d, owner, crid);
+        const status: StoredOperationStatus = a.kind === 'success' ? 'confirmed' : a.kind === 'failed' ? 'failed' : a.kind === 'discarded' ? 'discarded' : 'unresolved';
+        out.set(crid, { clientRequestId: crid, status, body: parse(d.payload), ...(a.kind === 'success' ? { receipt: a.receipt } : {}), at: typeof d.at === 'number' ? d.at : 0 });
+      }
+      for (const r of await relevantRecords(st, owner)) {
+        const id = recordIdentity(owner, r);
+        if (!id.crid || out.has(id.crid)) continue;
+        const { tempId: _t, ownerUserId: _o, recordId: _r, queuedAt: _q, ...body } = (r.item ?? {}) as OwnedQueuedHabitLog & Record<string, unknown>;
+        out.set(id.crid, { clientRequestId: id.crid, status: id.kind === 'valid' ? 'pending' : 'unresolved', body: id.kind === 'valid' ? body : null, at: r.queuedAt ?? 0 });
+      }
+      return [...out.values()];
+    });
+  } catch {
+    return null;
   }
 }
 
@@ -1089,7 +1301,7 @@ export async function discardOwned(owner: string, snap: DiscardSnapshot, { tab }
     try {
       found = await tx('readonly', async (st) => {
         const m = new Map<string, boolean>();
-        for (const crid of confirmed) { const dd = (await asPromise(st.tombstones.get(decisionKey(owner, crid)))) as Decision | undefined; if (dd?.decision === 'discarded') m.set(crid, Boolean(dd.possiblySent)); }
+        for (const crid of confirmed) { const a = decisionAuthority(await asPromise(st.tombstones.get(decisionKey(owner, crid))), owner, crid); if (a.kind === 'discarded') m.set(crid, a.possiblySent); }
         return m;
       });
     } catch {
@@ -1231,18 +1443,32 @@ export function toPendingLoggedEntry(item: QueuedHabitLog): LoggedEntryItem {
 export function mergeConfirmedLogEntries(
   confirmedEntries: LoggedEntryItem[],
   prevLogEntries: LoggedEntryItem[],
-  queuedClientRequestIds: Set<string>
+  queuedClientRequestIds: Set<string>,
+  /**
+   * R15 -- the operation projection (request id -> its outcome, from the ONE outcome authority). A server list,
+   * however fresh, only ADDS evidence: its absence never releases an operation. A pending or unresolved operation
+   * keeps its row; a confirmed one (validated receipt) is shown confirmed until the list carries its server row.
+   */
+  operations?: ReadonlyMap<string, { status: string; receipt?: { row: { id: string; activeWindow?: string; logMinuteOfDay?: number } } }>
 ): LoggedEntryItem[] {
   const confirmedClientRequestIds = new Set(
     confirmedEntries.map((entry) => entry.clientRequestId).filter((id): id is string => Boolean(id))
   );
-  const stillPendingLocalOnly = prevLogEntries.filter(
-    (item) =>
-      item.syncStatus === 'pending' &&
-      !(item.clientRequestId && confirmedClientRequestIds.has(item.clientRequestId)) &&
-      Boolean(item.clientRequestId && queuedClientRequestIds.has(item.clientRequestId))
-  );
-  return [...confirmedEntries, ...stillPendingLocalOnly];
+  const kept: LoggedEntryItem[] = [];
+  for (const item of prevLogEntries) {
+    const crid = item.clientRequestId;
+    if (!crid || confirmedClientRequestIds.has(crid)) continue; // the server list carries it: server truth wins
+    const op = operations?.get(crid);
+    if (op && (op.status === 'pending' || op.status === 'unresolved')) { if (item.syncStatus === 'pending') kept.push(item); continue; }
+    if (op && op.status === 'confirmed' && op.receipt) {
+      const r = op.receipt.row;
+      kept.push({ ...item, id: r.id, activeWindow: r.activeWindow ?? item.activeWindow, logMinuteOfDay: r.logMinuteOfDay ?? item.logMinuteOfDay, syncStatus: undefined });
+      continue;
+    }
+    if (op) continue; // failed / discarded: resolved, no longer local
+    if (item.syncStatus === 'pending' && queuedClientRequestIds.has(crid)) kept.push(item);
+  }
+  return [...confirmedEntries, ...kept];
 }
 
 /**

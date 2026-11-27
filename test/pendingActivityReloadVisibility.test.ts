@@ -337,23 +337,27 @@ check(
   'page.tsx imports the extracted helpers from the new lib module',
   /import \{ readOfflineQueueView, toPendingLoggedEntry, mergeConfirmedLogEntries, selectQueueItemsToReconstruct \} from '\.\.\/lib\/offlineHabitQueue';/.test(pageSource)
 );
-check('loadUserDataAndLogs calls mergeConfirmedLogEntries (no re-implemented inline merge logic)', /return mergeConfirmedLogEntries\(confirmedEntries, prev, queuedClientRequestIds\);/.test(pageSource));
+// R15 (39257): the merge also receives the ID-keyed operation projection (a list never releases an open operation).
+check('loadUserDataAndLogs calls mergeConfirmedLogEntries (no re-implemented inline merge logic)', /return mergeConfirmedLogEntries\(confirmedEntries, prev, queuedClientRequestIds, ops\);/.test(pageSource));
 check('the confirmed fetch propagates clientRequestId from the server row onto each entry', /clientRequestId: l\.clientRequestId \?\? undefined,/.test(pageSource));
 check('the reload-reconstruction effect calls selectQueueItemsToReconstruct (no re-implemented inline selection logic)', /const reconstructed = selectQueueItemsToReconstruct\(queued, prev\)\.map\(toPendingLoggedEntry\);/.test(pageSource));
 check('an empty queue is a no-op in the reconstruction (no unnecessary setLogEntries call)', /if \(queued && queued\.length > 0\) \{/.test(pageSource));
 check('AURA-ANDROID-REL-04: reconstruction reads only the verified account\'s queue (R4: awaited IndexedDB read, dropped if the account changed meanwhile; R8: view read with the paused count)', /const view = await readOfflineQueueView\(check\.user\.id\);\s*if \(accountIdRef\.current !== check\.user\.id\) return;\s*const queued = view \? view\.items : null;\s*setQueueUnavailable\(queued === null\);/.test(pageSource));
 
-check('handleLogActivity is unchanged: still returns Promise<\'confirmed\' | \'pending\'>', /Promise<'confirmed' \| 'pending'>/.test(pageSource));
+check('handleLogActivity resolves to the shared ActivityLogResult (R15 adds \'unresolved\')', /\): Promise<ActivityLogResult> => \{/.test(pageSource));
 check(
-  'the only change to handleLogActivity itself is stamping the already-generated clientRequestId onto the pending-marked entry',
-  /prev\.map\(\(item\) => \(item\.id === tempId \? \{ \.\.\.item, syncStatus: 'pending', clientRequestId \} : item\)\)\);/.test(pageSource)
+  'the only change to handleLogActivity itself is stamping the already-generated clientRequestId onto the pending-marked entry (R15: isMine = the optimistic entry or the operation\'s existing row, which a Retry reuses)',
+  /prev\.map\(\(item\) => \(isMine\(item\) \? \{ \.\.\.item, syncStatus: 'pending', clientRequestId \} : item\)\)\);/.test(pageSource) && /const isMine = \(item: LoggedEntryItem\) => item\.id === tempId \|\| item\.clientRequestId === clientRequestId;/.test(pageSource)
 );
-check('handleLogActivity\'s optimistic-entry literal is unchanged apart from carrying its outbox clientRequestId (AURA-ANDROID-REL-04 R2)', /const optimisticEntry: LoggedEntryItem = \{\s*id: tempId,[\s\S]{0,200}?clientRequestId,\s*activityTitle,\s*activeWindow: activeWindowForLog,\s*loggedAt: targetDate,\s*logMinuteOfDay: calculatedMinute,\s*durationMinutes,\s*notes: notes \? String\(notes\)\.trim\(\) : null,\s*logSource: finalLogSource,\s*activitySignificance: inferredSignificance,\s*\};/.test(pageSource));
+// R15 (39257): the optimistic entry is projected from the operation's immutable dispatch body (the same values; a Retry
+// shows the ORIGINAL timestamp), still carrying its outbox clientRequestId.
+check('handleLogActivity\'s optimistic entry is projected from the operation\'s immutable dispatch body, carrying its outbox clientRequestId (AURA-ANDROID-REL-04 R2/R15)', /const optimisticEntry: LoggedEntryItem = \{\s*id: tempId,[\s\S]{0,200}?clientRequestId,\s*activityTitle: payload\.activityTitle,\s*activeWindow: payload\.activeWindow,\s*loggedAt: new Date\(payload\.logTimestamp\),\s*logMinuteOfDay: payload\.logMinuteOfDay,\s*durationMinutes: payload\.durationMinutes,\s*notes: payload\.notes \?\? null,\s*logSource: payload\.logSource,\s*activitySignificance: payload\.activitySignificance,\s*\};/.test(pageSource) && /activeWindow: activeWindowForLog,\s*logMinuteOfDay: calculatedMinute,\s*logTimestamp: targetDate\.toISOString\(\),\s*notes: notes \? String\(notes\)\.trim\(\) \|\| undefined : undefined,\s*durationMinutes,\s*logSource: finalLogSource,\s*activitySignificance: inferredSignificance,/.test(pageSource));
 check('page.tsx still generates clientRequestId once per log attempt via generateClientRequestId() (PR #86 idempotency untouched; AURA-MOBILE-01-M2-B/AND-01: not crypto.randomUUID() directly, which throws outside a secure context)', /const clientRequestId = generateClientRequestId\(\);/.test(pageSource));
 // AURA-ANDROID-REL-04 IR-01: replay moved to lib/activitySync.ts (account-bound); same classification.
 const activitySyncSource = fs.readFileSync('apps/web/lib/activitySync.ts', 'utf8');
-check('offline-queue replay still classifies via classifyHabitLogSyncOutcome (now in lib/activitySync.ts)', /classifyHabitLogSyncOutcome/.test(activitySyncSource) && /replayOfflineQueue\(\)/.test(pageSource));
-check('the replay queue-removal/retention logic still classifies confirmed/retry/permanent-failure', /const outcome = classifyHabitLogSyncOutcome\(status\);/.test(activitySyncSource) && /outcome === 'retry'/.test(activitySyncSource) && /outcome === 'confirmed'/.test(activitySyncSource));
+// R15 (39257) supersedes: replay classifies through THE shared response decoder.
+check('offline-queue replay classifies via the shared decodeHabitLogResponse (now in lib/activitySync.ts)', /decode: decodeHabitLogResponse/.test(activitySyncSource) && /replayOfflineQueue\(\)/.test(pageSource));
+check('the replay queue-removal/retention logic classifies accepted / retry / unverified / rejected (R15)', /const decoded = await __decoder\.decode\(res,/.test(activitySyncSource) && /decoded\.kind === 'retry'/.test(activitySyncSource) && /decoded\.kind === 'unverified'/.test(activitySyncSource) && /decoded\.kind === 'accepted'/.test(activitySyncSource));
 check('Plan logging (handlePlanLogged) remains separate and untouched in page.tsx', /const handlePlanLogged = useCallback\(async \(\) => \{/.test(pageSource));
 check('Timing Location save orchestration (handleLocationChanged) remains untouched in page.tsx', /const handleLocationChanged = useCallback\(async \(city: \{/.test(pageSource));
 check('LocationPicker.tsx was not touched by this change (no reference to offlineHabitQueue there)', !fs.existsSync('apps/web/components/LocationPicker.tsx') || !/offlineHabitQueue/.test(fs.readFileSync('apps/web/components/LocationPicker.tsx', 'utf8')));

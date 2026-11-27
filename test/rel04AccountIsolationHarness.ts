@@ -124,7 +124,9 @@ export const logsOf = (userId: string) => store.logs.filter((l) => l.userId === 
     recordVisit: async () => {},
     getHabitLogByClientRequestId: async (userId: string, crid: string) => store.logs.find((l) => l.userId === userId && l.clientRequestId === crid) ?? null,
     createHabitLog: async (row: any) => {
-      const e = { id: `log-${++seq}`, userId: row.userId, clientRequestId: row.clientRequestId ?? null, activityTitle: row.activityTitle, activeWindow: row.activeWindow, logTimestamp: new Date(row.logTimestamp).toISOString(), createdAt: new Date().toISOString() };
+      // R15: the persisted row exactly as createHabitLog's RETURNING * gives it (every column the route writes), so
+      // the client's shared decoder can bind the answer to the operation's persisted intent.
+      const e = { id: `log-${++seq}`, userId: row.userId, clientRequestId: row.clientRequestId ?? null, activityTitle: row.activityTitle, activityId: row.activityId ?? null, activeWindow: row.activeWindow, logMinuteOfDay: row.logMinuteOfDay, logTimestamp: new Date(row.logTimestamp).toISOString(), durationMinutes: row.durationMinutes ?? 30, notes: row.notes ?? null, logSource: row.logSource ?? 'MANUAL', activitySignificance: row.activitySignificance ?? 'MEDIUM', createdAt: new Date().toISOString() };
       store.logs.push(e);
       return e;
     },

@@ -1032,6 +1032,10 @@ jobs:
         env:
           TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
         run: npx ts-node --project tsconfig.jsdom-tests.json test/rel04R14OutcomeReconciliation.test.ts
+      - name: Run REL-04 R15 shared operation contract test (39255 witnesses on 6c69d7d vs current; decoder, receipts, identity; negative controls)
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/rel04ActivityOperationContract.test.ts
       - name: Run REL-04 R3-head (b323d2a) reproduction test
         env:
           TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
@@ -1206,6 +1210,16 @@ jobs:
         run: npx playwright install --with-deps chromium
       - name: Run REL-04 Next.js app rendering test (builds the app)
         run: npx ts-node test/rel04R5NextAppRendering.test.ts
+      # AURA-ANDROID-REL-04 R15 (39257) -- the same production build and disposable PostgreSQL: the habit-log
+      # idempotency guarantee plus the client's shared row-binding rule against real persisted rows, then the operation
+      # contract through the real Home "Start now" flow in two real Chromium tabs (G3 ordering, HTML 200 + Retry, a cut
+      # response, an unreadable operations store).
+      - name: Run HabitLog idempotency + R15 row-binding DB test
+        run: npx ts-node test/habitLogIdempotencyDb.test.ts
+      - name: Run REL-04 R15 operation contract Home test (production build, two real Chromium tabs, PostgreSQL)
+        env:
+          REL04_SKIP_BUILD: '1'
+        run: npx ts-node test/rel04ActivityOperationHomeChromiumDb.test.ts
   web-build:
     name: Next.js production build
     runs-on: ubuntu-latest
