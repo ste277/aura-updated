@@ -8,6 +8,8 @@
  *   C. tracing state transitions; incomplete, skipped and invalid traces
  *   D. I1 parity over the complete independent 6,548-trace corpus (all four lines) + measurement parity
  *   E. privacy and release exclusion
+ *   F. R1 (50342): construction validation of malformed detector landmarks -- witnesses, every-index handoff,
+ *      sparse / wrong-length / null / malformed / non-finite / out-of-frame inputs, I1 boundary agreement, snapshot
  *
  *   npx ts-node test/palm04I1Tracing.test.ts
  */
@@ -15,7 +17,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { analyzePalmFrame, analyzePalmFrameWithDetection } from '../apps/web/lib/palm-analysis/analyze';
 import { createConstructionContext, PALM_CONSTRUCTION_CONTEXT_VERSION, type PalmConstructionData } from '../apps/web/lib/palm-analysis/construction';
-import { buildPalmFeatureSet, TRACE_LIMITS, type PalmFeatureSetInput, type PalmLineId } from '../apps/web/lib/palm-analysis/features';
+import { buildPalmFeatureSet, palmFrameFromLandmarks, TRACE_LIMITS, type PalmFeatureSetInput, type PalmLineId } from '../apps/web/lib/palm-analysis/features';
 import { normalizeDrawableFrame } from '../apps/web/lib/palm-analysis/normalize';
 import { createPalmAnalysisSession, type PalmSessionState } from '../apps/web/lib/palm-analysis/session';
 import { createTracingModel, TracingError, TRACING_LINES, MAX_TRACE_INPUT_POINTS } from '../apps/web/lib/palm-analysis/tracing';
@@ -316,6 +318,99 @@ async function run() {
       const leak = scanner.scanImageInput(tmp);
       check('E9. the scanner flags a build that contains the new modules, and passes one that does not', clean.length === 0 && sentinels.every((sv) => leak.some((h: any) => h.sentinel === sv)), { clean, leak });
     } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
+  }
+
+
+  // ============================================================ F. R1 (50342): construction validation
+  // Malformed detector landmarks must never activate a context, expose malformed guides or throw. The acceptance
+  // oracle is frozen I1 itself: a landmark set is accepted exactly when I1's palmFrameFromLandmarks does not call it
+  // 'landmarks-invalid' or 'landmark-out-of-frame'.
+  {
+    const base = () => LM.map((q) => ({ ...q }));
+    const accepts = (lm: unknown) => { try { return createConstructionContext(DATA({ landmarks: lm as any }), 1, () => true); } catch { return 'THREW' as const; } };
+    const i1Rejects = (lm: unknown) => { const r = palmFrameFromLandmarks(lm as any, 64, 128).reason; return r === 'landmarks-invalid' || r === 'landmark-out-of-frame'; };
+    const guideOk = (c: { context: any } | null) => { if (!c) return false; try { const g = createTracingModel(c.context).guides().image as Record<string, { x: number; y: number }>; return Object.values(g).every((q) => Number.isFinite(q.x) && Number.isFinite(q.y) && q.x >= 0 && q.x <= 1 && q.y >= 0 && q.y <= 1); } catch { return false; } };
+    const holeAt = (k: number) => { const a = base(); delete (a as any)[k]; return a; };
+    const setAt = (k: number, v: unknown) => { const a: unknown[] = base(); a[k] = v; return a; };
+    // witnesses reproduced against unchanged 3d66055 (R1 evidence: witness-before-3d66055.log)
+    const w1 = holeAt(3), w2 = holeAt(5), w3 = setAt(0, { x: -0.01, y: LM[0].y });
+    check('F0. witnesses: a hole at index 3 (length 21), a hole at guide index 5, and x = -0.01 are all rejected (no context)', w1.length === 21 && w2.length === 21 && accepts(w1) === null && accepts(w2) === null && accepts(w3) === null);
+
+    // every rejected case, built deterministically
+    const rejected: Array<[string, unknown]> = [];
+    for (let k = 0; k < 21; k++) {
+      rejected.push([`hole@${k}`, holeAt(k)]);
+      rejected.push([`undefined@${k}`, setAt(k, undefined)]);
+      rejected.push([`null@${k}`, setAt(k, null)]);
+      for (const [n, v] of [['number', 0.5], ['string', '0.5'], ['array', [0.5, 0.5]], ['empty', {}], ['x-only', { x: 0.5 }], ['y-only', { y: 0.5 }], ['x-string', { x: '0.5', y: 0.5 }], ['z-null', { x: 0.5, y: 0.5, z: null }], ['z-string', { x: 0.5, y: 0.5, z: '0' }]] as Array<[string, unknown]>) rejected.push([`${n}@${k}`, setAt(k, v)]);
+      for (const bad of [NaN, Infinity, -Infinity]) {
+        rejected.push([`x=${bad}@${k}`, setAt(k, { x: bad, y: 0.5 })]);
+        rejected.push([`y=${bad}@${k}`, setAt(k, { x: 0.5, y: bad })]);
+        rejected.push([`z=${bad}@${k}`, setAt(k, { x: 0.5, y: 0.5, z: bad })]);
+      }
+      for (const out of [-0.01, -1e-9, 1 + 1e-9, 1.01, -5, 7]) {
+        rejected.push([`x=${out}@${k}`, setAt(k, { x: out, y: 0.5 })]);
+        rejected.push([`y=${out}@${k}`, setAt(k, { x: 0.5, y: out })]);
+      }
+    }
+    const sparse21 = new Array(21); sparse21[0] = { ...LM[0] }; sparse21[20] = { ...LM[20] };
+    const sparseAllButOne = base(); (sparseAllButOne as any).length = 22; // a hole at index 21 and length 22
+    const arrayLike = Object.assign(Object.create(null), base(), { length: 21 });
+    for (const [n, v] of [['length-0', []], ['length-20', base().slice(0, 20)], ['length-22', [...base(), { ...LM[0] }]], ['length-42', [...base(), ...base()]], ['sparse-21', sparse21], ['trailing-hole-22', sparseAllButOne], ['new-Array-21', new Array(21)], ['null', null], ['undefined', undefined], ['array-like-object', arrayLike], ['string', 'x'.repeat(21)], ['number', 21]] as Array<[string, unknown]>) rejected.push([n, v]);
+    const accRej = rejected.map(([n, v]) => [n, accepts(v)] as const);
+    check(`F1. ${rejected.length} malformed landmark sets (every index: hole, undefined, null, 9 malformed entry shapes, NaN/+-Infinity in x, y, z, 6 out-of-frame values in x and y; plus sparse, wrong-length and non-array inputs) never activate a context and never throw`, accRej.every(([, r]) => r === null), accRej.filter(([, r]) => r !== null).map(([n, r]) => `${n}:${r === 'THREW' ? 'THREW' : 'ACTIVE'}`).slice(0, 10));
+    check('F2. agreement with frozen I1: frozen I1 also rejects every one of those inputs as landmarks-invalid or landmark-out-of-frame', rejected.every(([, v]) => i1Rejects(v)), rejected.filter(([, v]) => !i1Rejects(v)).map(([n]) => n).slice(0, 10));
+
+    // valid boundary coordinates, consistent with I1 ([0, 1] inclusive), at every index
+    const boundary: Array<[string, unknown[]]> = [];
+    for (let k = 0; k < 21; k++) for (const [n, q] of [['x=0', { x: 0, y: LM[k].y }], ['x=1', { x: 1, y: LM[k].y }], ['y=0', { x: LM[k].x, y: 0 }], ['y=1', { x: LM[k].x, y: 1 }], ['z=0', { ...LM[k], z: 0 }], ['z=-0.3', { ...LM[k], z: -0.3 }]] as Array<[string, unknown]>) boundary.push([`${n}@${k}`, setAt(k, q)]);
+    const bAcc = boundary.map(([n, v]) => [n, accepts(v), !i1Rejects(v)] as const);
+    check(`F3. ${boundary.length} valid boundary inputs (x or y exactly 0 or 1, finite z, at every index) are accepted, exactly as frozen I1 accepts them, and give finite in-frame guides`, bAcc.every(([, c, i1]) => c !== null && c !== 'THREW' && i1 && guideOk(c as any)), bAcc.filter(([, c, i1]) => !(c && c !== 'THREW') || !i1).map(([n]) => n).slice(0, 10));
+    const zc = accepts(setAt(4, { ...LM[4], z: -0.25 })) as { context: any };
+    const zd = zc.context.read();
+    check('F4. z semantics preserved: a finite z is kept, an absent z stays absent', zd.landmarks[4].z === -0.25 && !('z' in zd.landmarks[3]));
+
+    // snapshot: each coordinate is read once, and what was validated is what is kept
+    let reads = 0;
+    const flip = setAt(7, { get x() { reads++; return reads === 1 ? 0.4 : -9; }, y: 0.3 });
+    const fc = accepts(flip) as { context: any };
+    check('F5. one snapshot: a getter read once at validation, its validated value is the stored value (a later different read is never seen)', !!fc && reads === 1 && fc.context.read().landmarks[7].x === 0.4 && guideOk(fc));
+    const throwing = setAt(9, { get x(): number { throw new Error('boom'); }, y: 0.3 });
+    const proxied = new Proxy(base(), { get(t, k, r) { if (k === '12') throw new Error('trap'); return Reflect.get(t, k, r); } });
+    check('F6. a throwing accessor or proxy is a controlled rejection (null), never an exception', accepts(throwing) === null && accepts(proxied) === null);
+    const src = base(); const sc = accepts(src) as { context: any }; src[5].x = 0.99; (src as any)[6] = null;
+    check('F7. mutating the detector array after hand-off cannot reach the context', sc.context.read().landmarks[5].x === LM[5].x && sc.context.read().landmarks[6] !== null && guideOk(sc));
+
+    // detector -> session hand-off: malformed hands reach the real session through the detector double
+    const handoff: Array<[string, unknown]> = [];
+    const H0 = () => makeHand() as unknown[];
+    const hSet = (k: number, v: unknown) => { const a = H0(); a[k] = v; return a; };
+    const hHole = (k: number) => { const a = H0(); delete (a as any)[k]; return a; };
+    for (let k = 0; k < 21; k++) handoff.push([`hole@${k}`, hHole(k)], [`null@${k}`, hSet(k, null)], [`x=NaN@${k}`, hSet(k, { x: NaN, y: 0.5 })], [`x=-0.01@${k}`, hSet(k, { x: -0.01, y: (H0()[k] as any).y })]);
+    const sp = new Array(21); sp[0] = H0()[0];
+    handoff.push(['undefined@5', hSet(5, undefined)], ['y=Infinity@17', hSet(17, { x: 0.5, y: Infinity })], ['y=1.01@0', hSet(0, { x: 0.5, y: 1.01 })], ['z=NaN@9', hSet(9, { ...(H0()[9] as any), z: NaN })], ['malformed@0', hSet(0, { x: '0.5', y: 0.5 })], ['length-20', H0().slice(0, 20)], ['length-22', [...H0(), H0()[0]]], ['sparse-21', sp]);
+    const bad: string[] = [];
+    for (const [n, lm] of handoff) {
+      const states: PalmSessionState[] = [];
+      const s = createPalmAnalysisSession({ detectorFactory: async () => detector([[{ landmarks: lm as any, handednessLabel: 'Left', handednessScore: 0.98 }]]), normalizeEnv: env(), isEnabled: () => true, yieldToUi: yieldNow });
+      s.subscribe((x) => states.push(x));
+      let threw = false;
+      try { await s.submitFile(pngFile()); } catch { threw = true; }
+      const st = s.getState();
+      const ok = !threw && s.getConstructionContext() === null && (st.phase === 'result' || st.phase === 'error') && states.every((x) => !JSON.stringify({ ...x, frame: null }).includes('landmarks'));
+      if (!ok) bad.push(`${n}:threw=${threw},ctx=${!!s.getConstructionContext()},phase=${st.phase}`);
+      s.dispose();
+    }
+    check(`F8. detector -> session: ${handoff.length} malformed hands (a hole, null, NaN and an out-of-frame x at every index; undefined, infinite, out-of-frame y, NaN z, malformed entry, length 20 / 22, sparse) never activate a context, never throw out of the session, and end in a result or error state free of landmarks`, bad.length === 0, bad.slice(0, 10));
+    {
+      const valid = H0(); valid[4] = { x: 0, y: (valid[4] as any).y };
+      const s = createPalmAnalysisSession({ detectorFactory: async () => detector([[{ landmarks: makeHand() as any, handednessLabel: 'Left', handednessScore: 0.98 }]]), normalizeEnv: env(), isEnabled: () => true, yieldToUi: yieldNow });
+      await s.submitFile(pngFile());
+      const c = s.getConstructionContext();
+      const b = createConstructionContext(DATA({ landmarks: valid as any }), 1, () => true);
+      check('F9. positive control: a well-formed detector hand still activates a context through the session, with finite in-frame guides; a boundary coordinate (x = 0) is accepted', !!c && c.isActive() && guideOk({ context: c }) && !!b && guideOk(b));
+      s.dispose();
+    }
   }
 }
 

@@ -44,6 +44,9 @@ export interface PalmConstructionContext {
 }
 
 const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+const own = (o: object, k: PropertyKey) => Object.prototype.hasOwnProperty.call(o, k);
+
+type Landmark = Readonly<{ x: number; y: number; z?: number }>;
 
 function copyData(d: PalmConstructionData): PalmConstructionData {
   return Object.freeze({
@@ -57,19 +60,47 @@ function copyData(d: PalmConstructionData): PalmConstructionData {
 }
 
 /**
+ * R1: one-pass snapshot + validation of the detector landmarks, under the frozen I1 landmark contract
+ * (measurements.ts readLandmarks / features.ts palmFrameFromLandmarks): a dense array of exactly 21 entries, every
+ * index an own property (holes are rejected explicitly -- Array.prototype.every skips them), every entry a non-null
+ * object with finite x and y in [0, 1] (boundaries inclusive) and, if present, a finite z. Each entry and each
+ * coordinate is read exactly once, and the returned plain copy is what the context keeps, so the validated values
+ * and the stored values are the same snapshot. Returns null for any malformed input; never throws.
+ */
+function snapshotLandmarks(lm: unknown): Landmark[] | null {
+  try {
+    if (!Array.isArray(lm) || lm.length !== 21) return null;
+    const out: Landmark[] = [];
+    for (let k = 0; k < 21; k++) {
+      if (!own(lm, k)) return null;
+      const p: unknown = lm[k];
+      if (p === null || typeof p !== 'object') return null;
+      const x: unknown = (p as { x?: unknown }).x, y: unknown = (p as { y?: unknown }).y, z: unknown = (p as { z?: unknown }).z;
+      if (!isNum(x) || !isNum(y) || (z !== undefined && !isNum(z))) return null;
+      if (x < 0 || x > 1 || y < 0 || y > 1) return null;
+      out.push(z === undefined ? { x, y } : { x, y, z: z as number });
+    }
+    return out;
+  } catch {
+    return null; // a throwing accessor or proxy is malformed input, not a crash
+  }
+}
+
+/**
  * Create a context from one analysed hand. `isCurrent` lets the owning session tie validity to its own generation
- * as well (belt and braces: the session also revokes explicitly). Returns null if the hand is not a complete set
- * of 21 finite landmarks or the frame size is not finite and positive.
+ * as well (belt and braces: the session also revokes explicitly). Returns null -- a controlled rejection, never an
+ * active malformed context -- unless the hand meets the frozen I1 landmark contract (snapshotLandmarks) and the frame
+ * size is finite and positive.
  */
 export function createConstructionContext(
   source: PalmConstructionData,
   generation: number,
   isCurrent: () => boolean,
 ): { context: PalmConstructionContext; revoke: () => void } | null {
-  if (!isNum(source.imageWidth) || !isNum(source.imageHeight) || source.imageWidth <= 0 || source.imageHeight <= 0) return null;
-  if (!Array.isArray(source.landmarks) || source.landmarks.length !== 21) return null;
-  if (!source.landmarks.every((p) => p && isNum(p.x) && isNum(p.y) && (p.z === undefined || isNum(p.z)))) return null;
-  let data: PalmConstructionData | null = copyData(source);
+  if (!source || !isNum(source.imageWidth) || !isNum(source.imageHeight) || source.imageWidth <= 0 || source.imageHeight <= 0) return null;
+  const landmarks = snapshotLandmarks(source.landmarks);
+  if (!landmarks) return null;
+  let data: PalmConstructionData | null = copyData({ ...source, landmarks });
   const active = () => data !== null && isCurrent();
   const context: PalmConstructionContext = Object.freeze({
     generation,
