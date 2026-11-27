@@ -69,6 +69,9 @@ const IMAGE_INPUT_SENTINELS = [
   // both strings are used at runtime, so they survive minification whenever the code is bundled
   'palm-04-construction-context@0.1.0', // construction.ts (toJSON kind)
   'the photo this tracing belonged to was reset, replaced or closed', // tracing.ts (context-cleared message)
+  // AURA-PALM-04-I2 -- the tracing overlay (components/palm-scan, rendered only by PalmImageInput); used at runtime
+  'palm-04-tracing-ui@0.1.0', // PalmImageInput.tsx tracing overlay (data-version)
+  'Aura does not find palm lines for you. It only checks that the shape and position of your trace can be used.', // PalmImageInput.tsx tracing overlay (scope note)
 ];
 
 // AURA-PALM-G5-I1-R2 (R1-F3) -- signatures of the MediaPipe runtime itself.

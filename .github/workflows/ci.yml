@@ -965,6 +965,14 @@ jobs:
       # Synthetic data only; no UI; nothing persisted or transmitted.
       - name: Run assisted-tracing foundation tests (PALM-04-I1)
         run: npx ts-node test/palm04I1Tracing.test.ts
+      - name: Run tracing UI geometry and isolation tests (PALM-04-I2)
+        run: npx ts-node test/palm04I2TracingGeometry.test.ts
+      - name: Run tracing UI component tests (PALM-04-I2, jsdom)
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/palm04I2TracingUiJsdom.test.ts
+      - name: Run tracing UI browser tests (PALM-04-I2, runner's installed Google Chrome, synthetic harness, no network)
+        env:
+          PALM_BROWSER_CHANNEL: chrome
+        run: npx ts-node test/palm04I2TracingBrowser.test.ts
       # PALM-03-E1: development-only personalised interpretation engine (synthetic
       # observations only; unreviewed content). The package suite compares the engine
       # with the unmodified C1 reference oracle (python3, preinstalled on the runner):
