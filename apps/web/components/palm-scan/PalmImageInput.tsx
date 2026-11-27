@@ -379,8 +379,8 @@ export const PLACEMENT_TEXT: Partial<Record<LineUnassessedReason, string>> = {
 };
 /** Shown when the model's input cap (MAX_TRACE_INPUT_POINTS) refuses another point; nothing is added or truncated. */
 export const POINT_LIMIT_TEXT = `This line has reached the point limit (${MAX_TRACE_INPUT_POINTS} points), so nothing was added. Use Undo, Clear line, or retrace the line with one drag.`;
-/** R2: a tap (a gesture shorter than the tap slop) whose pointer left the photo is refused; nothing is added. */
-export const TAP_OFF_PHOTO_TEXT = 'The pointer was released outside the photo, so nothing was added. Tap on the photo, or drag along the line.';
+/** R3: any gesture (tap or drag) whose pointer left the photo at any delivered sample is refused; nothing changes. */
+export const GESTURE_OFF_PHOTO_TEXT = 'The pointer went outside the photo, so nothing was changed. Keep the whole trace on the photo.';
 export const PLACEMENT_OK_TEXT = 'The shape and position of this trace can be used. Confirm it if it follows the line you see.';
 const placementText = (r: LineUnassessedReason) => PLACEMENT_TEXT[r] ?? 'This trace cannot be used yet.';
 
@@ -407,9 +407,10 @@ export interface PalmTracingPanelProps {
  *     Next, a step button), a new context (photo replacement), revocation and teardown invalidate it first: the epoch
  *     moves on, the draft is dropped and pointer capture is released, so a later release changes nothing;
  *   - the release position is part of the stroke (it is mapped through the same geometry and judged by I1);
- *   - R2: a tap (a gesture shorter than the tap slop) is only a point when it never left the photo -- every sample,
- *     including the release, is checked with the shared geometry; a tap that left the photo is refused and changes
- *     nothing (never clamped, never reduced to its in-photo press point);
+ *   - R3: EVERY delivered sample -- each coalesced pointermove sample, every move and the release -- is checked against
+ *     the photo with the shared geometry BEFORE any spacing or simplification. A gesture (tap or drag) that left the
+ *     photo at any sample is refused and changes nothing; coming back inside does not restore it (never clamped, never
+ *     shortened into an eligible trace);
  *   - pointercancel or lost capture discard it.
  */
 type Gesture = { id: number; epoch: number; model: TracingModel; line: PalmLineId; pts: TracingPoint[]; startClient: { x: number; y: number }; moved: boolean; leftPhoto: boolean };
@@ -578,11 +579,17 @@ export function PalmTracingPanel({ context, imageSource, onClose }: PalmTracingP
   const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
     const g = gesture.current;
     if (!g || e.pointerId !== g.id) return;
-    const p = toImage(e.clientX, e.clientY);
-    if (!p) return;
-    g.pts.push({ x: p.x, y: p.y });
-    if (!p.inside) g.leftPhoto = true;
-    if (!g.moved && Math.hypot(e.clientX - g.startClient.x, e.clientY - g.startClient.y) > TRACING_TAP_SLOP_PX) g.moved = true;
+    // Every sample the browser delivered for this event, coalesced ones included, in order (the event itself is last).
+    const native = e.nativeEvent as PointerEvent & { getCoalescedEvents?: () => PointerEvent[] };
+    const coalesced = typeof native.getCoalescedEvents === 'function' ? native.getCoalescedEvents() : [];
+    const samples: Array<{ clientX: number; clientY: number }> = coalesced.length ? coalesced : [native];
+    for (const sample of samples) {
+      const p = toImage(sample.clientX, sample.clientY);
+      if (!p) continue;
+      if (!p.inside) g.leftPhoto = true; // validated before any spacing or simplification
+      g.pts.push({ x: p.x, y: p.y });
+      if (!g.moved && Math.hypot(sample.clientX - g.startClient.x, sample.clientY - g.startClient.y) > TRACING_TAP_SLOP_PX) g.moved = true;
+    }
     setDraft(g.moved ? g.pts.slice() : [g.pts[0]]);
   };
 
@@ -601,9 +608,9 @@ export function PalmTracingPanel({ context, imageSource, onClose }: PalmTracingP
       if (!release.inside) g.leftPhoto = true;
       if (!g.moved && Math.hypot(e.clientX - g.startClient.x, e.clientY - g.startClient.y) > TRACING_TAP_SLOP_PX) g.moved = true;
     }
-    // R2: the tap/drag classification never bypasses the photo boundary. A drag keeps its real terminal for I1 to judge;
-    // a tap that left the photo has no valid point to add, so it is refused and the draft stays exactly as it was.
-    if (!g.moved && g.leftPhoto) { setMessage(TAP_OFF_PHOTO_TEXT); return; }
+    // R3: a gesture that left the photo at any delivered sample is refused before any spacing or simplification, so
+    // neither the tap/drag classification nor stroke filtering can turn it into an eligible trace; the draft is unchanged.
+    if (g.leftPhoto) { setMessage(GESTURE_OFF_PHOTO_TEXT); return; }
     run((m) => {
       if (m.line(g.line).status !== 'tracing') m.start(g.line);
       if (!g.moved) m.addPoint(g.line, g.pts[0]);
