@@ -217,3 +217,62 @@ Every required item is covered by CI, so no separate local run was needed. The e
 
 The CI result on the final head is reported on PR #401 and in the owner report. Per instruction, a failure of the known Rhythm Move test (CI-09) would be recorded as-is: not rerun, not modified.
 
+
+## 11. CI stabilization (ticket 39230, 2026-11-27)
+
+**CI run 2, [45980042902](https://github.com/ste277/aura-updated/actions/runs/45980042902), on `afb72e6`: 6 of 7 jobs passed.** Database migration validation passed, which confirms the F1 fix: real `prisma migrate deploy` and `status`, plus the I1 store, bound and DB test. Day Constructor acceptance passed, including the auth DB suites, and the Rhythm Move failure did not occur. Build, MCP ×2 and G5 passed. **Ephemeris failed at step 129**, MR3 check G12, which is another migration-number guard. The superseded run on `81f08df` failed at the same step.
+
+**Full local replay of the Ephemeris job.** All 245 runnable steps were replayed in CI's order, with CI's per-step `env` and `working-directory`, and CI's dependency layout:
+- Steps 1–63 run without `apps/web/node_modules`; step 64 restores it, from `npm ci`.
+- The replay continues past failures, so every failure surfaces in one pass.
+- The runner is `run-eph.sh`, driven by the steps extracted from `ci.yml`.
+
+| Replay | Result | Classification |
+|---|---|---|
+| 1, on the stale symlinked root `node_modules` | 216 pass, 28 fail | **26 local environment:** `oidc-provider`, `@modelcontextprotocol/server` and `jsdom` were missing from a stale install. All are CI-green on main, and none touch I1. **2 I1 regressions:** steps 206 and 212 (below). |
+| 2, on a real root `npm ci` from the lockfile (after the corrections) | **244 / 244 runnable steps PASS, 0 fail** (the 2 install steps were replaced by the local `npm ci`) | — |
+
+**I1-caused failures, all corrected in one pass:**
+
+| # | Test (check) | Cause | Correction (test only) | Protection kept |
+|---|---|---|---|---|
+| 1 | `availabilityPreferencesPref01` (11o) | rejected any migration ≥ 0055 | allow-list `['0055_auth_session']` | any other migration ≥ 0055 is still rejected |
+| 2 | `myRhythmPreferencesUi` (G12), CI step 129 | allowed only 0054 | allow-list `['0054_reminder_dispatch_heartbeat', '0055_auth_session']` | same |
+| 3 | `insightsAlignmentSafeguards` (S9) | allowed only 0054 (found in the same pass) | same allow-list as G12 | same |
+| 4 | `dayConstructorAcceptanceFreshOverlapArchitecture`, step 206 | "no lock timeout in production code": `authSessionDb.ts` sets `SET LOCAL lock_timeout` for session queries, and `sessionErrors.ts` names the reason | exempt only those two files by name, plus two new checks: the timeout module never touches the schedule-write lock (no `pg_advisory`, no `day-constructor-accept:`), and the label module contains no SQL | every other production file is still scanned exactly as before |
+| 5 | `scheduleWriteManualSerializationArchitecture`, step 212 | "no NOWAIT / lock_timeout / statement_timeout": same cause | same narrow exemption and the same two new checks. `NOWAIT` / `SKIP LOCKED` are still forbidden even in `authSessionDb.ts`. | same |
+
+**Expected three-file reconciliation with MP-1 (#400, migration 0056).** MP-1 edits the same three migration guards (11o, G12, S9), each to allow `0056_my_people_foundation`. Whichever PR merges second will hit a one-line conflict in each file. Resolve it by **taking the union of both allow-lists**:
+- PREF-01 11o: `!['0055_auth_session', '0056_my_people_foundation'].includes(d) && /^005[5-9]_|^00[6-9]\d_/.test(d)`
+- MR3 G12 and INS-01 S9: `!['0054_reminder_dispatch_heartbeat', '0055_auth_session', '0056_my_people_foundation'].includes(d) && /^005[4-9]_|^00[6-9]\d_/.test(d)`
+
+Checks 4 and 5 above don't conflict with MP-1. Its diff doesn't touch those two files.
+
+### 11.3 Verification before pushing the consolidated corrections
+
+- **Replay 2: all previously skipped steps ran and passed.** CI never reached these steps on run 1 or run 2, and every one passed locally:
+  - step 125, MR3 G12;
+  - step 126, INS-01 S9;
+  - step 206, acceptance fresh-overlap;
+  - step 212, manual-writer serialization;
+  - step 217, `signInResendChangeEmailJsdom`;
+  - step 244, `authSessionToken` (67/67);
+  - step 245, `authSessionDormancy` (16/16).
+  Evidence: `AURA_AUTH_SESSION_01_I1_EVIDENCE/ephemeris-replay/` (both summaries, replay-1 failure causes, the runner, and the steps extracted from `ci.yml`).
+- **Guard negative controls** (`AURA_AUTH_SESSION_01_I1_EVIDENCE/guard-controls/guard-negative-controls.txt`):
+
+  | Probe | 11o / G12 / S9 | 206 / 212 |
+  |---|---|---|
+  | Baseline (only `0055_auth_session` added) | PASS | PASS |
+  | Unrelated `0057_unrelated_guard_probe` | **FAIL ×3** | — |
+  | Misnamed `0055_other_feature` | **FAIL ×3** | — |
+  | Another production file sets `lock_timeout` / `statement_timeout` | — | **FAIL ×2** |
+  | `authSessionDb.ts` takes `pg_advisory_xact_lock` (temporary mutation) | — | **FAIL ×2** |
+  | `NOWAIT` in `authSessionDb.ts` (temporary mutation) | — | **212 FAIL** |
+  | `authSessionDb.ts` restored, sha256 identical; baseline again | PASS | PASS |
+
+- **The approved implementation is unchanged.** `git diff 5d8a16c -- apps/web/lib apps/web/prisma .github/workflows/ci.yml` is empty. All corrections since `5d8a16c` are in `test/` and documentation or evidence.
+- **No dependency or lockfile change.** `git diff 477723d` over every `package.json` and `package-lock.json` (root, `apps/web`, `apps/mcp`) is empty. The local `npm ci` installs are gitignored and not committed.
+- **Corrections in this push:** `test/availabilityPreferencesPref01`, `myRhythmPreferencesUi`, `insightsAlignmentSafeguards`, `dayConstructorAcceptanceFreshOverlapArchitecture` and `scheduleWriteManualSerializationArchitecture`, each `.test.ts`.
+
+**Final CI.** The CI run on this push is recorded in a checksummed evidence addendum, `AURA_AUTH_SESSION_01_I1_EVIDENCE/final-ci-addendum.txt` plus its `.sha256`. It is kept with the evidence but **not committed**, so no documentation-only commit is needed. It is also summarized in the owner report and on PR #401.

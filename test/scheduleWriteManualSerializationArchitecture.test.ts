@@ -363,7 +363,18 @@ check('NO NEW LOCK DOMAIN: every advisory-lock key in production code is the sam
 // primitive for a different key/purpose.
 check('the lock SQL is byte-identical at all four SCHEDULE-WRITE sites (same primitive, no variant)', production.filter((x) => ['apps/web/app/api/plans/route.ts', 'apps/web/lib/dayConstructorAcceptancePersistence.ts', 'apps/web/lib/planMove.ts', 'apps/web/lib/remainingDayRecompositionAcceptance.ts'].includes(x.f) && x.src.includes('pg_advisory_xact_lock(hashtext($1))')).length === 4);
 check('TRANSACTION-SCOPED ONLY: no session-level advisory lock, try-lock or manual unlock exists anywhere in production code', !production.some((x) => /pg_advisory_lock\(|pg_try_advisory|pg_advisory_unlock|pg_advisory_lock_shared/.test(x.src)));
-check('no NOWAIT, lock_timeout or statement_timeout was introduced (the lock waits under the existing timeout semantics)', !production.some((x) => /NOWAIT|lock_timeout|statement_timeout|SKIP LOCKED/i.test(x.src)));
+// AURA-AUTH-SESSION-01-I1: lib/authSessionDb.ts bounds ITS OWN session queries
+// with SET LOCAL statement_timeout / lock_timeout (fail closed). It never touches
+// the schedule-write lock (asserted below), so the schedule-write lock still
+// waits under the existing timeout semantics everywhere it is taken.
+const SESSION_STORE_TIMEOUT_MODULE = 'apps/web/lib/authSessionDb.ts';
+// lib/sessionErrors.ts only NAMES the 'statement_timeout' / 'lock_timeout'
+// failure reasons (diagnostic labels); it contains no SQL (asserted below).
+const SESSION_ERROR_LABELS_MODULE = 'apps/web/lib/sessionErrors.ts';
+const I1_TIMEOUT_EXEMPT = [SESSION_STORE_TIMEOUT_MODULE, SESSION_ERROR_LABELS_MODULE];
+check('no NOWAIT, lock_timeout or statement_timeout was introduced (the lock waits under the existing timeout semantics; re-baselined by AURA-AUTH-SESSION-01-I1: only lib/authSessionDb.ts may set timeouts, for session queries; lib/sessionErrors.ts only names the reasons)', !production.some((x) => !I1_TIMEOUT_EXEMPT.includes(x.f) && /NOWAIT|lock_timeout|statement_timeout|SKIP LOCKED/i.test(x.src)) && !production.some((x) => x.f === SESSION_STORE_TIMEOUT_MODULE && /NOWAIT|SKIP LOCKED/i.test(x.src)));
+check('the session-store timeout module never touches the schedule-write lock (no advisory lock, no "day-constructor-accept:" key)', !production.some((x) => x.f === SESSION_STORE_TIMEOUT_MODULE && /pg_advisory|day-constructor-accept:/.test(x.src)));
+check('the session error-label module contains no SQL at all (it cannot set a timeout)', !production.some((x) => x.f === SESSION_ERROR_LABELS_MODULE && /SET\s+LOCAL|\.query\s*\(|SELECT\s|UPDATE\s|INSERT\s|DELETE\s/i.test(x.src)));
 check('NO LOCK HELPER / RENAME in this slice: no extracted lock helper, and the key is not renamed', !production.some((x) => /withUserScheduleLock|scheduleWriteLock|acquireScheduleLock|schedule-write:/.test(x.src)));
 check('LOCK ORDER: the manual writer takes no other lock (no FOR UPDATE / FOR SHARE / other advisory lock in POST), so it cannot invert the automatic writers\' order', !/FOR UPDATE|FOR SHARE/.test(post) && count(/pg_advisory/g, post) === 1);
 
