@@ -42,6 +42,7 @@ import type { AcceptConstructedDayRequest } from '../apps/web/lib/dayConstructor
 import { getDatePartsInTimezone, addDaysToDateStr, localDateTimeToUTC } from '../apps/web/lib/timezone';
 import { getWeekdayForDateStr } from '../apps/web/lib/availabilityContext';
 import { localCalendarWeekStart } from '../apps/web/lib/goalActivityRhythm';
+import { fixtureAnchorMonday, realClockReferenceForFixture } from './lifecycleFixtureCalendar';
 
 let allPassed = true;
 function check(label: string, condition: boolean) {
@@ -298,39 +299,104 @@ async function main() {
     // ============================================================
     // Same enforcement point via the RECOMPOSITION Move path (not just
     // the manual Move route) -- proving there is exactly one check,
-    // shared by both callers of applyMoveWrites. Uses "today" (real
-    // near-future, remaining-today window) since Recomposition's own
-    // acceptance validates the destination is within the SAME real
-    // local day as the server's current instant.
+    // shared by both callers of applyMoveWrites.
+    //
+    // Recomposition acceptance requires targetDate to equal the
+    // ACCEPTANCE instant's Asia/Kolkata local date (DAY_CHANGED) and the
+    // destination to start after that instant and END within that same
+    // local day (DESTINATION_PAST / DESTINATION_OUTSIDE_TODAY).
+    //
+    // AURA-CI-09: this section used to place the plan at "now + lead"
+    // on the REAL clock (Date.now() here, clock_timestamp() inside the
+    // acceptance). The lead was clamped to at least 1 minute, so from
+    // about 23:23 Asia/Kolkata (17:53Z) the 20-minute destination 15
+    // minutes later ended after local midnight and acceptance correctly
+    // returned STALE / DESTINATION_OUTSIDE_TODAY (CI runs 40926594114,
+    // 45870363531 at 23:26 IST, 45872154803 at 23:38 IST).
+    //
+    // It now runs at ONE fixed acceptance instant, given to persistence
+    // as its `now` and to the acceptance through its supported clock seam
+    // (deps.readClock; every other dependency is the real one), the same
+    // pattern as goalActivityRhythmMaterializationDb.test.ts section 53
+    // (AURA-CI-02). The day is the Wednesday after the shared CI-07
+    // fixture anchor Monday (always >= 28 days ahead, a week no other
+    // scenario here uses), at 10:00 local -- mid-week and mid-day, so no
+    // run time can move the self-move across a day or week boundary.
     // ============================================================
+    const RECOMP_DATE = addDaysToDateStr(fixtureAnchorMonday(realClockReferenceForFixture(), TZ), 2); // a Wednesday
+    const RECOMP_NOW = localDateTimeToUTC(RECOMP_DATE, '10:00', TZ).getTime();
+    const RECOMP_LEAD_MS = 20 * MIN;
+    const RECOMP_MOVE_OFFSET_MS = 15 * MIN;
+    const RECOMP_ITEM_MS = 20 * MIN;
+    const RECOMP_BUFFER_MS = 2 * MIN;
+    /** The local day / week facts acceptance depends on, for a placement judged at `nowMs`. Pure. */
+    const recompPlacementIsSafe = (nowMs: number, sourceStartMs: number, destStartMs: number): boolean => {
+      const day = dateOf(nowMs);
+      const destEndPlusBuffer = destStartMs + RECOMP_ITEM_MS + RECOMP_BUFFER_MS;
+      return sourceStartMs > nowMs && destStartMs > nowMs
+        && dateOf(sourceStartMs) === day && dateOf(destStartMs) === day && dateOf(destEndPlusBuffer) === day
+        && destEndPlusBuffer <= localDateTimeToUTC(addDaysToDateStr(day, 1), '00:00', TZ).getTime()
+        && localCalendarWeekStart(dateOf(sourceStartMs)) === localCalendarWeekStart(dateOf(destStartMs + RECOMP_ITEM_MS));
+    };
+    const recompBase = RECOMP_NOW + RECOMP_LEAD_MS;
+    const recompDest = recompBase + RECOMP_MOVE_OFFSET_MS;
+    check('Recomp fixture (CI-09): the fixed acceptance clock is 10:00 Asia/Kolkata on a Wednesday; the source, and the destination (+15 min, 20 min long, 2 min buffer), lie after it, inside that SAME local day and week',
+      getWeekdayForDateStr(RECOMP_DATE) === 3 && dateOf(RECOMP_NOW) === RECOMP_DATE && new Date(RECOMP_NOW + 5.5 * HOUR).toISOString().slice(11, 16) === '10:00' /* Asia/Kolkata: fixed UTC+5:30, no DST */ && recompPlacementIsSafe(RECOMP_NOW, recompBase, recompDest));
+    // Non-vacuous: the same guard rejects the old wall-clock placement at the real failing CI instant (run 45872154803).
+    const oldWallClockPlacement = (nowMs: number) => {
+      const [y, m, d] = addDaysToDateStr(dateOf(nowMs), 1).split('-').map(Number);
+      const remainingTodayMs = Date.UTC(y, m - 1, d) - 5.5 * HOUR - nowMs;
+      const leadMs = Math.max(MIN, Math.min(RECOMP_LEAD_MS, remainingTodayMs - RECOMP_MOVE_OFFSET_MS - RECOMP_ITEM_MS - RECOMP_BUFFER_MS));
+      const base = Math.ceil((nowMs + leadMs) / MIN) * MIN;
+      return { base, dest: base + RECOMP_MOVE_OFFSET_MS };
+    };
+    const failingCiInstant = Date.parse('2026-11-26T18:08:48Z');
+    const oldAtFailure = oldWallClockPlacement(failingCiInstant);
+    check('Recomp fixture (CI-09): the guard rejects the old "now + lead" placement at the 2026-11-26T18:08:48Z CI failure (23:38 IST)', !recompPlacementIsSafe(failingCiInstant, oldAtFailure.base, oldAtFailure.dest));
+    let recompClockReads = 0;
+    const recompDeps = { ...realRecompositionAcceptanceDeps, readClock: async () => { recompClockReads++; return new Date(RECOMP_NOW); } };
+
     const { ga: gaR } = await makeGoalActivity('Recomp', 1);
-    // Recomposition's own acceptance validates BOTH that targetDate equals
-    // the real current Asia/Kolkata local calendar date AND that the
-    // destination instant falls within that SAME local day -- a real-
-    // wall-clock-dependent window, same accepted residual risk every
-    // other Recomposition DB test in this codebase already carries
-    // (see goalActivityRhythmMaterializationDb.test.ts's own section 53).
-    // Scheduling comfortably EARLY (a short, bounded lead time, never
-    // more than what's left before local midnight) minimizes it.
-    const todayLocalDateRecomp = getDatePartsInTimezone(TZ, new Date()).dateStr;
-    const [midY, midM, midD] = addDaysToDateStr(todayLocalDateRecomp, 1).split('-').map(Number);
-    const tomorrowMidnightUTC = Date.UTC(midY, midM - 1, midD) - 5.5 * HOUR; // Asia/Kolkata is a fixed UTC+5:30 offset, no DST
-    const remainingTodayMs = tomorrowMidnightUTC - Date.now();
-    const idealLeadMs = 20 * MIN;
-    const moveOffsetMs = 15 * MIN;
-    const itemDurationMs = 20 * MIN;
-    const bufferMs = 2 * MIN;
-    const leadMs = Math.max(MIN, Math.min(idealLeadMs, remainingTodayMs - moveOffsetMs - itemDurationMs - bufferMs));
-    const recompBase = Math.ceil((Date.now() + leadMs) / MIN) * MIN;
     const dR = await accept(gaR, recompBase, 'intent-r');
     check('Recomp setup: 1 of 1 occurrence created (capacity now exactly full for this week)', dR.status === 'SAVED');
     const planR = (dR as any).plans[0];
-    const recompDate = todayLocalDateRecomp;
-    const recompDest = recompBase + moveOffsetMs; // later the SAME day -- same week, already at capacity (1 of 1) for gaR, but excluding itself makes this a same-week self-move
-    const rcDecision = { decision: 'MOVE' as const, planId: planR.id, title: planR.title, current: { start: new Date(planR.plannedStartAt), end: new Date(planR.plannedEndAt) }, to: { start: new Date(recompDest), end: new Date(recompDest + 20 * MIN) } };
-    const rcToken = signRecompositionProposal(user.id, { generatedAt: new Date(), targetDate: recompDate, timezone: TZ, summary: { state: 'CHANGES_PROPOSED' }, decisions: [rcDecision] } as any)!;
-    const rcResult = await acceptRemainingDayRecomposition(user.id, rcToken, realRecompositionAcceptanceDeps);
+    const occBeforeR = await occurrencesFor(gaR.id);
+    // later the SAME day -- same week, already at capacity (1 of 1) for gaR, but excluding itself makes this a same-week self-move
+    const rcDecision = { decision: 'MOVE' as const, planId: planR.id, title: planR.title, current: { start: new Date(planR.plannedStartAt), end: new Date(planR.plannedEndAt) }, to: { start: new Date(recompDest), end: new Date(recompDest + RECOMP_ITEM_MS) } };
+    const rcToken = signRecompositionProposal(user.id, { generatedAt: new Date(RECOMP_NOW), targetDate: RECOMP_DATE, timezone: TZ, summary: { state: 'CHANGES_PROPOSED' }, decisions: [rcDecision] } as any)!;
+    const rcResult = await acceptRemainingDayRecomposition(user.id, rcToken, recompDeps);
+    check('Recomp fixture (CI-09): the acceptance was judged at the fixed clock (read through deps.readClock), not the wall clock', recompClockReads >= 1);
     check('Recomp. the SAME enforcement point is reached via Recomposition acceptance: a same-week self-move (not exceeding capacity) SUCCEEDS through applyMoveWrites, proving one shared check, not two', rcResult.status === 'ACCEPTED');
+    const successorR = rcResult.status === 'ACCEPTED' ? rcResult.moves[0].successorPlanId : null;
+    const occAfterR = await occurrencesFor(gaR.id);
+    check('Recomp. the source plan is MOVED and still exactly ONE occurrence row (same id), now pointing at the successor -- counted once, never twice',
+      (await planStatus(planR.id)) === 'MOVED' && occAfterR.length === 1 && occBeforeR.length === 1 && occAfterR[0].id === occBeforeR[0].id && occAfterR[0].plannedActivityId === successorR);
+    check('Recomp. remainingThisWeek for the destination week is 0 after the self-move (1 of 1), never negative', ['EXCLUDED', 0].includes(await remaining(gaR, RECOMP_DATE)));
+
+    // ============================================================
+    // Recomp-neg. The SAME Recomposition path still REJECTS a Move that
+    // WOULD exceed capacity: a DIFFERENT occurrence (from the next week)
+    // moved into a week already at its target (1 of 1). Proves the
+    // positive check above is not vacuous -- the shared enforcement point
+    // is live on this path, and the self-move passed only because it
+    // excludes itself.
+    // ============================================================
+    const { ga: gaRN } = await makeGoalActivity('RecompNeg', 1);
+    const dRNFill = await accept(gaRN, RECOMP_NOW + 90 * MIN, 'intent-rn-fill'); // 11:30, fills RECOMP_DATE's week (1 of 1)
+    const dRNOther = await accept(gaRN, RECOMP_NOW + 7 * 24 * HOUR + 40 * MIN, 'intent-rn-other'); // the next Wednesday, 10:40 -- another week
+    check('Recomp-neg setup: the fixture week is filled to its target (1 of 1) and a second occurrence exists in the FOLLOWING week',
+      dRNFill.status === 'SAVED' && dRNOther.status === 'SAVED' && localCalendarWeekStart(dateOf(RECOMP_NOW + 7 * 24 * HOUR + 40 * MIN)) !== localCalendarWeekStart(RECOMP_DATE));
+    const planRNOther = (dRNOther as any).plans[0];
+    const plansBeforeRN = await totalPlans(user.id);
+    const occsBeforeRN = await occurrencesFor(gaRN.id);
+    const rnDest = RECOMP_NOW + 2 * HOUR; // 12:00 the same fixture day: inside today, clear of every other plan
+    check('Recomp-neg fixture (CI-09): the destination is inside the fixed acceptance day', recompPlacementIsSafe(RECOMP_NOW, rnDest, rnDest));
+    const rnDecision = { decision: 'MOVE' as const, planId: planRNOther.id, title: planRNOther.title, current: { start: new Date(planRNOther.plannedStartAt), end: new Date(planRNOther.plannedEndAt) }, to: { start: new Date(rnDest), end: new Date(rnDest + RECOMP_ITEM_MS) } };
+    const rnToken = signRecompositionProposal(user.id, { generatedAt: new Date(RECOMP_NOW), targetDate: RECOMP_DATE, timezone: TZ, summary: { state: 'CHANGES_PROPOSED' }, decisions: [rnDecision] } as any)!;
+    const rnResult = await acceptRemainingDayRecomposition(user.id, rnToken, recompDeps);
+    check('Recomp-neg. a Recomposition Move that WOULD exceed the destination week\'s target is REJECTED by the same enforcement point (SAVE_FAILED, code CAPACITY_EXCEEDED)', rnResult.status === 'SAVE_FAILED' && (rnResult as any).code === 'CAPACITY_EXCEEDED');
+    check('Recomp-neg. ZERO partial mutation: the plan is still UPCOMING, no successor, occurrence rows unchanged',
+      (await planStatus(planRNOther.id)) === 'UPCOMING' && (await totalPlans(user.id)) === plansBeforeRN && JSON.stringify(await occurrencesFor(gaRN.id)) === JSON.stringify(occsBeforeRN));
   } finally {
     await cleanup();
   }

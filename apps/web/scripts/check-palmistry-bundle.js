@@ -65,6 +65,10 @@ const IMAGE_INPUT_SENTINELS = [
   'g5-i1-dev', // dev gate flag value (compared at runtime, so never minified away)
   'Check a palm photo', // section heading (JSX text)
   'odml.pa.googleapis.com', // MediaPipe bundle (its usage-logger endpoint)
+  // AURA-PALM-04-I1 -- the in-memory construction context and the headless tracing model (lib/palm-analysis);
+  // both strings are used at runtime, so they survive minification whenever the code is bundled
+  'palm-04-construction-context@0.1.0', // construction.ts (toJSON kind)
+  'the photo this tracing belonged to was reset, replaced or closed', // tracing.ts (context-cleared message)
 ];
 
 // AURA-PALM-G5-I1-R2 (R1-F3) -- signatures of the MediaPipe runtime itself.

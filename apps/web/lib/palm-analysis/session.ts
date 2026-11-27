@@ -18,7 +18,8 @@
  *     a load that finishes after dispose().
  *   - State is volatile memory only. Nothing is persisted, logged or sent.
  */
-import { analyzePalmFrame } from './analyze';
+import { analyzePalmFrameWithDetection } from './analyze';
+import { createConstructionContext, type PalmConstructionContext } from './construction';
 import { isPalmImageInputEnabled } from './gate';
 import { createDefaultDecoder, defaultCanvasFactory, normalizeDrawableFrame, normalizeImageBlob, type PalmNormalizeEnv } from './normalize';
 import { palmInputError, validatePalmImageFile, type PalmBlobLike } from './validate';
@@ -52,6 +53,12 @@ export interface PalmAnalysisSession {
   submitDrawable(drawable: unknown, width: number, height: number, source?: PalmImageSourceKind): Promise<void>;
   /** Retry analysis of the current frame (e.g. after a model-load failure). */
   retry(): Promise<void>;
+  /**
+   * AURA-PALM-04-I1: the in-memory construction context of the CURRENT result (exactly one hand analysed), or
+   * null. Revoked on clear(), on every new submit (photo replacement), on retry(), when an analysis fails or is
+   * superseded, and on dispose(). Never part of the session state or the analysis result.
+   */
+  getConstructionContext(): PalmConstructionContext | null;
   clear(): void;
   dispose(): void;
   readonly disposed: boolean;
@@ -73,6 +80,12 @@ export function createPalmAnalysisSession(deps: PalmSessionDeps): PalmAnalysisSe
   let detector: PalmHandDetector | null = null;
   let detectorPromise: Promise<PalmHandDetector> | null = null;
   const listeners = new Set<(s: PalmSessionState) => void>();
+  // AURA-PALM-04-I1: the one live construction context (see construction.ts); revoked at every lifecycle boundary
+  let construction: { context: PalmConstructionContext; revoke: () => void } | null = null;
+  const revokeConstruction = () => {
+    construction?.revoke();
+    construction = null;
+  };
 
   const emit = (next: Omit<PalmSessionState, 'generation'>, gen: number) => {
     if (gen !== generation || disposed) return;
@@ -81,6 +94,7 @@ export function createPalmAnalysisSession(deps: PalmSessionDeps): PalmAnalysisSe
   };
 
   const releaseCurrentFrame = () => {
+    revokeConstruction(); // the context never outlives its frame
     state.frame?.release();
   };
 
@@ -128,11 +142,27 @@ export function createPalmAnalysisSession(deps: PalmSessionDeps): PalmAnalysisSe
     await yieldToUi();
     if (stale() || frame.released) return;
     try {
-      const result = analyzePalmFrame(frame, detector!);
-      if (stale()) return;
+      const { result, hand } = analyzePalmFrameWithDetection(frame, detector!);
+      if (stale()) return; // superseded: no context is ever created for an old generation
+      revokeConstruction();
+      if (hand && result.metrics && (result.status === 'accepted' || result.status === 'needs-retake')) {
+        construction = createConstructionContext(
+          {
+            imageWidth: frame.width,
+            imageHeight: frame.height,
+            landmarks: hand.landmarks,
+            ...(typeof hand.handednessLabel === 'string' ? { handednessLabel: hand.handednessLabel } : {}),
+            rotationDeg: result.metrics.rotationDeg,
+            qualityIssues: result.issues.map((i) => i.code),
+          },
+          gen,
+          () => gen === generation && !disposed && !frame.released,
+        );
+      }
       emit({ phase: 'result', frame, result, error: null }, gen);
     } catch (err) {
       if (stale()) return;
+      revokeConstruction();
       emit({ phase: 'error', frame, result: null, error: toError(err) }, gen);
     }
   };
@@ -193,6 +223,7 @@ export function createPalmAnalysisSession(deps: PalmSessionDeps): PalmAnalysisSe
     async retry() {
       const frame = state.frame;
       if (disposed || !frame || frame.released || state.phase !== 'error') return;
+      revokeConstruction();
       generation++;
       await analyseFrame(frame, generation);
     },
@@ -212,6 +243,9 @@ export function createPalmAnalysisSession(deps: PalmSessionDeps): PalmAnalysisSe
       try { detector?.close(); } catch { /* ignore */ }
       detector = null;
       // A load still in flight is closed by loadDetector's disposed check.
+    },
+    getConstructionContext() {
+      return construction && construction.context.isActive() ? construction.context : null;
     },
     get disposed() {
       return disposed;
