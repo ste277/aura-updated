@@ -296,6 +296,12 @@ const FORBIDDEN_METADATA_KEYS = new Set<string>([
   'reasons',
   'muhurtareasons',
   'name',
+  // AURA-MP-1: a person's private note, label, interests and location never reach an event.
+  'notes',
+  'note',
+  'relationshiplabel',
+  'interests',
+  'locationname',
   'savedpersonname',
   'recipientname',
   'senderdisplayname',
@@ -312,7 +318,7 @@ const SCOPE_VALUES = new Set(['GENERAL', 'PERSONAL', 'SHARED']);
 const TIMING_MODE_VALUES = new Set(['FIND', 'CHECK', 'COMPARE']);
 const PREFERENCE_VALUES = new Set(['EARLIER', 'LATER', 'DIFFERENT_DAY', 'NO_PREFERENCE']);
 const SHARE_METHOD_VALUES = new Set(['native_share', 'copy_link']);
-const RELATIONSHIP_VALUES = new Set(['PARTNER', 'SPOUSE', 'FAMILY', 'FRIEND', 'OTHER']);
+const RELATIONSHIP_VALUES = new Set(['PARTNER', 'SPOUSE', 'FAMILY', 'FRIEND', 'OTHER', 'PARENT', 'CHILD', 'SIBLING']);
 // Product Structure V2 (brief section 31): "at minimum ensure we can
 // distinguish... source = PLAN | MUHURTHAM, planningMode = EVERYDAY |
 // IMPORTANT | CEREMONIAL" -- reusing the exact same closed vocabularies

@@ -88,7 +88,9 @@ export interface EverydaySharedFitRequest {
    * biases what counts as "generally favorable" (same separation SHARED
    * Muhurtham already maintains). */
   context: DailyAssistantContext;
-  partnerContext: PersonalMuhurtaContext;
+  /** AURA-MP-1: undefined when the person has no chart details -- the partner
+   * side is then scored with no personal context (neutral delta). */
+  partnerContext?: PersonalMuhurtaContext;
 }
 
 export type EverydaySharedFitOutcome =
@@ -136,7 +138,9 @@ export function evaluateEverydaySharedCandidate(params: {
    * owner's natal data) -- NOT personalContext-stripped, unlike the context
    * used to produce `generalCandidate` itself. */
   context: DailyAssistantContext;
-  partnerContext: PersonalMuhurtaContext;
+  /** AURA-MP-1: undefined when the person has no chart details -- the partner
+   * side is then scored with no personal context (neutral delta). */
+  partnerContext?: PersonalMuhurtaContext;
 }): EverydaySharedCandidate {
   const { profile, generalCandidate, durationMinutes, context, partnerContext } = params;
   const start = new Date(generalCandidate.start);

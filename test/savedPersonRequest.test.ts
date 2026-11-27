@@ -57,7 +57,11 @@ check('Missing birthTimezone is rejected', buildSavedPersonInput({ ...validBody,
 
 check('Invalid relationshipType is rejected', buildSavedPersonInput({ ...validBody, relationshipType: 'SOULMATE' }).ok === false);
 check('Malformed birthDate (not YYYY-MM-DD) is rejected', buildSavedPersonInput({ ...validBody, birthDate: '03/14/1992' }).ok === false);
-check('Invalid calendar-looking birthDate (bad month) is still format-checked (regex-level)', buildSavedPersonInput({ ...validBody, birthDate: '1992-13-40' }).ok === true); // regex only checks shape, matching the existing /api/users/birth-profile route's own validation depth
+// AURA-MP-1 R1 F3 (62007): this assertion used to pin the DEFECT (an impossible date passed validation and then
+// threw a RangeError inside the database writer -> HTTP 500). Impossible calendar dates are now a controlled 400.
+check('Invalid calendar date (bad month/day, 1992-13-40) is rejected by validation (R1 F3; previously accepted, then a 500)', buildSavedPersonInput({ ...validBody, birthDate: '1992-13-40' }).ok === false);
+check('R1 F3: 2023-02-30 and 2021-04-31 are rejected with a client error', buildSavedPersonInput({ ...validBody, birthDate: '2023-02-30' }).ok === false && buildSavedPersonInput({ ...validBody, birthDate: '2021-04-31' }).ok === false);
+check('R1 F3: a real leap day (1992-02-29) is still accepted', buildSavedPersonInput({ ...validBody, birthDate: '1992-02-29' }).ok === true);
 check('Malformed birthTime (not HH:MM 24h) is rejected', buildSavedPersonInput({ ...validBody, birthTime: '8:15am' }).ok === false);
 check('birthTime hour 24 is rejected (out of 24h range)', buildSavedPersonInput({ ...validBody, birthTime: '24:00' }).ok === false);
 check('Invalid birthTimezone (not a real IANA name) is rejected', buildSavedPersonInput({ ...validBody, birthTimezone: 'Mars/OlympusMons' }).ok === false);

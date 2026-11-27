@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSessionFromRequest } from '../../../lib/session';
 import { refuseUnboundWrite, refuseAccountMismatch } from '../../../lib/expectedAccount';
 import { DIRECT_PLAN_SCHEDULING_MODE } from '../../../lib/plannedActivitySchedulingMode';
-import { beginTransaction, createPlannedActivity, listPlannedActivities, getPlannedActivityForOwner, getGuestConversionRedemption, claimGuestConversionToken, fillGuestConversionRedemption, getPlanCreationClaim, claimPlanCreation, fillPlanCreationClaim, linkGoalActivityToPlannedActivity, lockGoalParentLifecycleForPlanning, materializeGoalActivityRhythmOccurrence, getUserById } from '../../../lib/db';
+import { beginTransaction, createPlannedActivity, listPlannedActivities, getPlannedActivityForOwner, getGuestConversionRedemption, claimGuestConversionToken, fillGuestConversionRedemption, getPlanCreationClaim, claimPlanCreation, fillPlanCreationClaim, linkGoalActivityToPlannedActivity, lockGoalParentLifecycleForPlanning, materializeGoalActivityRhythmOccurrence, getUserById, getSavedPersonForOwner } from '../../../lib/db';
+import { isMyPeopleServerEnabled } from '../../../lib/myPeopleGate';
 import { parseJsonObject } from '../../../lib/request';
 import { verifyGuestStateToken, hashGuestConversionToken } from '../../../lib/guestState';
 import { parseEventLocationSnapshot } from '../../../lib/plansRequest';
@@ -306,6 +307,18 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: eventLocationSnapshot.error }, { status: 400 });
   }
 
+  // AURA-MP-1 -- OPTIONAL My People link. Honoured ONLY while My People is
+  // enabled (ignored, never written, when it is off). Must be the signed-in
+  // user's own person: another user's id behaves exactly like an unknown one
+  // (404). createPlannedActivity's INSERT additionally re-checks ownership
+  // in SQL, so a cross-owner link can never be persisted.
+  let savedPersonId: string | null = null;
+  if (isMyPeopleServerEnabled() && typeof body?.savedPersonId === 'string' && body.savedPersonId.trim()) {
+    const person = await getSavedPersonForOwner(session.userId, body.savedPersonId.trim());
+    if (!person) return NextResponse.json({ error: 'Person not found.' }, { status: 404 });
+    savedPersonId = person.id;
+  }
+
   // HPG3-A2 -- cheap, pre-transaction gathering (same discipline as every
   // other validation above): a goalActivityId write may need to route
   // through materializeGoalActivityRhythmOccurrence, which requires the
@@ -357,6 +370,7 @@ export async function POST(req: NextRequest) {
       eventTimezone: eventLocationSnapshot.eventTimezone,
       eventLocationName: eventLocationSnapshot.eventLocationName,
       activityId: validatedActivityId,
+      savedPersonId,
       // F1: a direct plan is an explicit exact-time choice made outside the Constructor's flexible-placement flow.
       // Server constant, never read from the request body -- a client cannot grant recomposition permission.
       schedulingMode: DIRECT_PLAN_SCHEDULING_MODE,

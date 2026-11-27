@@ -16,3 +16,7 @@ export { analyzePalmFrameWithDetection } from './analyze';
 export { PALM_CONSTRUCTION_CONTEXT_VERSION, type PalmConstructionContext, type PalmConstructionData } from './construction';
 export { createTracingModel, TracingError, TRACING_LINES, MAX_TRACE_INPUT_POINTS, PALM_TRACING_MODEL_VERSION } from './tracing';
 export type { TracingModel, TracingLineView, TracingLineStatus, TracingSkipReason, TracePlacement, TracingGuides, TracingErrorCode } from './tracing';
+// AURA-PALM-04-I2 -- the tracing overlay's single image geometry, plus the approved line names and the I1 trace point
+// limits it shows (read-only values re-exported by the geometry module; nothing is redefined).
+export { PALM_TRACING_GEOMETRY_VERSION, containRect, imageToClient, clientToImage, imageDistance, spaceStroke, resampleStroke, TRACING_LINE_NAMES, TRACE_POINT_LIMITS } from './tracingGeometry';
+export type { Rect as TracingRect, Pt as TracingPoint, TracingLineId, TracingUnassessedReason } from './tracingGeometry';
