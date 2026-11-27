@@ -26,7 +26,7 @@ import { upsertUserByEmail, updateBirthProfile, createGoalWithActivities, addGoa
 import { createSessionToken } from '../apps/web/lib/auth';
 import { getDatePartsInTimezone } from '../apps/web/lib/timezone';
 import { localCalendarWeekBounds } from '../apps/web/lib/goalActivityRhythm';
-import { addCivilDays } from './lifecycleFixtureCalendar';
+import { addCivilDays, civilWeekday, fixtureAnchorMonday, realClockReferenceForFixture } from './lifecycleFixtureCalendar';
 import { POST as weeklyProposalRoute } from '../apps/web/app/api/daily-assistant/goal-rhythm/weekly-proposal/route';
 import { POST as weeklyAcceptRoute } from '../apps/web/app/api/daily-assistant/goal-rhythm/weekly-accept/route';
 import {
@@ -63,10 +63,11 @@ const TZ = 'Asia/Kolkata';
 // below, before any route call.
 let frozenNowIso = '';
 
-const fakeReq = (cookie: string | undefined, body: unknown): any => ({
+// `nowIso` (optional) overrides the frozen "now" for ONE request -- used only by section 8's own fixed clock (AURA-CI-10).
+const fakeReq = (cookie: string | undefined, body: unknown, nowIso: string = frozenNowIso): any => ({
   cookies: { get: (n: string) => (cookie !== undefined && n === 'as_session' ? { value: cookie } : undefined) },
   json: async () => body,
-  headers: new Headers(frozenNowIso ? { 'x-e2e-now': frozenNowIso } : {}),
+  headers: new Headers(nowIso ? { 'x-e2e-now': nowIso } : {}),
 });
 
 async function sql(text: string, params: unknown[] = []): Promise<any[]> {
@@ -210,13 +211,33 @@ async function main() {
     // the shipped UI going forward; this test proves the reconciliation
     // logic is independently correct as defense in depth, regardless of
     // that UI gate.
+    //
+    // AURA-CI-10: this section used to run at the suite's real-clock
+    // frozen "now" and build the second instant as `first.start + 4h`.
+    // The first proposal is the engine's best remaining slot, so whenever
+    // it started after ~20:00 local (today's slot in the IST evening, or a
+    // later day's 23:15 slot on other dates) the second instant crossed
+    // local midnight and this setup failed (CI 46002683525 at 18:27 IST,
+    // 46005075636 at 18:43 IST). The section now runs at its OWN fixed
+    // instant -- 06:00 Asia/Kolkata on the Wednesday after the shared
+    // CI-07 fixture anchor Monday (>= 28 days ahead) -- sent through the
+    // same x-e2e-now seam, for this section's requests only. The second
+    // instant is still the first +/- 4 hours with the same duration: +4h
+    // when that ends inside the first's local date, otherwise -4h. With
+    // the section clock at 06:00 one of the two always lies after "now"
+    // and inside that date, so the same-date pair no longer depends on
+    // when CI runs or which slot the engine ranks first.
+    const SAME_DATE_DAY = addCivilDays(fixtureAnchorMonday(realClockReferenceForFixture(), TZ), 2); // a Wednesday
+    const SAME_DATE_NOW_ISO = new Date(Date.parse(`${SAME_DATE_DAY}T06:00:00.000Z`) - 5.5 * 3600000).toISOString(); // 06:00 IST (fixed UTC+5:30, no DST)
+    check('8. fixture (CI-10): the section clock is 06:00 Asia/Kolkata on a Wednesday at least 28 days ahead, independent of when this run happens',
+      civilWeekday(SAME_DATE_DAY) === 3 && getDatePartsInTimezone(TZ, new Date(SAME_DATE_NOW_ISO)).dateStr === SAME_DATE_DAY && Date.parse(SAME_DATE_NOW_ISO) > Date.now() + 27 * 24 * 3600000);
     const user2 = await upsertUserByEmail({ email: `hgr3c2-weekly-review-client-samedate-${Date.now()}@example.com`, cityName: 'Chennai', latitude: 13.0827, longitude: 80.2707, timezone: TZ });
     await updateBirthProfile(user2.id, { birthDate: '1990-06-15', birthTime: '08:30', birthCityName: 'Chennai', birthLatitude: 13.0827, birthLongitude: 80.2707, birthTimezone: TZ });
     const tok2 = createSessionToken(user2.id, user2.email);
     const { goal: goal2 } = await createGoalWithActivities({ userId: user2.id, title: 'Mindfulness (HGR3-C2 same-date fixture)', targetDate: null, activities: [] });
     const activity2 = await addGoalActivity(user2.id, goal2.id, { title: 'Meditate', activityId: 'meditation', rhythm: { kind: 'N_PER_WEEK', targetPerWeek: 2 } });
     if (!activity2) throw new Error('fixture setup failed: second addGoalActivity returned null');
-    const proposal3Res = await weeklyProposalRoute(fakeReq(tok2, { goalActivityId: activity2.id }));
+    const proposal3Res = await weeklyProposalRoute(fakeReq(tok2, { goalActivityId: activity2.id }, SAME_DATE_NOW_ISO));
     const proposal3 = parseWeeklyProposalResponseBody(await proposal3Res.json(), proposal3Res.status);
     check('8. setup: a real proposal for the isolated second user/GoalActivity returns at least one suitable session', proposal3.status === 'OK' && proposal3.proposals.length >= 1);
     if (proposal3.status === 'OK' && proposal3.proposals.length >= 1) {
@@ -226,18 +247,26 @@ async function main() {
       // start whose OWN local date disagrees with the claimed localDate
       // as TIME_DATE_MISMATCH, so this must be a real same-day instant,
       // not borrowed from a different day's proposal) -- a few hours
-      // later, same duration, exactly the shape an Adjust-onto-a-
-      // sibling's-date would have produced pre-fix.
-      const secondStart = new Date(new Date(first.start).getTime() + 4 * 3600000);
-      const secondEnd = new Date(secondStart.getTime() + first.durationMinutes * 60000);
+      // later (or, when that would leave the date, earlier), same
+      // duration, exactly the shape an Adjust-onto-a-sibling's-date would
+      // have produced pre-fix. See the AURA-CI-10 note above.
+      const durationMs = first.durationMinutes * 60000;
+      const secondStartFor = (offsetMs: number) => new Date(Date.parse(first.start) + offsetMs);
+      const staysOnFirstDate = (s: Date) => getDatePartsInTimezone(TZ, s).dateStr === first.localDate && getDatePartsInTimezone(TZ, new Date(s.getTime() + durationMs - 1)).dateStr === first.localDate;
+      const secondStart = staysOnFirstDate(secondStartFor(4 * 3600000)) ? secondStartFor(4 * 3600000) : secondStartFor(-4 * 3600000);
+      const secondEnd = new Date(secondStart.getTime() + durationMs);
       const secondStillSameDay = getDatePartsInTimezone(TZ, secondStart).dateStr === first.localDate;
+      check('8. fixture (CI-10): the proposal was generated for the fixed section clock -- its first session lies on or after the fixed Wednesday, after the section clock',
+        first.localDate >= SAME_DATE_DAY && Date.parse(first.start) > Date.parse(SAME_DATE_NOW_ISO));
       check('8. setup: the constructed second instant genuinely falls on the SAME local date as the first (a real, valid same-date pair)', secondStillSameDay);
+      check('8. setup (CI-10): the second instant is genuinely distinct and valid -- exactly 4 hours from the first, same duration, entirely inside that local date, and after the section clock (never already elapsed)',
+        Math.abs(secondStart.getTime() - Date.parse(first.start)) === 4 * 3600000 && secondEnd.getTime() - secondStart.getTime() === Date.parse(first.end) - Date.parse(first.start) && staysOnFirstDate(secondStart) && secondStart.getTime() > Date.parse(SAME_DATE_NOW_ISO));
       if (secondStillSameDay) {
         const secondOnFirstDate = { localDate: first.localDate, start: secondStart.toISOString(), end: secondEnd.toISOString() };
         const firstSubmitted = { localDate: first.localDate, start: first.start, end: first.end };
         const sameDateSessions = [firstSubmitted, secondOnFirstDate];
         const acceptanceIdC = randomUUID();
-        const res2 = await weeklyAcceptRoute(fakeReq(tok2, buildWeeklyAcceptanceRequestBody(activity2.id, acceptanceIdC, sameDateSessions)));
+        const res2 = await weeklyAcceptRoute(fakeReq(tok2, buildWeeklyAcceptanceRequestBody(activity2.id, acceptanceIdC, sameDateSessions), SAME_DATE_NOW_ISO));
         const sameDateResult = parseWeeklyAcceptanceResponseBody(await res2.json(), res2.status);
         check('8. the real backend, with these two same-date sessions genuinely isolated from any other booking, reproduces the live repro exactly: the first-processed session succeeds, the second is rejected as a payload-binding conflict -- never both silently failing or both silently succeeding', sameDateResult.status === 'OK' && sameDateResult.summary.acceptedCount === 1 && sameDateResult.summary.failedCount === 1 && sameDateResult.summary.sessions[0]?.outcome === 'ACCEPTED' && sameDateResult.summary.sessions[1]?.outcome === 'FAILED' && (sameDateResult.summary.sessions[1] as any)?.reason === 'ACCEPTANCE_IDENTITY_CONFLICT');
         if (sameDateResult.status === 'OK') {
