@@ -218,7 +218,7 @@ async function partB(direct: LibPool) {
     c.release();
     const cs = d.outcome === 'committed' ? await releaseCommittedAuthSession(direct, d.authorization) : null;
     check('B2 acknowledged COMMIT -> outcome committed with an authorization; the decision itself carries no sid', d.outcome === 'committed' && !hasSid(d) && !hasSid((d as { authorization?: unknown }).authorization));
-    check('B2 the commit helper sent only its in-transaction check and COMMIT (no BEGIN / ROLLBACK / SET)', sent.length === 2 && /^SELECT txid_current_if_assigned/.test(sent[0]) && sent[1] === 'COMMIT', sent.map((x) => x.slice(0, 40)));
+    check('B2 (R3) the commit helper sent ONE message: the transaction-binding check and COMMIT together (no BEGIN / ROLLBACK / SET)', sent.length === 1 && /^DO \$auth_session_commit\$ BEGIN IF txid_current_if_assigned\(\) IS DISTINCT FROM \d+::bigint/.test(sent[0]) && /; COMMIT$/.test(sent[0]), sent.map((x) => x.slice(0, 60)));
     check('B2 confirmed commit + live matching row -> CommittedAuthSession whose sid hashes to the row', cs?.state === 'committed' && hashSessionId(cs.sid) === p.idHash && cs.userId === u);
     const again = d.outcome === 'committed' ? await releaseCommittedAuthSession(direct, d.authorization).then(() => 'resolved', (e) => (e instanceof TypeError ? 'TypeError' : 'other')) : 'n/a';
     check('B2 an authorization releases at most once', again === 'TypeError', again);
@@ -246,14 +246,15 @@ async function partB(direct: LibPool) {
     const d = await commitAuthSessionTransaction(lib<LibClient>(c), p);
     const again = await commitAuthSessionTransaction(lib<LibClient>(c), p).then(() => 'resolved', (e) => (e instanceof TypeError ? 'TypeError' : 'other'));
     c.release();
-    check("B4 caller's own ROLLBACK, then the commit helper -> rolled_back (session_not_in_transaction), no authorization, no row; cannot be retried", d.outcome === 'rolled_back' && (d as { reason?: string }).reason === 'session_not_in_transaction' && !('authorization' in d) && !(await independentSees(p.idHash)) && again === 'TypeError', d);
+    check("B4 caller's own ROLLBACK, then the commit helper -> rolled_back (transaction_mismatch, R3), no authorization, no row; cannot be retried", d.outcome === 'rolled_back' && (d as { reason?: string }).reason === 'transaction_mismatch' && !('authorization' in d) && !(await independentSees(p.idHash)) && again === 'TypeError', d);
   }
   {
     const { c, p } = await openTx();
     const err = await c.query('SELECT 1 / 0').then(() => 'none', (e) => e.code);
     const d = await commitAuthSessionTransaction(lib<LibClient>(c), p);
+    await c.query('ROLLBACK').catch(() => {}); // R3: an aborted transaction is left to its caller to end
     c.release();
-    check('B4 aborted transaction (22012) -> COMMIT answers ROLLBACK -> rolled_back (aborted_transaction), no authorization', err === '22012' && d.outcome === 'rolled_back' && (d as { reason?: string }).reason === 'aborted_transaction' && !('authorization' in d) && !(await independentSees(p.idHash)), d);
+    check('B4 aborted transaction (22012) -> binding check refused with 25P02, COMMIT skipped (R3) -> rolled_back (aborted_transaction), no authorization', err === '22012' && d.outcome === 'rolled_back' && (d as { reason?: string }).reason === 'aborted_transaction' && !('authorization' in d) && !(await independentSees(p.idHash)), d);
   }
   {
     const c = await admin.connect();

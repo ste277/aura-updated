@@ -1264,6 +1264,12 @@ jobs:
       # whatever a read-back finds (B, R2 39235), and 720-hour expiry (C).
       - name: Run session R1 deadline, durability and expiry DB test (AUTH-SESSION-01-I1 R1)
         run: npx ts-node test/authSessionR1Db.test.ts
+      # AURA-AUTH-SESSION-01-I1 R3 (39237) -- transaction binding (an authorization only
+      # from the acknowledged COMMIT of the transaction whose INSERT created the
+      # session) and single-use release under overlapping calls, with exact
+      # raw-id release counts, deterministic barriers and the loopback fault proxy.
+      - name: Run session R3 transaction binding and single-use release DB test (AUTH-SESSION-01-I1 R3)
+        run: npx ts-node test/authSessionR3Db.test.ts
       - name: Verify every repository migration was recorded as applied
         run: |
           set -euo pipefail
