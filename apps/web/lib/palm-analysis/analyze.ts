@@ -8,7 +8,7 @@
  * found and never interprets anything.
  */
 import { assessQuality, orientation, palmPolygon, bbox, toGray, extendedFingerCount, type QualityIssue } from './quality';
-import { PalmPipelineError, type PalmAnalysisResult, type PalmFeedbackCode, type PalmFrame, type PalmHandDetector } from './types';
+import { PalmPipelineError, type PalmAnalysisResult, type PalmFeedbackCode, type PalmFrame, type PalmHandDetection, type PalmHandDetector } from './types';
 
 export const PALM_ACCEPTED_HEADLINE = 'Palm image looks suitable for further analysis.';
 export const PALM_SCOPE_NOTE = 'This checks hand position and image quality only. It does not read palm lines or make any prediction.';
@@ -33,6 +33,15 @@ export const PALM_RETAKE_HEADLINE = 'This photo is not suitable yet. See the sug
 const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
 
 export function analyzePalmFrame(frame: PalmFrame, detector: PalmHandDetector): PalmAnalysisResult {
+  return analyzePalmFrameWithDetection(frame, detector).result;
+}
+
+/**
+ * AURA-PALM-04-I1 -- the same analysis (identical result), also returning the ONE detected hand so the session can
+ * build its in-memory construction context (construction.ts). The hand is null unless exactly one hand was found
+ * and analysed. The result itself stays pixel-free and landmark-free.
+ */
+export function analyzePalmFrameWithDetection(frame: PalmFrame, detector: PalmHandDetector): { result: PalmAnalysisResult; hand: PalmHandDetection | null } {
   if (frame.released) throw new PalmPipelineError('analysis-failed', 'frame already released');
   const { width: w, height: h } = frame;
   const t0 = now();
@@ -41,10 +50,10 @@ export function analyzePalmFrame(frame: PalmFrame, detector: PalmHandDetector): 
   const base = { source: frame.source, handsDetected: hands.length } as const;
 
   if (hands.length === 0) {
-    return { ...base, status: 'no-hand', headline: PALM_NO_HAND_HEADLINE, issues: [], timing: { detectMs, postMs: 0 } };
+    return { result: { ...base, status: 'no-hand', headline: PALM_NO_HAND_HEADLINE, issues: [], timing: { detectMs, postMs: 0 } }, hand: null };
   }
   if (hands.length > 1) {
-    return { ...base, status: 'multiple-hands', headline: PALM_MULTIPLE_HANDS_HEADLINE, issues: [], timing: { detectMs, postMs: 0 } };
+    return { result: { ...base, status: 'multiple-hands', headline: PALM_MULTIPLE_HANDS_HEADLINE, issues: [], timing: { detectMs, postMs: 0 } }, hand: null };
   }
 
   const t1 = now();
@@ -66,7 +75,7 @@ export function analyzePalmFrame(frame: PalmFrame, detector: PalmHandDetector): 
   const box = bbox(poly);
   const clamp = (v: number) => Math.min(1, Math.max(0, v));
   const accepted = issues.length === 0;
-  return {
+  const result: PalmAnalysisResult = {
     ...base,
     status: accepted ? 'accepted' : 'needs-retake',
     headline: accepted ? PALM_ACCEPTED_HEADLINE : PALM_RETAKE_HEADLINE,
@@ -84,4 +93,5 @@ export function analyzePalmFrame(frame: PalmFrame, detector: PalmHandDetector): 
     palmBox: { x0: clamp(box.x0 / w), y0: clamp(box.y0 / h), x1: clamp(box.x1 / w), y1: clamp(box.y1 / h) },
     timing: { detectMs, postMs: now() - t1 },
   };
+  return { result, hand };
 }
