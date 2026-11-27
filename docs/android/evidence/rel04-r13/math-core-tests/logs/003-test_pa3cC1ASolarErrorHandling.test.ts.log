@@ -1,0 +1,50 @@
+$ npx ts-node test/pa3cC1ASolarErrorHandling.test.ts
+# job=math-core-tests step=Run PA-3C-C1A typed solar errors test env={}
+OK   70N, June solstice 2026-06-21 -> POLAR_DAY (cosH < -1, continuous daylight)
+OK   70N, Dec solstice 2026-12-21 -> POLAR_NIGHT (cosH > 1, continuous darkness)
+OK   70S, Dec solstice 2026-12-21 -> POLAR_DAY (Southern summer)
+OK   70S, June solstice 2026-06-21 -> POLAR_NIGHT (Southern winter)
+OK   66.5N (accepted MAX_VALID_LATITUDE), June solstice -> still throws SolarNoEventError/POLAR_DAY
+OK   66.5S (accepted MIN_VALID_LATITUDE), Dec solstice -> still throws SolarNoEventError/POLAR_DAY
+OK   65.6N (below the 66.5 cutoff, above the real ~65.448 threshold), June solstice -> still throws (confirms the cutoff is not a complete guarantee)
+OK   66.5N, March equinox (same lat that no-events in June) -> succeeds
+OK   60N, June solstice -> succeeds (mid-latitude control)
+OK   Chennai 13.08N equatorial-ish control -> succeeds
+OK   boundary-1e-9: 65.448462876N succeeds
+OK   boundary+1e-9: 65.448462876N throws SolarNoEventError (no tolerance band smoothing the knife-edge)
+OK   boundary gap is a genuine floating-point knife-edge, not a wide fabricated band
+OK   NaN latitude -> SolarInputValidationError (not silent NaN propagation)
+OK   Infinity latitude -> SolarInputValidationError
+OK   -Infinity latitude -> SolarInputValidationError
+OK   latitude = 200 (out of physical range) -> SolarInputValidationError (previously silently "succeeded")
+OK   latitude = -91 (out of physical range) -> SolarInputValidationError
+OK   latitude = 90 exactly (inclusive boundary, pole) -> accepted as valid input, but always resolves to SolarNoEventError, never silently "succeeds"
+OK   NaN longitude -> SolarInputValidationError
+OK   Infinity longitude -> SolarInputValidationError
+OK   longitude = 300 (out of [-180,180]) -> SolarInputValidationError
+OK   NaN day component -> SolarInputValidationError
+OK   NaN tzOffsetMinutes -> SolarInputValidationError
+OK   isSolarError(SolarNoEventError) -> true
+OK   isSolarError(SolarInputValidationError) -> true
+OK   isSolarError(SolarComputationError) -> true
+OK   isSolarError(plain Error) -> false (unrelated errors are not swallowed)
+OK   isSolarError(non-error value) -> false
+OK   getDailySolarWindows with an Invalid Date -> SolarInputValidationError (not a downstream RangeError)
+OK   getDailySolarWindows with a valid Date/location -> succeeds
+OK   getDailySolarWindows at a polar no-event location/date -> SolarNoEventError propagates (not swallowed at this layer)
+OK   C1A-01 Home: imports isSolarError
+OK   C1A-01 Home: computeSolarEphemeris call is wrapped in try/catch
+OK   C1A-02 Panchangam API: uses solarErrorResponse (no raw err.message leak)
+OK   C1A-02 Panchangam API: no longer returns err.message directly
+OK   C1A-03 Today's Panchangam: catches around getPanchangForDate
+OK   C1A-04 My Day: narrowed catch uses isSolarError and rethrows otherwise
+OK   C1A-04 My Day: buildTomorrowPreview is called OUTSIDE the narrowed try block
+OK   C1A-05 Ask Aura: handlePanchangQuery catches and checks SOLAR_NO_EVENT specifically
+OK   C1A-08 Calendar feed: catches SolarNoEventError around getDailySolarWindows
+OK   C1B-02 Muhurtham/Chaturmas: PeriodEligibilityResult now has an explicit UNAVAILABLE status distinct from ELIGIBLE/INELIGIBLE
+OK   C1A-07 Daily assistant: DailyBriefing.peakWindow NOT made optional/nullable (confirmed blocker left as-is, not worked around)
+
+43 passed, 0 failed.
+ALL PA-3C-C1A CHECKS PASSED
+
+# exit=0 signal=

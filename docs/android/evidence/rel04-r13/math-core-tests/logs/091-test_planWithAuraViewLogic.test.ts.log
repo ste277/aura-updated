@@ -1,0 +1,30 @@
+$ npx ts-node test/planWithAuraViewLogic.test.ts
+# job=math-core-tests step=Run Plan-with-Aura view logic test env={"TS_NODE_COMPILER_OPTIONS":"{\"jsx\":\"react\"}"}
+OK   A known catalog activity (exact title match) resolves to activityId, not taskTitle
+OK   A known catalog activity is matched case-insensitively
+OK   A known catalog activity chip title ("Tea Break") resolves to its activityId
+OK   Free text with no catalog match sends taskTitle, not activityId
+OK   Free text is trimmed before comparison/sending
+OK   ANYTIME maps to ANY for the Timing Search API
+OK   MORNING/AFTERNOON/EVENING/NIGHT pass through unchanged
+OK   WORK_HOURS (unreachable via this UI) falls back to ANY rather than being sent verbatim
+OK   RESULT_LABEL_TEXT covers every TimingCandidateLabel with the brief's exact copy
+OK   findCandidateKey differs for two distinct candidates
+OK   findCandidateKey is stable for the same candidate
+OK   planPayloadFromCandidate carries the activity title as the plan title
+OK   planPayloadFromCandidate carries the candidate's exact start/end instants
+OK   planPayloadFromCandidate carries the candidate's windowLabel verbatim (so windowTypeFromLabel still resolves it)
+OK   planPayloadFromCandidate's note uses the friendly RESULT_LABEL_TEXT, not the raw engine label
+OK   planPayloadFromCandidate rescales the 0-10 score back to the existing /100 plan-list convention
+OK   planPayloadFromCandidate's details match the shared plain-language projection of the candidate's reasons
+OK   planPayloadFromCandidate's details never name a raw Panchang term (Rohini/Shukla Panchami/Nakshatra/Tithi)
+OK   planPayloadFromCandidate always produces a googleCalendarUrl
+OK   FIND returns multiple ranked candidates for the component to render as BEST MATCH + OTHER GOOD OPTIONS
+OK   FIND candidates are pre-sorted descending, matching the component's "candidates[0] is best" assumption
+OK   COMPARE ranks the two supplied options so candidates[0] is the "Recommended" card and candidates[1] is "Compared With"
+OK   CHECK response always carries a requestedCandidate matching the exact requested instant (component renders it unconditionally)
+OK   CHECK with checkNearbyWindowMinutes: 0 never returns betterNearby (component must not render the "Better Nearby" section)
+
+ALL PLAN-WITH-AURA-VIEW LOGIC CHECKS PASSED
+
+# exit=0 signal=

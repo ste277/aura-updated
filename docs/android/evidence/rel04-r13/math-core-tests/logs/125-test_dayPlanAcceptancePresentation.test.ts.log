@@ -1,0 +1,53 @@
+$ npx ts-node test/dayPlanAcceptancePresentation.test.ts
+# job=math-core-tests step=Run Day Plan acceptance presentation test env={}
+OK   1. every real AcceptanceRejectionReason maps to non-empty, non-enum text
+OK   2. STALE_PREVIEW maps to the "day changed" copy
+OK   3. CONFLICT maps to a distinct schedule-changed message
+OK   4. INVALID_ACTIVITY maps to an activity-specific message
+OK   5. TIMING_CHECK_FAILED maps to a timing-specific message
+OK   6. SAVED classifies as SAVED
+OK   7. ALREADY_ACCEPTED classifies as SAVED (identical treatment, this ticket's own section 12)
+OK   8. REJECTED classifies as STALE, carrying human-readable copy
+OK   9. IDEMPOTENCY_CONFLICT classifies as STALE (fail closed, this ticket's own section 15), never as an ordinary conflict
+OK   10. SAVE_FAILED classifies as FAILED (retryable)
+OK   10b. HPG3-A3b -- a codeless SAVE_FAILED keeps the EXACT pre-A3b generic message and carries no code
+OK   10c. HPG3-A3b -- a known SAVE_FAILED code (DAILY_CAPACITY_EXCEEDED) classifies as FAILED, carries the code, and uses distinct, non-generic copy
+OK   10d. HPG3-A3b -- every known SchedulingEligibilityErrorCode produces a distinct, non-generic FAILED message and carries its own code
+OK   10e. HPG3-A3b -- the weekly-capacity message never implies a different TIME would resolve it (this ticket's own section 3)
+OK   11. NETWORK_ERROR classifies as FAILED (retryable)
+OK   12. UNKNOWN_RESPONSE classifies as FAILED (generic failure, this ticket's own section 10)
+OK   13. every real AcceptConstructedDayClientResult status is handled (no silent fallthrough)
+OK   14. IDLE allows submission
+OK   15. SAVING blocks a second submission (in-flight guard)
+OK   16. SAVED blocks resubmission (no accidental resave, this ticket's own section 19)
+OK   17. STALE allows a fresh submission after review-again produces a new preview
+OK   18. FAILED allows retry
+OK   19. a preview with proposed items is submittable
+OK   20. a preview with zero proposed items is NOT submittable
+OK   21. no cached id yet: generates a fresh id for the current identity key
+OK   22. same identity key on a retry: reuses the SAME cached id, never regenerates
+OK   23. a different identity key: generates a NEW id
+OK   24. same object: identical identity key (trivially, by reference-independence)
+OK   25. deep-cloned equivalent proposal (different object, same acceptance-relevant content): SAME identity key
+OK   26. presentation-only warning change: SAME identity key
+OK   27. capacity-state-only change: SAME identity key
+OK   28. deferred-items-only change: SAME identity key
+OK   29. constructionWindow change: NEW identity key
+OK   30. proposed start change: NEW identity key
+OK   31. proposed end/duration change: NEW identity key
+OK   32. title change: NEW identity key
+OK   33. activityId change: NEW identity key
+OK   34. placementSource change: NEW identity key
+OK   35. proposed item added: NEW identity key
+OK   36. proposed item removed: NEW identity key
+OK   37. network failure + equivalent reconstructed preview: SAME identity key (retry resolves to the same cached clientRequestId)
+OK   38. proposed items in a different array order (same set): SAME identity key (order-independent canonicalization, this ticket's own section 4)
+OK   39. activityId undefined vs. explicit null normalize to the SAME identity key
+OK   40. the controller never references /api/plans anywhere (no fallback persistence path, this ticket's own section 36)
+OK   41. the controller never calls createPlannedActivity/saveUpcomingPlanFromCandidate directly
+OK   42. onDiscard is passed straight through to DayPlanPreview without ever being wrapped in the submit/accept flow (Discard produces zero acceptance POSTs)
+OK   43. acceptConstructedDay is only ever invoked from within the submit function (single call site)
+OK   44. constructDay/runTimingSearch/orchestrateConstructDay are never called from the controller (no reconstruction)
+ALL DAY PLAN ACCEPTANCE PRESENTATION CHECKS PASSED
+
+# exit=0 signal=

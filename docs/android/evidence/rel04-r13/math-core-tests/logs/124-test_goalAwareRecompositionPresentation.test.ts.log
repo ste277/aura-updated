@@ -1,0 +1,50 @@
+$ npx ts-node test/goalAwareRecompositionPresentation.test.ts
+# job=math-core-tests step=Run Goal-aware Recomposition presentation test env={"TS_NODE_COMPILER_OPTIONS":"{\"jsx\":\"react\"}"}
+OK   21. a MOVE decision carrying goalContext parses into RecompositionMoveRow.goalContext (id/title preserved)
+OK   22. a MOVE decision with no goalContext field parses with goalContext ABSENT (never null/placeholder) on the row
+OK   11. a MALFORMED goalContext (present but invalid) fails the WHOLE parse closed -- never silently dropped or half-trusted
+OK   11. a non-object goalContext also fails closed
+OK   11. an explicit null goalContext fails closed too (only a genuinely ABSENT key means "no Goal")
+OK   9. a KEEP decision carrying goalContext does not break parsing (the field is simply not read for KEEP -- this ticket's own section 9 scope)
+OK   7/8. presentMove exposes goalTitle for a Goal-linked move
+OK   7. accessibleText folds the Goal title in without changing the time phrasing
+OK   8. presentMove for a non-Goal move has NO goalTitle and BYTE-IDENTICAL accessibleText to pre-G3.5 (regression)
+OK   7. the Goal-linked MOVE row renders "For: Get fitter" as plain visible text
+OK   30. the Goal line is NOT aria-hidden (readable by assistive tech, never color-alone)
+OK   8. a non-Goal MOVE row renders no "For:" line, no blank line, no placeholder
+OK   31. at most one compact Goal-context line per move row (no second "For:"/Goal mention for the same row)
+OK   31. no Goal card/progress bar/statistics introduced (no role="progressbar", no "%", no Goal-specific class/section)
+OK   16/17. no completion/progress detail rendered for the Goal-linked row (no numeric target, no "/ min", no "pages")
+OK   9/27. loadGoalContexts is called with the AUTHENTICATED session userId, never a client-supplied id
+OK   28. loadGoalContexts receives every decision's planId in ONE call (batched, not per-decision)
+OK   7. enrichment is applied AFTER the decision (the decision engine itself returns the SAME `decisions`; enrichment is a response-layer step)
+OK   29. loadGoalContexts omitted entirely -> the response is byte-identical to pre-G3.5 (no goalContext field anywhere, additive/optional, backward compatible)
+OK   33. exactly one loadGoalContexts call for the whole request (no N+1)
+OK   23. decisions (minus goalContext) are byte-identical with and without the loader -- enrichment cannot influence the decision
+OK   13/22. no proposalToken difference: enrichment never touches signing (both responses carry the SAME token presence/absence contract)
+OK   decision engine (remainingDayRecomposition.ts) imports/references nothing Goal-related -- stays entirely Goal-unaware
+OK   ranking/comparison (compareTimingTiers, isStrictlyBetterTier) and the KEEP/MOVE fixed-point loop are untouched -- still exactly their pre-G3.5 bodies
+OK   acceptance module/route carry no goalId field or Goal reference (acceptance payload unchanged, still exactly { proposalToken })
+OK   integrity module (signing/verification) carries no Goal reference -- Goal data can never enter what is signed or verified
+OK   planMove.ts (applyMoveWrites) was not modified by G3.5 -- its own GoalActivity/GoalActivityExecution continuity lines are untouched
+OK   G3.1's own loadGoalContextsForPlanIds is reused verbatim -- route.ts wires the REAL loader (an injectable dep in server.ts, never a second parallel implementation like loadRecompositionGoal/getGoalForProposal anywhere in the stack)
+OK   enrichDecisionsWithGoalContext calls loadGoalContexts exactly once per request, outside any loop (no N+1) -- the per-decision work is a plain, loader-free .map
+OK   the server wiring exposes ONLY goal id/title -- no execution id/source/snapshot/currentValue field is ever read off PlanGoalContext
+OK   homeRecomposition.ts (the client parser) never reads any execution/completion field off goalContext -- only goal.id/goal.title
+OK   RecompositionCard.tsx consumes Goal identity only -- no completionRequirement/currentValue/targetValue/progress field is ever read
+OK   RecompositionCard.tsx renders no numeric completion/progress detail (no role="progressbar", no Math.round percentage)
+OK   Timeline (HomeTimeline.tsx) was not touched by G3.5 -- no new Goal/recomposition cross-reference
+OK   Right Now (HomeDashboard.tsx) was not touched by G3.5 -- no recomposition-goal cross-reference beyond its own pre-existing G3.3 goalContext usage
+OK   Goal Detail (GoalDetailClient.tsx) was not touched by G3.5
+OK   Goal templates (goals.ts) were not touched by G3.5
+OK   Constructor (dayConstructorOrchestrator.ts, dayConstructor.ts) was not touched by G3.5 -- still never mentions Goal, and never mentions this ticket
+OK   no write statement was added to the server wiring or route (still exactly the pre-G3.5 READ-ONLY guarantee)
+OK   no Rhythm/recurrence concept anywhere in the Recomposition presentation stack
+OK   no day-accumulation concept (dayBucket/dailyTarget/accumulat) anywhere in the Recomposition presentation stack
+OK   no history/aggregate concept (executionHistory/weeklyTotal/allExecutions) anywhere in the Recomposition presentation stack
+OK   no streak/score/gamification copy anywhere in the Recomposition presentation stack
+OK   no guilt/motivation copy was introduced ("keeps you on track"/"don't lose progress"/"stay committed"/"at risk")
+OK   schema/migrations untouched by G3.5: no migration directory name mentions Goal-aware Recomposition's own vocabulary (count-independent -- holds regardless of how many unrelated migrations exist)
+ALL GOAL-AWARE RECOMPOSITION PRESENTATION CHECKS PASSED
+
+# exit=0 signal=

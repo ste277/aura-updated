@@ -1,0 +1,48 @@
+$ npx ts-node test/baselinePlacements.test.ts
+# job=math-core-tests step=Run baseline placements test env={}
+=== REAL orchestrator: a mixed day (flexible + FIXED + deferred + blocker) ===
+OK   FLEXIBLE capture: A's placement is the exact selected candidate -- interval 11:00-12:00, SELECTED_CANDIDATE, the real timingFit (BEST, from the EXCELLENT label) and candidateOrder -- and FIXED capture: X's is exactly its constraint 13:00-14:00 as FIXED_CONSTRAINT with neither timingFit nor candidateOrder
+OK   EVERY AND ONLY the final Proposed items, in the result's own order and with the result's own values; the Deferred intents (N: nothing searched usable, L: lost its only slot) do not appear
+OK   same-run pairing: the diagnostics outcome carries a READY ConstructionBasis AND READY placements for the same run; the placements validated against that basis (their ids are basis intents, the FIXED one equals the basis fixed constraint)
+OK   SEPARATE CONTRACTS: the placements carry no title, activity, importance, deadline, flexibility or originalOrder (the basis owns those), no pressure / promotion / facts / source field, and the basis carries no placement
+OK   DETACHED: none of the 9 captured objects / Dates is reachable from the Constructor result (whose Proposed Dates alias the live candidate Dates), the recorded Constructor inputs, the loader plans, the request or the ConstructionBasis
+OK   SOURCE MUTATION (test only): setTime on the SOURCE result / window / FIXED / plan Dates after capture leaves the placements byte-identical
+OK   DEEP FREEZE: the outcome, the placements array, every placement and every (owned) Date is frozen; writes throw -- and the freeze is NOT claimed to protect a Date's time value
+=== REAL orchestrator: order, touching boundaries, empty day ===
+OK   BASELINE ORDER is the result's own (precedence) order, not sorted by id or by start: B@13:00 comes before A@11:00
+OK   TOUCHING: two placements that merely touch (11:00-12:00 and 12:00-13:00) are both valid -- half-open semantics, exactly as the Constructor places them
+OK   TOUCHING A BLOCKER: a placement ending exactly where an external blocker begins (14:00-15:00 against a 15:00-16:00 plan) is valid -- it is not a blocker conflict
+OK   EMPTY DAY: a baseline with no Proposed item is a valid READY outcome with `placements: []` (not UNAVAILABLE)
+OK   FIXED-ONLY DAY: exactly the FIXED placement, validated against the basis constraint with no candidate list involved
+=== REAL orchestrator: the replenishment fixture -- validation is against FINAL candidate authority ===
+OK   REPLENISHED (real): B was placed at 15:00 from a REPLENISHED list; that candidate is in B's FINAL list and NOT in its INITIAL list ([11:00]) -- yet the placement validates, because the baseline decision came from terminal state
+=== the capture never touches the baseline ===
+OK   BASELINE IDENTITY and TOKEN IDENTITY: the result with the placements is deep-identical to the plain orchestration and the signed preview body (every acceptance token) is byte-identical
+OK   CALL COUNTS: Constructor passes, timing searches and blocker / duration / availability loader calls are IDENTICAL with and without the capture (2 passes, 3 searches)
+OK   NOT PUBLIC: no result key mentions placements; they are only on the internal diagnostics outcome
+OK   NORMAL PATH: `orchestrateConstructDay` (the preview entry point) performs ZERO placement capture
+OK   DIAGNOSTICS PATH: exactly ONE capture, through the same orchestration
+OK   FAILURE ISOLATION (the capture throws): the baseline result is deep-identical to the plain run, the signed body unchanged, the basis still READY, and the placements UNAVAILABLE / CAPTURE_FAILED -- no partial authority
+OK   BASIS UNAVAILABLE (duplicate request ids): the placements are NOT independently READY -- UNAVAILABLE / BASIS_UNAVAILABLE -- so READY placements can never be paired with an unavailable basis; the baseline result is exactly the plain one
+OK   a run that is not READY has no placements: UNAVAILABLE / RUN_NOT_READY; a timing-search failure likewise leaves READY nowhere
+OK   READY placements imply a READY basis in every diagnostics outcome observed (no READY placements are ever paired with an unavailable or mismatched basis)
+OK   SOURCE NEUTRALITY: ids shaped like automatic Goal demand, a manual hand-off and a generic typed intent yield structurally identical placements
+=== the pure capture: every validation failure is UNAVAILABLE -- nothing is repaired or chosen ===
+OK   the unmodified real day validates READY (control for the synthetic failures below)
+OK   CONTROL for the three targeted validations: the lax run is READY and its real baseline (A alone) validates; each synthetic placement below is a captured final candidate, so it can fail only its own targeted check
+OK   OVERLAP: A (11:00-12:00) and B (11:30-12:30), both captured candidates, overlap -> UNAVAILABLE / INVALID_PLACEMENT (synthetic -- the real Constructor never produces this)
+OK   BLOCKER CONFLICT: T placed at its captured 15:00-16:00 candidate sits inside the 15:00-16:00 plan blocker -> UNAVAILABLE / INVALID_PLACEMENT (it would otherwise validate)
+OK   OUTSIDE THE WINDOW: W placed at its captured 08:00-09:00 candidate lies before the 09:00 window start -> UNAVAILABLE / INVALID_PLACEMENT (it would otherwise validate)
+OK   UNKNOWN INTENT: a placement id that is not a basis intent is UNAVAILABLE
+OK   DUPLICATE PLACEMENT ID: the same intent placed twice is UNAVAILABLE / DUPLICATE_INTENT_ID -- never last-write-wins
+OK   FIXED MISMATCH: a FIXED placement shifted by one minute, or an intent that is not FIXED claiming FIXED_CONSTRAINT, or a FIXED intent claiming SELECTED_CANDIDATE, is UNAVAILABLE
+OK   FLEXIBLE CANDIDATE MISMATCH: a placement whose start is not a captured final candidate, whose timingFit or candidateOrder differs, or whose length is not the intent's duration, is UNAVAILABLE -- nothing is matched fuzzily or repaired
+OK   INVALID DATE: a placement with an Invalid Date, or start >= end, is UNAVAILABLE; a non-Date is CAPTURE_FAILED (never thrown out)
+OK   a placement that is not in the basis's FINAL candidate list but is in no list at all, or whose intent has no candidate entry, is UNAVAILABLE (absent authority is not repaired)
+OK   INPUT IMMUTABILITY: capturing does not mutate the result day it reads
+OK   a basis that is not READY makes any day UNAVAILABLE / BASIS_UNAVAILABLE
+OK   NO CLOCK: capturing calls Date.now zero times
+OK   DETERMINISM: repeated capture of the same day over the same basis is byte-identical
+ALL BASELINE PLACEMENTS CHECKS PASSED
+
+# exit=0 signal=

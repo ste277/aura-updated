@@ -1,0 +1,26 @@
+$ npx ts-node test/hpg5I2MyDaySaveDb.test.ts
+# job=day-constructor-acceptance-db-tests step=Run My Day save protection DB test (HPG5-V2-I2) env={"TS_NODE_COMPILER_OPTIONS":"{\"jsx\":\"react\"}"}
+OK   setup: My Day FIND returns a recommendation
+OK   recommendation is valid when made: overlaps no existing plan
+OK   competing plan created after the recommendation (another tab/device)
+OK   stale My Day save is rejected with a typed PLAN_OVERLAP error
+OK   the error names the competing plan and its exact time
+OK   the error carries the exact refused proposal (same instants as the recommendation)
+OK   NO database write on rejection
+OK   Choose another time: a fresh FIND excludes the competing plan
+OK   Save anyway (ALLOW) writes exactly one plan at the refused time
+OK   identity unchanged vs. the legacy My Day save: no goal occurrence created
+OK   a caller that omits overlapPolicy still saves an explicit overlap (S2 contract)
+OK   two simultaneous My Day saves for one slot -> exactly one saved, one PLAN_OVERLAP
+OK   exactly one row written by the race
+OK   blocking plan cancelled after the recommendation -> REJECT save succeeds
+OK   another user's plans never block or appear in a My Day save
+OK   invalid session: generic failure (not a conflict), nothing written for anyone
+OK   malformed overlapPolicy -> 400 generic failure, nothing written
+
+17 checks
+ALL CHECKS PASSED
+(node:34575) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+# exit=0 signal=

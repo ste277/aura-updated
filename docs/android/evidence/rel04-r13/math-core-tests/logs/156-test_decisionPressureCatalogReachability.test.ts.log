@@ -1,0 +1,46 @@
+$ npx ts-node test/decisionPressureCatalogReachability.test.ts
+# job=math-core-tests step=Run decision pressure catalog reachability test env={}
+=== the catalog: explicit per-activity characterization against the LIVE catalog ===
+OK   CATALOG DRIFT (set): every live catalog activity is classified by name in the table and the table lists nothing the catalog no longer has (a new, removed or renamed activity must be re-classified on purpose)
+OK   CATALOG DRIFT (durations): each activity's live `defaultDurationMinutes` and first `suggestedDurations` entry equal the table (an activity moving between RESOLVED-by-default and fallback is detected here, by name)
+OK   NO SOURCE DIVERGENCE: the catalog PROFILE default (what classifies the basis) and the activity DEFINITION default (what resolves the minutes) are the same value for every activity, so a minute count and its basis can never come from two different catalog fields
+[info] live catalog: 42 activities; 24 have a resolving catalog default, 18 do not (3 of those carry only a suggested duration; 15 carry neither)
+OK   the live counts reported above are derived from the table, which is verified against the live catalog (no unverified magic number)
+=== NO SOURCE: every catalog activity through the REAL orchestrator, with no explicit duration, preference or behavior ===
+OK   DEFAULT/FALLBACK MATRIX: all 42 activities resolve exactly as classified -- the orchestrator's own fallback flag, the resolved minutes and the evidence basis agree for each one
+OK   DEFAULT-DURATION MATRIX: every activity WITH a catalog default reaches RESOLVED with no explicit duration, at exactly its default minutes
+OK   FALLBACK MATRIX: every activity WITHOUT a catalog default stays GENERIC_FALLBACK with no explicit duration, preference or behavior
+OK   DURATION REACHABILITY IS NOT PRESSURE REACHABILITY (control): on a NON-scarce day (Wednesday, Thursday and Friday still viable) the same 24 RESOLVED activities are all NONE -- a RESOLVED duration is necessary, never sufficient
+OK   PRESSURE REACHABILITY (catalog default): on the scarce Friday every activity that resolves by catalog default is LAST_KNOWN_OPPORTUNITY, and EVERY fallback activity is NONE with otherwise identical facts
+=== the four important fallback activities: why default demand does or does not reach RESOLVED ===
+OK   WORKOUT: no catalog default -> GENERIC_FALLBACK -> NONE, resolved only by explicit duration, a stored preference or behavior (minutes without them: 30)
+OK   DEEP-WORK: no catalog default -> GENERIC_FALLBACK -> NONE, resolved only by explicit duration, a stored preference or behavior (minutes without them: 30)
+OK   LEARNING: no catalog default -> GENERIC_FALLBACK -> NONE, resolved only by explicit duration, a stored preference or behavior (minutes without them: 20)
+OK   DATING: no catalog default -> GENERIC_FALLBACK -> NONE, resolved only by explicit duration, a stored preference or behavior (minutes without them: 45)
+=== SUGGESTED vs DEFAULT: the repository treats them differently for authority, and so does pressure ===
+OK   workout: the SUGGESTED duration sets the minutes (30, not the 45-minute floor) but is NOT authority: the basis stays GENERIC_FALLBACK and pressure NONE -- suggested is never promoted to RESOLVED to raise coverage
+OK   deep-work: the SUGGESTED duration sets the minutes (30, not the 45-minute floor) but is NOT authority: the basis stays GENERIC_FALLBACK and pressure NONE -- suggested is never promoted to RESOLVED to raise coverage
+OK   learning: the SUGGESTED duration sets the minutes (20, not the 45-minute floor) but is NOT authority: the basis stays GENERIC_FALLBACK and pressure NONE -- suggested is never promoted to RESOLVED to raise coverage
+OK   a DEFAULT, by contrast, is authority: an activity carrying both (e.g. one whose suggestion differs from its default) resolves to the DEFAULT minutes, as RESOLVED
+=== UNTYPED demand: activityId == null ===
+OK   UNTYPED, no explicit duration, a title that resolves to no catalog activity ("Finite task") -> the 45-minute generic floor, GENERIC_FALLBACK, NONE
+OK   UNTYPED with an explicit duration -> RESOLVED and (scarce Friday) LAST_KNOWN_OPPORTUNITY: an explicit duration needs no catalog identity
+OK   UNTYPED whose TITLE exactly matches a catalog alias ("walk together") is resolved by the orchestrator's EXISTING title resolution (not new behavior) and so follows that activity's catalog default (45 min, RESOLVED)
+=== EVERY resolution source, individually (each is RESOLVED and each yields pressure under scarcity) ===
+OK   EXPLICIT duration (a user-chosen 60 minutes on an activity with no catalog default): RESOLVED, 60 minutes, and LAST_KNOWN_OPPORTUNITY on the scarce Friday
+OK   STORED PREFERENCE (deep-work, no catalog default): RESOLVED at the stored 90 minutes, LAST_KNOWN_OPPORTUNITY
+OK   BEHAVIORAL typical duration (learning, no catalog default): RESOLVED at the behavioral 45 minutes, LAST_KNOWN_OPPORTUNITY
+OK   CATALOG DEFAULT (meditation): RESOLVED at 15 minutes, LAST_KNOWN_OPPORTUNITY
+OK   NEGATIVE CONTROL: the SAME activity and the SAME scarce Friday facts with NO source (workout) -> GENERIC_FALLBACK, NONE
+OK   SCARCITY CONTROL: the very same explicit duration on a Wednesday (later viable days) is RESOLVED but NONE
+=== precedence among the RESOLVED sources (the basis stays RESOLVED at every level; the minutes follow the chain) ===
+OK   explicit (30) > stored preference (20) > behavioral (25) > catalog default (15); every level is RESOLVED
+OK   a source on a DIFFERENT activity never leaks: a preference and a behavioral duration for other activities leave workout (no catalog default) at GENERIC_FALLBACK
+=== source neutrality of the resolution and of pressure ===
+OK   identical demand under a canonical automatic id, a manual hand-off id and a typed id gives deeply equal evidence and identical pressure (the resolution has no source branch)
+OK   flexibility is the only candidate property pressure reads: the same evidence for a FIXED candidate is NONE
+=== inertness ===
+OK   the evidence under test is the evidence the preview stage prepared: it is frozen and was produced by the real preparer, and deriving pressure left it unchanged
+ALL DECISION PRESSURE CATALOG REACHABILITY CHECKS PASSED
+
+# exit=0 signal=

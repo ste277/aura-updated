@@ -2,7 +2,17 @@
 
 **Date:** 2026-11-26 (R9) · **PR:** #392 · **Branch:** `aura-android-rel04-app-readiness`, cut from `main` `ad49e6a`
 
-**Revision:** **R12** (ticket 39248): queue concurrency correction for verification 39247, which was OPEN at `d150327`.
+**Revision:** **R13** (ticket 39250): queue integrity corrections for verification 39249, which was NO-GO at `6373fd9`.
+- **Correction:**
+  - account-bound claims, with claim/lease agreement before sending (E1);
+  - queue-write outcomes that match storage: a refusal aborts the transaction, a commit is reconciled from storage, and an uncertain outcome is reported as such (E2);
+  - reporting at the verification boundary, with observed, known and unverified physical states kept distinct (E3, E4).
+- **Implementation:** `a8a976733d73d8acc5eb13e2af687f3648204471`.
+- **Evidence:** `docs/android/evidence/rel04-r13/`. Handover: `docs/android/AURA_ANDROID_REL_04_R13_VERIFICATION_HANDOVER.md`, which supersedes §R9–§R12 where they differ.
+- **CI:** automatic run 45985719059, 9/9.
+- **Release conditions:** the N2 writer-free origin and rollback allowlist are recorded as **mandatory release acceptance conditions**; unreadable-v2 recovery remains mandatory.
+
+**Previous revision:** **R12** (ticket 39248): queue concurrency correction for verification 39247, which was OPEN at `d150327`.
 - **Correction:** one concurrency model across inspection, claim, transmission, settlement, discard and cleanup. Claim-bound transmission and settlement; retired-storage checks at the claim and transmission linearization points; scans of every record that names the account; incomplete keys never trusted; removal reported only after the physical state is verified. Closes N1–N6.
 - **Implementation:** `02e283e836638bd86763cd8447b370538d8050e2`.
 - **Evidence:** `docs/android/evidence/rel04-r12/`. Handover: `docs/android/AURA_ANDROID_REL_04_R12_VERIFICATION_HANDOVER.md`, which supersedes §R9–§R11 where they differ.
@@ -61,7 +71,7 @@ R5, R4 and R3 sections are kept as history.
 
 ## 1. Verdict
 
-**R12 READY FOR INDEPENDENT VERIFICATION** (39247 N1–N6 addressed; ticket 39243 open; the N2 cross-storage residual awaits an owner decision; CI-09 separate).
+**R13 READY FOR INDEPENDENT VERIFICATION** (39249 E1–E4 addressed; ticket 39243 OPEN; the N2 origin/rollback allowlist and unreadable-v2 recovery are mandatory release conditions).
 
 | Disposition | State |
 |---|---|

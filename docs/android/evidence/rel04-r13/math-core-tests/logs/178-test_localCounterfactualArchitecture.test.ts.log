@@ -1,0 +1,45 @@
+$ npx ts-node test/localCounterfactualArchitecture.test.ts
+# job=math-core-tests step=Run local counterfactual architecture test env={}
+=== the real tree conforms ===
+OK   THE REAL PRODUCTION TREE HAS ZERO LOCAL-COUNTERFACTUAL ARCHITECTURE VIOLATIONS (566 production files scanned)
+=== zero consumers, confinement, untouched scheduling code ===
+OK   ZERO PRODUCTION CONSUMERS: the generator vocabulary exists in exactly THREE production files (itself, as a TYPE-only import of its output the O5 P4b3 acceptance predicate, and the O5 P4b4 same-run shadow composition, the only caller); nothing else calls or imports the generator and nothing consumes the composition -- tests only
+OK   NOT PUBLIC / SIGNED / PERSISTED / ACCEPTED: no preview, signing, acceptance, persistence, Recomposition, Move, presentation, route, scheduling-context, trace, basis, placements, input, contention, attempts or promotion-preparation module names the generator or the word counterfactual
+OK   NO PERSISTENCE, NO SCHEMA: the Prisma schema and every migration directory's own contents mention no counterfactual; no migration was added (count-independent)
+OK   THE CONSTRUCTOR IS UNTOUCHED: dayConstructor.ts still exports exactly the comparator, `constructDay` and `constructDayWithTrace`; dayConstructor.ts, dayIntent.ts and dayCapacity.ts name no generator vocabulary (their behavior hashes are pinned by the P0c guard)
+OK   #208 SCOPE: the generator is on the protected Date-mutator list (zero exceptions); the regex-literal scanner debt is carried unchanged
+OK   REQUIRED CI: the behavior, gate-parity and architecture suites are mandatory steps in the pure job
+OK   PARITY ORACLE IS TEST-ONLY: the gate-parity suite imports the REAL `constructDay` as an oracle; the production generator never does
+=== the generator is pure, neutral and policy-free ===
+OK   IMPORTS: exactly seven -- the comparator and the precedence comparator as values, five authority TYPES -- hence no Constructor execution, search, database, clock, orchestrator, preparation or raw trace can be reached
+OK   NO DATABASE, SNAPSHOT, CLOCK, SEARCH, CONSTRUCTOR, ASYNC, LOGGING, ENVIRONMENT, GENERIC CLONE or `any`
+OK   NO RAW TRACE, NO FACTS / EVIDENCE / PRESSURE: the generator never names a contention event or trace, DecisionFacts, DecisionEvidence, scarcity, recurrence, opportunity or pressure; owners are read ONLY by id
+OK   NO POLICY: none of SAFE / UNSAFE / ACCEPT / REJECT / OWNER_PRESSURED / FIXED_OWNER / PRECEDENCE_NOT_TIE / NON_OWNER_CHANGED / NET_PROPOSED_LOSS / TIMING_FLOOR appears, and the UNAVAILABLE taxonomy is generation / integrity only
+OK   NO CANDIDATE HISTORY, NO ROUND
+OK   RANKING IS ONLY THE CONSTRUCTOR'S: exactly three sorts -- P's slots and the owner alternatives by the exported `compareCandidatesForPlacement` over the CAPTURED timing fit (candidateOrder is the constant 0: equal fit + equal start is the same placement), the displaced owners by the Constructor's `compareByOverloadPrecedence`; no discovery order, no positional selection of attempts
+OK   SLOT AND ALTERNATIVE AUTHORITY: P's slots are built only from the contention authority; the basis candidate lists are read only inside the owner-alternatives function, which is exactly initial UNION final UNION the owner's OWN attempts, deduplicated by (start, timingFit)
+OK   LOCAL SCOPE: P's slot must terminally overlap something, and only authorized FLEXIBLE owners; the pinned set is baseline minus the displaced owners plus P; every relocation is gated against the pinned set, P and the owners already re-placed; there is no generic loop over intents, no Deferred iteration, no global replan
+OK   THE LOCAL GATES are exactly the Constructor's (order, half-open overlap, inclusive window, derived interval, positive-length blockers) -- proven equal to the REAL Constructor by the gate-parity suite
+OK   FIVE-AUTHORITY REVALIDATION AND FAIL-CLOSED: every authority must be READY; the pair, the candidate (exactly once, unplaced, FLEXIBLE), the owners (distinct, placed, not the candidate), the contention owner scope and per-owner support, and the placements (unique, disjoint, in the window, off the blockers) are checked; malformed instants fail closed; generation never throws
+OK   OWNERSHIP AND FREEZE: every output Date is a new frozen `new Date(ms)` built from a number (no alias of a source Date); the output is deeply frozen; no input is mutated
+OK   CONTRACT: input is exactly the five authorities; output is exactly { candidateIntentId, promotedPlacement, displacedOwnerIds, relocatedPlacements, unplacedOwnerIds, counterfactualPlacements }; placements carry a counterfactual-local source (the baseline contract is untouched); exports are the ten reviewed names
+=== MUTATIONS: each violation, injected into an in-memory copy, is detected ===
+OK   MUTATION: a NON-OWNER becomes releasable, an undisturbed owner is released, a FIXED owner may be moved -> detected
+OK   MUTATION: DISCOVERY ORDER ranks P (the slot sort removed or replaced by position), the captured timing fit is IGNORED, the owner alternatives are ranked by origin -> detected
+OK   MUTATION: the ATTEMPT-ONLY owner alternative is dropped, the INITIAL candidates are dropped, the FINAL candidates are dropped, or an owner's alternatives come from a foreign owner's attempts -> detected
+OK   MUTATION: candidate ORIGIN affects ranking / dedup identity (origin in the identity, or a longer span replaced by the first source) -> detected
+OK   MUTATION: PRESSURE affects generation (an owner pressure read, a branch, an ordering or a filter) -> detected
+OK   MUTATION: TRANSITIVE DISPLACEMENT (relocation gated only against the pinned set, or a relocated owner not added to the occupied set) and a GLOBAL REPLAN (a generic loop over intents, a Deferred iteration) -> detected
+OK   MUTATION: a timing SEARCH, a Constructor / orchestration call, a DB access, a clock read, async / logging -> detected
+OK   MUTATION: the RAW TRACE is imported or read (a contention event / trace import, `.events`) -> detected
+OK   MUTATION: a policy term / reason (OWNER_PRESSURED, FIXED_OWNER, NET_PROPOSED_LOSS, TIMING_FLOOR, SAFE, ACCEPT) is introduced -> detected
+OK   MUTATION: an input is MUTATED, a Date is SHARED (aliased) with a source object, the output is UNFROZEN -> detected
+OK   MUTATION: TOUCHING counts as overlap, the window boundary is wrong, the duration validation is skipped, a MALFORMED interval is chosen -> detected
+OK   MUTATION: the revalidation is weakened (authority readiness, pair id, contention owner scope, owner support, candidate state, placement consistency) -> detected
+OK   MUTATION: PUBLIC WIRING / a production consumer (a route, the preview request, the preparation boundary or a new module imports or names the generator) -> detected
+OK   MUTATION: the Constructor is modified to export a private helper (a changed export list) -> detected
+OK   MUTATION: the generator mutates a baseline placement by changing the output shape (extra contract field, extra source, a policy reason) -> detected
+OK   the mutations were applied to in-memory copies only: the real tree still has zero violations afterwards
+ALL LOCAL COUNTERFACTUAL ARCHITECTURE CHECKS PASSED
+
+# exit=0 signal=
