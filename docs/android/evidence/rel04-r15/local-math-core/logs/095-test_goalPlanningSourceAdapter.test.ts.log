@@ -1,0 +1,32 @@
+$ npx ts-node test/goalPlanningSourceAdapter.test.ts
+# job=math-core-tests step=Run Goal planning-source adapter test env={}
+OK   1. one Goal candidate produces exactly one generic intent
+OK   2. two distinct Goal candidates produce exactly two generic intents
+OK   3. identical input produces byte-equivalent output across repeated calls
+OK   4. different GoalActivities produce distinct intentIds
+OK   5. same GoalActivity + same planning date -> same intentId
+OK   6. same GoalActivity + different planning date -> different intentId (Today vs Tomorrow never collide)
+OK   6b. encodeGoalDemandIntentId is deterministic and matches the adapter's own output
+OK   7. a changed activity title does not change the intentId
+OK   8. a changed Goal title does not change the intentId
+OK   9. manual GA-1 + automatic GA-1 -> exactly one (manual wins, automatic omitted)
+OK   10. manual GA-1 + automatic GA-2 -> GA-2 remains (different GoalActivity not excluded)
+OK   11. dedup uses goalActivityId, not title -- a different id with the same title is never excluded
+OK   12. dedup uses goalActivityId, not activityId -- a shared catalog activityId never causes exclusion
+OK   13. a byte-identical duplicate A1 record collapses deterministically to exactly ONE emitted intent
+OK   14. a CONFLICTING duplicate A1 record (same id, different facts) returns an invariant-violation diagnostic, never a guess
+OK   15. remainingThisWeek never enters the generic intent (not a scheduling field)
+OK   16. no duration is invented -- durationMinutes is absent, letting the existing generic resolution chain decide
+OK   17. no Goal/Rhythm field enters the generic Constructor-facing intent
+OK   17b. activityId is carried through verbatim when present, and omitted (never null) when absent -- flexibility defaults to FLEXIBLE, matching an unedited manual Goal row
+OK   18. 13 eligible candidates are returned in full -- never silently truncated to the 12-intent transport ceiling
+OK   18b. with no explicitIntentCount supplied, the limit diagnostic is honestly null/unknown, not a guessed true/false
+OK   19. downstream-limit diagnostic is correct when explicitIntentCount is supplied (13 + 1 = 14 > 12), and no candidate is dropped because of it
+OK   19b. combined count under the limit reports exceedsDownstreamIntentLimit false
+OK   20. output order matches the input array order exactly (no re-ranking) -- A1 is the one place ordering is decided
+OK   21. the adapter module never calls Date.now() or constructs a clock-reading Date in real code
+OK   21b. the adapter module never references crypto.randomUUID or a random-id generator in real code
+OK   22. the adapter module performs no DB/network access in real code (no pool.query, no fetch, no beginTransaction)
+ALL GOAL PLANNING SOURCE ADAPTER CHECKS PASSED
+
+# exit=0 signal=

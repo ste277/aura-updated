@@ -2,7 +2,15 @@
 
 **Date:** 2026-11-26 (R9) · **PR:** #392 · **Branch:** `aura-android-rel04-app-readiness`, cut from `main` `ad49e6a`
 
-**Revision:** **R14** (ticket 39253): unified outcome reconciliation for verification 39252, which was NO-GO at `f6a8cbe`.
+**Revision:** **R15** (ticket 39257): the shared operation contract consolidation (39256 Option B), for verification 39255 (NO-GO: G1–G3).
+- One response decoder for direct submission, replay and GET evidence.
+- Versioned settlement receipts.
+- Immutable operation identity with same-operation Retry and Check again.
+- An ID-keyed UI projection.
+- Implementation `e6a6a6678bf6300362e15cf398343a246807a7e2`; CI 46036623125 **9/9** on its first attempt.
+- Handover: `docs/android/AURA_ANDROID_REL_04_R15_INDEPENDENT_VERIFICATION_HANDOVER.md`. It supersedes §R9–§R14 where they differ.
+
+**Previous revision:** **R14** (ticket 39253): unified outcome reconciliation for verification 39252, which was NO-GO at `f6a8cbe`.
 - **Correction:** one durable-state reconciliation (`requestState`) for the gate and for lost-acknowledgement recovery; decisions record the server's answer; one authoritative physical verification. Closes F1–F3.
 - **Implementation:** `0df08780bd75e16b676efda6c99c1738bc72681b`.
 - **Evidence:** `docs/android/evidence/rel04-r14/`. Handover: `docs/android/AURA_ANDROID_REL_04_R14_VERIFICATION_HANDOVER.md`, which supersedes §R9–§R13 where they differ.
@@ -77,7 +85,7 @@ R5, R4 and R3 sections are kept as history.
 
 ## 1. Verdict
 
-**R14 READY FOR INDEPENDENT VERIFICATION** (39252 F1–F3 addressed; ticket 39243 OPEN; CI 8/9 because of a separate wall-clock finding; the N2 allowlist and unreadable-v2 recovery are mandatory release conditions).
+**R15 READY FOR INDEPENDENT VERIFICATION** (39252 F1–F3 addressed; ticket 39243 OPEN; CI 8/9 because of a separate wall-clock finding; the N2 allowlist and unreadable-v2 recovery are mandatory release conditions).
 
 | Disposition | State |
 |---|---|

@@ -1,0 +1,154 @@
+import assert = require('node:assert/strict');
+import { addUser, clearQueueDb, closeAllTabs, Device, idbFault, logsOf, openTab, payload, queueDump, resetStore, storage, WEB } from './rel04AccountIsolationHarness';
+
+const A = 'independent-r11-a';
+const B = 'independent-r11-b';
+addUser(A, 'independent-r11-a@example.invalid');
+addUser(B, 'independent-r11-b@example.invalid');
+const f = require(require.resolve('fake-indexeddb', { paths: [WEB] }));
+const route = '/api/habit-logs';
+const q3 = (owner: string, id: string) => 'aura_q3:' + owner + ':' + id;
+const body = (id: string, title = 'reviewed activity') => payload(title, id);
+const item = (id: string, owner = A, title?: string) => ({ ...body(id, title), ownerUserId: owner, tempId: 'tmp' });
+const row = (recordId: string, id: string, owner = A, title?: string) => ({ recordId, ownerUserId: owner, clientRequestId: id, item: item(id, owner, title), fmt: 'r8', queuedAt: Date.now() });
+type Tab = ReturnType<typeof openTab>;
+let sequence = 0;
+async function fresh() {
+  closeAllTabs(); resetStore(); storage.clear();
+  storage.fail = { get: false, set: false, remove: false };
+  idbFault.open = false; idbFault.read = false; idbFault.write = false;
+  await clearQueueDb();
+  return new Device();
+}
+async function signIn(dev: Device, owner = A) {
+  dev.signIn(owner);
+  const t = openTab('r11-independent-' + sequence++);
+  await t.acct.fetchVerifiedSession(dev.fetch);
+  return t;
+}
+const submit = (t: Tab, dev: Device, id: string, title?: string) => t.sync.submitActivityLog(body(id, title), 'tmp', dev.fetch);
+const so = (t: Tab, dev: Device, beforeAck?: () => Promise<unknown>) => t.so.performSignOut({
+  confirm: () => true,
+  fetch: async (url: unknown, init: any) => {
+    if (String(url) === '/api/auth/logout') await beforeAck?.();
+    return dev.fetch(url, init);
+  },
+});
+const rows = (owner = A) => logsOf(owner).map((l: any) => [l.clientRequestId, l.activityTitle]);
+const report = (id: string, data: unknown) => console.log(id, JSON.stringify(data));
+const decisions = async () => (await queueDump()).tombstones.map((d: any) => [d.ownerUserId, d.clientRequestId, d.decision, d.possiblySent ?? null]);
+async function put(t: Tab, rec: any) {
+  const db = await t.q.__openQueueDbForTests();
+  const tx = db.transaction('records', 'readwrite');
+  tx.objectStore('records').put(rec);
+  await new Promise<void>((resolve, reject) => {
+    tx.oncomplete = () => resolve();
+    tx.onabort = () => reject(tx.error);
+  });
+}
+async function snapshot(t: Tab) {
+  const s = await t.q.readOwnedQueue(A);
+  if (!s.ok) throw Error('Snapshot unexpectedly unreadable');
+  return s;
+}
+function wait<T>() {
+  let resolve!: (value: T) => void;
+  const reached = new Promise<T>((r) => { resolve = r; });
+  return { resolve, reached };
+}
+function afterReplayRead(replace: (db: IDBDatabase, before: any[]) => void) {
+  const index = f.IDBIndex.prototype.getAll;
+  const store = f.IDBObjectStore.prototype.getAll;
+  const restore = () => { f.IDBIndex.prototype.getAll = index; f.IDBObjectStore.prototype.getAll = store; };
+  function barrier(req: any, db: IDBDatabase) {
+    restore();
+    req.addEventListener('success', () => replace(db, req.result));
+  }
+  f.IDBIndex.prototype.getAll = function (...args: unknown[]) {
+    const req = index.apply(this, args);
+    if (this.name === 'owner' && this.objectStore.transaction.mode === 'readonly') barrier(req, this.objectStore.transaction.db);
+    return req;
+  };
+  f.IDBObjectStore.prototype.getAll = function (...args: unknown[]) {
+    const req = store.apply(this, args);
+    if (this.name === 'records' && this.transaction.mode === 'readonly') barrier(req, this.transaction.db);
+    return req;
+  };
+  return restore;
+}
+function onFirstDecisionRead(effect: () => void) {
+  const original = f.IDBObjectStore.prototype.get;
+  f.IDBObjectStore.prototype.get = function (...args: unknown[]) {
+    const req = original.apply(this, args);
+    if (this.name === 'tombstones' && this.transaction.mode === 'readwrite') {
+      f.IDBObjectStore.prototype.get = original;
+      req.addEventListener('success', effect);
+    }
+    return req;
+  };
+  return () => { f.IDBObjectStore.prototype.get = original; };
+}
+function delayNextWriteCompletion() {
+  const original = f.IDBDatabase.prototype.transaction;
+  const held = wait<() => void>();
+  f.IDBDatabase.prototype.transaction = function (...args: unknown[]) {
+    const tx = original.apply(this, args);
+    if (tx.mode === 'readwrite') {
+      f.IDBDatabase.prototype.transaction = original;
+      tx.addEventListener('complete', (event: Event) => {
+        const completion = tx.oncomplete;
+        assert.equal(typeof completion, 'function');
+        tx.oncomplete = null;
+        held.resolve(() => completion.call(tx, event));
+      });
+    }
+    return tx;
+  };
+  return { reached: held.reached, restore: () => { f.IDBDatabase.prototype.transaction = original; } };
+}
+function loseNextWriteAcknowledgement(failReconciliation = false) {
+  const original = f.IDBDatabase.prototype.transaction;
+  f.IDBDatabase.prototype.transaction = function (...args: unknown[]) {
+    const tx = original.apply(this, args);
+    if (tx.mode === 'readwrite') {
+      f.IDBDatabase.prototype.transaction = original;
+      tx.addEventListener('complete', () => {
+        if (failReconciliation) idbFault.read = true;
+        tx.onerror?.(new Event('error'));
+      });
+    }
+    return tx;
+  };
+  return () => { f.IDBDatabase.prototype.transaction = original; idbFault.read = false; };
+}
+
+
+
+async function main(){
+  for(const mode of ['direct','replay']){
+    const dev=await fresh(),t=await signIn(dev);
+    let result:any;
+    if(mode==='direct'){
+      dev.fault('POST',route,'html200');
+      result=await submit(t,dev,'fake-200');
+    }else{
+      await put(t,row('http-fallback-record','fake-200'));
+      dev.fault('POST',route,'html200');
+      result=await t.sync.replayOfflineQueue(dev.fetch);
+    }
+    const dump=await queueDump(),retry=await submit(t,dev,'fake-200');
+    report('G1 non-API HTTP 200 authorizes accepted marker',{mode,result,markers:dump.tombstones.map((x:any)=>[x.ownerUserId,x.clientRequestId,x.decision,x.serverOutcome]),copies:dump.records.length,retry:retry.kind,rowsA:rows()});
+  }
+  for(const marker of ['wrong-owner','missing-payload','wrong-request','known-reject']){
+    const dev=await fresh(),t=await signIn(dev);
+    const id='decision-id';
+    const db=await t.q.__openQueueDbForTests();
+    const trx=db.transaction('tombstones','readwrite');
+    const decision={recordId:t.q.decisionKey(A,id),ownerUserId:marker==='wrong-owner'?B:A,clientRequestId:marker==='wrong-request'?'other-request':id,payload:marker==='missing-payload'?null:t.q.canonicalPayload(item(id)),decision:'settled',serverOutcome:marker==='known-reject'?'rejected':'accepted',at:Date.now(),fmt:'r8'};
+    trx.objectStore('tombstones').put(decision);
+    await new Promise<void>((ok,err)=>{trx.oncomplete=()=>ok();trx.onerror=()=>err(trx.error)});
+    const result=await submit(t,dev,id);
+    report('G2 contradictory or incomplete durable marker',{marker,decision,result,posts:dev.count('POST',route),rowsA:rows(),rowsB:rows(B)});
+  }
+}
+main().catch(e=>{console.error(e);process.exitCode=1});

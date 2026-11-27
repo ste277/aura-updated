@@ -1,0 +1,22 @@
+$ npx ts-node test/goalPlanningHandoffUi.test.ts
+# job=math-core-tests step=Run Goal planning handoff UI test env={}
+OK   A/4. the checkbox is gated on derivedState === 'SUGGESTED' (unconditionally), OR COMPLETED/PLANNED gated strictly on rhythm.eligibleForAnotherOccurrence for an N_PER_WEEK activity (R4, extended by Multi-Occurrence Rhythm PR 2)
+OK   B/C. PLANNED/COMPLETED never render a checkbox -- isSelectable is false for every state except SUGGESTED (single boolean gate, no PLANNED/COMPLETED branch grants it)
+OK   4. the checkbox itself is conditionally rendered only when isSelectable
+OK   4. toggleSelected exists and contains no fetch() call (selection never mutates GoalActivity)
+OK   4. selecting never calls Day Constructor/creates a PlannedActivity (no dayConstructor/acceptConstructedDay reference anywhere in this file)
+OK   D. DISMISSED activities are filtered out before rendering (derivedState !== 'DISMISSED')
+OK   E. the "Plan with Aura" CTA is conditionally rendered only when effectiveSelectedIds.length > 0 (absent, not disabled, at zero selection)
+OK   F/5. the CTA copy is "Plan with Aura" (existing product vocabulary)
+OK   5. the CTA never says "Schedule automatically" or other pipeline language
+OK   effectiveSelectedIds is derived by intersecting selectedIds with the CURRENT selectableIds set (never used raw)
+OK   the CTA/handler use effectiveSelectedIds, never the raw selectedIds Set directly
+OK   G. handlePlanWithAura exists
+OK   G. the URL is built via URLSearchParams({ fromGoal: goal.id, activities: ... })
+OK   G. no activity title is ever interpolated into the handoff URL
+OK   G. no activityId is ever interpolated into the handoff URL
+OK   the handoff navigates to /plan-day (not a Goal-specific route)
+OK   47. "What would you like Aura to help you plan?" appears, gated on selectableIds.size > 0
+ALL GOAL PLANNING HANDOFF UI CHECKS PASSED
+
+# exit=0 signal=

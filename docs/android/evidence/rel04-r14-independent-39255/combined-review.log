@@ -1,0 +1,365 @@
+=== .github/workflows/ci.yml
++      # ---- AURA-ANDROID-REL-04 -- application release readiness (offline only) ----
++      # Backup/device-transfer off, cookie flush, release-build gate, logout attributes.
++      - name: Run REL-04 Android application readiness static test
++        run: node test/androidRel04AppReadiness.test.mjs
++      # Sign-out reports success only when the server removed the cookie; clears the
++      # account-less offline queue (after asking) only then.
++      - name: Run REL-04 sign-out test
++        env:
++          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
++        run: npx ts-node --project tsconfig.jsdom-tests.json test/signOutRel04.test.ts
++      # IR-01/IR-03 -- account isolation and the sign-out transition: real client
++      # modules (one instance per tab) against the real logout/session/habit-logs/
++      # plans routes in-process, synthetic accounts A and B, held/failed requests.
++      - name: Run REL-04 account isolation integration test (IR-01/IR-03)
++        env:
++          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
++        run: npx ts-node --project tsconfig.jsdom-tests.json test/rel04AccountIsolation.test.ts
++      # The real Home page and /find mounted in jsdom across sign-out, sign-in,
++      # late responses, session expiry and another tab's account switch.
++      - name: Run REL-04 Home and /find transition test (IR-01/IR-03)
++        env:
++          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
++        run: npx ts-node --project tsconfig.jsdom-tests.json test/rel04HomeFindTransitionJsdom.test.ts
++      # The original cross-account failure reproduces with the reviewed head's code
++      # (a54daf6, vendored verbatim) and is prevented by the corrected head.
++      - name: Run REL-04 reviewed-head reproduction test (IR-01)
++        env:
++          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
++        run: npx ts-node --project tsconfig.jsdom-tests.json test/rel04ReviewedHeadReproduction.test.ts
++      # R2 -- plan creation and existing mutations through the real callers
++      # (shared helper, overlap override, fetch wrapper) and the real mounted /find
++      # sign-in-and-save flow, incl. competing sign-in and late completion.
++      - name: Run REL-04 bound writes and /find flow test (IR-01/IR-03 R2)
++        env:
++          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
++        run: npx ts-node --project tsconfig.jsdom-tests.json test/rel04BoundWritesJsdom.test.ts
++      # R2 -- the delta review's findings reproduce with the R1 head's code
++      # (d09449b, vendored verbatim) and are prevented by the corrected head,
++      # including the pre-REL-04 client against both routes (mixed-version).
++      - name: Run REL-04 R1-head reproduction and mixed-version test (R2)
++        env:
++          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
++        run: npx ts-node --project tsconfig.jsdom-tests.json test/rel04R1HeadReproduction.test.ts
++      # R3 -- final independent disposition of 091e3ce: queue durability and auth
++      # transitions; shared account boundary across every surface; overlap-override
++      # binding on the mounted My Day / PlanWithAura flows; 091e3ce reproductions.
++      - name: Run REL-04 R3 queue durability and auth-transition test
++        env:
++          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
++        run: npx ts-node --project tsconfig.jsdom-tests.json test/rel04R3QueueAuth.test.ts
++      - name: Run REL-04 R3 shared account boundary test (route inventory, surfaces)
++        env:
++          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
++        run: npx ts-node --project tsconfig.jsdom-tests.json test/rel04R3BoundaryJsdom.test.ts
++      - name: Run REL-04 R3 overlap-override binding test (mounted)
++      # I2b-S12 (S11 review residuals): structured redirect validation, original
++      # budget instant + limiter ROLLBACK / retry / exact-deadline boundaries
++      # under a synthetic clock, explicit secret formats, sanitized audit causes. No DB.
++      - name: Run I2b-S12 offline residual test
++        run: npx ts-node test/mcpOAuthS12.test.ts
++      # AURA-PALM-03-E1-R2 -- the E1 exclusion guard on every release build path:
++      # CI build job, the real Vercel wrapper (fake next, planted leaks) and the
++      # Docker build stage.
++      - name: Run personalised interpretation release-guard test (PALM-03-E1)
++        run: npx ts-node test/palm03E1ReleaseGuards.test.ts
++      # AURA-PREF-01 (PV-F01) -- work hours and availability applied the same
++      # way across Find a Time, weekly/rhythm planning, Plan My Day and Home
++      # (real engine): new users unaffected, personal avoid / work prefer
++      # working hours, explicit choices win, Panchang ranking preserved.
++      - name: Run PREF-01 availability preferences test
++        run: npx ts-node test/availabilityPreferencesPref01.test.ts
++      # Existing work-hours suites, never wired into CI before PREF-01.
++      - name: Run Daily Rhythm scheduling test
++        run: npx ts-node test/dailyRhythmScheduling.test.ts
++      - name: Run Daily Rhythm Find a Time test
++        run: npx ts-node test/timingSearchDailyRhythm.test.ts
++      - name: Run Daily Rhythm candidate coverage test
++        run: npx ts-node test/dailyRhythmCandidateCoverageIntegration.test.ts
++      # PALM-03-I1: hand measurements, user-assisted feature representation and
++      # synthetic engine compatibility. Synthetic landmarks and traces only.
++      - name: Run Palm feature foundation tests (PALM-03-I1)
++        run: npx ts-node test/palm03I1FeatureFoundation.test.ts
++      # AURA-PALM-04-I1: in-memory hand construction context (revoked on reset, photo
++      # replacement, cancellation and teardown) and the headless assisted-tracing model,
++      # with I1 parity over the complete independent 6,548-trace synthetic corpus.
++      # Synthetic data only; no UI; nothing persisted or transmitted.
++      - name: Run assisted-tracing foundation tests (PALM-04-I1)
++        run: npx ts-node test/palm04I1Tracing.test.ts
++      # PALM-03-E1: development-only personalised interpretation engine (synthetic
++      # observations only; unreviewed content). The package suite compares the engine
++      # with the unmodified C1 reference oracle (python3, preinstalled on the runner):
++      # 7 examples x 3 modes, 5,760 essential-input derivations, 40 negative cases.
++      - name: Run personalised interpretation engine tests (PALM-03-E1)
++        working-directory: packages/palm-reading-engine/e1
++        run: node --test test/*.test.mjs
++      - name: Run personalised interpretation end-to-end tests (PALM-03-E1)
++        run: npx ts-node test/palm03E1Engine.test.ts
++      # AURA-PALM-03-E1 -- the personalised interpretation engine and its unreviewed
++      # catalogue must never be bundled; unconditional, sentinels self-checked by the
++      # E1 package tests.
++      - name: Verify the personalised interpretation engine is excluded from the build
++        working-directory: apps/web
++        run: node scripts/check-palm-e1-bundle.js
++      # AURA-PALM-03-E1-R6 -- the shipped standalone artifact actually starts: the located app root (+ static,
++      # public) is copied to an isolated temp dir, its generated server.js is started with no database or secrets on
++      # 127.0.0.1, every module must resolve inside the copy, and it must serve its build manifest; then terminated.
++      - name: Verify the standalone server artifact starts in isolation
++        working-directory: apps/web
++        run: node scripts/check-artifact-startup.js
++      # I2b-S12: same-status redirect replacements (code moved / duplicated /
++      # re-homed, callback or state changed) are never committed and are refused
++      # on another instance; limiter causes reach the application audit output on
++      # the OAuth path and both MCP paths. Touches only the MCP tables.
++      - name: Run I2b-S12 redirect integrity and audit cause DB test
++        run: npx ts-node test/mcpOAuthS12Db.test.ts
++      # AURA-PREF-01 -- new users start unconfigured; setting, changing or
++      # clearing work hours/availability never modifies confirmed plans.
++      - name: Run PREF-01 availability preferences DB test
++        run: npx ts-node test/availabilityPreferencesPref01Db.test.ts
+=== apps/web/components/PlanWithAuraView.tsx
++import { boundFetch, captureAccountBinding, type AccountBinding } from '../lib/accountBoundFetch';
++  // AURA-ANDROID-REL-04 IR-01 (R2) -- bound before any await: the account
++  // the user acted under (or, if the caller didn't capture one, now).
++  const binding = options.binding ?? captureAccountBinding();
+-  const res = await fetch('/api/plans', {
++  const res = await boundFetch(binding, '/api/plans', {
+-      if (isPlanOverlapResponse(body)) throw new PlanOverlapSaveError(parsePlanOverlapConflict(body), plan);
++      if (isPlanOverlapResponse(body)) throw new PlanOverlapSaveError(parsePlanOverlapConflict(body), plan, binding);
+-  constructor(public readonly conflict: PlanOverlapConflictView | null, public readonly proposed: UpcomingPlan) {
++  constructor(public readonly conflict: PlanOverlapConflictView | null, public readonly proposed: UpcomingPlan, public readonly binding?: AccountBinding) {
+-  constructor(message: string, public readonly conflict: PlanOverlapConflictView | null, public readonly sentGoalActivityId: string | null = null) {
++  constructor(message: string, public readonly conflict: PlanOverlapConflictView | null, public readonly sentGoalActivityId: string | null = null, public readonly binding?: AccountBinding) {
++  /** AURA-ANDROID-REL-04 (R3) -- the account of the ORIGINAL action; "Save
++   * anyway" re-sends with it instead of capturing a new one. */
++  binding?: AccountBinding;
++  /** AURA-ANDROID-REL-04 (R3) -- the account the refused save was bound to. */
++  binding?: AccountBinding;
++    // AURA-ANDROID-REL-04 IR-01 (R2/R3) -- the account the user acted under:
++    // the original action's binding when re-sent (Save anyway), else captured now.
++    const binding = options?.binding ?? captureAccountBinding();
+-      const res = await fetch('/api/plans', {
++      const res = await boundFetch(binding, '/api/plans', {
+-          throw new PlanOverlapActionError((body && typeof body.error === 'string' && body.error) || 'That time overlaps another plan.', parsePlanOverlapConflict(body), selectedGoalActivityId ?? null);
++          throw new PlanOverlapActionError((body && typeof body.error === 'string' && body.error) || 'That time overlaps another plan.', parsePlanOverlapConflict(body), selectedGoalActivityId ?? null, binding);
+-        setPlanOverlap({ key, plan, activityId, goalActivityId: err.sentGoalActivityId, conflict: err.conflict });
++        setPlanOverlap({ key, plan, activityId, goalActivityId: err.sentGoalActivityId, conflict: err.conflict, binding: err.binding });
+-    void saveOpportunity(pending.key, pending.plan, pending.activityId, { overlapPolicy: 'ALLOW' });
++    // AURA-ANDROID-REL-04 (R3) -- re-sent for the ORIGINAL action's account.
++    void saveOpportunity(pending.key, pending.plan, pending.activityId, { overlapPolicy: 'ALLOW', binding: pending.binding });
++import { describeFindATimePreferenceHint } from '../lib/preferenceLinks';
++          {findResult.candidates.length > 0 && (() => {
++            // AURA-PREF-01: one optional line when a preference that would
++            // tailor these times isn't set (signed-in Find a Time only).
++            const hint = describeFindATimePreferenceHint((findResult as { constraintsApplied?: Parameters<typeof describeFindATimePreferenceHint>[0] }).constraintsApplied);
++            return hint ? (
++              <p data-testid="find-preference-hint" style={{ margin: 0, fontSize: 12, color: colors.textSecondary, lineHeight: 1.5 }}>
++                {hint.text}{' '}
++                <a href={hint.href} style={{ color: colors.accent, fontWeight: 700 }}>{hint.linkLabel}</a>
++              </p>
++            ) : null;
++          })()}
+=== apps/web/components/YouView.tsx
++import { downloadBound, downloadResultMessage } from '../lib/boundDownload';
++  // AURA-ANDROID-REL-04 IR-01 (R4): in-app downloads are bound to the account
++  // tapped under (lib/boundDownload.ts), never an ambient-cookie navigation.
++  const [downloadNotice, setDownloadNotice] = useState<string | null>(null);
++  const [downloading, setDownloading] = useState<'export' | 'calendar' | null>(null);
++  const runDownload = async (kind: 'export' | 'calendar') => {
++    if (downloading) return;
++    setDownloading(kind);
++    setDownloadNotice(null);
++    try {
++      const r = kind === 'export'
++        ? await downloadBound('/api/users/export', 'myauramoment-export.json')
++        : await downloadBound('/api/calendar/feed', 'auraschedule.ics');
++      setDownloadNotice(downloadResultMessage(r));
++    } finally {
++      setDownloading(null);
++    }
++  };
+-                <a href="/api/calendar/feed" target="_blank" rel="noreferrer" style={calendarPrimaryActionStyle}>
+-                  Open calendar
+-                </a>
++                <button type="button" onClick={() => void runDownload('calendar')} disabled={downloading !== null} style={calendarPrimaryActionStyle}>
++                  {downloading === 'calendar' ? 'Downloading…' : 'Download calendar'}
++                </button>
+-          <SettingsLinkRow icon="⬇️" title="Export Data" detail="Download your timing data" href="/api/users/export" />
++          <SettingsLinkRow icon="⬇️" title="Export Data" detail={downloading === 'export' ? 'Preparing your download…' : 'Download your timing data'} onClick={() => void runDownload('export')} />
++          {downloadNotice && (
++            <div role="status" style={{ padding: '8px 14px', color: '#fbbf24', fontSize: 12 }}>{downloadNotice}</div>
++          )}
+-function SettingsLinkRow({ icon, title, detail, href }: { icon: string; title: string; detail: string; href: string }) {
++function SettingsLinkRow({ icon, title, detail, onClick }: { icon: string; title: string; detail: string; onClick: () => void }) {
+-    <a
+-      href={href}
+-      style={{ width: '100%', minHeight: 58, borderBottom: '1px solid rgba(255, 255, 255, 0.06)', background: 'transparent', color: '#f8fafc', display: 'grid', gridTemplateColumns: '28px 1fr auto', alignItems: 'center', gap: 10, padding: '10px 14px', textAlign: 'left', cursor: 'pointer', boxSizing: 'border-box', textDecoration: 'none' }}
++    <button
++      type="button"
++      onClick={onClick}
++      style={{ width: '100%', minHeight: 58, border: 'none', borderBottom: '1px solid rgba(255, 255, 255, 0.06)', background: 'transparent', color: '#f8fafc', display: 'grid', gridTemplateColumns: '28px 1fr auto', alignItems: 'center', gap: 10, padding: '10px 14px', textAlign: 'left', cursor: 'pointer', boxSizing: 'border-box', textDecoration: 'none', font: 'inherit' }}
+-    </a>
++    </button>
+-import React, { useMemo, useState } from 'react';
++import React, { useEffect, useMemo, useState } from 'react';
++import { PREFERENCE_SECTION_IDS, preferenceSectionIdFromSearch } from '../lib/preferenceLinks';
++  // AURA-PREF-01: `/?tab=you&section=availability|work-hours` (from Find a
++  // Time and Plan My Day) opens You scrolled to that settings card.
++  useEffect(() => {
++    if (typeof window === 'undefined') return;
++    const id = preferenceSectionIdFromSearch(window.location.search);
++    if (!id) return;
++    // Scroll once now and once after the settings cards above have loaded
++    // their data (their height changes as they render).
++    const scroll = () => document.getElementById(id)?.scrollIntoView({ block: 'start' });
++    const timers = [window.setTimeout(scroll, 0), window.setTimeout(scroll, 800)];
++    return () => timers.forEach((timer) => window.clearTimeout(timer));
++  }, []);
+-      <div>
++      <div id={PREFERENCE_SECTION_IDS.availability} style={{ scrollMarginTop: 18 }}>
+-      <div>
+-        <SectionHeader label="Daily Rhythm" />
++      <div id={PREFERENCE_SECTION_IDS.workHours} style={{ scrollMarginTop: 18 }}>
++        <SectionHeader label="Work hours" />
+=== test/findATimeConstraintsDb.test.ts
++import { boundHeaders } from './rel04BoundTestHeaders';
+-const fakeReq = (cookie: string | undefined, body: unknown): any => ({ cookies: { get: (n: string) => (cookie !== undefined && n === 'as_session' ? { value: cookie } : undefined) }, json: async () => body, headers: new Headers() });
++const fakeReq = (cookie: string | undefined, body: unknown): any => ({ cookies: { get: (n: string) => (cookie !== undefined && n === 'as_session' ? { value: cookie } : undefined) }, json: async () => body, headers: boundHeaders(cookie) });
+-    check('T9 route: constraintsApplied reports CONFIGURED + 2 blocking plans', JSON.stringify(fa.body.constraintsApplied) === JSON.stringify({ availability: 'CONFIGURED', blockedPlanCount: 2 }));
++    check('T9 route: constraintsApplied reports CONFIGURED + 2 blocking plans (re-baselined by AURA-PREF-01: summary now also reports workHours)', JSON.stringify(fa.body.constraintsApplied) === JSON.stringify({ availability: 'CONFIGURED', blockedPlanCount: 2, workHours: 'UNCONFIGURED' }));
+-    check('T3 route: UNCONFIGURED reported, existing plan still counted', JSON.stringify(fb.body.constraintsApplied) === JSON.stringify({ availability: 'UNCONFIGURED', blockedPlanCount: 1 }));
++    check('T3 route: UNCONFIGURED reported, existing plan still counted (re-baselined by AURA-PREF-01: summary now also reports workHours)', JSON.stringify(fb.body.constraintsApplied) === JSON.stringify({ availability: 'UNCONFIGURED', blockedPlanCount: 1, workHours: 'UNCONFIGURED' }));
+=== test/goalActivityDailyOccurrenceEligibilityDb.test.ts
++import { boundHeaders } from './rel04BoundTestHeaders';
+-    headers: new Headers(),
++    headers: boundHeaders(tok),
+-// acceptance, and Move. Uses fixed, explicit UTC instants anchored to
+-// 2026-12-01 (a safe, uncollided future date) rather than Date.now()
+-// arithmetic, so every scenario's local-day boundary (Asia/Kolkata,
+-// UTC+5:30) is deterministic and easy to reason about.
++// acceptance, and Move. Every instant is a fixed offset from one anchor
++// (12:00 IST on a Tuesday), so every scenario's local-day boundary
++// (Asia/Kolkata, UTC+5:30) is deterministic and easy to reason about.
++//
++// AURA-CI-07 -- the anchor was the hard-coded 2026-12-01T06:30Z. Move
++// rejects a destination that is not in the future, so the Move scenarios
++// (6/6a/6b/7/8/9) would have failed on every run from that date. The
++// anchor is now the Tuesday of the shared lifecycleFixtureCalendar week
++// (always >= 28 days ahead): same weekday layout as before (day -1 is the
++// Monday of the same Monday-start week; days 0..+2 share that week; +9
++// crosses into the next), always in the future. Set
++// LIFECYCLE_FIXTURE_REFERENCE_NOW to simulate a run date.
++import { fixtureAnchorMonday, addCivilDays, realClockReferenceForFixture } from './lifecycleFixtureCalendar';
+-// 2026-12-01T06:30:00Z = 2026-12-01 12:00 IST (safely mid-day, no midnight-adjacent ambiguity).
+-const ANCHOR_MS = Date.parse('2026-12-01T06:30:00Z');
++// <Tuesday>T06:30:00Z = <Tuesday> 12:00 IST (safely mid-day, no midnight-adjacent ambiguity).
++const ANCHOR_TUESDAY = addCivilDays(fixtureAnchorMonday(realClockReferenceForFixture(), TZ), 1);
++const ANCHOR_MS = Date.parse(`${ANCHOR_TUESDAY}T06:30:00Z`);
++// AURA-CI-07 -- deterministic ordering for the Move-versus-create race. A third
++// transaction holds the per-user advisory lock that both writers take; the first
++// writer is started and we wait until Postgres reports it blocked on that lock,
++// then the second, then the holder commits. Postgres grants a released lock to
++// waiters in queue order, so the first writer always wins. No retries: a writer
++// that never blocks fails the barrier and the scenario.
++async function advisoryLockWaiters(): Promise<number> {
++  return (await sql(`SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock' AND wait_event = 'advisory' AND query LIKE '%pg_advisory_xact_lock%'`))[0].n;
++}
++async function waitForAdvisoryLockWaiters(n: number): Promise<void> {
++  const deadline = Date.now() + 10_000;
++  while (Date.now() < deadline) {
++    if ((await advisoryLockWaiters()) >= n) return;
++    await new Promise((r) => setTimeout(r, 5));
++  }
++  throw new Error(`CI-07 barrier: ${n} writer(s) never blocked on the per-user advisory lock`);
++}
++async function runMoveVersusCreateRace(label: string, order: 'natural' | 'move-first' | 'create-first', userId: string, tok: string, goalActivityId: string) {
++  const setupRes = await plansRoute(req(tok, { ...plan('Strength training', -DAY), goalActivityId }));
++  const setupPlan = await setupRes.json();
++  check(`${label}. setup: an occurrence exists on day -1`, setupRes.status === 200);
++  const original = (await sql(`SELECT id, "scheduledLocalDate" FROM "GoalActivityOccurrence" WHERE "goalActivityId" = $1`, [goalActivityId]))[0];
++  const doMove = () => movePlannedActivity(userId, setupPlan.id, { newStartAt: new Date(ANCHOR_MS + HOUR) }).then((r) => ({ ok: true as const, r, code: 'OK' })).catch((e) => ({ ok: false as const, r: null, code: String(e?.code ?? e) }));
++  const doCreate = () => plansRoute(req(tok, { ...plan('Strength training', 3 * HOUR), goalActivityId }));
++  let moveResult: Awaited<ReturnType<typeof doMove>>;
++  let createResult: Awaited<ReturnType<typeof doCreate>>;
++  if (order === 'natural') {
++    [moveResult, createResult] = await Promise.all([doMove(), doCreate()]);
++  } else {
++    const holder = await beginTransaction();
++    try {
++      await holder.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`day-constructor-accept:${userId}`]);
++      const movePromise = order === 'move-first' ? doMove() : null;
++      const createPromise = order === 'create-first' ? doCreate() : null;
++      await waitForAdvisoryLockWaiters(1);
++      const secondMove = movePromise ?? doMove();
++      const secondCreate = createPromise ?? doCreate();
++      await waitForAdvisoryLockWaiters(2);
++      await holder.query('COMMIT');
++      [moveResult, createResult] = await Promise.all([secondMove, secondCreate]);
++    } catch (e) {
++      await holder.query('ROLLBACK').catch(() => {});
++      throw e;
+=== test/planDayWiring.test.ts
+-const planDayPageSource: string = fs.readFileSync(path.join(__dirname, '../apps/web/app/plan-day/page.tsx'), 'utf8');
++// AURA-ANDROID-REL-04 (R5): the page's account-derived bootstrap moved, unchanged, into the account-scoped
++// GET /api/plan-day/bootstrap route (fetched by PlanDayLoader after verification). The page-level checks below
++// therefore read that route (plus the loader, which renders PlanDayClient with its result).
++const planDayPageSource: string = fs.readFileSync(path.join(__dirname, '../apps/web/app/api/plan-day/bootstrap/route.ts'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, '../apps/web/app/plan-day/PlanDayLoader.tsx'), 'utf8');
+-    planDayPageSource.includes("verifySessionToken, SESSION_COOKIE_NAME } from '../../lib/auth'") && /import \{[^}]*\bgetUserById\b[^}]*\} from '\.\.\/\.\.\/lib\/db'/.test(planDayPageSource)
++    planDayPageSource.includes("verifySessionToken, SESSION_COOKIE_NAME } from '../../../../lib/auth'") && /import \{[^}]*\bgetUserById\b[^}]*\} from '\.\.\/\.\.\/\.\.\/\.\.\/lib\/db'/.test(planDayPageSource)
+-    '30. page.tsx is a real async Server Component doing the session/user read itself (matches the established app/moment/[token]/page.tsx precedent)',
+-    /export default async function PlanDayPage\(\{\s*searchParams/.test(planDayPageSource)
++    '30. (R5) the bootstrap route does the session/user read itself, server-side, from the request\'s own searchParams',
++    /export async function GET\(req: NextRequest\)/.test(planDayPageSource) && /const searchParams = \{ horizon: pick\('horizon'\)/.test(planDayPageSource)
+-      planDayPageSource.includes('timezone={bootstrap?.timezone ?? null}') &&
+-      planDayPageSource.includes('planningDate={bootstrap?.planningDate ?? null}')
++      planDayPageSource.includes('timezone: bootstrap?.timezone ?? null') &&
++      planDayPageSource.includes('planningDate: bootstrap?.planningDate ?? null')
+-  check('115. page.tsx passes autoGoalSuggestions={autoGoalSuggestions} to <PlanDayClient>', /autoGoalSuggestions=\{autoGoalSuggestions\}/.test(planDayPageSource));
++  check('115. (R5) the bootstrap returns autoGoalSuggestions, which the loader passes to <PlanDayClient> unchanged', /\n\s*autoGoalSuggestions,\n/.test(planDayPageSource) && /<PlanDayClient \{\.\.\.load\.props\} \/>/.test(planDayPageSource));
+-  check('48. the Availability prerequisite links to the existing You tab (/?tab=you), never a new Settings route', planDayClientSource.includes("'/?tab=you'"));
++  check('48. the Availability prerequisite links to the existing You tab (deep link to its Availability card), never a new Settings route (re-baselined by AURA-PREF-01)', planDayClientSource.includes("preferenceSettingsHref('availability')"));
+-  check('102. FUTURE_AVAILABILITY_REQUIRED / NO_USABLE_CAPACITY (Tomorrow) Configure availability action navigates to the SAME real \'/?tab=you\' destination the bootstrap-known prerequisite card already uses (this ticket\'s own section 9 -- no second/new destination invented)', (planDayClientSource.match(/\/\?tab=you/g) ?? []).length >= 2);
++  check('102. FUTURE_AVAILABILITY_REQUIRED / NO_USABLE_CAPACITY (Tomorrow) Configure availability action navigates to the SAME real \'/?tab=you\' destination the bootstrap-known prerequisite card already uses (this ticket\'s own section 9 -- no second/new destination invented)', (planDayClientSource.match(/preferenceSettingsHref\('availability'\)/g) ?? []).length >= 2);
+=== test/schedulingEligibilityErrorContractDb.test.ts
++import { boundHeaders } from './rel04BoundTestHeaders';
+-    headers: new Headers(),
++    headers: boundHeaders(tok),
+-    const fakeReq = (body: unknown): any => ({ cookies: { get: () => ({ value: createSessionToken(user.id, user.email) }) }, json: async () => body, headers: new Headers() });
++    const fakeReq = (body: unknown): any => ({ cookies: { get: () => ({ value: createSessionToken(user.id, user.email) }) }, json: async () => body, headers: boundHeaders(createSessionToken(user.id, user.email)) });
+-// POST /api/plans, Day Constructor acceptance, and Move. Uses fixed,
+-// explicit UTC instants anchored to 2026-12-15 (a safe, uncollided future
+-// date), same convention as test/goalActivityDailyOccurrenceEligibilityDb.test.ts.
++// POST /api/plans, Day Constructor acceptance, and Move. Every instant is a
++// fixed offset from one anchor (12:00 IST on a Tuesday), same convention as
++// test/goalActivityDailyOccurrenceEligibilityDb.test.ts.
++//
++// AURA-CI-07 -- the anchor was the hard-coded 2026-12-15T06:30Z, which Move
++// (future destinations only) would have rejected from that date. It is now
++// the Tuesday two weeks after the shared lifecycleFixtureCalendar Monday
++// (always >= 28 days ahead): still a Tuesday, still 14 days after the HPG3-A2
++// file's own anchor, offsets 0..+3 days within one Monday-start week. Set
++// LIFECYCLE_FIXTURE_REFERENCE_NOW to simulate a run date.
++import { fixtureAnchorMonday, addCivilDays, realClockReferenceForFixture } from './lifecycleFixtureCalendar';
+-// 2026-12-15T06:30:00Z = 2026-12-15 12:00 IST (mid-day, no midnight-adjacent ambiguity).
+-const ANCHOR_MS = Date.parse('2026-12-15T06:30:00Z');
++// <Tuesday>T06:30:00Z = <Tuesday> 12:00 IST (mid-day, no midnight-adjacent ambiguity).
++const ANCHOR_TUESDAY = addCivilDays(fixtureAnchorMonday(realClockReferenceForFixture(), TZ), 15);
++const ANCHOR_MS = Date.parse(`${ANCHOR_TUESDAY}T06:30:00Z`);
+=== test/schedulingEligibilityUiPresentationDb.test.ts
++import { boundHeaders } from './rel04BoundTestHeaders';
+-    headers: new Headers(),
++    headers: boundHeaders(tok),
++import { fixtureAnchorMonday, addCivilDays, realClockReferenceForFixture } from './lifecycleFixtureCalendar';
+-// 2026-12-16T06:30:00Z = 2026-12-16 12:00 IST -- a distinct anchor from
++// <Wednesday>T06:30:00Z = <Wednesday> 12:00 IST -- a distinct anchor from
+-const ANCHOR_MS = Date.parse('2026-12-16T06:30:00Z');
++//
++// AURA-CI-07 -- this was the hard-coded 2026-12-16T06:30Z, which Move (future
++// destinations only) would have rejected from that date. It is now the
++// Wednesday two weeks after the shared lifecycleFixtureCalendar Monday
++// (always >= 28 days ahead): still a Wednesday, still the day after HPG3-A3a's
++// Tuesday anchor, offsets 0..+3 days within one Monday-start week. Set
++// LIFECYCLE_FIXTURE_REFERENCE_NOW to simulate a run date.
++const ANCHOR_WEDNESDAY = addCivilDays(fixtureAnchorMonday(realClockReferenceForFixture(), TZ), 16);
++const ANCHOR_MS = Date.parse(`${ANCHOR_WEDNESDAY}T06:30:00Z`);

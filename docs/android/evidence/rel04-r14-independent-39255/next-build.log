@@ -1,0 +1,139 @@
+
+> auraschedule-web@0.0.1 build
+> next build
+
+  ▲ Next.js 14.2.35
+  - Experiments (use with caution):
+    · externalDir
+
+   Creating an optimized production build ...
+ ✓ Compiled successfully
+   Linting and checking validity of types ...
+   Collecting page data ...
+   Generating static pages (0/72) ...
+   Generating static pages (18/72) 
+   Generating static pages (36/72) 
+   Generating static pages (54/72) 
+ ✓ Generating static pages (72/72)
+   Finalizing page optimization ...
+   Collecting build traces ...
+
+Route (app)                                                  Size     First Load JS
+┌ ○ /                                                        129 kB          318 kB
+├ ○ /_not-found                                              875 B          88.3 kB
+├ ƒ /.well-known/oauth-protected-resource                    0 B                0 B
+├ ƒ /.well-known/oauth-protected-resource/api/mcp            0 B                0 B
+├ ƒ /api/activity-preferences                                0 B                0 B
+├ ƒ /api/activity-preferences/[activityId]                   0 B                0 B
+├ ƒ /api/ask-aura                                            0 B                0 B
+├ ƒ /api/aura-moments                                        0 B                0 B
+├ ƒ /api/aura-moments/[token]                                0 B                0 B
+├ ƒ /api/aura-moments/[token]/alternatives                   0 B                0 B
+├ ƒ /api/aura-moments/[token]/response                       0 B                0 B
+├ ƒ /api/aura-moments/[token]/revoke                         0 B                0 B
+├ ƒ /api/aura-moments/[token]/seen                           0 B                0 B
+├ ƒ /api/aura-moments/[token]/suggest                        0 B                0 B
+├ ƒ /api/aura-updates                                        0 B                0 B
+├ ƒ /api/auth/logout                                         0 B                0 B
+├ ƒ /api/auth/request-link                                   0 B                0 B
+├ ƒ /api/auth/session                                        0 B                0 B
+├ ƒ /api/auth/verify                                         0 B                0 B
+├ ƒ /api/auth/verify-code                                    0 B                0 B
+├ ƒ /api/calendar/feed                                       0 B                0 B
+├ ƒ /api/captures                                            0 B                0 B
+├ ƒ /api/captures/[captureId]                                0 B                0 B
+├ ƒ /api/captures/[captureId]/complete                       0 B                0 B
+├ ƒ /api/cities/custom                                       0 B                0 B
+├ ƒ /api/daily-assistant/briefing                            0 B                0 B
+├ ƒ /api/daily-assistant/goal-rhythm                         0 B                0 B
+├ ƒ /api/daily-assistant/goal-rhythm/weekly-accept           0 B                0 B
+├ ƒ /api/daily-assistant/goal-rhythm/weekly-proposal         0 B                0 B
+├ ƒ /api/daily-assistant/guidance                            0 B                0 B
+├ ƒ /api/daily-assistant/insights                            0 B                0 B
+├ ƒ /api/daily-assistant/reflection                          0 B                0 B
+├ ƒ /api/daily-assistant/slot-task                           0 B                0 B
+├ ƒ /api/daily-briefing/today                                0 B                0 B
+├ ƒ /api/day-constructor/accept                              0 B                0 B
+├ ƒ /api/day-constructor/preview                             0 B                0 B
+├ ƒ /api/day-constructor/preview-item                        0 B                0 B
+├ ƒ /api/day/recompose                                       0 B                0 B
+├ ƒ /api/day/recompose/accept                                0 B                0 B
+├ ƒ /api/forward-planner                                     0 B                0 B
+├ ƒ /api/goals                                               0 B                0 B
+├ ƒ /api/goals/[goalId]                                      0 B                0 B
+├ ƒ /api/goals/[goalId]/activities                           0 B                0 B
+├ ƒ /api/goals/[goalId]/activities/[goalActivityId]/dismiss  0 B                0 B
+├ ƒ /api/goals/[goalId]/activities/[goalActivityId]/rhythm   0 B                0 B
+├ ƒ /api/goals/[goalId]/archive                              0 B                0 B
+├ ƒ /api/guest/state                                         0 B                0 B
+├ ƒ /api/guest/timing-search                                 0 B                0 B
+├ ƒ /api/habit-logs                                          0 B                0 B
+├ ƒ /api/habit-logs/calendar                                 0 B                0 B
+├ ƒ /api/habit-logs/calendar/day                             0 B                0 B
+├ ƒ /api/habits                                              0 B                0 B
+├ ƒ /api/habits/[habitId]                                    0 B                0 B
+├ ƒ /api/habits/[habitId]/log                                0 B                0 B
+├ ○ /api/health                                              0 B                0 B
+├ ƒ /api/insights/reporting                                  0 B                0 B
+├ ƒ /api/internal/product-metrics                            0 B                0 B
+├ ƒ /api/internal/reminders/dispatch                         0 B                0 B
+├ ƒ /api/location/reverse                                    0 B                0 B
+├ ƒ /api/location/search                                     0 B                0 B
+├ ƒ /api/mcp                                                 0 B                0 B
+├ ƒ /api/mcp/connections                                     0 B                0 B
+├ ƒ /api/muhurtham-search                                    0 B                0 B
+├ ƒ /api/my-day                                              0 B                0 B
+├ ƒ /api/my-day/suggestions                                  0 B                0 B
+├ ƒ /api/my-day/suggestions/dismiss                          0 B                0 B
+├ ƒ /api/panchang                                            0 B                0 B
+├ ƒ /api/panchang/month                                      0 B                0 B
+├ ƒ /api/panchang/natal-chart                                0 B                0 B
+├ ƒ /api/panchang/today                                      0 B                0 B
+├ ƒ /api/panchang/transits                                   0 B                0 B
+├ ƒ /api/people                                              0 B                0 B
+├ ƒ /api/people/[personId]                                   0 B                0 B
+├ ƒ /api/plan-day/bootstrap                                  0 B                0 B
+├ ƒ /api/plans                                               0 B                0 B
+├ ƒ /api/plans/[planId]                                      0 B                0 B
+├ ƒ /api/plans/[planId]/log                                  0 B                0 B
+├ ƒ /api/plans/[planId]/move                                 0 B                0 B
+├ ƒ /api/plans/[planId]/skip                                 0 B                0 B
+├ ƒ /api/product-events                                      0 B                0 B
+├ ƒ /api/push-subscriptions                                  0 B                0 B
+├ ƒ /api/push/public-key                                     0 B                0 B
+├ ƒ /api/reminders/seen                                      0 B                0 B
+├ ƒ /api/timing-search                                       0 B                0 B
+├ ƒ /api/timing-search/shared                                0 B                0 B
+├ ƒ /api/users/availability-preferences                      0 B                0 B
+├ ƒ /api/users/birth-profile                                 0 B                0 B
+├ ƒ /api/users/daily-rhythm-preferences                      0 B                0 B
+├ ƒ /api/users/day-builder-preferences                       0 B                0 B
+├ ƒ /api/users/export                                        0 B                0 B
+├ ƒ /api/users/location                                      0 B                0 B
+├ ƒ /api/users/onboarding                                    0 B                0 B
+├ ƒ /api/users/reminder-preferences                          0 B                0 B
+├ ○ /captures                                                3.1 kB          101 kB
+├ ƒ /connect/apps                                            1.71 kB        91.9 kB
+├ ƒ /connect/sign-in                                         3.99 kB        94.2 kB
+├ ƒ /find                                                    6.59 kB         182 kB
+├ ○ /goals                                                   5.09 kB         109 kB
+├ ƒ /goals/[goalId]                                          5.75 kB         110 kB
+├ ƒ /moment/[token]                                          3.21 kB         138 kB
+└ ○ /plan-day                                                7.63 kB         120 kB
++ First Load JS shared by all                                87.4 kB
+  ├ chunks/963da1d4-f0b5f020a594b1af.js                      53.7 kB
+  ├ chunks/999-22481cb35571d6a2.js                           31.7 kB
+  └ other shared chunks (total)                              2.02 kB
+
+Route (pages)                                                Size     First Load JS
+─ ƒ /api/oauth/[...oidc]                                     0 B              86 kB
++ First Load JS shared by all                                86 kB
+  ├ chunks/framework-e88872643b0873ed.js                     44.9 kB
+  ├ chunks/main-f9961b9cd502d03b.js                          39.1 kB
+  └ other shared chunks (total)                              1.99 kB
+
+ƒ Middleware                                                 27.9 kB
+
+○  (Static)   prerendered as static content
+ƒ  (Dynamic)  server-rendered on demand
+

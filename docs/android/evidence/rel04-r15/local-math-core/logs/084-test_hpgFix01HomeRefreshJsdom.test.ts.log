@@ -1,0 +1,24 @@
+$ npx ts-node --project tsconfig.jsdom-tests.json test/hpgFix01HomeRefreshJsdom.test.ts
+# job=math-core-tests step=Run HPG-FIX-01 Home rhythm refresh (jsdom) test env={}
+OK   1. not scheduled today: "Just today" offered (unchanged)
+OK   1. not scheduled today: "Plan remaining 2" offered (unchanged)
+OK   1. not scheduled today: no "already planned" note
+OK   1. scheduled today: "Just today" NOT offered
+OK   1. scheduled today: "Plan it" (a today handoff) NOT offered
+OK   1. scheduled today: weekly review still offered
+OK   1. scheduled today: explanatory note rendered
+OK   1. scheduled today, 1 remaining: "Plan another day" instead of "Plan it"
+OK   2. weekly review opened and settled (Close available)
+OK   2. nothing refreshed merely by opening the review
+OK   2. closing the review calls onWeeklyReviewClosed exactly once
+OK   2. review dialog is gone after close
+OK   3. Plan-tab saves/logs/moves/skips (handlePlanLogged) refresh rhythm
+OK   3. Home complete/skip/move/skip-all (handleHomePlanCompleted) refresh rhythm
+OK   3. My Day / Day Builder changes (handleMyDayOrGuidanceChanged) refresh rhythm
+OK   3. weekly-review close is wired page -> Home -> card
+OK   3. post-change refresh keeps last-known-good on failure (no blanking)
+OK   3. no full-page reload introduced for the refresh
+
+hpgFix01HomeRefreshJsdom: all checks passed
+
+# exit=0 signal=

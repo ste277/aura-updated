@@ -1,0 +1,860 @@
+Day Constructor acceptance DB tests	UNKNOWN STEP	﻿2026-11-27T13:28:52.3971240Z Current runner version: '2.338.2'
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:52.3997986Z ##[group]Runner Image Provisioner
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:52.3999183Z Hosted Compute Agent
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:52.3999816Z Version: 20261111.635
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:52.4000480Z Commit: b8a594ea514ff44cadb5342986c68b1eac6e22ed
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:52.4001213Z Build Date: 2026-11-11T01:49:01Z
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:52.4001896Z Worker ID: {32768033-60d5-467c-917c-74e2c8dbd70a}
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:52.4002591Z Region: us-east-1
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:52.4003107Z Cloud: AWS
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:52.4003703Z ##[endgroup]
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:52.4005358Z ##[group]Operating System
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:52.4006020Z Ubuntu
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:52.4006512Z 26.04.1
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:52.4007092Z LTS
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:52.4007558Z ##[endgroup]
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:52.4008096Z ##[group]Runner Image
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:52.4008668Z Image: ubuntu-26.04
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:52.4009532Z Version: 20261122.9.1
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:52.4010829Z Included Software: https://github.com/actions/runner-images/blob/ubuntu26/20261122.9/images/ubuntu/Ubuntu2604-Readme.md
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:52.4012366Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu26%2F20261122.9
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:52.4013334Z ##[endgroup]
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:52.4014571Z ##[group]GITHUB_TOKEN Permissions
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:52.4016921Z Contents: read
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:52.4017547Z Metadata: read
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:52.4018087Z Packages: read
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:52.4018605Z ##[endgroup]
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:52.4021323Z Secret source: Actions
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:52.4022370Z Cache mode: write
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:52.4023274Z Prepare workflow directory
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:52.4363171Z Prepare all required actions
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:52.4399988Z Getting action download info
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:52.5872075Z Download action repository 'actions/checkout@v5' (SHA:fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09)
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:53.5876440Z Download action repository 'actions/setup-node@v5' (SHA:a0853c24544627f65ddf259abe73b1d18a591444)
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:54.0920016Z Complete job name: Day Constructor acceptance DB tests
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:54.1883885Z ##[group]Checking docker version
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:54.1894377Z ##[command]/usr/bin/docker version --format '{{.Server.APIVersion}}'
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:55.8930666Z '1.54'
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:55.8945081Z Docker daemon API version: '1.54'
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:55.8945459Z ##[command]/usr/bin/docker version --format '{{.Client.APIVersion}}'
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:55.9097358Z '1.54'
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:55.9106034Z Docker client API version: '1.54'
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:55.9110635Z ##[endgroup]
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:55.9112130Z ##[group]Clean up resources from previous jobs
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:55.9116002Z ##[command]/usr/bin/docker ps --all --quiet --no-trunc --filter "label=719007"
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:55.9234873Z ##[command]/usr/bin/docker network prune --force --filter "label=719007"
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:55.9340061Z ##[endgroup]
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:55.9340419Z ##[group]Create local container network
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:55.9347296Z ##[command]/usr/bin/docker network create --label 719007 github_network_e7c8b65c79d84584b263322416d6be18
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:55.9656601Z c20aa4c643bd96e8f028a3e33edf5954ec9b92b3f8b19693fcef541787590547
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:55.9670650Z ##[endgroup]
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:55.9690695Z ##[group]Starting postgres service container
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:55.9707110Z ##[command]/usr/bin/docker pull postgres:16
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:56.1937538Z 16: Pulling from library/postgres
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:56.3169657Z cfa3776983f1: Pulling fs layer
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:56.3176378Z c362828e9ca3: Pulling fs layer
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:56.3184650Z 9be9d0609035: Pulling fs layer
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:56.3184994Z 1be8baae3c53: Pulling fs layer
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:56.3185199Z 3b9319a24e33: Pulling fs layer
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:56.3185382Z 91d82016f303: Pulling fs layer
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:56.3185569Z 46e4f78fd254: Pulling fs layer
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:56.3185746Z 72bd85048465: Pulling fs layer
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:56.3185945Z cc2ed79b34db: Pulling fs layer
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:56.3186165Z 34ff39ac908b: Pulling fs layer
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:56.3186342Z 40748add9f4f: Pulling fs layer
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:56.3186875Z 111f378001d9: Pulling fs layer
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:56.3187076Z e91b6b814ba6: Pulling fs layer
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:56.3839214Z cfa3776983f1: Download complete
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:56.3840598Z 9be9d0609035: Download complete
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:56.3866691Z 91d82016f303: Download complete
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:56.3871545Z 34ff39ac908b: Download complete
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:56.3875968Z 72bd85048465: Download complete
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:56.3882650Z c362828e9ca3: Download complete
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:56.3892246Z 1be8baae3c53: Download complete
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:56.3894961Z cc2ed79b34db: Download complete
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:56.4831538Z 111f378001d9: Download complete
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:56.4842861Z e91b6b814ba6: Download complete
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:56.4843753Z 46e4f78fd254: Download complete
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:56.4845165Z 7aa47411d7c7: Download complete
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:56.4846586Z 636bc81cf18f: Download complete
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:56.6835377Z 40748add9f4f: Download complete
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:57.1898118Z 1be8baae3c53: Pull complete
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:57.1948224Z 40748add9f4f: Pull complete
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:57.2938256Z e91b6b814ba6: Pull complete
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:57.2962475Z 46e4f78fd254: Pull complete
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:57.3935192Z 111f378001d9: Pull complete
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:57.4840290Z 9be9d0609035: Pull complete
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:57.4877264Z 72bd85048465: Pull complete
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:57.4888293Z c362828e9ca3: Pull complete
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:57.5836401Z 3b9319a24e33: Download complete
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:58.9286111Z cfa3776983f1: Pull complete
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:58.9291336Z 91d82016f303: Pull complete
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:58.9299113Z 34ff39ac908b: Pull complete
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:58.9308388Z cc2ed79b34db: Pull complete
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:58.9317241Z 3b9319a24e33: Pull complete
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:58.9317850Z Digest: sha256:ce81150802644ddfac1db4da9e63be6f2a3818aa6ee98a7a28838aeea65dc37a
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:58.9318268Z Status: Downloaded newer image for postgres:16
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:58.9323519Z docker.io/library/postgres:16
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:28:58.9388056Z ##[command]/usr/bin/docker create --name 5ed69b4a8a9b4fff9206ea4c7bf46723_postgres16_026142 --label 719007 --network github_network_e7c8b65c79d84584b263322416d6be18 --network-alias postgres -p 5432:5432 --health-cmd "pg_isready -U aura_ci -d aura_ci" --health-interval 5s --health-timeout 5s --health-retries 10 -e "POSTGRES_USER=aura_ci" -e "POSTGRES_PASSWORD=aura_ci" -e "POSTGRES_DB=aura_ci" -e GITHUB_ACTIONS=true -e CI=true postgres:16
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:00.1218334Z 034e063394a9b13dfbad5a6d998675ad08f7be76ba99fc08e848bb48de132706
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:00.1237872Z ##[command]/usr/bin/docker start 034e063394a9b13dfbad5a6d998675ad08f7be76ba99fc08e848bb48de132706
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:00.7775976Z 034e063394a9b13dfbad5a6d998675ad08f7be76ba99fc08e848bb48de132706
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:00.7790872Z ##[command]/usr/bin/docker ps --all --filter id=034e063394a9b13dfbad5a6d998675ad08f7be76ba99fc08e848bb48de132706 --filter status=running --no-trunc --format "{{.ID}} {{.Status}}"
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:00.7986775Z 034e063394a9b13dfbad5a6d998675ad08f7be76ba99fc08e848bb48de132706 Up Less than a second (health: starting)
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:00.8009947Z ##[command]/usr/bin/docker port 034e063394a9b13dfbad5a6d998675ad08f7be76ba99fc08e848bb48de132706
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:00.8133301Z 5432/tcp -> 0.0.0.0:5432
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:00.8133996Z 5432/tcp -> [::]:5432
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:00.8168326Z ##[endgroup]
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:00.8175829Z ##[group]Waiting for all services to be ready
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:00.8186035Z ##[command]/usr/bin/docker inspect --format="{{if .Config.Healthcheck}}{{print .State.Health.Status}}{{end}}" 034e063394a9b13dfbad5a6d998675ad08f7be76ba99fc08e848bb48de132706
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:00.8323871Z starting
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:00.8337390Z postgres service is starting, waiting 2 seconds before checking again.
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:02.8340042Z ##[command]/usr/bin/docker inspect --format="{{if .Config.Healthcheck}}{{print .State.Health.Status}}{{end}}" 034e063394a9b13dfbad5a6d998675ad08f7be76ba99fc08e848bb48de132706
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:02.8452032Z starting
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:02.8460841Z postgres service is starting, waiting 3 seconds before checking again.
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:06.7732535Z ##[command]/usr/bin/docker inspect --format="{{if .Config.Healthcheck}}{{print .State.Health.Status}}{{end}}" 034e063394a9b13dfbad5a6d998675ad08f7be76ba99fc08e848bb48de132706
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:06.7841779Z healthy
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:06.7853428Z postgres service is healthy.
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:06.7854026Z ##[endgroup]
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:06.8071495Z ##[group]Run actions/checkout@v5
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:06.8071833Z with:
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:06.8072014Z   repository: ste277/aura-updated
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:06.8073828Z   token: ***
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:06.8073990Z   ssh-strict: true
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:06.8074154Z   ssh-user: git
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:06.8074324Z   persist-credentials: true
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:06.8074509Z   clean: true
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:06.8074686Z   sparse-checkout-cone-mode: true
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:06.8074881Z   fetch-depth: 1
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:06.8075035Z   fetch-tags: false
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:06.8075195Z   show-progress: true
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:06.8075374Z   lfs: false
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:06.8075522Z   submodules: false
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:06.8075732Z   set-safe-directory: true
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:06.8075928Z   allow-unsafe-pr-checkout: false
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:06.8076188Z env:
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:06.8076513Z   DATABASE_URL: ***localhost:5432/aura_ci
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:06.8076719Z ##[endgroup]
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:08.8534630Z Syncing repository: ste277/aura-updated
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:08.8535895Z ##[group]Getting Git version info
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:08.8536328Z Working directory is '/home/runner/work/aura-updated/aura-updated'
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:08.8536903Z [command]/usr/bin/git version
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:08.8541322Z git version 2.56.1
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:08.8555029Z ##[endgroup]
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:08.8564744Z Temporarily overriding HOME='/home/runner/work/_temp/6cc96ade-4423-4755-9510-115bd81baee9' before making global git config changes
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:08.8565412Z Adding repository directory to the temporary git global config as a safe directory
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:08.8568185Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/aura-updated/aura-updated
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:08.8916740Z Deleting the contents of '/home/runner/work/aura-updated/aura-updated'
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:08.8929748Z ##[group]Initializing the repository
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:08.8930459Z [command]/usr/bin/git init /home/runner/work/aura-updated/aura-updated
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:08.9403183Z hint: Using 'master' as the name for the initial branch. This default branch name
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:08.9403644Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:08.9403999Z hint: to use in all of your new repositories, which will suppress this warning,
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:08.9404280Z hint: call:
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:08.9404482Z hint:
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:08.9404693Z hint: 	git config --global init.defaultBranch <name>
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:08.9404916Z hint:
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:08.9405129Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:08.9405477Z hint: 'development'. The just-created branch can be renamed via this command:
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:08.9405739Z hint:
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:08.9405896Z hint: 	git branch -m <name>
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:08.9406065Z hint:
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:08.9406291Z hint: Disable this message with "git config set advice.defaultBranchName false"
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:08.9423088Z Initialized empty Git repository in /home/runner/work/aura-updated/aura-updated/.git/
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:08.9432290Z [command]/usr/bin/git remote add origin https://github.com/ste277/aura-updated
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:08.9493256Z ##[endgroup]
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:08.9493577Z ##[group]Disabling automatic garbage collection
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:08.9497029Z [command]/usr/bin/git config --local gc.auto 0
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:08.9520504Z ##[endgroup]
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:08.9520789Z ##[group]Setting up auth
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:08.9525486Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:08.9548136Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:09.2603470Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:09.2628768Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:09.2815813Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:09.2840403Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:09.3021453Z [command]/usr/bin/git config --local http.https://github.com/.extraheader AUTHORIZATION: basic ***
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:09.3054550Z ##[endgroup]
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:09.3054870Z ##[group]Fetching the repository
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:09.3060872Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +fcf24bf5c44a5d5a1342d0151e47bb90eb7b09ea:refs/remotes/pull/392/merge
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:09.9148606Z From https://github.com/ste277/aura-updated
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:09.9149398Z  * [new ref]         fcf24bf5c44a5d5a1342d0151e47bb90eb7b09ea -> pull/392/merge
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:09.9153296Z ##[endgroup]
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:09.9153691Z ##[group]Determining the checkout info
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:09.9154850Z ##[endgroup]
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:09.9158736Z [command]/usr/bin/git sparse-checkout disable
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:09.9212991Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:09.9235269Z ##[group]Checking out the ref
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:09.9238241Z [command]/usr/bin/git checkout --progress --force refs/remotes/pull/392/merge
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:10.1783812Z Note: switching to 'refs/remotes/pull/392/merge'.
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:10.1784058Z 
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:10.1784238Z You are in 'detached HEAD' state. You can look around, make experimental
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:10.1784626Z changes and commit them, and you can discard any commits you make in this
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:10.1784961Z state without impacting any branches by switching back to a branch.
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:10.1785148Z 
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:10.1785287Z If you want to create a new branch to retain commits you create, you may
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:10.1785614Z do so (now or later) by using -c with the switch command. Example:
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:10.1785798Z 
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:10.1785884Z   git switch -c <new-branch-name>
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:10.1786013Z 
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:10.1786091Z Or undo this operation with:
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:10.1786211Z 
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:10.1786278Z   git switch -
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:10.1786372Z 
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:10.1786528Z Turn off this advice by setting config variable advice.detachedHead to false
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:10.1786738Z 
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:10.1786988Z HEAD is now at fcf24bf Merge 39f262b16cca48e40e2fcb528ad221d188f8daad into 38b7fa6f587fd7c1eac0687eb153ac11514ede1f
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:10.1798358Z ##[endgroup]
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:10.1847869Z [command]/usr/bin/git log -1 --format=%H
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:10.1867177Z fcf24bf5c44a5d5a1342d0151e47bb90eb7b09ea
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:10.2062931Z ##[group]Run actions/setup-node@v5
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:10.2063133Z with:
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:10.2063286Z   node-version: 24
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:10.2063442Z   always-auth: false
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:10.2063604Z   check-latest: false
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:10.2065251Z   token: ***
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:10.2065419Z   package-manager-cache: true
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:10.2065602Z env:
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:10.2065877Z   DATABASE_URL: ***localhost:5432/aura_ci
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:10.2066078Z ##[endgroup]
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:10.5017355Z (node:2740) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:10.5018060Z (Use `node --trace-deprecation ...` to show where the warning was created)
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:10.5019403Z Found in cache @ /opt/hostedtoolcache/node/24.22.3/x64
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:10.5020519Z ##[group]Environment details
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:13.2074218Z node: v24.22.3
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:13.2074521Z npm: 11.19.1
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:13.2074710Z yarn: 1.22.22
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:13.2075399Z ##[endgroup]
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:13.2168088Z ##[group]Run npm install
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:13.2168353Z ^[[36;1mnpm install^[[0m
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:13.2798827Z shell: /usr/bin/bash -e {0}
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:13.2799295Z env:
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:13.2799806Z   DATABASE_URL: ***localhost:5432/aura_ci
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:13.2800024Z ##[endgroup]
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:14.8281940Z npm warn deprecated whatwg-encoding@3.1.1: Use @exodus/bytes instead for a more spec-conformant and faster implementation
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:15.5455698Z 
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:15.5456460Z added 146 packages, and audited 147 packages in 2s
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:15.5456693Z 
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:15.5456822Z 24 packages are looking for funding
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:15.5457042Z   run `npm fund` for details
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:15.5462649Z 
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:15.5462922Z found 0 vulnerabilities
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:15.5697811Z ##[group]Run npm install
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:15.5698054Z ^[[36;1mnpm install^[[0m
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:15.5729227Z shell: /usr/bin/bash -e {0}
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:15.5729442Z env:
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:15.5730124Z   DATABASE_URL: ***localhost:5432/aura_ci
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:15.5730333Z ##[endgroup]
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:16.8646748Z npm warn deprecated tar@6.2.1: Old versions of tar are not supported, and contain widely publicized security vulnerabilities, which have been fixed in the current version. Please update. Support for old versions may be purchased (at exorbitant rates) by contacting i@izs.me
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:17.1643011Z npm warn deprecated glob@9.3.5: Old versions of glob are not supported, and contain widely publicized security vulnerabilities, which have been fixed in the current version. Please update. Support for old versions may be purchased (at exorbitant rates) by contacting i@izs.me
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:24.0408330Z 
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:24.0409099Z > auraschedule-web@0.0.1 postinstall
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:24.0409778Z > node scripts/apply-geolocation-compat-patch.mjs
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:24.0410127Z 
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:24.0767872Z [geolocation-compat-patch] applied coarse-location compatibility patch to @capacitor/geolocation 6.1.1 (GeolocationPlugin.java, Geolocation.java).
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:24.0884385Z 
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:24.0885172Z added 167 packages, and audited 168 packages in 8s
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:24.0885572Z 
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:24.0886244Z 16 packages are looking for funding
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:24.0886723Z   run `npm fund` for details
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:24.2014858Z 
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:24.2015903Z 13 vulnerabilities (3 moderate, 6 high, 4 critical)
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:24.2016232Z 
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:24.2016595Z To address issues that do not require attention, run:
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:24.2016934Z   npm audit fix
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:24.2017071Z 
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:24.2017275Z To address all issues (including breaking changes), run:
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:24.2017625Z   npm audit fix --force
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:24.2017819Z 
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:24.2017948Z Run `npm audit` for details.
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:24.2024633Z npm warn install-scripts 3 packages have install scripts not yet covered by allowScripts:
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:24.2025680Z npm warn install-scripts   @prisma/client@5.22.0 (postinstall: node scripts/postinstall.js)
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:24.2026574Z npm warn install-scripts   @prisma/engines@5.22.0 (postinstall: node scripts/postinstall.js)
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:24.2027441Z npm warn install-scripts   prisma@5.22.0 (preinstall: node scripts/preinstall-entry.js)
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:24.2028045Z npm warn install-scripts
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:24.2029348Z npm warn install-scripts Run `npm install-scripts ls` to review, or `npm install-scripts approve <pkg>` to allow.
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:24.2277112Z ##[group]Run npx prisma migrate deploy
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:24.2277473Z ^[[36;1mnpx prisma migrate deploy^[[0m
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:24.2315271Z shell: /usr/bin/bash -e {0}
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:24.2315555Z env:
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:24.2316091Z   DATABASE_URL: ***localhost:5432/aura_ci
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:24.2316554Z ##[endgroup]
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:24.7929927Z Prisma schema loaded from prisma/schema.prisma
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:24.7986147Z Datasource "db": PostgreSQL database "aura_ci", schema "public" at "localhost:5432"
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:24.8429552Z 
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:24.8459965Z 54 migrations found in prisma/migrations
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:24.8475900Z 
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:24.8896419Z Applying migration `0001_init`
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:24.8954501Z Applying migration `0002_visit_log`
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:24.8990044Z Applying migration `0003_timezone_column`
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:24.9014569Z Applying migration `0004_habits`
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:24.9048317Z Applying migration `0005_birth_profile`
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:24.9065419Z Applying migration `0006_timestamptz_fix`
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:24.9183379Z Applying migration `0007_custom_cities`
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:24.9219409Z Applying migration `0008_daily_reflections`
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:24.9258052Z Applying migration `0009_habit_log_duration`
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:24.9274100Z Applying migration `0010_habit_log_notes`
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:24.9285382Z Applying migration `0011_auth_codes`
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:24.9319323Z Applying migration `0012_user_email_case_insensitive`
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:24.9337710Z Applying migration `0013_planned_activities`
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:24.9375609Z Applying migration `0014_habit_log_context`
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:24.9395642Z Applying migration `0015_saved_person`
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:24.9426670Z Applying migration `0016_aura_moments`
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:24.9466170Z Applying migration `0017_aura_moment_reschedule`
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:24.9489297Z Applying migration `0018_aura_updates`
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:24.9508320Z Applying migration `0019_product_events`
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:24.9561662Z Applying migration `0020_aura_moment_source`
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:24.9577894Z Applying migration `0021_aura_reminders`
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:24.9600659Z Applying migration `0022_reminder_attention_delivery`
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:24.9661740Z Applying migration `0023_web_push`
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:24.9701601Z Applying migration `0024_guest_conversion_idempotency`
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:24.9732968Z Applying migration `0025_day_builder`
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:24.9766821Z Applying migration `0026_day_builder_dismissal`
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:24.9799718Z Applying migration `0027_day_builder_priorities`
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:24.9818690Z Applying migration `0028_event_location_plan_persistence`
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:24.9832446Z Applying migration `0029_aura_moment_location_name`
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:24.9847577Z Applying migration `0030_habit_log_activity_id`
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:24.9860303Z Applying migration `0031_planned_activity_activity_id`
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:24.9873896Z Applying migration `0032_habit_log_client_request_id`
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:24.9892203Z Applying migration `0033_user_activity_preference`
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:24.9929091Z Applying migration `0034_user_availability`
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:24.9961602Z Applying migration `0035_goals`
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0019927Z Applying migration `0036_captures`
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0057964Z Applying migration `0037_planned_activity_skipped_at`
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0071494Z Applying migration `0038_planned_activity_move_lineage`
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0099545Z Applying migration `0039_planned_activity_scheduling_mode`
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0112716Z Applying migration `0040_goal_activity_completion_requirement`
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0127689Z Applying migration `0041_goal_activity_execution`
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0170891Z Applying migration `0042_goal_activity_occurrence`
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0210133Z Applying migration `0043_goal_activity_rhythm`
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0224881Z Applying migration `0044_user_location_confirmed_at`
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0240868Z Applying migration `0045_user_onboarding_resolved_at`
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0255405Z Applying migration `0046_planned_activity_moved_at`
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0269239Z Applying migration `0047_goal_activity_occurrence_scheduled_week`
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0284395Z Applying migration `0048_goal_activity_execution_occurrence_link`
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0308437Z Applying migration `0049_habit_log_completion_attribution`
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0337851Z Applying migration `0050_user_daily_rhythm_preferences`
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0355685Z Applying migration `0051_goal_activity_daily_frequency_foundation`
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0371347Z Applying migration `0052_mcp_oauth_state`
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0428558Z Applying migration `0053_goal_activity_rhythm_preferences`
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0444762Z Applying migration `0054_reminder_dispatch_heartbeat`
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0467096Z 
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0477326Z The following migration(s) have been applied:
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0477935Z 
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0478334Z migrations/
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0479007Z   └─ 0001_init/
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0479299Z     └─ migration.sql
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0479597Z   └─ 0002_visit_log/
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0479849Z     └─ migration.sql
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0480114Z   └─ 0003_timezone_column/
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0480387Z     └─ migration.sql
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0480638Z   └─ 0004_habits/
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0480876Z     └─ migration.sql
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0481149Z   └─ 0005_birth_profile/
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0481416Z     └─ migration.sql
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0481676Z   └─ 0006_timestamptz_fix/
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0481943Z     └─ migration.sql
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0482203Z   └─ 0007_custom_cities/
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0482486Z     └─ migration.sql
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0482751Z   └─ 0008_daily_reflections/
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0483035Z     └─ migration.sql
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0483300Z   └─ 0009_habit_log_duration/
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0483577Z     └─ migration.sql
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0483832Z   └─ 0010_habit_log_notes/
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0484096Z     └─ migration.sql
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0484339Z   └─ 0011_auth_codes/
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0484591Z     └─ migration.sql
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0484911Z   └─ 0012_user_email_case_insensitive/
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0485219Z     └─ migration.sql
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0485486Z   └─ 0013_planned_activities/
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0485766Z     └─ migration.sql
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0486023Z   └─ 0014_habit_log_context/
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0486310Z     └─ migration.sql
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0486567Z   └─ 0015_saved_person/
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0486825Z     └─ migration.sql
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0487072Z   └─ 0016_aura_moments/
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0487322Z     └─ migration.sql
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0487612Z   └─ 0017_aura_moment_reschedule/
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0487953Z     └─ migration.sql
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0488204Z   └─ 0018_aura_updates/
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0488453Z     └─ migration.sql
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0488706Z   └─ 0019_product_events/
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0489108Z     └─ migration.sql
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0489381Z   └─ 0020_aura_moment_source/
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0489655Z     └─ migration.sql
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0489914Z   └─ 0021_aura_reminders/
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0490192Z     └─ migration.sql
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0490492Z   └─ 0022_reminder_attention_delivery/
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0490802Z     └─ migration.sql
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0491054Z   └─ 0023_web_push/
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0491297Z     └─ migration.sql
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0491619Z   └─ 0024_guest_conversion_idempotency/
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0491955Z     └─ migration.sql
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0492205Z   └─ 0025_day_builder/
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0492460Z     └─ migration.sql
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0492744Z   └─ 0026_day_builder_dismissal/
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0493034Z     └─ migration.sql
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0493317Z   └─ 0027_day_builder_priorities/
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0493634Z     └─ migration.sql
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0493948Z   └─ 0028_event_location_plan_persistence/
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0494279Z     └─ migration.sql
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0494573Z   └─ 0029_aura_moment_location_name/
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0494888Z     └─ migration.sql
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0495173Z   └─ 0030_habit_log_activity_id/
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0495678Z     └─ migration.sql
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0495990Z   └─ 0031_planned_activity_activity_id/
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0496314Z     └─ migration.sql
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0496614Z   └─ 0032_habit_log_client_request_id/
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0496922Z     └─ migration.sql
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0498413Z   └─ 0033_user_activity_preference/
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0501095Z     └─ migration.sql
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0501373Z   └─ 0034_user_availability/
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0501659Z     └─ migration.sql
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0501898Z   └─ 0035_goals/
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0502135Z     └─ migration.sql
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0502379Z   └─ 0036_captures/
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0502622Z     └─ migration.sql
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0502922Z   └─ 0037_planned_activity_skipped_at/
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0503245Z     └─ migration.sql
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0503547Z   └─ 0038_planned_activity_move_lineage/
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0503858Z     └─ migration.sql
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0504198Z   └─ 0039_planned_activity_scheduling_mode/
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0504541Z     └─ migration.sql
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0504874Z   └─ 0040_goal_activity_completion_requirement/
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0505223Z     └─ migration.sql
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0505482Z   └─ 0041_goal_activity_execution/
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0505783Z     └─ migration.sql
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0506089Z   └─ 0042_goal_activity_occurrence/
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0506390Z     └─ migration.sql
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0506672Z   └─ 0043_goal_activity_rhythm/
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0506958Z     └─ migration.sql
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0507256Z   └─ 0044_user_location_confirmed_at/
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0507557Z     └─ migration.sql
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0507853Z   └─ 0045_user_onboarding_resolved_at/
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0508150Z     └─ migration.sql
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0508443Z   └─ 0046_planned_activity_moved_at/
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0508748Z     └─ migration.sql
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0509244Z   └─ 0047_goal_activity_occurrence_scheduled_week/
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0509593Z     └─ migration.sql
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0509942Z   └─ 0048_goal_activity_execution_occurrence_link/
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0510283Z     └─ migration.sql
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0510597Z   └─ 0049_habit_log_completion_attribution/
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0510925Z     └─ migration.sql
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0511228Z   └─ 0050_user_daily_rhythm_preferences/
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0511550Z     └─ migration.sql
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0511892Z   └─ 0051_goal_activity_daily_frequency_foundation/
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0512240Z     └─ migration.sql
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0512498Z   └─ 0052_mcp_oauth_state/
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0512778Z     └─ migration.sql
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0513128Z   └─ 0053_goal_activity_rhythm_preferences/
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0513444Z     └─ migration.sql
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0513739Z   └─ 0054_reminder_dispatch_heartbeat/
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0514042Z     └─ migration.sql
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0514257Z       
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0514577Z All migrations have been successfully applied.
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0832542Z ##[group]Run npx ts-node test/dayConstructorAcceptancePersistenceDb.test.ts
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0833161Z ^[[36;1mnpx ts-node test/dayConstructorAcceptancePersistenceDb.test.ts^[[0m
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0869425Z shell: /usr/bin/bash -e {0}
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0869650Z env:
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0870166Z   DATABASE_URL: ***localhost:5432/aura_ci
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:25.0870435Z ##[endgroup]
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:27.5582890Z OK   1. multi-item acceptance SAVES
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:27.5583373Z OK   2. exactly 2 Plans created for 2 proposed items
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:27.5583734Z OK   3. reviewed start preserved exactly
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:27.5584103Z OK   4. reviewed end preserved exactly
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:27.5584463Z OK   5. reviewed duration preserved exactly (60 min)
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:27.5584799Z OK   6. reviewed activityId preserved
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:27.5585174Z OK   7. absent activityId persists as null (never fabricated)
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:27.5585664Z OK   8. status written is UPCOMING for every new Plan
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:27.5586076Z OK   9. Plans are scoped to the authenticated user
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:27.5612872Z OK   10. identical replay returns ALREADY_ACCEPTED
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:27.5613384Z OK   11. replay returns the SAME Plan ids (no duplicates created)
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:27.5620417Z OK   12. replay created zero additional rows (still exactly 2 for this window)
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:27.5699825Z OK   13. exactly one of two concurrent identical requests SAVES, the other sees ALREADY_ACCEPTED
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:27.5705443Z OK   14. concurrent identical acceptance created exactly one Plan, never two
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:27.5715667Z OK   Case A: original [A,B], retry [A] alone (identical content) rejects as IDEMPOTENCY_CONFLICT
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:27.5728333Z OK   Case B: original [A,B], retry [B] alone (identical content) rejects as IDEMPOTENCY_CONFLICT
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:27.5792092Z OK   Case C setup: original [A,B,C] SAVES
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:27.5804583Z OK   Case C: original [A,B,C], retry [A,C] (dropping B) rejects as IDEMPOTENCY_CONFLICT
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:27.5838139Z OK   Case D setup: original [A] alone SAVES
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:27.5850396Z OK   Case D: original [A], retry [A,B] (adding a never-seen item) rejects as IDEMPOTENCY_CONFLICT
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:27.5854477Z OK   Case D: the never-seen item is never created
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:27.5872383Z OK   Case F: same item-ID set [A,B], changed content for B rejects as IDEMPOTENCY_CONFLICT
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:27.5877763Z OK   Case F: zero new rows created (no "RESCHEDULED" title persisted)
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:27.5915810Z OK   Wildcard safety: a clientRequestId containing a literal '%' SAVES normally
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:27.5951952Z OK   Wildcard safety: the would-be LIKE-match id is treated as a genuinely SEPARATE, unrelated acceptance (SAVES, not confused with the percent-id one)
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:27.5966849Z OK   Wildcard safety: replaying the original '%'-containing request returns ALREADY_ACCEPTED for exactly its own single item
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:27.5970023Z OK   19. a nonexistent user fails the whole acceptance (SAVE_FAILED), never partially
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:27.5972902Z OK   19b. no Plan exists for a user that was never created
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:27.6015910Z OK   20. a fresh, valid acceptance still succeeds normally after an earlier, unrelated rejection (no residual corrupted state)
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:27.6043850Z ALL DAY CONSTRUCTOR ACCEPTANCE PERSISTENCE DB CHECKS PASSED
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:37.6390193Z ##[group]Run npx ts-node test/planGoalActivityLinkDb.test.ts
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:37.6390559Z ^[[36;1mnpx ts-node test/planGoalActivityLinkDb.test.ts^[[0m
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:37.6422085Z shell: /usr/bin/bash -e {0}
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:37.6422303Z env:
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:37.6422746Z   DATABASE_URL: ***localhost:5432/aura_ci
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:37.6422957Z ##[endgroup]
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:40.0778129Z OK   1. valid, owned, SUGGESTED goalActivityId -> 200 OK, plan created
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:40.0785691Z OK   1. GoalActivity.plannedActivityId now points at the new plan
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:40.0806919Z OK   2. ordinary plan creation (no goalActivityId) still works exactly as before
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:40.0825851Z OK   3. a plain catalog-activity plan (HPG1 identity, no Goal) still works unchanged
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:40.0861489Z OK   4. linking succeeds for the SPECIFIC goalActivityId requested (goalA2's own "Duplicate Title")
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:40.0871977Z OK   4. the OTHER goal activity sharing the same title (goalA's own) was NOT linked -- no title-based cross-resolution
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:40.0891929Z OK   5. omitting goalActivityId entirely behaves exactly like passing none
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:40.0911192Z OK   6. empty-string goalActivityId -> treated as no Goal link, plan still created
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:40.0953595Z OK   7. a nonexistent/malformed goalActivityId -> 400, request rejected
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:40.0954215Z OK   7. no orphan PlannedActivity was created when the Goal link failed
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:40.0992198Z OK   8. userB referencing userA's own GoalActivity id -> 400, rejected (ownership enforced server-side)
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:40.0992730Z OK   8. no PlannedActivity row was created for userB from this rejected attempt
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:40.0998454Z OK   8. userA's own GoalActivity linkage from check 1 is untouched by userB's rejected attempt
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:40.1029248Z OK   9. a GoalActivity already linked to a LIVE (UPCOMING) plan cannot be relinked to a different new plan
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:40.1093618Z OK   10. a GoalActivity linked only to a CANCELLED plan CAN be relinked to a fresh plan (same rule Day Constructor already relies on)
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:40.1127239Z OK   11. activityId (catalog) and goalActivityId (Goal) can both be supplied together, independently, without collision
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:40.1132480Z OK   11. the Goal link was ALSO correctly established alongside the independent catalog activityId
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:40.1159123Z OK   12. a real CATALOG activityId string, passed as goalActivityId, does not resolve to any GoalActivity row -- rejected, not silently accepted as if interchangeable
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:40.1232948Z ALL HPG2 GOAL-ACTIVITY LINK CHECKS PASSED
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:40.1524638Z ##[group]Run npx ts-node test/planGoalActivityCompletionIntegrityDb.test.ts
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:40.1525289Z ^[[36;1mnpx ts-node test/planGoalActivityCompletionIntegrityDb.test.ts^[[0m
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:40.1566070Z shell: /usr/bin/bash -e {0}
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:40.1566289Z env:
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:40.1566964Z   DATABASE_URL: ***localhost:5432/aura_ci
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:40.1567247Z ##[endgroup]
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:42.5921400Z OK   setup: Goal-linked plan created via POST /api/plans
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:42.5921986Z OK   1. before completion: progress is 0/1 (scheduled, not yet completed)
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:42.5976992Z OK   2. Move succeeds for a Goal-linked plan created via the new entry point
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:42.5984060Z OK   2. GoalActivity now points at the Move SUCCESSOR plan, not the original (MOVED) one
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:42.5984748Z OK   2. the association survived the Move -- repointed, not lost and not duplicated
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:42.6047469Z OK   3. completion succeeds for the (moved) Goal-linked plan
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:42.6053241Z OK   3. exactly ONE GoalActivityExecution row exists for this GoalActivity (no double-count)
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:42.6054039Z OK   3. the execution row is attributed to the SUCCESSOR plan (the one actually completed), not the original
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:42.6054631Z OK   4. after completion: progress correctly shows 1/1
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:42.6063973Z OK   5. re-logging an already-LOGGED plan is a structural no-op (existing idempotency, unmodified)
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:42.6069570Z OK   5. still exactly ONE execution row after a repeated completion attempt -- no double-count
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:42.6125048Z OK   6. completing an UNLINKED plan never creates/affects this GoalActivity's execution record
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:42.6166602Z ALL HPG2 COMPLETION/PROGRESS INTEGRITY CHECKS PASSED
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:42.6461651Z ##[group]Run npx ts-node test/planGoalActivityArchivedLifecycleDb.test.ts
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:42.6462134Z ^[[36;1mnpx ts-node test/planGoalActivityArchivedLifecycleDb.test.ts^[[0m
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:42.6493243Z shell: /usr/bin/bash -e {0}
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:42.6493630Z env:
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:42.6494325Z   DATABASE_URL: ***localhost:5432/aura_ci
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:42.6494606Z ##[endgroup]
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:45.0721692Z OK   1. ACTIVE Goal: plan creation succeeds (200)
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:45.0728119Z OK   1. ACTIVE Goal: the GoalActivity is linked to the new plan
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:45.0857828Z OK   2. ARCHIVED Goal: request rejected with 400
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:45.0858623Z OK   2. ARCHIVED Goal: error names the real reason (GOAL_NOT_ACTIVE-style, not the generic link-failed message)
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:45.0863576Z OK   2. ARCHIVED Goal: no new PlannedActivity row was committed (the insert that happened before the check was rolled back)
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:45.0870326Z OK   2. ARCHIVED Goal: the GoalActivity remains unlinked
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:45.0983598Z OK   3. Goal archived between selection and save: rejected, not silently linked
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:45.0988819Z OK   3. Goal archived between selection and save: the GoalActivity remains unlinked
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:45.1145358Z OK   4. concurrent archive: archiveGoal itself succeeds
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:45.1158504Z OK   4. concurrent archive: when the archive wins the race, the request is rejected and no Goal-derived planning state is committed
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:45.1782769Z OK   4b. with a head start, the plan request wins the race: link legitimately succeeds (serialized before the archive)
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:45.1950493Z OK   5. cross-user GoalActivity id: rejected with 400 (not GOAL_NOT_ACTIVE -- still the generic link-failed/ownership path)
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:45.1955355Z OK   5. cross-user GoalActivity id: the real owner's GoalActivity remains unlinked
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:45.2053825Z OK   6. invalid GoalActivity id: rejected with 400
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:45.2156491Z OK   setup: an unrelated, valid Goal-linked plan exists before the failing attempt
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:45.2201612Z OK   7. failed link (archived Goal) rolls back: request rejected
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:45.2206078Z OK   7. failed link rolls back completely: no new PlannedActivity row persisted
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:45.2212993Z OK   8. the EARLIER, unrelated, already-valid GoalActivity link is completely untouched by the later failed attempt
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:45.2295288Z OK   9. an ordinary plan (no goalActivityId at all) is created normally
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:45.2361534Z OK   10. lockGoalParentLifecycleForPlanning: an ACTIVE Goal reports its GoalActivity as owned AND active
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:45.2372225Z OK   10. lockGoalParentLifecycleForPlanning: after archiving, the SAME GoalActivity is owned but no longer active -- the exact Day-Constructor contract this fix reuses, unmodified
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:45.2404695Z ALL HPG2 ARCHIVED-GOAL LIFECYCLE FIX CHECKS PASSED
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:45.2702369Z ##[group]Run npx ts-node test/planStatusPreservationDb.test.ts
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:45.2702850Z ^[[36;1mnpx ts-node test/planStatusPreservationDb.test.ts^[[0m
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:45.2733770Z shell: /usr/bin/bash -e {0}
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:45.2734039Z env:
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:45.2734471Z   DATABASE_URL: ***localhost:5432/aura_ci
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:45.2734762Z ##[endgroup]
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:47.6681934Z OK   19. mapPlanRow preserves UPCOMING -> UPCOMING
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:47.6685315Z OK   19. mapPlanRow preserves LOGGED -> LOGGED
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:47.6687318Z OK   19. mapPlanRow preserves CANCELLED -> CANCELLED
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:47.6689208Z OK   19. mapPlanRow preserves SKIPPED -> SKIPPED
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:47.6691138Z OK   19/6. an absent status (legacy row/fixture) is UPCOMING
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:47.6691897Z OK   20. an unknown runtime status fails loudly rather than defaulting to UPCOMING
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:47.6693940Z OK   20. the mapper has no `=== 'LOGGED' ? 'LOGGED' : 'UPCOMING'` collapse and uses an exhaustive never check
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:47.6694688Z OK   10. presentation: only UPCOMING is actionable, only LOGGED is completed; CANCELLED/SKIPPED are neither
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:47.6703079Z OK   10/11. the Plan tab lists come from the presentation predicates (correctness does not rely on a pre-mapper filter)
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:47.6703696Z OK   24. handleLogPlan refuses LOGGED/CANCELLED/SKIPPED/MOVED rows
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:47.6976986Z OK   26/6. normal creation: POST creates UPCOMING -> mapped UPCOMING -> actionable (unchanged behavior)
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:47.7047892Z OK   27/7/13. normal Log: the log result maps LOGGED and is the completed representation
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:47.7129768Z OK   16-18/14/15. clientRequestId + SKIPPED: replay returns the SAME plan with its current persisted status SKIPPED
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:47.7132502Z OK   14/15. clientRequestId + SKIPPED: mapPlanRow (the saveUpcomingPlanFromCandidate / Plan-tab-save mapping) preserves SKIPPED, never UPCOMING
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:47.7142119Z OK   23. clientRequestId + SKIPPED: replay mutates nothing (status, skippedAt, updatedAt unchanged), creates no HabitLog and no second plan
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:47.7199568Z OK   16-18/14/15. clientRequestId + CANCELLED: replay returns the SAME plan with its current persisted status CANCELLED
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:47.7201987Z OK   14/15. clientRequestId + CANCELLED: mapPlanRow (the saveUpcomingPlanFromCandidate / Plan-tab-save mapping) preserves CANCELLED, never UPCOMING
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:47.7211279Z OK   23. clientRequestId + CANCELLED: replay mutates nothing (status, skippedAt, updatedAt unchanged), creates no HabitLog and no second plan
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:47.7286848Z OK   16-18/14/15. guestToken + SKIPPED: replay returns the SAME plan with its current persisted status SKIPPED
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:47.7289062Z OK   14/15. guestToken + SKIPPED: mapPlanRow (the saveUpcomingPlanFromCandidate / Plan-tab-save mapping) preserves SKIPPED, never UPCOMING
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:47.7297736Z OK   23. guestToken + SKIPPED: replay mutates nothing (status, skippedAt, updatedAt unchanged), creates no HabitLog and no second plan
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:47.7364906Z OK   16-18/14/15. guestToken + CANCELLED: replay returns the SAME plan with its current persisted status CANCELLED
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:47.7367094Z OK   14/15. guestToken + CANCELLED: mapPlanRow (the saveUpcomingPlanFromCandidate / Plan-tab-save mapping) preserves CANCELLED, never UPCOMING
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:47.7378309Z OK   23. guestToken + CANCELLED: replay mutates nothing (status, skippedAt, updatedAt unchanged), creates no HabitLog and no second plan
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:47.7398660Z ALL STATUS PRESERVATION CHECKS PASSED
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:47.7715257Z ##[group]Run npx ts-node test/plannedActivitySchedulingModeDb.test.ts
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:47.7715991Z ^[[36;1mnpx ts-node test/plannedActivitySchedulingModeDb.test.ts^[[0m
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:47.7754694Z shell: /usr/bin/bash -e {0}
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:47.7754982Z env:
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:47.7755466Z   DATABASE_URL: ***localhost:5432/aura_ci
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:47.7755753Z ##[endgroup]
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:50.2941997Z OK   5/40. the column exists, is NULLABLE, has NO default, and is the PlannedActivitySchedulingMode enum
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:50.2950476Z OK   3/48. the DB enum has exactly FIXED and FLEXIBLE (same vocabulary as DayIntent, its own DB type)
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:50.2960053Z OK   49. the database itself rejects an unknown scheduling mode value
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:50.2993892Z OK   4/39. a row created without a scheduling mode reads back as NULL through every read path (no crash, no mapper default, never FLEXIBLE)
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:50.2994956Z OK   20/49. NULL / undefined / unknown values are never flexible
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:50.3410122Z OK   7/13. an accepted FIXED intent persists FIXED
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:50.3415104Z OK   7/12. an accepted FLEXIBLE intent persists FLEXIBLE -- accepting Aura's proposed time does NOT make it FIXED
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:50.3416011Z OK   12. exactly one plan per intent, none NULL: the constraint is always known for a Constructor-created plan
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:50.3612603Z OK   8. a Capture planned through Plan My Day (flexible intent) persists FLEXIBLE and stays linked
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:50.3659968Z OK   8. a Capture planned with an exact time (fixed intent) persists FIXED
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:50.3880331Z OK   8. a GoalActivity planned through Plan My Day (flexible intent) persists FLEXIBLE
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:50.3943824Z OK   8. a GoalActivity planned with an exact time (fixed intent) persists FIXED
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:50.4017057Z OK   9/10/11. POST /api/plans (every direct caller) persists FIXED -- an explicit exact-time choice outside the Constructor flow
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:50.4043715Z OK   18/38. a client submitting schedulingMode: FLEXIBLE to POST /api/plans cannot grant it -- the row is FIXED
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:50.4054556Z OK   4/49. createPlannedActivity with no mode stated persists NULL (the DB helper never grants FLEXIBLE by default)
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:50.4064707Z OK   49. an unrecognised mode handed to the DB helper degrades to NULL (protected), never to FLEXIBLE and never a crash
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:50.4109348Z OK   18/38. the accept route ignores a client schedulingMode field: a verified FIXED_CONSTRAINT item stays FIXED even when the body says FLEXIBLE
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:50.4114034Z OK   10/11. a forged placementSource (FIXED_CONSTRAINT -> SELECTED_CANDIDATE) with the original token is REJECTED, so it can never persist FLEXIBLE
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:50.4117470Z OK   26. an unsigned acceptance (no acceptanceToken) is REJECTED -- there is no compatibility path
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:50.4200087Z OK   14. Move FIXED -> the successor inherits it exactly (FIXED); the original keeps its own
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:50.4255705Z OK   14. Move FLEXIBLE -> the successor inherits it exactly (FLEXIBLE); the original keeps its own
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:50.4299786Z OK   14. Move NULL -> the successor inherits it exactly (NULL); the original keeps its own
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:50.4577058Z OK   15. A -> B -> C (user Moves): A == B == C for FIXED, FLEXIBLE and NULL, with the lineage intact
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:50.4642031Z OK   23. an explicit user Move of a FIXED plan is still allowed (scheduling mode does not gate Move); the successor stays FIXED
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:50.4678364Z OK   24. a FLEXIBLE plan with an active linked AuraMoment is still refused (HAS_LINKED_MOMENT): scheduling mode is independent of that restriction
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:50.4779548Z OK   16. Done / Skip / Cancel leave a FIXED scheduling mode untouched (statuses LOGGED/SKIPPED/CANCELLED)
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:50.4867591Z OK   16. Done / Skip / Cancel leave a FLEXIBLE scheduling mode untouched (statuses LOGGED/SKIPPED/CANCELLED)
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:50.4944523Z OK   16. Done / Skip / Cancel leave a NULL scheduling mode untouched (statuses LOGGED/SKIPPED/CANCELLED)
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:50.5190950Z OK   33. Move of a Capture-linked FLEXIBLE plan: successor FLEXIBLE, the Capture is repointed to B and still PLANNED (completedAt null)
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:50.5275170Z OK   33. Move of a GoalActivity-linked FIXED plan: successor FIXED, the GoalActivity is repointed to B and still PLANNED
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:50.5477644Z OK   34. replaying an acceptance (even claiming a different placementSource) returns the original plan and never rewrites its scheduling mode
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:50.5567586Z ALL SCHEDULING MODE DB CHECKS PASSED
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:50.5883988Z ##[group]Run npx ts-node test/goalDemandCandidatesDb.test.ts
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:50.5884415Z ^[[36;1mnpx ts-node test/goalDemandCandidatesDb.test.ts^[[0m
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:50.5914969Z shell: /usr/bin/bash -e {0}
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:50.5915261Z env:
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:50.5915827Z   DATABASE_URL: ***localhost:5432/aura_ci
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:50.5916120Z ##[endgroup]
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:52.8590745Z OK   1. a SUGGESTED N_PER_WEEK activity with no prior occurrences is returned
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:52.8945511Z OK   2. setup: first occurrence SAVED (now UPCOMING)
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:52.8968075Z OK   3. an activity with a live UPCOMING commitment and remaining numeric capacity (3-0-1=2) is still offered, with remainingThisWeek correctly reduced to 2
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:52.9038831Z OK   4. after LOGGING the commitment, the activity is eligible again with remainingThisWeek reduced to 2 (3 - 1 completed)
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:52.9311560Z OK   5. a SKIPPED occurrence frees its capacity back to full (remainingThisWeek 2, not 1)
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:52.9586336Z OK   6. a CANCELLED occurrence frees its capacity back to full (remainingThisWeek 2, not 1)
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:52.9932097Z OK   7. a Moved-then-Logged occurrence counts as exactly ONE completion (remainingThisWeek 1 of 2), never two
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:53.0221086Z OK   8a. same week as the completion: 1/week exhausted, excluded
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:53.0240373Z OK   8b. a new week resets capacity -- eligible again with full remainingThisWeek 1, no debt carried
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:53.0699246Z OK   9a. planning for Sunday itself: the Sunday completion exhausts THIS week -> excluded
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:53.0714713Z OK   9b. planning for the very next day (Monday, crossing the week boundary): eligible again, full capacity
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:53.1001867Z OK   10. multiple Goals -> eligible activities from BOTH Goals are returned together, ineligible one excluded, no cross-Goal grouping
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:53.1046184Z OK   11. a GoalActivity belonging to an ARCHIVED Goal is excluded
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:53.1082930Z OK   12. a DISMISSED GoalActivity is excluded
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:53.1110728Z OK   13. a Rhythm NONE (finite) GoalActivity is excluded from Goal-demand entirely
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:53.1160406Z OK   14a. User A never receives User B's GoalActivity
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:53.1161035Z OK   14b. User B correctly receives their OWN GoalActivity
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:53.1172449Z OK   15. a user with zero GoalActivities at all gets a successful, empty result
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:53.1239528Z OK   16. three repeated loader calls create ZERO new GoalActivityOccurrence/PlannedActivity/GoalActivityExecution rows
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:53.1300473Z OK   17a. exactly ONE discovery query call for this whole request, independent of candidate count
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:53.1301346Z OK   17b. exactly ONE batched facts query call for this whole request, independent of candidate count
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:53.1302208Z OK   17c. every batch-created activity is present in that single result
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:53.1336096Z OK   18. repeated calls against unchanged state return candidates in the identical order
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:53.1514011Z OK   19a. the raw discovery query never returns the DISMISSED activity from check 12
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:53.1514674Z OK   19b. the raw discovery query never returns the ARCHIVED-Goal activity from check 11
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:53.1515186Z OK   19c. the raw discovery query never returns the Rhythm NONE activity from check 13
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:53.1515988Z OK   19d. the raw discovery query DOES return an activity with a live UPCOMING commitment (Multi-Occurrence Rhythm PR 2 -- capacity, not this query, now decides)
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:29:53.1562352Z ALL GOAL DEMAND CANDIDATES DB CHECKS PASSED
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:03.1923043Z ##[group]Run npx ts-node test/hpgFix01DailyOccupancyDb.test.ts
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:03.1923463Z ^[[36;1mnpx ts-node test/hpgFix01DailyOccupancyDb.test.ts^[[0m
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:03.1954010Z shell: /usr/bin/bash -e {0}
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:03.1954298Z env:
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:03.1954831Z   DATABASE_URL: ***localhost:5432/aura_ci
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:03.1955103Z ##[endgroup]
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:05.5621318Z OK   setup: move to Wednesday succeeded (origin MOVED, successor UPCOMING on Wednesday)
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:05.5877719Z OK   1. UPCOMING occupies its day
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:05.5878286Z OK   1. LOGGED (completed) occupies its day
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:05.5879023Z OK   1. SKIPPED does not occupy
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:05.5879338Z OK   1. CANCELLED does not occupy
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:05.5879771Z OK   1. MOVED: destination day occupied, origin day freed
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:05.6003489Z OK   2. occupancy hint agrees with checkDailyOccurrenceEligibility for every activity x day
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:05.6010454Z OK   3. user-scoped: another user's activity/occurrence is never reported
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:05.6044765Z OK   4. read model (real deps): Tuesday flagged for UPCOMING and LOGGED activities
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:05.6045641Z OK   4. read model (real deps): Tuesday not flagged for SKIPPED / CANCELLED / MOVED-away
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:05.6051275Z OK   5. root-cause pin: rhythm facts carry the WEEK start, not the session day (so they cannot answer "which day")
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:05.6100846Z 
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:05.6101169Z hpgFix01DailyOccupancyDb: all checks passed
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:05.6402683Z ##[group]Run npx ts-node test/goalRhythmWeeklyAcceptanceDb.test.ts
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:05.6403155Z ^[[36;1mnpx ts-node test/goalRhythmWeeklyAcceptanceDb.test.ts^[[0m
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:05.6434883Z shell: /usr/bin/bash -e {0}
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:05.6435197Z env:
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:05.6435665Z   DATABASE_URL: ***localhost:5432/aura_ci
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:05.6435959Z ##[endgroup]
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:08.3460253Z OK   precondition: zero PlannedActivity rows exist before any acceptance
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:08.3794631Z OK   1/3/4/6. a genuinely future date, at the EXACT approved time, is accepted end-to-end through the real EXPLICIT_RANGE preview -> FIXED placement -> sign -> verify -> authorize -> persist pipeline
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:08.3804817Z OK   1. exactly one real PlannedActivity row was created, dated on the SELECTED future date (never today, never a different day)
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:08.3806005Z OK   HGR3-BH P1-1: the persisted Plan carries the EXACT approved start/end -- never a Constructor-re-ranked, different instant of its own choosing
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:08.3807009Z OK   1. the persisted Plan carries the real GoalActivity's own title/activityId, never a client-supplied value
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:08.3810774Z OK   1. a real GoalActivityOccurrence was materialized and linked to the new Plan (the SAME write path the automatic Goal-demand flow already uses for today)
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:08.3811981Z OK   1. the response itself reports the exact approved start/end back to the caller
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:08.3923408Z OK   HGR3-BH P1-1: a FIXED instant that collides with an existing real commitment is rejected (TIME_NO_LONGER_AVAILABLE), never silently placed at a different, available time instead
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:08.3929856Z OK   HGR3-BH P1-1: the rejected conflicting request created no Plan at all for the second activity
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:08.4002590Z OK   HGR3-BH P1-2: retrying the IDENTICAL (goalActivityId, localDate, start, end) session resolves ALREADY_ACCEPTED -- deterministically, never a fresh ACCEPTED and never the old IDEMPOTENCY_CONFLICT coin-flip the original review found
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:08.4003709Z OK   HGR3-BH P1-2: the replay response carries the SAME real plannedActivityId as the original acceptance
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:08.4004279Z OK   HGR3-BH P1-2: the replay response carries the SAME real committed start/end
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:08.4011417Z OK   9/10. the retry created NO duplicate PlannedActivity row
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:08.4203366Z OK   a DIFFERENT approved time for the same activity/date, under its own fresh acceptanceId, is never misclassified as a replay of the original -- it is independently revalidated and correctly rejected by the real, authoritative capacity check (NOT_ELIGIBLE), not silently treated as ALREADY_ACCEPTED for the WRONG time
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:08.4208322Z OK   the mis-time attempt created no second Plan
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:08.4330242Z OK   6/18. with target 1 already fully satisfied by the FIRST real acceptance, a second DISTINCT future date is rejected NOT_ELIGIBLE by fresh, authoritative capacity enforcement -- never a second commitment
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:08.4335043Z OK   6/18. the rejected second session created no Plan at all
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:08.4363837Z OK   5/18. a GoalActivity owned by a DIFFERENT user is rejected NOT_ELIGIBLE for that other user, never disclosed as existing
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:08.4368665Z OK   5/18. the cross-user attempt created no Plan for either user
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:08.4376091Z OK   13. a malformed localDate is rejected 400, never reaches eligibility/preview/persist
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:08.4382950Z OK   HGR3-BH: a non-string start is rejected 400
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:08.4389178Z OK   [STRUCTURAL-adjacent] a request with more than MAX_WEEKLY_ACCEPTANCE_SESSIONS entries is rejected 400 before any session is attempted
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:08.4402298Z OK   a request with a duplicate (localDate, start, end) entry is rejected 400 before any session is attempted
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:08.4407658Z OK   HGR3-C1: a request with NO acceptanceId at all is rejected 400 -- it is a required field, not an optional fallback to the old content-only identity
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:08.4412249Z OK   HGR3-C1: a whitespace-only acceptanceId is rejected 400
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:08.4417024Z OK   HGR3-C1: an oversized acceptanceId (over the bounded length) is rejected 400
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:08.4578770Z OK   F-1 scenario 2 precondition: the session to be cancelled was genuinely accepted first
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:08.4592234Z OK   F-1 scenario 2 precondition: cancelPlannedActivity updates ONLY status -- plannedStartAt/plannedEndAt are left untouched (the exact mechanism the independent review found)
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:08.4643694Z OK   F-1 scenario 2: a retry of an accept request whose commitment has since been CANCELLED never returns ALREADY_ACCEPTED against the dead record
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:08.4644875Z OK   F-1 scenario 2: it is reported as a clean, specific failure (COMMITMENT_NO_LONGER_LIVE) -- never silently recreated, and the real preview+accept route genuinely returns it
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:08.4651434Z OK   F-1 scenario 2/8/9: exactly one row exists for this activity afterward (the CANCELLED original) -- the retry created no second row, never a duplicate of or replacement for the dead one
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:08.4816543Z OK   F-1 scenario 3 precondition: the session to be moved was genuinely accepted first
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:08.4897345Z OK   F-1 scenario 3 precondition: the move flow updates the OLD row's status to MOVED and leaves its OLD plannedStartAt untouched (the exact mechanism the independent review found)
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:08.4949947Z OK   F-1 scenario 3: a retry of the ORIGINAL (pre-move) time never returns ALREADY_ACCEPTED against the stale, moved-away record
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:08.4951007Z OK   F-1 scenario 3: it is reported as a clean, specific failure (COMMITMENT_NO_LONGER_LIVE) rather than referencing the stale moved-away record
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:08.4956634Z OK   F-1 scenario 3/9: no additional row was created by the retry -- only the original (now MOVED) row and its real live successor (created by the move itself, not by the retry) exist
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:08.5098382Z OK   F-1 scenario 4 precondition: the session to be moved was genuinely accepted first
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:08.5210368Z OK   F-1 scenario 4: a request for the NEW (moved-to) time is never reported ALREADY_ACCEPTED against the OLD commitment's identity (there is no stored claim at all for this exact request, since it was never submitted through weekly-accept -- the move flow is a separate write path)
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:08.5211943Z OK   F-1 scenario 4: it is independently, correctly rejected -- the exact requested time is already occupied by the real live successor plan, detected by the real conflict check before any write is attempted -- never silently treated as a duplicate-free success
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:08.5216077Z OK   F-1 scenario 4: no second Plan was created for this activity -- only the original (now MOVED) row and its real live successor exist
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:08.5217846Z SKIP  F-1 scenario 5 -- fewer than 3 distinct future dates remain in the current local week on this run date (needs 3 to stay clear of the default once-per-day cap); covered deterministically every run by goalRhythmWeeklyAcceptance.test.ts's own pure-level F-1 checks regardless
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:08.5354928Z OK   HGR3-C1 step 1: accept using identity A genuinely succeeds
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:08.5365880Z OK   HGR3-C1 step 2: the commitment is genuinely cancelled
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:08.5420503Z OK   HGR3-C1 steps 3/4: retrying the STALE identity A after cancellation fails FAILED/COMMITMENT_NO_LONGER_LIVE -- never ALREADY_ACCEPTED against the dead original
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:08.5424629Z OK   HGR3-C1 steps 3/4: the stale retry created no new occurrence/row for THIS GoalActivity
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:08.5567164Z OK   HGR3-C1 steps 6/7: explicitly re-approving the IDENTICAL slot under a FRESH identity B is genuinely accepted -- a real, new live commitment is created
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:08.5568034Z OK   HGR3-C1 step 7: the new commitment is a GENUINELY DIFFERENT real row, never the resurrected original
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:08.5572140Z OK   HGR3-C1 step 8: the cancelled original remains CANCELLED, completely untouched by the new booking
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:08.5636014Z OK   HGR3-C1 steps 9/10: retrying the NEW identity B resolves ALREADY_ACCEPTED, pointing at the NEW live commitment -- never the old dead one
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:08.5642720Z OK   HGR3-C1 steps 9/10: exactly two real rows exist for this activity in total -- the cancelled original and the one genuinely new rebooking, never a third
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:08.5803158Z OK   HGR3-C1 payload-binding precondition: the first request under identity X succeeds
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:08.5832196Z OK   HGR3-C1: reusing the SAME acceptanceId for a DIFFERENT approved time on the same (goalActivityId, localDate), against a real database, is rejected ACCEPTANCE_IDENTITY_CONFLICT -- never silently processed as an independent fresh session, and never misreported as a replay
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:08.5837213Z OK   HGR3-C1: the rejected conflict created no second real row
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:08.5837456Z 
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:08.5837657Z ALL GOAL RHYTHM WEEKLY ACCEPTANCE DB CHECKS PASSED
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:18.6206377Z ##[group]Run npx ts-node test/weeklyPlanReviewClientDb.test.ts
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:18.6206814Z ^[[36;1mnpx ts-node test/weeklyPlanReviewClientDb.test.ts^[[0m
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:18.6237342Z shell: /usr/bin/bash -e {0}
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:18.6237683Z env:
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:18.6238319Z   DATABASE_URL: ***localhost:5432/aura_ci
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:18.6238586Z ##[endgroup]
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:21.3544617Z OK   precondition: zero PlannedActivity rows exist before any acceptance
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:21.5217309Z OK   1. the real weekly-proposal endpoint, parsed through this UI's own real response parser, returns a usable proposal
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:21.5218081Z OK   1. every projected draft starts PENDING, ready for the review screen
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:21.5218791Z OK   2. selectSessionsPendingSubmission includes every freshly-proposed (PENDING) session
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:21.5520628Z OK   2. the real weekly-accept endpoint, parsed through this UI's own real response parser, reports a genuine ACCEPTED outcome
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:21.5521852Z OK   2. applyAcceptanceSummaryToDrafts correctly locks the accepted session in the UI's own state
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:21.5530726Z OK   2. a REAL PlannedActivity row was created in the database by this exact UI-driven request
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:21.5531435Z OK   2. the UI's own draft now carries the real, authoritative plannedActivityId from the database
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:21.5547834Z OK   3. the real row is now CANCELLED, with its original start/end untouched (the existing cancel flow's own, unmodified behavior)
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:21.5610841Z OK   4. [HGR3-C-R1] a stale retry of the original acceptanceId correctly fails -- never silently "re-accepted" against the cancelled row
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:21.5616950Z OK   4. the UI's own reconciliation correctly surfaces this as a FAILED draft (COMMITMENT_NO_LONGER_LIVE), never a false ACCEPTED/ALREADY_ACCEPTED
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:21.5617592Z OK   4. the stale retry created ZERO additional rows (still exactly 1, still CANCELLED)
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:21.7399782Z OK   5. [HGR3-C-R1] a fresh weekly-proposal call, generated through the SAME real UI path, is eligible again now that the cancellation freed this week's demand
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:21.7401079Z OK   6. a genuinely new confirmation uses a DIFFERENT acceptanceId than the original (the real lifecycle contract: fresh id per new decision)
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:21.7575901Z OK   6. [HGR3-C-R1] the fresh, explicitly-approved re-booking succeeds -- the user CAN rebook the identical slot with a new confirmation
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:21.7581260Z OK   6. a GENUINELY NEW live row now exists, with a DIFFERENT id than the original cancelled row
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:21.7582176Z OK   6. exactly one of the two rows is UPCOMING (the new booking) and the original remains CANCELLED, untouched
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:21.7649299Z OK   7. retrying the NEW identity resolves ALREADY_ACCEPTED, pointing at the real new row -- never a duplicate
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:21.7650133Z OK   7. the UI's own reconciliation correctly re-locks the session with the SAME real plannedActivityId as before
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:21.7656591Z OK   7. retrying the new identity created ZERO additional rows (still exactly 2 total)
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:21.8846858Z OK   8. setup: a real proposal for the isolated second user/GoalActivity returns at least one suitable session
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:21.8847764Z FAIL 8. setup: the constructed second instant genuinely falls on the SAME local date as the first (a real, valid same-date pair)
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:21.8848398Z 
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:21.8848607Z SOME WEEKLY PLAN REVIEW CLIENT DB CHECKS FAILED
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:21.9191363Z ##[error]Process completed with exit code 1.
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:21.9462656Z Post job cleanup.
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:22.0133098Z [command]/usr/bin/git version
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:22.0164367Z git version 2.56.1
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:22.0201406Z Temporarily overriding HOME='/home/runner/work/_temp/21f5559d-7bb7-4f6f-8a6e-84287de4d0b6' before making global git config changes
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:22.0202309Z Adding repository directory to the temporary git global config as a safe directory
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:22.0203065Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/aura-updated/aura-updated
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:22.0225769Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:22.0250143Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:22.0472590Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:22.0494431Z http.https://github.com/.extraheader
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:22.0503576Z [command]/usr/bin/git config --local --unset-all http.https://github.com/.extraheader
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:22.0528649Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:22.0757086Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:22.0785331Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:22.1065724Z Print service container logs: 5ed69b4a8a9b4fff9206ea4c7bf46723_postgres16_026142
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:22.1069532Z ##[command]/usr/bin/docker logs --details 034e063394a9b13dfbad5a6d998675ad08f7be76ba99fc08e848bb48de132706
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:22.1177962Z  initdb: warning: enabling "trust" authentication for local connections
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:22.1178658Z  The files belonging to this database system will be owned by user "postgres".
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:22.1179737Z  initdb: hint: You can change this by editing pg_hba.conf or using the option -A, or --auth-local and --auth-host, the next time you run initdb.
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:22.1180402Z  This user must also own the server process.
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:22.1181291Z  2026-11-27 13:29:01.425 UTC [1] LOG:  starting PostgreSQL 16.16 (Debian 16.16-1.pgdg13+1) on x86_64-pc-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:22.1182085Z  
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:22.1182681Z  2026-11-27 13:29:01.425 UTC [1] LOG:  listening on IPv4 address "0.0.0.0", port 5432
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:22.1183211Z  The database cluster will be initialized with locale "en_US.utf8".
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:22.1183805Z  2026-11-27 13:29:01.425 UTC [1] LOG:  listening on IPv6 address "::", port 5432
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:22.1184351Z  The default database encoding has accordingly been set to "UTF8".
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:22.1185121Z  2026-11-27 13:29:01.425 UTC [1] LOG:  listening on Unix socket "/var/run/postgresql/.s.PGSQL.5432"
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:22.1185713Z  The default text search configuration will be set to "english".
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:22.1186346Z  2026-11-27 13:29:01.427 UTC [64] LOG:  database system was shut down at 2026-11-27 13:29:01 UTC
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:22.1186847Z  
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:22.1187365Z  2026-11-27 13:29:01.429 UTC [1] LOG:  database system is ready to accept connections
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:22.1187938Z  Data page checksums are disabled.
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:22.1188533Z  2026-11-27 13:29:42.615 UTC [137] ERROR:  update or delete on table "User" violates foreign key constraint "HabitLog_userId_fkey" on table "HabitLog"
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:22.1189551Z  2026-11-27 13:29:42.615 UTC [137] DETAIL:  Key (id)=(82f6c32e-2177-4a6f-ada2-335753f27e32) is still referenced from table "HabitLog".
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:22.1190160Z  2026-11-27 13:29:42.615 UTC [137] STATEMENT:  DELETE FROM "User" WHERE email = $1
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:22.1190854Z  2026-11-27 13:29:50.295 UTC [148] ERROR:  invalid input value for enum "PlannedActivitySchedulingMode": "MOVABLE" at character 210
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:22.1192010Z  2026-11-27 13:29:50.295 UTC [148] STATEMENT:  INSERT INTO "PlannedActivity" (id, "userId", title, "plannedStartAt", "plannedEndAt", "durationMinutes", "windowType", "schedulingMode") VALUES ($1, $2, 'bad', now(), now() + interval '1 hour', 60, 'NEUTRAL', 'MOVABLE')
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:22.1192945Z  
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:22.1193226Z  fixing permissions on existing directory /var/lib/postgresql/data ... ok
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:22.1193612Z  creating subdirectories ... ok
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:22.1193914Z  selecting dynamic shared memory implementation ... posix
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:22.1194427Z  selecting default max_connections ... 100
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:22.1194729Z  selecting default shared_buffers ... 128MB
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:22.1195030Z  selecting default time zone ... Etc/UTC
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:22.1195342Z  creating configuration files ... ok
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:22.1195608Z  running bootstrap script ... ok
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:22.1195882Z  performing post-bootstrap initialization ... ok
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:22.1196171Z  syncing data to disk ... ok
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:22.1196400Z  
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:22.1196641Z  
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:22.1196871Z  Success. You can now start the database server using:
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:22.1197144Z  
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:22.1197389Z      pg_ctl -D /var/lib/postgresql/data -l logfile start
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:22.1197660Z  
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:22.1198298Z  waiting for server to start....2026-11-27 13:29:01.159 UTC [48] LOG:  starting PostgreSQL 16.16 (Debian 16.16-1.pgdg13+1) on x86_64-pc-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:22.1199211Z  2026-11-27 13:29:01.159 UTC [48] LOG:  listening on Unix socket "/var/run/postgresql/.s.PGSQL.5432"
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:22.1199678Z  2026-11-27 13:29:01.161 UTC [51] LOG:  database system was shut down at 2026-11-27 13:29:01 UTC
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:22.1200103Z  2026-11-27 13:29:01.163 UTC [48] LOG:  database system is ready to accept connections
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:22.1200449Z   done
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:22.1200697Z  server started
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:22.1200916Z  CREATE DATABASE
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:22.1201121Z  
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:22.1201321Z  
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:22.1201631Z  /usr/local/bin/docker-entrypoint.sh: ignoring /docker-entrypoint-initdb.d/*
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:22.1201977Z  
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:22.1202300Z  waiting for server to shut down....2026-11-27 13:29:01.311 UTC [48] LOG:  received fast shutdown request
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:22.1202770Z  2026-11-27 13:29:01.311 UTC [48] LOG:  aborting any active transactions
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:22.1203240Z  2026-11-27 13:29:01.313 UTC [48] LOG:  background worker "logical replication launcher" (PID 54) exited with exit code 1
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:22.1203700Z  2026-11-27 13:29:01.313 UTC [49] LOG:  shutting down
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:22.1204047Z  2026-11-27 13:29:01.313 UTC [49] LOG:  checkpoint starting: shutdown immediate
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:22.1204932Z  2026-11-27 13:29:01.325 UTC [49] LOG:  checkpoint complete: wrote 935 buffers (5.7%); 0 WAL file(s) added, 0 removed, 0 recycled; write=0.010 s, sync=0.001 s, total=0.012 s; sync files=301, longest=0.001 s, average=0.001 s; distance=4346 kB, estimate=4346 kB; lsn=0/1943080, redo lsn=0/1943080
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:22.1205869Z  2026-11-27 13:29:01.328 UTC [48] LOG:  database system is shut down
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:22.1417311Z   done
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:22.1417640Z  server stopped
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:22.1417835Z  
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:22.1418043Z  PostgreSQL init process complete; ready for start up.
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:22.1418325Z  
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:22.1425882Z Stop and remove container: 5ed69b4a8a9b4fff9206ea4c7bf46723_postgres16_026142
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:22.1430965Z ##[command]/usr/bin/docker rm --force 034e063394a9b13dfbad5a6d998675ad08f7be76ba99fc08e848bb48de132706
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:22.2370190Z 034e063394a9b13dfbad5a6d998675ad08f7be76ba99fc08e848bb48de132706
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:22.2390998Z Remove container network: github_network_e7c8b65c79d84584b263322416d6be18
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:22.2394144Z ##[command]/usr/bin/docker network rm github_network_e7c8b65c79d84584b263322416d6be18
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:22.3097583Z github_network_e7c8b65c79d84584b263322416d6be18
+Day Constructor acceptance DB tests	UNKNOWN STEP	2026-11-27T13:30:22.3167022Z Cleaning up orphan processes

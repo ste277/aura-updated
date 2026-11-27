@@ -1,0 +1,69 @@
+$ npx ts-node test/dayConstructorOverloadDecisionDb.test.ts
+# job=day-constructor-acceptance-db-tests step=Run Constructor overload decision DB test env={}
+=== PRIMARY FIXTURE: one scarce 60-minute slot, two equal-duration FLEXIBLE candidates ===
+OK   INDIVIDUAL FEASIBILITY: candidate A (HIGH) alone is PROPOSED in the contested slot
+OK   INDIVIDUAL FEASIBILITY: candidate B (LOW) alone is PROPOSED in the SAME slot -- the loser is not intrinsically infeasible
+OK   equal hard feasibility: both resolve the same RESOLVED duration (60), the same activity, and the same timing quality (no timingFit or duration difference can explain the outcome)
+OK   REAL CONTENTION (A then B): the real pipeline returns READY with exactly ONE proposed and ONE deferred contested candidate
+OK   CURRENT WINNER under existing precedence: the HIGH-importance candidate A is proposed in the scarce slot; the LOW candidate B is deferred
+OK   CURRENT DEFERRED REASON for the loser is exactly NO_CANDIDATES with no per-candidate diagnostics (replenishment found no remaining slot; see the file header)
+OK   the existing `conflicts` list is EMPTY: no contention metadata explains the loss today
+OK   CURRENT ProposedItem shape: FLEXIBLE selected candidate with timingFit/candidateOrder, requiresConfirmation true, and NO decision/explanation field
+OK   the winner and the loser both get the SAME timingFit for that slot (selection, not placement, decided it)
+  [CAPACITY METADATA] {"constructionWindowMinutes":480,"blockedMinutes":420,"usableMinutes":60,"requestedMinutes":120,"remainingMinutes":-60,"utilization":2,"capacityState":"OVERLOADED"} | proposed: {"constructionWindowMinutes":480,"blockedMinutes":420,"usableMinutes":60,"requestedMinutes":60,"remainingMinutes":0,"utilization":1,"capacityState":"BUSY"}
+OK   CAPACITY METADATA marks the day OVERLOADED: window 480, blocked 420, usable 60, requested 120, remaining -60, utilization 2 (current capacityState contract)
+OK   after placement the proposed capacity is BUSY (60 of 60 usable minutes used, nothing left)
+OK   the loser did not fail for a contention-unrelated reason: the preview carries no warning and the same capacity-validated window was used for both alone-runs
+=== ORDER REVERSAL: unequal importance must not depend on submission order ===
+OK   reversed input (B then A): the SAME higher-importance candidate A still wins and B is still deferred
+OK   the whole constructed day is byte-identical for both input orders (placement, capacity, warnings)
+=== IMPORTANCE MATRIX (all other dimensions equal) ===
+OK   HIGH over MEDIUM: X wins in both submission orders
+OK   MEDIUM over LOW: X wins in both submission orders
+OK   HIGH over LOW: X wins in both submission orders
+OK   an OMITTED importance is MEDIUM (the Plan Day default): it beats LOW exactly like an explicit MEDIUM
+=== EQUAL PRECEDENCE: the final tie-break is submission order ===
+OK   both HIGH, no deadlines: the FIRST SUBMITTED wins (P first -> P; Q first -> Q) -- the current deterministic fallback is original/submission order
+OK   both MEDIUM (explicit), no deadlines: the FIRST SUBMITTED wins (P first -> P; Q first -> Q) -- the current deterministic fallback is original/submission order
+OK   both with importance omitted, no deadlines: the FIRST SUBMITTED wins (P first -> P; Q first -> Q) -- the current deterministic fallback is original/submission order
+=== DEADLINE CONTROLS ===
+OK   deadline TODAY (the planning date) beats no deadline at equal importance even when submitted SECOND
+OK   deadline today beats a LATER deadline at equal importance even when submitted second
+OK   PRECEDENCE ORDER: deadline today ranks ABOVE importance -- a LOW item due today beats a HIGH item with no deadline
+OK   EARLIER DEADLINE (neither is today, equal importance): the earlier deadline wins in both submission orders
+OK   ANY deadline beats no deadline at equal importance (a future deadline outranks an undated item submitted first)
+OK   importance ranks ABOVE an earlier (non-today) deadline: a HIGH undated item beats a LOW dated one
+=== FIXED stays authoritative (regression-only, not part of the contest) ===
+OK   a FIXED intent on the scarce slot keeps it regardless of a HIGH FLEXIBLE competitor (reservation invariant; FIXED is not ranked)
+OK   persisted plans remain HARD blockers: a 90-minute candidate cannot use the 60-minute gap even alone
+=== GREEDY / NON-BACKTRACKING behavior (current, not changed) ===
+OK   GREEDY: the higher-precedence SHORT item takes its best candidate first, which uses part of the only 60-minute gap, so LONG is deferred even though an arrangement that fits BOTH exists: SHORT in 13:00-13:30 and LONG in 11:00-12:00
+OK   NO BACKTRACKING: SHORT is never moved to make room (it sits in the 11:00-12:00 gap), so the global optimum is not found
+OK   ...and both are individually feasible in that same fixture (the loss is contention under greedy order, not infeasibility)
+=== CAPACITY METADATA vs ACTUAL PLACEMENT CONTENTION (a current-behavior discrepancy) ===
+OK   NOMINAL capacity is NOT overloaded when usable == requested (120 == 120): capacityState BUSY, remaining 0, utilization 1
+OK   ...yet REAL CONTENTION still occurs: greedy placement puts the higher-precedence A mid-gap (10:30-11:30, its best-timed slot), leaving two 30-minute fragments, so B cannot fit and is deferred (NO_CANDIDATES) -- in both input orders
+OK   the capacity model never flags that contention: after placement it reports BALANCED with 60 minutes "remaining" that no candidate can actually use (capacity metadata and placement contention differ; the capacity model is unchanged)
+=== NOT OVERLOADED: enough capacity proposes BOTH ===
+OK   generous capacity: BOTH proposed -- precedence never suppresses a feasible second candidate
+OK   ...and the two placements do not overlap
+=== LIFECYCLE BLOCKER SEMANTICS (current) ===
+OK   LOGGED plans block exactly like UPCOMING ones: the same contest and the same winner
+OK   a CANCELLED plan does not block: removing its hold turns the contest into a non-contest (both proposed)
+=== EMPTY DAY: no filler is ever invented ===
+OK   an empty request is rejected by the existing parser (400), never turned into invented work
+OK   the real orchestrator given zero intents proposes nothing and defers nothing (no filler)
+=== SOURCE NEUTRALITY: a Goal-derived candidate (with real facts) is ordered by the same rules ===
+OK   the Goal candidate really carries recurrence AND opportunity facts in the preview (they exist but are inert)
+OK   Goal (MEDIUM) beats a generic LOW candidate even though submitted second: by importance, not by source
+OK   a generic HIGH candidate beats the Goal (MEDIUM, with facts) even though the Goal was submitted first: facts and source give no advantage
+OK   equal importance: submission order decides, whichever side is the Goal (no source branch): Goal-first -> Goal; generic-first -> generic
+=== DETERMINISM ===
+OK   20 repetitions of the primary overload scenario produce an IDENTICAL result every time (winner, loser, reason, placement, capacity)
+OK   both input permutations, 10 repetitions each: the higher-importance candidate wins every time
+OK   preview is read-only: no plan row was created or changed by 32 previews
+=== CIVIL-TIME CONTROL: the same fixture in UTC ===
+OK   the same scarce-slot contest in a UTC user (09:00-17:00 UTC, gap 11:00-12:00 UTC) gives the same winner, loser, reason and capacity shape
+ALL OVERLOAD DECISION DB CHECKS PASSED
+
+# exit=0 signal=

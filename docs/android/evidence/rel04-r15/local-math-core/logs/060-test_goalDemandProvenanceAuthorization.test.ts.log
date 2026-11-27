@@ -1,0 +1,19 @@
+$ npx ts-node test/goalDemandProvenanceAuthorization.test.ts
+# job=math-core-tests step=Run Goal demand provenance authorization test env={}
+OK   19. verified automatic intent + matching client link -> succeeds
+OK   27/28. a link for an intentId never among the verified items carries zero authority and never reaches the result
+OK   20. verified automatic intent + missing client link -> server derives the correct link from the verified intentId
+OK   21. verified automatic intent + conflicting client link -> rejected
+OK   22. conflict produces zero authorized links (never a partial/guessed result)
+OK   23. verified item carrying a malformed reserved identity -> rejected
+OK   24. malformed identity produces zero authorized links
+OK   25. verified automatic intent whose decoded date differs from the verified planning date -> rejected
+OK   26. date mismatch produces zero authorized links
+OK   29. a typed/ordinary intent with no link -> succeeds, no link in the result (unchanged behavior)
+OK   32. a manual Goal intent + matching client link -> passes through verbatim, unchanged
+OK   manual Goal links are never cross-checked by this file (that stays the existing transactional ownership check's job)
+OK   39. multiple item kinds in one batch all authorize correctly together
+OK   40. one invalid automatic provenance among valid siblings -> the whole batch is rejected, zero authorized links for ANY item
+ALL GOAL DEMAND PROVENANCE AUTHORIZATION CHECKS PASSED
+
+# exit=0 signal=

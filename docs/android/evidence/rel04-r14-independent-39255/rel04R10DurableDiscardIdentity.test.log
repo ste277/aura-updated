@@ -1,0 +1,33 @@
+OK   fixture rel04-r1-head/offlineHabitQueue.ts.txt == d09449b apps/web/lib/offlineHabitQueue.ts
+OK   fixture rel04-r2-head/offlineHabitQueue.ts.txt == db8607e apps/web/lib/offlineHabitQueue.ts
+OK   fixture rel04-r3-head/offlineHabitQueue.ts.txt == b323d2a apps/web/lib/offlineHabitQueue.ts
+OK   fixture rel04-r9-head/offlineHabitQueue.ts.txt == 513c12b apps/web/lib/offlineHabitQueue.ts
+OK   fixture rel04-r9-head/activitySync.ts.txt == 513c12b apps/web/lib/activitySync.ts
+OK   fixture rel04-r9-head/signOut.ts.txt == 513c12b apps/web/lib/signOut.ts
+OK   the 39228-R9 reviewer evidence (probe + logs) is preserved byte-for-byte (SHA256SUMS)
+W1 R9 v2: {"format":"v2","paused":1,"removed":1,"markers":0,"submit":"confirmed","rows":1}
+OK   W1 R9 HEAD reproduces (v2): readable request id, damaged timestamp -> sign-out removes it with NO decision; the same request is then CONFIRMED (1 server row)
+W1 current v2: {"format":"v2","paused":1,"removed":1,"markers":1,"submit":"not-stored","rows":0}
+OK   W1 CORRECTED (v2): discarded by its identity with a durable decision; the same request is refused, ZERO server rows
+W1 R9 idb: {"format":"idb","paused":1,"removed":1,"markers":0,"submit":"confirmed","rows":1}
+OK   W1 R9 HEAD reproduces (idb): readable request id, damaged timestamp -> sign-out removes it with NO decision; the same request is then CONFIRMED (1 server row)
+W1 current idb: {"format":"idb","paused":1,"removed":1,"markers":1,"submit":"not-stored","rows":0}
+OK   W1 CORRECTED (idb): discarded by its identity with a durable decision; the same request is refused, ZERO server rows
+W2 R9: {"counts":{"unknown":false,"removed":1,"removedPossiblySent":1,"keptInFlight":0,"failed":0,"cleanupPending":1},"actuallySentRows":1,"unsentRows":0,"message":"You're signed out. 1 unsynced activity log was removed from this device. It may already have been sent, so it may be saved to your account; removing it here doesn't undo that. 1 activity log was discarded and will never be sent, but Aura couldn't delete its copy from this device's storage."}
+OK   W2 R9 HEAD reproduces: the possible send is attributed to the REMOVED (never-sent) log, not to the cleanup-pending (sent) one
+W2 current: {"counts":{"unknown":false,"removed":1,"removedPossiblySent":0,"keptInFlight":0,"failed":0,"cleanupPending":1,"cleanupPendingPossiblySent":1,"unidentified":0,"uncertain":0,"discardedUnverified":0,"discardedUnverifiedPossiblySent":0},"actuallySentRows":1,"unsentRows":0,"message":"You're signed out. 1 unsynced activity log was removed from this device. 1 activity log was discarded and will never be sent, but Aura couldn't delete its copy from this device's storage. It may already have been sent, so it may be saved to your account; discarding it here doesn't undo that."}
+OK   W2 CORRECTED: removed 1 (not possibly sent), cleanup-pending 1 (possibly sent); the message attributes the possible send only to the cleanup-pending log
+OK   M1 six identifiable activities with malformed or missing non-identity fields (v2 ×3, aura_q3, aura_q4, IndexedDB): counted as 6 paused, all discarded with a durable decision, all copies removed; every resubmission refused; ZERO server rows
+OK   M2 identity-less (v2 missing id, v2 malformed id) and identity-conflicting entries (aura_q3 key vs value, aura_q3 malformed id, IndexedDB naming another account) are counted, never eligible (all refused, no server row)
+OK   M2 the discard decides ONLY the identified activity (v2-good) and PRESERVES the 5 unidentifiable ones (reported "couldn't be identified safely"); the v2 array that holds them is kept (v2-good cleanup pending)
+OK   M3 a damaged IndexedDB copy + valid aura_q3 + damaged v2 copy of ONE activity: counted once, asked about once, removed once with ONE decision; resubmission refused; ZERO rows
+OK   M4 A's discard decides only A's damaged entry; B's damaged localStorage and IndexedDB entries are untouched, still paused, and B has no decision
+OK   M5 a FAILED discard transaction (damaged identifiable v2 entry) records nothing and removes nothing: reported failed (never removed), entry preserved, still refused, ZERO rows
+OK   M5 an AMBIGUOUS end (decision committed, cleanup never ran) for an unparseable aura_q3 value identified by its key: cleanup pending, the survivor is permanently ineligible, ZERO rows
+OK   M6 cleanup failing after the durable discard: cleanup-pending (never removed), resubmission refused, replay sends nothing, ZERO rows; a retried sign-out removes it
+OK   M7 20 interleavings of a submission racing the durable discard of its damaged localStorage-only request: never transmitted, refused afterwards
+OK   M8 3 logical activities over 5 copies: asked about 3; 1 removed (not possibly sent), 2 cleanup-pending of which exactly 1 possibly sent; physical duplicates never counted twice
+OK   M9 healthy online submission is confirmed once; offline submission is queued then replayed and confirmed once
+OK   M10 the released offline_habit_queue is never counted as the account's, never decided, never sent, byte-identical after sign-out and reported as left in place
+
+25 passed, 0 failed

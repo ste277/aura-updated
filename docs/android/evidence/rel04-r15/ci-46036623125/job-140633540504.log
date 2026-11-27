@@ -1,0 +1,470 @@
+REL-04 Chromium multi-tab tests	Set up job	﻿2026-11-27T16:48:01.3128542Z Current runner version: '2.338.2'
+REL-04 Chromium multi-tab tests	Set up job	2026-11-27T16:48:01.3151091Z ##[group]Runner Image Provisioner
+REL-04 Chromium multi-tab tests	Set up job	2026-11-27T16:48:01.3151827Z Hosted Compute Agent
+REL-04 Chromium multi-tab tests	Set up job	2026-11-27T16:48:01.3152298Z Version: 20261111.635
+REL-04 Chromium multi-tab tests	Set up job	2026-11-27T16:48:01.3152954Z Commit: b8a594ea514ff44cadb5342986c68b1eac6e22ed
+REL-04 Chromium multi-tab tests	Set up job	2026-11-27T16:48:01.3153555Z Build Date: 2026-11-11T01:49:01Z
+REL-04 Chromium multi-tab tests	Set up job	2026-11-27T16:48:01.3154155Z Worker ID: {b8ac98c1-62c6-4497-9c69-df8d991c9b47}
+REL-04 Chromium multi-tab tests	Set up job	2026-11-27T16:48:01.3154726Z Region: westus3
+REL-04 Chromium multi-tab tests	Set up job	2026-11-27T16:48:01.3155170Z Cloud: Azure
+REL-04 Chromium multi-tab tests	Set up job	2026-11-27T16:48:01.3155692Z ##[endgroup]
+REL-04 Chromium multi-tab tests	Set up job	2026-11-27T16:48:01.3157447Z ##[group]Operating System
+REL-04 Chromium multi-tab tests	Set up job	2026-11-27T16:48:01.3158050Z Ubuntu
+REL-04 Chromium multi-tab tests	Set up job	2026-11-27T16:48:01.3158503Z 26.04.1
+REL-04 Chromium multi-tab tests	Set up job	2026-11-27T16:48:01.3158927Z LTS
+REL-04 Chromium multi-tab tests	Set up job	2026-11-27T16:48:01.3159433Z ##[endgroup]
+REL-04 Chromium multi-tab tests	Set up job	2026-11-27T16:48:01.3159929Z ##[group]Runner Image
+REL-04 Chromium multi-tab tests	Set up job	2026-11-27T16:48:01.3160453Z Image: ubuntu-26.04
+REL-04 Chromium multi-tab tests	Set up job	2026-11-27T16:48:01.3160931Z Version: 20261122.9.1
+REL-04 Chromium multi-tab tests	Set up job	2026-11-27T16:48:01.3161808Z Included Software: https://github.com/actions/runner-images/blob/ubuntu26/20261122.9/images/ubuntu/Ubuntu2604-Readme.md
+REL-04 Chromium multi-tab tests	Set up job	2026-11-27T16:48:01.3163231Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu26%2F20261122.9
+REL-04 Chromium multi-tab tests	Set up job	2026-11-27T16:48:01.3164040Z ##[endgroup]
+REL-04 Chromium multi-tab tests	Set up job	2026-11-27T16:48:01.3165017Z ##[group]GITHUB_TOKEN Permissions
+REL-04 Chromium multi-tab tests	Set up job	2026-11-27T16:48:01.3166758Z Contents: read
+REL-04 Chromium multi-tab tests	Set up job	2026-11-27T16:48:01.3167569Z Metadata: read
+REL-04 Chromium multi-tab tests	Set up job	2026-11-27T16:48:01.3168032Z Packages: read
+REL-04 Chromium multi-tab tests	Set up job	2026-11-27T16:48:01.3168540Z ##[endgroup]
+REL-04 Chromium multi-tab tests	Set up job	2026-11-27T16:48:01.3170431Z Secret source: Actions
+REL-04 Chromium multi-tab tests	Set up job	2026-11-27T16:48:01.3171316Z Cache mode: write
+REL-04 Chromium multi-tab tests	Set up job	2026-11-27T16:48:01.3171903Z Prepare workflow directory
+REL-04 Chromium multi-tab tests	Set up job	2026-11-27T16:48:01.3473817Z Prepare all required actions
+REL-04 Chromium multi-tab tests	Set up job	2026-11-27T16:48:01.3526741Z Getting action download info
+REL-04 Chromium multi-tab tests	Set up job	2026-11-27T16:48:01.6205570Z Download action repository 'actions/checkout@v4' (SHA:11d5960a326750d5838078e36cf38b85af677262)
+REL-04 Chromium multi-tab tests	Set up job	2026-11-27T16:48:01.7036181Z Download action repository 'actions/setup-node@v4' (SHA:49933ea5288caeca8642d1e84afbd3f7d6820020)
+REL-04 Chromium multi-tab tests	Set up job	2026-11-27T16:48:01.8900937Z Complete job name: REL-04 Chromium multi-tab tests
+REL-04 Chromium multi-tab tests	Run actions/checkout@v4	﻿2026-11-27T16:48:01.9639255Z ##[group]Run actions/checkout@v4
+REL-04 Chromium multi-tab tests	Run actions/checkout@v4	2026-11-27T16:48:01.9639969Z with:
+REL-04 Chromium multi-tab tests	Run actions/checkout@v4	2026-11-27T16:48:01.9640341Z   repository: ste277/aura-updated
+REL-04 Chromium multi-tab tests	Run actions/checkout@v4	2026-11-27T16:48:01.9643338Z   token: ***
+REL-04 Chromium multi-tab tests	Run actions/checkout@v4	2026-11-27T16:48:01.9643691Z   ssh-strict: true
+REL-04 Chromium multi-tab tests	Run actions/checkout@v4	2026-11-27T16:48:01.9644051Z   ssh-user: git
+REL-04 Chromium multi-tab tests	Run actions/checkout@v4	2026-11-27T16:48:01.9644409Z   persist-credentials: true
+REL-04 Chromium multi-tab tests	Run actions/checkout@v4	2026-11-27T16:48:01.9644813Z   clean: true
+REL-04 Chromium multi-tab tests	Run actions/checkout@v4	2026-11-27T16:48:01.9645172Z   sparse-checkout-cone-mode: true
+REL-04 Chromium multi-tab tests	Run actions/checkout@v4	2026-11-27T16:48:01.9645593Z   fetch-depth: 1
+REL-04 Chromium multi-tab tests	Run actions/checkout@v4	2026-11-27T16:48:01.9645942Z   fetch-tags: false
+REL-04 Chromium multi-tab tests	Run actions/checkout@v4	2026-11-27T16:48:01.9646303Z   show-progress: true
+REL-04 Chromium multi-tab tests	Run actions/checkout@v4	2026-11-27T16:48:01.9646658Z   lfs: false
+REL-04 Chromium multi-tab tests	Run actions/checkout@v4	2026-11-27T16:48:01.9647299Z   submodules: false
+REL-04 Chromium multi-tab tests	Run actions/checkout@v4	2026-11-27T16:48:01.9647669Z   set-safe-directory: true
+REL-04 Chromium multi-tab tests	Run actions/checkout@v4	2026-11-27T16:48:01.9648073Z   allow-unsafe-pr-checkout: false
+REL-04 Chromium multi-tab tests	Run actions/checkout@v4	2026-11-27T16:48:01.9648693Z ##[endgroup]
+REL-04 Chromium multi-tab tests	Run actions/checkout@v4	2026-11-27T16:48:02.1896420Z Syncing repository: ste277/aura-updated
+REL-04 Chromium multi-tab tests	Run actions/checkout@v4	2026-11-27T16:48:02.1898596Z ##[group]Getting Git version info
+REL-04 Chromium multi-tab tests	Run actions/checkout@v4	2026-11-27T16:48:02.1899497Z Working directory is '/home/runner/work/aura-updated/aura-updated'
+REL-04 Chromium multi-tab tests	Run actions/checkout@v4	2026-11-27T16:48:02.1900765Z [command]/usr/bin/git version
+REL-04 Chromium multi-tab tests	Run actions/checkout@v4	2026-11-27T16:48:02.1901405Z git version 2.56.1
+REL-04 Chromium multi-tab tests	Run actions/checkout@v4	2026-11-27T16:48:02.1918783Z ##[endgroup]
+REL-04 Chromium multi-tab tests	Run actions/checkout@v4	2026-11-27T16:48:02.1933169Z Temporarily overriding HOME='/home/runner/work/_temp/70d859c8-2b7f-4199-ba1f-8f0fed5a152f' before making global git config changes
+REL-04 Chromium multi-tab tests	Run actions/checkout@v4	2026-11-27T16:48:02.1934868Z Adding repository directory to the temporary git global config as a safe directory
+REL-04 Chromium multi-tab tests	Run actions/checkout@v4	2026-11-27T16:48:02.1938004Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/aura-updated/aura-updated
+REL-04 Chromium multi-tab tests	Run actions/checkout@v4	2026-11-27T16:48:02.1999037Z Deleting the contents of '/home/runner/work/aura-updated/aura-updated'
+REL-04 Chromium multi-tab tests	Run actions/checkout@v4	2026-11-27T16:48:02.2002112Z ##[group]Initializing the repository
+REL-04 Chromium multi-tab tests	Run actions/checkout@v4	2026-11-27T16:48:02.2007153Z [command]/usr/bin/git init /home/runner/work/aura-updated/aura-updated
+REL-04 Chromium multi-tab tests	Run actions/checkout@v4	2026-11-27T16:48:02.2082994Z hint: Using 'master' as the name for the initial branch. This default branch name
+REL-04 Chromium multi-tab tests	Run actions/checkout@v4	2026-11-27T16:48:02.2083984Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+REL-04 Chromium multi-tab tests	Run actions/checkout@v4	2026-11-27T16:48:02.2085102Z hint: to use in all of your new repositories, which will suppress this warning,
+REL-04 Chromium multi-tab tests	Run actions/checkout@v4	2026-11-27T16:48:02.2085981Z hint: call:
+REL-04 Chromium multi-tab tests	Run actions/checkout@v4	2026-11-27T16:48:02.2086432Z hint:
+REL-04 Chromium multi-tab tests	Run actions/checkout@v4	2026-11-27T16:48:02.2087211Z hint: 	git config --global init.defaultBranch <name>
+REL-04 Chromium multi-tab tests	Run actions/checkout@v4	2026-11-27T16:48:02.2087932Z hint:
+REL-04 Chromium multi-tab tests	Run actions/checkout@v4	2026-11-27T16:48:02.2088603Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+REL-04 Chromium multi-tab tests	Run actions/checkout@v4	2026-11-27T16:48:02.2089666Z hint: 'development'. The just-created branch can be renamed via this command:
+REL-04 Chromium multi-tab tests	Run actions/checkout@v4	2026-11-27T16:48:02.2090537Z hint:
+REL-04 Chromium multi-tab tests	Run actions/checkout@v4	2026-11-27T16:48:02.2091033Z hint: 	git branch -m <name>
+REL-04 Chromium multi-tab tests	Run actions/checkout@v4	2026-11-27T16:48:02.2091583Z hint:
+REL-04 Chromium multi-tab tests	Run actions/checkout@v4	2026-11-27T16:48:02.2092320Z hint: Disable this message with "git config set advice.defaultBranchName false"
+REL-04 Chromium multi-tab tests	Run actions/checkout@v4	2026-11-27T16:48:02.2093585Z Initialized empty Git repository in /home/runner/work/aura-updated/aura-updated/.git/
+REL-04 Chromium multi-tab tests	Run actions/checkout@v4	2026-11-27T16:48:02.2100153Z [command]/usr/bin/git remote add origin https://github.com/ste277/aura-updated
+REL-04 Chromium multi-tab tests	Run actions/checkout@v4	2026-11-27T16:48:02.2157471Z ##[endgroup]
+REL-04 Chromium multi-tab tests	Run actions/checkout@v4	2026-11-27T16:48:02.2158203Z ##[group]Disabling automatic garbage collection
+REL-04 Chromium multi-tab tests	Run actions/checkout@v4	2026-11-27T16:48:02.2161393Z [command]/usr/bin/git config --local gc.auto 0
+REL-04 Chromium multi-tab tests	Run actions/checkout@v4	2026-11-27T16:48:02.2200422Z ##[endgroup]
+REL-04 Chromium multi-tab tests	Run actions/checkout@v4	2026-11-27T16:48:02.2201577Z ##[group]Setting up auth
+REL-04 Chromium multi-tab tests	Run actions/checkout@v4	2026-11-27T16:48:02.2204210Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+REL-04 Chromium multi-tab tests	Run actions/checkout@v4	2026-11-27T16:48:02.2240389Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+REL-04 Chromium multi-tab tests	Run actions/checkout@v4	2026-11-27T16:48:02.2690510Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+REL-04 Chromium multi-tab tests	Run actions/checkout@v4	2026-11-27T16:48:02.2728687Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+REL-04 Chromium multi-tab tests	Run actions/checkout@v4	2026-11-27T16:48:02.3003008Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+REL-04 Chromium multi-tab tests	Run actions/checkout@v4	2026-11-27T16:48:02.3037427Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+REL-04 Chromium multi-tab tests	Run actions/checkout@v4	2026-11-27T16:48:02.3293109Z [command]/usr/bin/git config --local http.https://github.com/.extraheader AUTHORIZATION: basic ***
+REL-04 Chromium multi-tab tests	Run actions/checkout@v4	2026-11-27T16:48:02.3333309Z ##[endgroup]
+REL-04 Chromium multi-tab tests	Run actions/checkout@v4	2026-11-27T16:48:02.3334411Z ##[group]Fetching the repository
+REL-04 Chromium multi-tab tests	Run actions/checkout@v4	2026-11-27T16:48:02.3342630Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +2c9f15c95a5c9c2ea063136b9415a1ff6c033679:refs/remotes/pull/392/merge
+REL-04 Chromium multi-tab tests	Run actions/checkout@v4	2026-11-27T16:48:04.1418216Z From https://github.com/ste277/aura-updated
+REL-04 Chromium multi-tab tests	Run actions/checkout@v4	2026-11-27T16:48:04.1420028Z  * [new ref]         2c9f15c95a5c9c2ea063136b9415a1ff6c033679 -> pull/392/merge
+REL-04 Chromium multi-tab tests	Run actions/checkout@v4	2026-11-27T16:48:04.1423600Z ##[endgroup]
+REL-04 Chromium multi-tab tests	Run actions/checkout@v4	2026-11-27T16:48:04.1425071Z ##[group]Determining the checkout info
+REL-04 Chromium multi-tab tests	Run actions/checkout@v4	2026-11-27T16:48:04.1426745Z ##[endgroup]
+REL-04 Chromium multi-tab tests	Run actions/checkout@v4	2026-11-27T16:48:04.1430062Z [command]/usr/bin/git sparse-checkout disable
+REL-04 Chromium multi-tab tests	Run actions/checkout@v4	2026-11-27T16:48:04.1480363Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+REL-04 Chromium multi-tab tests	Run actions/checkout@v4	2026-11-27T16:48:04.1510712Z ##[group]Checking out the ref
+REL-04 Chromium multi-tab tests	Run actions/checkout@v4	2026-11-27T16:48:04.1514147Z [command]/usr/bin/git checkout --progress --force refs/remotes/pull/392/merge
+REL-04 Chromium multi-tab tests	Run actions/checkout@v4	2026-11-27T16:48:04.4860923Z Note: switching to 'refs/remotes/pull/392/merge'.
+REL-04 Chromium multi-tab tests	Run actions/checkout@v4	2026-11-27T16:48:04.4861521Z 
+REL-04 Chromium multi-tab tests	Run actions/checkout@v4	2026-11-27T16:48:04.4861838Z You are in 'detached HEAD' state. You can look around, make experimental
+REL-04 Chromium multi-tab tests	Run actions/checkout@v4	2026-11-27T16:48:04.4862499Z changes and commit them, and you can discard any commits you make in this
+REL-04 Chromium multi-tab tests	Run actions/checkout@v4	2026-11-27T16:48:04.4863131Z state without impacting any branches by switching back to a branch.
+REL-04 Chromium multi-tab tests	Run actions/checkout@v4	2026-11-27T16:48:04.4863514Z 
+REL-04 Chromium multi-tab tests	Run actions/checkout@v4	2026-11-27T16:48:04.4863810Z If you want to create a new branch to retain commits you create, you may
+REL-04 Chromium multi-tab tests	Run actions/checkout@v4	2026-11-27T16:48:04.4864374Z do so (now or later) by using -c with the switch command. Example:
+REL-04 Chromium multi-tab tests	Run actions/checkout@v4	2026-11-27T16:48:04.4865140Z 
+REL-04 Chromium multi-tab tests	Run actions/checkout@v4	2026-11-27T16:48:04.4865314Z   git switch -c <new-branch-name>
+REL-04 Chromium multi-tab tests	Run actions/checkout@v4	2026-11-27T16:48:04.4865495Z 
+REL-04 Chromium multi-tab tests	Run actions/checkout@v4	2026-11-27T16:48:04.4865635Z Or undo this operation with:
+REL-04 Chromium multi-tab tests	Run actions/checkout@v4	2026-11-27T16:48:04.4865834Z 
+REL-04 Chromium multi-tab tests	Run actions/checkout@v4	2026-11-27T16:48:04.4865933Z   git switch -
+REL-04 Chromium multi-tab tests	Run actions/checkout@v4	2026-11-27T16:48:04.4866076Z 
+REL-04 Chromium multi-tab tests	Run actions/checkout@v4	2026-11-27T16:48:04.4866292Z Turn off this advice by setting config variable advice.detachedHead to false
+REL-04 Chromium multi-tab tests	Run actions/checkout@v4	2026-11-27T16:48:04.4866563Z 
+REL-04 Chromium multi-tab tests	Run actions/checkout@v4	2026-11-27T16:48:04.4867058Z HEAD is now at 2c9f15c Merge e6a6a6678bf6300362e15cf398343a246807a7e2 into 73cea7dc409e2740b4474695e248338f87c374c0
+REL-04 Chromium multi-tab tests	Run actions/checkout@v4	2026-11-27T16:48:04.4932715Z ##[endgroup]
+REL-04 Chromium multi-tab tests	Run actions/checkout@v4	2026-11-27T16:48:04.4976397Z [command]/usr/bin/git log -1 --format=%H
+REL-04 Chromium multi-tab tests	Run actions/checkout@v4	2026-11-27T16:48:04.5000444Z 2c9f15c95a5c9c2ea063136b9415a1ff6c033679
+REL-04 Chromium multi-tab tests	Run actions/setup-node@v4	﻿2026-11-27T16:48:04.5345554Z ##[group]Run actions/setup-node@v4
+REL-04 Chromium multi-tab tests	Run actions/setup-node@v4	2026-11-27T16:48:04.5345897Z with:
+REL-04 Chromium multi-tab tests	Run actions/setup-node@v4	2026-11-27T16:48:04.5346122Z   node-version: 24
+REL-04 Chromium multi-tab tests	Run actions/setup-node@v4	2026-11-27T16:48:04.5346348Z   always-auth: false
+REL-04 Chromium multi-tab tests	Run actions/setup-node@v4	2026-11-27T16:48:04.5346572Z   check-latest: false
+REL-04 Chromium multi-tab tests	Run actions/setup-node@v4	2026-11-27T16:48:04.5348758Z   token: ***
+REL-04 Chromium multi-tab tests	Run actions/setup-node@v4	2026-11-27T16:48:04.5349009Z ##[endgroup]
+REL-04 Chromium multi-tab tests	Run actions/setup-node@v4	2026-11-27T16:48:04.6661293Z (node:2188) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+REL-04 Chromium multi-tab tests	Run actions/setup-node@v4	2026-11-27T16:48:04.6662144Z Found in cache @ /opt/hostedtoolcache/node/24.22.3/x64
+REL-04 Chromium multi-tab tests	Run actions/setup-node@v4	2026-11-27T16:48:04.6663395Z (Use `node --trace-deprecation ...` to show where the warning was created)
+REL-04 Chromium multi-tab tests	Run actions/setup-node@v4	2026-11-27T16:48:04.6663974Z ##[group]Environment details
+REL-04 Chromium multi-tab tests	Run actions/setup-node@v4	2026-11-27T16:48:05.0054980Z node: v24.22.3
+REL-04 Chromium multi-tab tests	Run actions/setup-node@v4	2026-11-27T16:48:05.0055779Z npm: 11.19.1
+REL-04 Chromium multi-tab tests	Run actions/setup-node@v4	2026-11-27T16:48:05.0056180Z yarn: 1.22.22
+REL-04 Chromium multi-tab tests	Run actions/setup-node@v4	2026-11-27T16:48:05.0057624Z ##[endgroup]
+REL-04 Chromium multi-tab tests	Install root deps	﻿2026-11-27T16:48:05.0251285Z ##[group]Run npm install
+REL-04 Chromium multi-tab tests	Install root deps	2026-11-27T16:48:05.0251639Z ^[[36;1mnpm install^[[0m
+REL-04 Chromium multi-tab tests	Install root deps	2026-11-27T16:48:05.0291045Z shell: /usr/bin/bash -e {0}
+REL-04 Chromium multi-tab tests	Install root deps	2026-11-27T16:48:05.0291344Z ##[endgroup]
+REL-04 Chromium multi-tab tests	Install root deps	2026-11-27T16:48:05.9548545Z npm warn deprecated whatwg-encoding@3.1.1: Use @exodus/bytes instead for a more spec-conformant and faster implementation
+REL-04 Chromium multi-tab tests	Install root deps	2026-11-27T16:48:06.9875281Z 
+REL-04 Chromium multi-tab tests	Install root deps	2026-11-27T16:48:06.9876357Z added 146 packages, and audited 147 packages in 2s
+REL-04 Chromium multi-tab tests	Install root deps	2026-11-27T16:48:06.9877072Z 
+REL-04 Chromium multi-tab tests	Install root deps	2026-11-27T16:48:06.9898285Z 24 packages are looking for funding
+REL-04 Chromium multi-tab tests	Install root deps	2026-11-27T16:48:06.9910494Z   run `npm fund` for details
+REL-04 Chromium multi-tab tests	Install root deps	2026-11-27T16:48:06.9910741Z 
+REL-04 Chromium multi-tab tests	Install root deps	2026-11-27T16:48:06.9910930Z found 0 vulnerabilities
+REL-04 Chromium multi-tab tests	Install web deps	﻿2026-11-27T16:48:07.0337539Z ##[group]Run npm install
+REL-04 Chromium multi-tab tests	Install web deps	2026-11-27T16:48:07.0337829Z ^[[36;1mnpm install^[[0m
+REL-04 Chromium multi-tab tests	Install web deps	2026-11-27T16:48:07.0371305Z shell: /usr/bin/bash -e {0}
+REL-04 Chromium multi-tab tests	Install web deps	2026-11-27T16:48:07.0371566Z ##[endgroup]
+REL-04 Chromium multi-tab tests	Install web deps	2026-11-27T16:48:08.6742273Z npm warn deprecated tar@6.2.1: Old versions of tar are not supported, and contain widely publicized security vulnerabilities, which have been fixed in the current version. Please update. Support for old versions may be purchased (at exorbitant rates) by contacting i@izs.me
+REL-04 Chromium multi-tab tests	Install web deps	2026-11-27T16:48:08.9184830Z npm warn deprecated glob@9.3.5: Old versions of glob are not supported, and contain widely publicized security vulnerabilities, which have been fixed in the current version. Please update. Support for old versions may be purchased (at exorbitant rates) by contacting i@izs.me
+REL-04 Chromium multi-tab tests	Install web deps	2026-11-27T16:48:17.8590644Z 
+REL-04 Chromium multi-tab tests	Install web deps	2026-11-27T16:48:17.8591303Z > auraschedule-web@0.0.1 postinstall
+REL-04 Chromium multi-tab tests	Install web deps	2026-11-27T16:48:17.8591785Z > node scripts/apply-geolocation-compat-patch.mjs
+REL-04 Chromium multi-tab tests	Install web deps	2026-11-27T16:48:17.8592005Z 
+REL-04 Chromium multi-tab tests	Install web deps	2026-11-27T16:48:17.9031282Z [geolocation-compat-patch] applied coarse-location compatibility patch to @capacitor/geolocation 6.1.1 (GeolocationPlugin.java, Geolocation.java).
+REL-04 Chromium multi-tab tests	Install web deps	2026-11-27T16:48:17.9181235Z 
+REL-04 Chromium multi-tab tests	Install web deps	2026-11-27T16:48:17.9182186Z added 167 packages, and audited 168 packages in 11s
+REL-04 Chromium multi-tab tests	Install web deps	2026-11-27T16:48:17.9182628Z 
+REL-04 Chromium multi-tab tests	Install web deps	2026-11-27T16:48:17.9182894Z 16 packages are looking for funding
+REL-04 Chromium multi-tab tests	Install web deps	2026-11-27T16:48:17.9183286Z   run `npm fund` for details
+REL-04 Chromium multi-tab tests	Install web deps	2026-11-27T16:48:18.0463442Z 
+REL-04 Chromium multi-tab tests	Install web deps	2026-11-27T16:48:18.0464317Z 13 vulnerabilities (3 moderate, 6 high, 4 critical)
+REL-04 Chromium multi-tab tests	Install web deps	2026-11-27T16:48:18.0464684Z 
+REL-04 Chromium multi-tab tests	Install web deps	2026-11-27T16:48:18.0465388Z To address issues that do not require attention, run:
+REL-04 Chromium multi-tab tests	Install web deps	2026-11-27T16:48:18.0465914Z   npm audit fix
+REL-04 Chromium multi-tab tests	Install web deps	2026-11-27T16:48:18.0466157Z 
+REL-04 Chromium multi-tab tests	Install web deps	2026-11-27T16:48:18.0467511Z To address all issues (including breaking changes), run:
+REL-04 Chromium multi-tab tests	Install web deps	2026-11-27T16:48:18.0467985Z   npm audit fix --force
+REL-04 Chromium multi-tab tests	Install web deps	2026-11-27T16:48:18.0468175Z 
+REL-04 Chromium multi-tab tests	Install web deps	2026-11-27T16:48:18.0468354Z Run `npm audit` for details.
+REL-04 Chromium multi-tab tests	Install web deps	2026-11-27T16:48:18.0473178Z npm warn install-scripts 3 packages have install scripts not yet covered by allowScripts:
+REL-04 Chromium multi-tab tests	Install web deps	2026-11-27T16:48:18.0474149Z npm warn install-scripts   @prisma/client@5.22.0 (postinstall: node scripts/postinstall.js)
+REL-04 Chromium multi-tab tests	Install web deps	2026-11-27T16:48:18.0475035Z npm warn install-scripts   @prisma/engines@5.22.0 (postinstall: node scripts/postinstall.js)
+REL-04 Chromium multi-tab tests	Install web deps	2026-11-27T16:48:18.0475810Z npm warn install-scripts   prisma@5.22.0 (preinstall: node scripts/preinstall-entry.js)
+REL-04 Chromium multi-tab tests	Install web deps	2026-11-27T16:48:18.0476201Z npm warn install-scripts
+REL-04 Chromium multi-tab tests	Install web deps	2026-11-27T16:48:18.0476673Z npm warn install-scripts Run `npm install-scripts ls` to review, or `npm install-scripts approve <pkg>` to allow.
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	﻿2026-11-27T16:48:18.0973247Z ##[group]Run npx playwright install --with-deps chromium
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:18.0973626Z ^[[36;1mnpx playwright install --with-deps chromium^[[0m
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:18.1004193Z shell: /usr/bin/bash -e {0}
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:18.1004423Z ##[endgroup]
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:18.7237661Z Installing dependencies...
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:18.7308394Z Switching to root user to install dependencies...
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:18.8175026Z Get:1 file:/etc/apt/apt-mirrors.txt Mirrorlist [144 B]
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:18.8522924Z Hit:2 http://azure.archive.ubuntu.com/ubuntu resolute InRelease
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:18.8529458Z Get:6 https://packages.microsoft.com/ubuntu/26.04/prod resolute InRelease [3964 B]
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:18.8576216Z Get:3 http://azure.archive.ubuntu.com/ubuntu resolute-updates InRelease [137 kB]
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:18.8608690Z Get:4 http://azure.archive.ubuntu.com/ubuntu resolute-backports InRelease [137 kB]
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:18.8638099Z Get:5 http://azure.archive.ubuntu.com/ubuntu resolute-security InRelease [137 kB]
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:18.8838887Z Get:7 https://packages.microsoft.com/ubuntu/26.04/prod resolute/main arm64 Packages [178 kB]
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:18.9011620Z Get:8 http://azure.archive.ubuntu.com/ubuntu resolute-updates/main amd64v3 Packages [928 kB]
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:18.9021562Z Get:9 https://packages.microsoft.com/ubuntu/26.04/prod resolute/main amd64 Packages [192 kB]
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:18.9080113Z Get:10 http://azure.archive.ubuntu.com/ubuntu resolute-updates/main Translation-en [205 kB]
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:18.9087412Z Get:11 http://azure.archive.ubuntu.com/ubuntu resolute-updates/universe amd64v3 Packages [402 kB]
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:18.9203485Z Get:12 http://azure.archive.ubuntu.com/ubuntu resolute-updates/universe Translation-en [127 kB]
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:18.9205092Z Get:13 http://azure.archive.ubuntu.com/ubuntu resolute-updates/restricted amd64v3 Packages [640 kB]
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:18.9206422Z Get:14 http://azure.archive.ubuntu.com/ubuntu resolute-updates/restricted Translation-en [132 kB]
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:18.9335396Z Get:15 http://azure.archive.ubuntu.com/ubuntu resolute-security/main amd64v3 Packages [765 kB]
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:18.9383758Z Get:16 http://azure.archive.ubuntu.com/ubuntu resolute-security/main Translation-en [165 kB]
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:18.9393736Z Get:17 http://azure.archive.ubuntu.com/ubuntu resolute-security/universe amd64v3 Packages [229 kB]
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:18.9418604Z Get:18 http://azure.archive.ubuntu.com/ubuntu resolute-security/universe Translation-en [74.4 kB]
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:18.9883934Z Get:19 http://azure.archive.ubuntu.com/ubuntu resolute-security/restricted amd64v3 Packages [618 kB]
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:18.9916965Z Get:20 http://azure.archive.ubuntu.com/ubuntu resolute-security/restricted Translation-en [128 kB]
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:22.4443406Z Fetched 5199 kB in 0s (14.1 MB/s)
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:23.1370514Z Reading package lists...
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:23.1623599Z Reading package lists...
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:23.3879903Z Building dependency tree...
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:23.3888308Z Reading state information...
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:23.4391939Z libatk-bridge2.0-0t64 is already the newest version (2.60.4-0ubuntu0.1).
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:23.4392685Z libatk-bridge2.0-0t64 set to manually installed.
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:23.4393526Z libatk1.0-0t64 is already the newest version (2.60.4-0ubuntu0.1).
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:23.4393868Z libatk1.0-0t64 set to manually installed.
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:23.4394215Z libatspi2.0-0t64 is already the newest version (2.60.4-0ubuntu0.1).
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:23.4394538Z libatspi2.0-0t64 set to manually installed.
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:23.4394829Z libcairo2 is already the newest version (1.18.4-3).
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:23.4395116Z libcairo2 set to manually installed.
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:23.4395439Z libcups2t64 is already the newest version (2.4.16-1ubuntu1.3).
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:23.4395748Z libcups2t64 set to manually installed.
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:23.4396060Z libdbus-1-3 is already the newest version (1.16.2-2ubuntu4).
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:23.4396352Z libdbus-1-3 set to manually installed.
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:23.4396623Z libdrm2 is already the newest version (2.4.131-1).
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:23.4397395Z libdrm2 set to manually installed.
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:23.4397700Z libgbm1 is already the newest version (26.0.8-1ubuntu0.3).
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:23.4397994Z libgbm1 set to manually installed.
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:23.4398312Z libglib2.0-0t64 is already the newest version (2.88.0-1ubuntu0.1).
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:23.4398630Z libglib2.0-0t64 set to manually installed.
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:23.4398963Z libnspr4 is already the newest version (2:4.38.2-1ubuntu1).
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:23.4399263Z libnspr4 set to manually installed.
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:23.4399559Z libnss3 is already the newest version (2:3.120-1ubuntu2.2).
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:23.4399843Z libnss3 set to manually installed.
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:23.4400141Z libpango-1.0-0 is already the newest version (1.57.0-1).
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:23.4400441Z libpango-1.0-0 set to manually installed.
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:23.4400921Z libx11-6 is already the newest version (2:1.8.13-1ubuntu0.1).
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:23.4401222Z libx11-6 set to manually installed.
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:23.4401511Z libxcb1 is already the newest version (1.17.0-2ubuntu1).
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:23.4401788Z libxcb1 set to manually installed.
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:23.4402117Z libxcomposite1 is already the newest version (1:0.4.6-1build1).
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:23.4402432Z libxcomposite1 set to manually installed.
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:23.4402728Z libxdamage1 is already the newest version (1:1.1.7-1).
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:23.4403010Z libxdamage1 set to manually installed.
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:23.4403308Z libxext6 is already the newest version (2:1.3.4-1build3).
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:23.4403590Z libxext6 set to manually installed.
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:23.4403881Z libxfixes3 is already the newest version (1:6.0.0-2build2).
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:23.4404175Z libxfixes3 set to manually installed.
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:23.4404466Z libxkbcommon0 is already the newest version (1.13.1-1).
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:23.4404756Z libxkbcommon0 set to manually installed.
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:23.4405058Z libxrandr2 is already the newest version (2:1.5.4-1build1).
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:23.4405352Z libxrandr2 set to manually installed.
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:23.4405650Z xvfb is already the newest version (2:21.1.22-1ubuntu1.3).
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:23.4406032Z fonts-noto-color-emoji is already the newest version (2.051-1build1).
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:23.4406421Z libfontconfig1 is already the newest version (2.17.1-3ubuntu1).
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:23.4406734Z libfontconfig1 set to manually installed.
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:23.4407164Z libfreetype6 is already the newest version (2.14.2+dfsg-1ubuntu0.2).
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:23.4407493Z libfreetype6 set to manually installed.
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:23.4407826Z fonts-liberation is already the newest version (1:2.1.5-3build1).
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:23.4408152Z fonts-liberation set to manually installed.
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:23.5107838Z Solving dependencies...
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:23.6438129Z The following additional packages will be installed:
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:23.6451404Z   libasound2-data xfonts-encodings xfonts-utils
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:23.6462085Z Recommended packages:
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:23.6462494Z   fonts-ipafont-mincho fonts-tlwg-loma
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:23.6714925Z The following NEW packages will be installed:
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:23.6716082Z   fonts-freefont-ttf fonts-ipafont-gothic fonts-tlwg-loma-otf fonts-unifont
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:23.6725300Z   fonts-wqy-zenhei xfonts-cyrillic xfonts-encodings xfonts-scalable
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:23.6725736Z   xfonts-utils
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:23.6731468Z The following packages will be upgraded:
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:23.6739267Z   libasound2-data libasound2t64
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:23.6963403Z 2 upgraded, 9 newly installed, 0 to remove and 36 not upgraded.
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:23.6963847Z Need to get 22.3 MB of archives.
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:23.6964198Z After this operation, 80.2 MB of additional disk space will be used.
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:23.6964605Z Get:1 file:/etc/apt/apt-mirrors.txt Mirrorlist [144 B]
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:23.7191175Z Get:2 http://azure.archive.ubuntu.com/ubuntu resolute/universe amd64v3 fonts-ipafont-gothic all 00303-23ubuntu1 [3703 kB]
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:23.7515374Z Get:3 http://azure.archive.ubuntu.com/ubuntu resolute/main amd64v3 fonts-freefont-ttf all 20211204+svn4273-4build1 [5656 kB]
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:23.8864048Z Get:4 http://azure.archive.ubuntu.com/ubuntu resolute/universe amd64v3 fonts-tlwg-loma-otf all 1:0.7.3-1build1 [106 kB]
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:23.8885403Z Get:5 http://azure.archive.ubuntu.com/ubuntu resolute/universe amd64v3 fonts-unifont all 1:16.0.04-1build1 [3169 kB]
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:23.9274237Z Get:6 http://azure.archive.ubuntu.com/ubuntu resolute/universe amd64v3 fonts-wqy-zenhei all 0.9.45-8build1 [7863 kB]
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:24.0441637Z Get:7 http://azure.archive.ubuntu.com/ubuntu resolute-updates/main amd64v3 libasound2t64 amd64 1.2.15.3-1ubuntu1.2 [418 kB]
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:24.0520983Z Get:8 http://azure.archive.ubuntu.com/ubuntu resolute-updates/main amd64v3 libasound2-data all 1.2.15.3-1ubuntu1.2 [19.7 kB]
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:24.0535234Z Get:9 http://azure.archive.ubuntu.com/ubuntu resolute/main amd64v3 xfonts-encodings all 1:1.0.5-0ubuntu3 [576 kB]
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:24.0654331Z Get:10 http://azure.archive.ubuntu.com/ubuntu resolute/main amd64v3 xfonts-utils amd64 1:7.7+7build1 [97.3 kB]
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:24.0686661Z Get:11 http://azure.archive.ubuntu.com/ubuntu resolute/universe amd64v3 xfonts-cyrillic all 1:1.0.5+nmu1build1 [384 kB]
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:24.0764497Z Get:12 http://azure.archive.ubuntu.com/ubuntu resolute/universe amd64v3 xfonts-scalable all 1:1.0.3-1.3build1 [304 kB]
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:24.3874234Z Fetched 22.3 MB in 0s (56.3 MB/s)
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:24.4146449Z Selecting previously unselected package fonts-ipafont-gothic.
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:24.4354096Z (Reading database ... 
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:24.4354508Z (Reading database ... 5%
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:24.4354752Z (Reading database ... 10%
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:24.4354962Z (Reading database ... 15%
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:24.4355154Z (Reading database ... 20%
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:24.4355344Z (Reading database ... 25%
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:24.4355537Z (Reading database ... 30%
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:24.4356148Z (Reading database ... 35%
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:24.4356475Z (Reading database ... 40%
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:24.4356770Z (Reading database ... 45%
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:24.4357174Z (Reading database ... 50%
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:24.4517895Z (Reading database ... 55%
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:24.4728924Z (Reading database ... 60%
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:24.4889745Z (Reading database ... 65%
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:24.5061482Z (Reading database ... 70%
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:24.6028057Z (Reading database ... 75%
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:24.7474692Z (Reading database ... 80%
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:24.9550696Z (Reading database ... 85%
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:25.0999119Z (Reading database ... 90%
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:25.3131094Z (Reading database ... 95%
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:25.3131506Z (Reading database ... 100%
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:25.3131866Z (Reading database ... 214389 files and directories currently installed.)
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:25.3185988Z Preparing to unpack .../00-fonts-ipafont-gothic_00303-23ubuntu1_all.deb ...
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:25.3340595Z Unpacking fonts-ipafont-gothic (00303-23ubuntu1) ...
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:25.4349949Z Selecting previously unselected package fonts-freefont-ttf.
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:25.4479362Z Preparing to unpack .../01-fonts-freefont-ttf_20211204+svn4273-4build1_all.deb ...
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:25.4642079Z Unpacking fonts-freefont-ttf (20211204+svn4273-4build1) ...
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:25.5941405Z Selecting previously unselected package fonts-tlwg-loma-otf.
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:25.6069631Z Preparing to unpack .../02-fonts-tlwg-loma-otf_1%3a0.7.3-1build1_all.deb ...
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:25.6077912Z Unpacking fonts-tlwg-loma-otf (1:0.7.3-1build1) ...
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:25.6329278Z Selecting previously unselected package fonts-unifont.
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:25.6464491Z Preparing to unpack .../03-fonts-unifont_1%3a16.0.04-1build1_all.deb ...
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:25.6472088Z Unpacking fonts-unifont (1:16.0.04-1build1) ...
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:25.9850698Z Selecting previously unselected package fonts-wqy-zenhei.
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:25.9980592Z Preparing to unpack .../04-fonts-wqy-zenhei_0.9.45-8build1_all.deb ...
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:26.0122273Z Unpacking fonts-wqy-zenhei (0.9.45-8build1) ...
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:26.1908727Z Preparing to unpack .../05-libasound2t64_1.2.15.3-1ubuntu1.2_amd64v3.deb ...
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:26.1938330Z Unpacking libasound2t64:amd64 (1.2.15.3-1ubuntu1.2) over (1.2.15.3-1ubuntu1.1) ...
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:26.2400796Z Preparing to unpack .../06-libasound2-data_1.2.15.3-1ubuntu1.2_all.deb ...
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:26.2418754Z Unpacking libasound2-data (1.2.15.3-1ubuntu1.2) over (1.2.15.3-1ubuntu1.1) ...
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:26.3475626Z Selecting previously unselected package xfonts-encodings.
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:26.3605685Z Preparing to unpack .../07-xfonts-encodings_1%3a1.0.5-0ubuntu3_all.deb ...
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:26.3615064Z Unpacking xfonts-encodings (1:1.0.5-0ubuntu3) ...
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:26.4918329Z Selecting previously unselected package xfonts-utils.
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:26.5047399Z Preparing to unpack .../08-xfonts-utils_1%3a7.7+7build1_amd64v3.deb ...
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:26.5055759Z Unpacking xfonts-utils (1:7.7+7build1) ...
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:26.6867481Z Selecting previously unselected package xfonts-cyrillic.
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:26.6996688Z Preparing to unpack .../09-xfonts-cyrillic_1%3a1.0.5+nmu1build1_all.deb ...
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:26.7011065Z Unpacking xfonts-cyrillic (1:1.0.5+nmu1build1) ...
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:26.8705461Z Selecting previously unselected package xfonts-scalable.
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:26.8833811Z Preparing to unpack .../10-xfonts-scalable_1%3a1.0.3-1.3build1_all.deb ...
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:26.9411331Z Unpacking xfonts-scalable (1:1.0.3-1.3build1) ...
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:27.5757688Z Setting up fonts-wqy-zenhei (0.9.45-8build1) ...
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:27.6239207Z Setting up fonts-freefont-ttf (20211204+svn4273-4build1) ...
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:27.6255950Z Setting up libasound2-data (1.2.15.3-1ubuntu1.2) ...
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:27.6273920Z Setting up libasound2t64:amd64 (1.2.15.3-1ubuntu1.2) ...
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:27.6290153Z Setting up fonts-tlwg-loma-otf (1:0.7.3-1build1) ...
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:27.6308136Z Setting up xfonts-encodings (1:1.0.5-0ubuntu3) ...
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:27.6325601Z Setting up fonts-ipafont-gothic (00303-23ubuntu1) ...
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:27.6386273Z update-alternatives: using /usr/share/fonts/opentype/ipafont-gothic/ipag.ttf to provide /usr/share/fonts/truetype/fonts-japanese-gothic.ttf (fonts-japanese-gothic.ttf) in auto mode
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:27.6400829Z Setting up fonts-unifont (1:16.0.04-1build1) ...
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:27.6419293Z Setting up xfonts-utils (1:7.7+7build1) ...
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:27.6477043Z Setting up xfonts-cyrillic (1:1.0.5+nmu1build1) ...
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:27.6897939Z Setting up xfonts-scalable (1:1.0.3-1.3build1) ...
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:27.7464237Z Processing triggers for libc-bin (2.43-2ubuntu2.7) ...
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:27.9672984Z Processing triggers for man-db (2.13.1-1build1) ...
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:27.9693167Z Not building database; man-db/auto-update is not 'true'.
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:27.9706406Z Processing triggers for fontconfig (2.17.1-3ubuntu1) ...
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:28.8658796Z 
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:28.8659572Z Running kernel seems to be up-to-date.
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:28.8659850Z 
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:28.8659950Z Restarting services...
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:28.8749100Z 
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:28.8750144Z Service restarts being deferred:
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:28.8751462Z  systemctl restart hosted-compute-agent.service
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:28.8751748Z 
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:28.8752569Z No containers need to be restarted.
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:28.8752778Z 
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:28.8752996Z No user sessions are running outdated binaries.
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:28.8753241Z 
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:28.8753588Z No VM guests are running outdated hypervisor (qemu) binaries on this host.
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:30.2017102Z Downloading Chrome for Testing 151.0.7922.34 (playwright chromium v1234) from https://cdn.playwright.dev/builds/cft/151.0.7922.34/linux64/chrome-linux64.zip
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:31.1736192Z |                                                                                |   0% of 184.3 MiB
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:31.3336761Z |■■■■■■■■                                                                        |  10% of 184.3 MiB
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:31.4118112Z |■■■■■■■■■■■■■■■■                                                                |  20% of 184.3 MiB
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:31.4868328Z |■■■■■■■■■■■■■■■■■■■■■■■■                                                        |  30% of 184.3 MiB
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:31.5841240Z |■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■                                                |  40% of 184.3 MiB
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:31.6764258Z |■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■                                        |  50% of 184.3 MiB
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:31.7506712Z |■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■                                |  60% of 184.3 MiB
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:31.8117513Z |■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■                        |  70% of 184.3 MiB
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:31.9242186Z |■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■                |  80% of 184.3 MiB
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:31.9812717Z |■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■        |  90% of 184.3 MiB
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:32.0659152Z |■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■| 100% of 184.3 MiB
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:34.3884555Z Chrome for Testing 151.0.7922.34 (playwright chromium v1234) downloaded to /home/runner/.cache/ms-playwright/chromium-1234
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:34.3888533Z Downloading FFmpeg (playwright ffmpeg v1011) from https://cdn.playwright.dev/dbazure/download/playwright/builds/ffmpeg/1011/ffmpeg-linux.zip
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:35.3001310Z |                                                                                |   0% of 2.3 MiB
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:35.3174605Z |■■■■■■■■                                                                        |  10% of 2.3 MiB
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:35.3255078Z |■■■■■■■■■■■■■■■■                                                                |  20% of 2.3 MiB
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:35.3310075Z |■■■■■■■■■■■■■■■■■■■■■■■■                                                        |  30% of 2.3 MiB
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:35.3344046Z |■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■                                                |  40% of 2.3 MiB
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:35.3352495Z |■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■                                        |  50% of 2.3 MiB
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:35.3393779Z |■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■                                |  60% of 2.3 MiB
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:35.3406161Z |■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■                        |  70% of 2.3 MiB
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:35.3420743Z |■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■                |  80% of 2.3 MiB
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:35.3428697Z |■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■        |  90% of 2.3 MiB
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:35.3439751Z |■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■| 100% of 2.3 MiB
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:35.3900305Z FFmpeg (playwright ffmpeg v1011) downloaded to /home/runner/.cache/ms-playwright/ffmpeg-1011
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:35.3902911Z Downloading Chrome Headless Shell 151.0.7922.34 (playwright chromium-headless-shell v1234) from https://cdn.playwright.dev/builds/cft/151.0.7922.34/linux64/chrome-headless-shell-linux64.zip
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:36.3572120Z |                                                                                |   0% of 114.7 MiB
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:36.4652779Z |■■■■■■■■                                                                        |  10% of 114.7 MiB
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:36.5233794Z |■■■■■■■■■■■■■■■■                                                                |  20% of 114.7 MiB
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:36.5982729Z |■■■■■■■■■■■■■■■■■■■■■■■■                                                        |  30% of 114.7 MiB
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:36.6639565Z |■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■                                                |  40% of 114.7 MiB
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:36.7362400Z |■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■                                        |  50% of 114.7 MiB
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:36.7931221Z |■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■                                |  60% of 114.7 MiB
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:36.8655432Z |■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■                        |  70% of 114.7 MiB
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:36.9528028Z |■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■                |  80% of 114.7 MiB
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:37.0103914Z |■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■        |  90% of 114.7 MiB
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:37.0989543Z |■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■| 100% of 114.7 MiB
+REL-04 Chromium multi-tab tests	Install Chromium for Playwright	2026-11-27T16:48:38.8431540Z Chrome Headless Shell 151.0.7922.34 (playwright chromium-headless-shell v1234) downloaded to /home/runner/.cache/ms-playwright/chromium_headless_shell-1234
+REL-04 Chromium multi-tab tests	Run REL-04 Chromium multi-tab test	﻿2026-11-27T16:48:38.8786199Z ##[group]Run npx ts-node test/rel04Chromium.test.ts
+REL-04 Chromium multi-tab tests	Run REL-04 Chromium multi-tab test	2026-11-27T16:48:38.8786537Z ^[[36;1mnpx ts-node test/rel04Chromium.test.ts^[[0m
+REL-04 Chromium multi-tab tests	Run REL-04 Chromium multi-tab test	2026-11-27T16:48:38.8818223Z shell: /usr/bin/bash -e {0}
+REL-04 Chromium multi-tab tests	Run REL-04 Chromium multi-tab test	2026-11-27T16:48:38.8818476Z ##[endgroup]
+REL-04 Chromium multi-tab tests	Run REL-04 Chromium multi-tab test	2026-11-27T16:48:41.7641648Z Chromium 151.0.7922.34 (headless) on http://127.0.0.1:39585
+REL-04 Chromium multi-tab tests	Run REL-04 Chromium multi-tab test	2026-11-27T16:48:42.2941925Z OK   CH1 two real tabs enqueue 40 entries each concurrently: all 80 kept
+REL-04 Chromium multi-tab tests	Run REL-04 Chromium multi-tab test	2026-11-27T16:48:42.7700568Z OK   CH2 a record discarded in tab 2 after tab 1's replay took its snapshot is never sent
+REL-04 Chromium multi-tab tests	Run REL-04 Chromium multi-tab test	2026-11-27T16:48:43.0571653Z OK   CH3 precondition: tab 1 signs out with NO storage marker (blocked)
+REL-04 Chromium multi-tab tests	Run REL-04 Chromium multi-tab test	2026-11-27T16:48:43.0572278Z OK   CH3 tab 2 sign-in during tab 1's sign-out is refused (BUSY) by the real cross-tab Web Lock
+REL-04 Chromium multi-tab tests	Run REL-04 Chromium multi-tab test	2026-11-27T16:48:43.0572852Z OK   CH3 tab 2 account-bound write during tab 1's sign-out is refused via the HELD lock, not the marker
+REL-04 Chromium multi-tab tests	Run REL-04 Chromium multi-tab test	2026-11-27T16:48:43.0573265Z OK   CH3 tab 1 completes its sign-out
+REL-04 Chromium multi-tab tests	Run REL-04 Chromium multi-tab test	2026-11-27T16:48:43.2791492Z OK   CH4a R2 HEAD (reproduced in Chromium): a delayed unbound legacy logout clears the newer sign-in (B before release: synthetic-user-b, after: null)
+REL-04 Chromium multi-tab tests	Run REL-04 Chromium multi-tab test	2026-11-27T16:48:43.5087204Z OK   CH4b CORRECTED: the delayed unbound legacy logout is refused (503) and B stays signed in
+REL-04 Chromium multi-tab tests	Run REL-04 Chromium multi-tab test	2026-11-27T16:48:43.7482837Z OK   CH4c coordinated new bundles: sign-in while the logout response is pending is refused (BUSY), so its cookie cannot be overwritten by that response
+REL-04 Chromium multi-tab tests	Run REL-04 Chromium multi-tab test	2026-11-27T16:48:43.9876134Z OK   CH4d RESIDUAL (documented, activation blocker A-3): an uncoordinated sign-in landing before a bound logout's delayed response is cleared by it (cookie now: null)
+REL-04 Chromium multi-tab tests	Run REL-04 Chromium multi-tab test	2026-11-27T16:48:44.1455994Z OK   CH5 pre-REL-04 client replay in Chromium, valid session: entries kept byte for byte, nothing stored
+REL-04 Chromium multi-tab tests	Run REL-04 Chromium multi-tab test	2026-11-27T16:48:44.3073419Z OK   CH5 pre-REL-04 client replay in Chromium, EXPIRED session: entries kept byte for byte, nothing stored
+REL-04 Chromium multi-tab tests	Run REL-04 Chromium multi-tab test	2026-11-27T16:48:44.5827463Z OK   CH6 (R4, real Chromium IndexedDB, two pages) a discard while the other page is SENDING keeps the record (keptInFlight); the send settles it exactly once
+REL-04 Chromium multi-tab tests	Run REL-04 Chromium multi-tab test	2026-11-27T16:48:44.8899613Z OK   CH7 (R4, real Chromium, Web Locks REMOVED) two pages replaying at once: each of 4 entries sent exactly once (4 sends)
+REL-04 Chromium multi-tab tests	Run REL-04 Chromium multi-tab test	2026-11-27T16:48:45.2207335Z OK   CH8 (R4/R8, real Chromium) settlement in one page racing reads of a stale retired-format copy in two others never recreates a settled entry; the copy stays quarantined and is never sent (left: 0, paused: 3, sends: 0)
+REL-04 Chromium multi-tab tests	Run REL-04 Chromium multi-tab test	2026-11-27T16:48:45.4608356Z OK   CH9 (R4, real Chromium) sign-out never rewrites the shared legacy array: all 3 old-bundle entries survive, reported as kept (3)
+REL-04 Chromium multi-tab tests	Run REL-04 Chromium multi-tab test	2026-11-27T16:48:45.6186488Z OK   CH10a RESIDUAL (A-2, page still under the OLD Production worker): the old page shows "signed-out" while the session is still synthetic-user-a
+REL-04 Chromium multi-tab tests	Run REL-04 Chromium multi-tab test	2026-11-27T16:48:47.3794119Z OK   CH10 precondition (real Chromium): after a navigation elsewhere in the origin, the NEW worker takes control of the already-open OLD page
+REL-04 Chromium multi-tab tests	Run REL-04 Chromium multi-tab test	2026-11-27T16:48:48.4160521Z OK   CH10 the old page's headerless sign-out is refused (503, cookie untouched) and the worker RELOADS that page into the current bundle (no lingering false "signed out" screen)
+REL-04 Chromium multi-tab tests	Run REL-04 Chromium multi-tab test	2026-11-27T16:48:48.4178979Z OK   CH10 the reloaded page runs the current bundle and shows the REAL session (still Alice), with the reload marker for its notice
+REL-04 Chromium multi-tab tests	Run REL-04 Chromium multi-tab test	2026-11-27T16:48:49.2409183Z OK   CH10 a current-bundle page (announced to the worker) is NOT reloaded even when one of its requests is refused as out of date (503)
+REL-04 Chromium multi-tab tests	Run REL-04 Chromium multi-tab test	2026-11-27T16:48:49.8892700Z OK   CH11 (real Chromium, worker controlling both pages) the uncoordinated sign-in waits for the pending sign-out response, so it is NOT cleared by it (cookie now: synthetic-user-b; sign-out: signed-out)
+REL-04 Chromium multi-tab tests	Run REL-04 Chromium multi-tab test	2026-11-27T16:48:51.5696750Z OK   CH12 (R5, real Chromium) after a worker restart with NO persisted state, a current-bundle page refused as out of date (503) is asked, answers, and is NOT reloaded
+REL-04 Chromium multi-tab tests	Run REL-04 Chromium multi-tab test	2026-11-27T16:48:52.2655876Z OK   CH12 (R5) after a restart an OLD page (cannot answer) is still reloaded after its refused sign-out; the session is untouched
+REL-04 Chromium multi-tab tests	Run REL-04 Chromium multi-tab test	2026-11-27T16:48:56.0735979Z OK   CH13 (R5, real Chromium) a page that is still old after its reload is NOT reloaded again -- also after a worker restart (navigations: 1)
+REL-04 Chromium multi-tab tests	Run REL-04 Chromium multi-tab test	2026-11-27T16:49:04.3900726Z OK   CH14 (R5, real Chromium) behind a sign-out unsettled beyond the worker bound (8 s, below the client's own timeouts) the sign-in is answered "unsettled" (~8 s), NOT sent, and the app does not report it as signed in (REJECTED: "Signing in or out is still in progress on this device. Nothing was changed; try again in a moment.")
+REL-04 Chromium multi-tab tests	Run REL-04 Chromium multi-tab test	2026-11-27T16:49:04.3902376Z OK   CH14 (R5) the slow sign-out then lands; no replacement session existed for it to clear (cookie now: null)
+REL-04 Chromium multi-tab tests	Run REL-04 Chromium multi-tab test	2026-11-27T16:49:06.1773532Z CH15 R5 HEAD (a3a02b8) worker: {"statuses":[503,503,503,503,503,503,503,503],"reloaded":true,"domNavigations":1}
+REL-04 Chromium multi-tab tests	Run REL-04 Chromium multi-tab test	2026-11-27T16:49:06.1821657Z CH15-diag R5 HEAD (a3a02b8) worker: {"chromium":"151.0.7922.34","node":"v24.22.3","playwright":"1.62.1","platform":"linux-x64","controllerBefore":"activated","controllerAfter":"activated","cdp":[{"t":1795798144553,"ev":"worker-version","versionId":"0","runningStatus":"running","status":"activated","controlledClients":1},{"t":1795798144554,"ev":"worker-version","versionId":"0","runningStatus":"stopping","status":"activated","controlledClients":1},{"t":1795798144556,"ev":"stopAllWorkers"},{"t":1795798144557,"ev":"worker-version","versionId":"0","runningStatus":"stopped","status":"activated","controlledClients":1},{"t":1795798144558,"ev":"worker-version","versionId":"0","runningStatus":"starting","status":"activated","controlledClients":1},{"t":1795798144559,"ev":"request","id":"3382.10","url":"/api/goals","type":"Fetch"},{"t":1795798144559,"ev":"request","id":"3382.11","url":"/api/goals","type":"Fetch"},{"t":1795798144559,"ev":"request","id":"3382.12","url":"/api/goals","type":"Fetch"},{"t":1795798144559,"ev":"request","id":"3382.13","url":"/api/goals","type":"Fetch"},{"t":1795798144559,"ev":"request","id":"3382.14","url":"/api/goals","type":"Fetch"},{"t":1795798144559,"ev":"worker-version","versionId":"0","runningStatus":"starting","status":"activated","controlledClients":1},{"t":1795798144559,"ev":"request","id":"3382.15","url":"/api/goals","type":"Fetch"},{"t":1795798144559,"ev":"request","id":"3382.16","url":"/api/goals","type":"Fetch"},{"t":1795798144559,"ev":"worker-version","versionId":"0","runningStatus":"starting","status":"activated","controlledClients":1},{"t":1795798144559,"ev":"request","id":"3382.17","url":"/api/goals","type":"Fetch"},{"t":1795798144561,"ev":"worker-version","versionId":"0","runningStatus":"running","status":"activated","controlledClients":1},{"t":1795798144568,"ev":"response","id":"3382.10","status":503,"fromServiceWorker":true},{"t":1795798144571,"ev":"response","id":"3382.11","status":503,"fromServiceWorker":true},{"t":1795798144571,"ev":"response","id":"3382.12","status":503,"fromServiceWorker":true},{"t":1795798144571,"ev":"response","id":"3382.13","status":503,"fromServiceWorker":true},{"t":1795798144572,"ev":"response","id":"3382.14","status":503,"fromServiceWorker":true},{"t":1795798144574,"ev":"response","id":"3382.15","status":503,"fromServiceWorker":true},{"t":1795798144576,"ev":"response","id":"3382.16","status":503,"fromServiceWorker":true},{"t":1795798144577,"ev":"response","id":"3382.17","status":503,"fromServiceWorker":true},{"t":1795798145172,"ev":"worker-version","versionId":"0","runningStatus":"running","status":"activated","controlledClients":1},{"t":1795798145178,"ev":"worker-version","versionId":"0","runningStatus":"running","status":"activated","controlledClients":0},{"t":1795798145179,"ev":"navigation","url":"http://127.0.0.1:39585/app?aura_reloaded=upgrade"}],"page":[{"t":1795798145337,"ev":"ack-delivered","state":"activated"}]}
+REL-04 Chromium multi-tab tests	Run REL-04 Chromium multi-tab test	2026-11-27T16:49:06.1829684Z OK   CH15 (R6, real Chromium) R5 HEAD (a3a02b8) worker reproduces the assessment: 8 concurrent refusals + 150 ms acknowledgement -> the CURRENT page is reloaded
+REL-04 Chromium multi-tab tests	Run REL-04 Chromium multi-tab test	2026-11-27T16:49:07.9818414Z CH15 current worker: {"statuses":[503,503,503,503,503,503,503,503],"reloaded":false,"domNavigations":0}
+REL-04 Chromium multi-tab tests	Run REL-04 Chromium multi-tab test	2026-11-27T16:49:07.9869266Z CH15-diag current worker: {"chromium":"151.0.7922.34","node":"v24.22.3","playwright":"1.62.1","platform":"linux-x64","controllerBefore":"activated","controllerAfter":"activated","cdp":[{"t":1795798146358,"ev":"worker-version","versionId":"0","runningStatus":"running","status":"activated","controlledClients":1},{"t":1795798146359,"ev":"worker-version","versionId":"0","runningStatus":"stopping","status":"activated","controlledClients":1},{"t":1795798146361,"ev":"stopAllWorkers"},{"t":1795798146362,"ev":"worker-version","versionId":"0","runningStatus":"stopped","status":"activated","controlledClients":1},{"t":1795798146365,"ev":"request","id":"3402.10","url":"/api/goals","type":"Fetch"},{"t":1795798146365,"ev":"request","id":"3402.11","url":"/api/goals","type":"Fetch"},{"t":1795798146365,"ev":"request","id":"3402.12","url":"/api/goals","type":"Fetch"},{"t":1795798146366,"ev":"request","id":"3402.13","url":"/api/goals","type":"Fetch"},{"t":1795798146366,"ev":"request","id":"3402.14","url":"/api/goals","type":"Fetch"},{"t":1795798146366,"ev":"request","id":"3402.15","url":"/api/goals","type":"Fetch"},{"t":1795798146366,"ev":"worker-version","versionId":"0","runningStatus":"starting","status":"activated","controlledClients":1},{"t":1795798146366,"ev":"request","id":"3402.16","url":"/api/goals","type":"Fetch"},{"t":1795798146366,"ev":"request","id":"3402.17","url":"/api/goals","type":"Fetch"},{"t":1795798146366,"ev":"worker-version","versionId":"0","runningStatus":"starting","status":"activated","controlledClients":1},{"t":1795798146366,"ev":"worker-version","versionId":"0","runningStatus":"starting","status":"activated","controlledClients":1},{"t":1795798146367,"ev":"worker-version","versionId":"0","runningStatus":"running","status":"activated","controlledClients":1},{"t":1795798146373,"ev":"response","id":"3402.10","status":503,"fromServiceWorker":true},{"t":1795798146373,"ev":"response","id":"3402.11","status":503,"fromServiceWorker":true},{"t":1795798146373,"ev":"response","id":"3402.12","status":503,"fromServiceWorker":true},{"t":1795798146375,"ev":"response","id":"3402.13","status":503,"fromServiceWorker":true},{"t":1795798146377,"ev":"response","id":"3402.14","status":503,"fromServiceWorker":true},{"t":1795798146378,"ev":"response","id":"3402.15","status":503,"fromServiceWorker":true},{"t":1795798146378,"ev":"response","id":"3402.16","status":503,"fromServiceWorker":true},{"t":1795798146379,"ev":"response","id":"3402.17","status":503,"fromServiceWorker":true}],"page":[{"t":1795798146262,"ev":"controllerchange","state":"activating"},{"t":1795798146262,"ev":"worker-message","type":"AURA_BOUNDARY_QUERY"},{"t":1795798146374,"ev":"worker-message","type":"AURA_BOUNDARY_QUERY"},{"t":1795798146374,"ev":"worker-message","type":"AURA_BOUNDARY_QUERY"},{"t":1795798146412,"ev":"ack-delivered","state":"activated"},{"t":1795798146412,"ev":"ack-delivered","state":"activated"},{"t":1795798146524,"ev":"ack-delivered","state":"activated"},{"t":1795798146524,"ev":"ack-delivered","state":"activated"}]}
+REL-04 Chromium multi-tab tests	Run REL-04 Chromium multi-tab test	2026-11-27T16:49:07.9882849Z OK   CH15 (R6, real Chromium) current worker: the same 8 concurrent refusals + 150 ms acknowledgement -> the current page is NOT reloaded (checks coalesced, acknowledgement correlated)
+REL-04 Chromium multi-tab tests	Run REL-04 Chromium multi-tab test	2026-11-27T16:49:08.2250917Z CH16 {"replay":{"attempted":1,"confirmed":1,"removed":1,"removeFailed":0,"conflicts":0,"paused":0,"stoppedBecause":null,"unverified":0},"kind":"already-recorded","posts":1,"rows":1}
+REL-04 Chromium multi-tab tests	Run REL-04 Chromium multi-tab test	2026-11-27T16:49:08.2252848Z OK   CH16 (R14, real Chromium) commit + lost acknowledgement + another tab settles it -> the original caller gets already-recorded (never "not saved"); exactly 1 POST and 1 server row for the original request id (kind already-recorded, posts 1, rows 1)
+REL-04 Chromium multi-tab tests	Run REL-04 Chromium multi-tab test	2026-11-27T16:49:08.2572112Z 
+REL-04 Chromium multi-tab tests	Run REL-04 Chromium multi-tab test	2026-11-27T16:49:08.2572757Z 30 passed, 0 failed
+REL-04 Chromium multi-tab tests	Post Run actions/setup-node@v4	﻿2026-11-27T16:49:08.3153615Z Post job cleanup.
+REL-04 Chromium multi-tab tests	Post Run actions/setup-node@v4	2026-11-27T16:49:08.4226763Z (node:3450) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+REL-04 Chromium multi-tab tests	Post Run actions/setup-node@v4	2026-11-27T16:49:08.4227626Z (Use `node --trace-deprecation ...` to show where the warning was created)
+REL-04 Chromium multi-tab tests	Post Run actions/checkout@v4	﻿2026-11-27T16:49:08.4498474Z Post job cleanup.
+REL-04 Chromium multi-tab tests	Post Run actions/checkout@v4	2026-11-27T16:49:08.5260905Z [command]/usr/bin/git version
+REL-04 Chromium multi-tab tests	Post Run actions/checkout@v4	2026-11-27T16:49:08.5301547Z git version 2.56.1
+REL-04 Chromium multi-tab tests	Post Run actions/checkout@v4	2026-11-27T16:49:08.5337771Z Temporarily overriding HOME='/home/runner/work/_temp/d64847e5-36cd-4075-b870-aaebaa27d141' before making global git config changes
+REL-04 Chromium multi-tab tests	Post Run actions/checkout@v4	2026-11-27T16:49:08.5338951Z Adding repository directory to the temporary git global config as a safe directory
+REL-04 Chromium multi-tab tests	Post Run actions/checkout@v4	2026-11-27T16:49:08.5347835Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/aura-updated/aura-updated
+REL-04 Chromium multi-tab tests	Post Run actions/checkout@v4	2026-11-27T16:49:08.5384070Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+REL-04 Chromium multi-tab tests	Post Run actions/checkout@v4	2026-11-27T16:49:08.5421525Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+REL-04 Chromium multi-tab tests	Post Run actions/checkout@v4	2026-11-27T16:49:08.5739228Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+REL-04 Chromium multi-tab tests	Post Run actions/checkout@v4	2026-11-27T16:49:08.5778586Z http.https://github.com/.extraheader
+REL-04 Chromium multi-tab tests	Post Run actions/checkout@v4	2026-11-27T16:49:08.5788372Z [command]/usr/bin/git config --local --unset-all http.https://github.com/.extraheader
+REL-04 Chromium multi-tab tests	Post Run actions/checkout@v4	2026-11-27T16:49:08.5828327Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+REL-04 Chromium multi-tab tests	Post Run actions/checkout@v4	2026-11-27T16:49:08.6178217Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+REL-04 Chromium multi-tab tests	Post Run actions/checkout@v4	2026-11-27T16:49:08.6213157Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+REL-04 Chromium multi-tab tests	Complete job	﻿2026-11-27T16:49:08.6643242Z Cleaning up orphan processes
+REL-04 Chromium multi-tab tests	Complete job	2026-11-27T16:49:08.6991345Z ##[warning]Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@v4, actions/setup-node@v4. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
