@@ -12,7 +12,7 @@ import { saveUpcomingPlanFromCandidate } from './PlanWithAuraView';
 import { ExploreModeToggle } from './ExploreModeToggle';
 import { getDatePartsInTimezone, isValidIanaTimezone, searchTimezones, TimezoneOption } from '../lib/timezone';
 import { CITY_OPTIONS, CityOption, formatCoordinateDirectional, isValidCustomLocation, parseCoordinate } from '../lib/cities';
-import { RELATIONSHIP_ICON, RELATIONSHIP_LABEL, SavedPersonRow } from './PeopleView';
+import { personHasChartDetails, RELATIONSHIP_ICON, RELATIONSHIP_LABEL, SavedPersonRow } from './PeopleView';
 import { trackEvent } from '../lib/trackEvent';
 import * as theme from './theme';
 import { SegmentedControl } from './ui';
@@ -284,8 +284,11 @@ export function MuhurthamFinderView({ timingLocation, locationConfirmed, onBack,
     fetch('/api/people')
       .then((res) => (res.ok ? res.json() : Promise.reject(new Error('Unable to load people.'))))
       .then((data: SavedPersonRow[]) => {
-        setSavedPeople(data);
-        if (data.length > 0) setSelectedPersonId((current) => current || data[0].id);
+        // AURA-MP-1: SHARED Muhurtham needs both people's birth details, so
+        // only people saved WITH chart details are offered here.
+        const eligible = data.filter(personHasChartDetails);
+        setSavedPeople(eligible);
+        if (eligible.length > 0) setSelectedPersonId((current) => current || eligible[0].id);
       })
       .catch(() => setSavedPeople([]))
       .finally(() => setLoadingPeople(false));

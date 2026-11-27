@@ -201,7 +201,8 @@ export const PEOPLE_GROUP_IDS: DailyIntentionGroupId[] = ['RELATIONSHIPS', 'FAMI
  * only used as SOCIAL's fallback in the orchestrator when no FRIEND exists). */
 export const PEOPLE_GROUP_RELATIONSHIP_TYPES: Record<string, SavedPersonRelationshipType[]> = {
   RELATIONSHIPS: ['PARTNER', 'SPOUSE'],
-  FAMILY: ['FAMILY'],
+  // AURA-MP-1: the My People family types join FAMILY (D2).
+  FAMILY: ['FAMILY', 'PARENT', 'CHILD', 'SIBLING'],
   SOCIAL: ['FRIEND', 'OTHER'],
 };
 

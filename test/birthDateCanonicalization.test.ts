@@ -4,8 +4,8 @@
  *   Part 1  `canonicalizeCivilBirthDate`: exact output, leap years, month / year boundaries, every date 1900-2100 round-trips through a UTC `Date`
  *   Part 2  rejection: anything that is not a real civil date is rejected (never normalized, never silently rolled)
  *   Part 3  the helper is pure string construction: no Date / Intl / clock / environment, so no process TZ, browser TZ or database TZ can reach it
- *   Part 4  the three production writers (`updateBirthProfile`, `createSavedPerson`, `updateSavedPerson`) pass ONLY the canonical surrogate -- a bare `input.birthDate` can
- *           never reach a SQL parameter again (in-memory mutations prove the guard)
+ *   Part 4  the three production writers (`updateBirthProfile`, `createSavedPerson`, `updateSavedPerson`) pass ONLY the canonical surrogate -- a bare birthDate can
+ *           never reach a SQL parameter again (in-memory mutations prove the guard). AURA-MP-1: SavedPerson charts go through savedPersonChartParams.
  *   Part 5  the read-only operator diagnostic selects aggregate counts only
  *   Part 6  scope: no schema change, 43 migrations, Constructor hashes untouched, both new suites run in CI
  */
@@ -56,25 +56,49 @@ check('the helper exports exactly one function, `canonicalizeCivilBirthDate`', J
 }
 
 // ---- Part 4
-const WRITERS = ['updateBirthProfile', 'createSavedPerson', 'updateSavedPerson'];
+// AURA-MP-1: SavedPerson chart details became optional and are written whole through ONE helper,
+// savedPersonChartParams(chart), in db.ts. The invariant is unchanged: every birthDate that reaches a
+// SQL parameter is the canonical surrogate. updateBirthProfile keeps `canonicalizeCivilBirthDate(input.birthDate)`;
+// the two SavedPerson writers must route their chart through the helper, which is the only place
+// `canonicalizeCivilBirthDate(chart.birthDate)` appears, and neither writer reads a `.birthDate` itself.
+const SAVED_PERSON_WRITERS = ['createSavedPerson', 'updateSavedPerson'];
+const bodyOf = (code: string, decl: string): string => {
+  const start = code.indexOf(decl);
+  if (start < 0) return '';
+  const end = code.indexOf('\nexport ', start + 10);
+  const nextFn = code.indexOf('\nfunction ', start + 10);
+  const stop = [end, nextFn].filter((n) => n >= 0).reduce((m, n) => Math.min(m, n), Number.POSITIVE_INFINITY);
+  return code.slice(start, stop === Number.POSITIVE_INFINITY ? undefined : stop);
+};
 const writerViolations = (db: string): string[] => {
   const v: string[] = [];
   const code = strip(db);
   if (!/^import \{ canonicalizeCivilBirthDate \} from '\.\/birthDate';$/m.test(code)) v.push('helper-not-imported');
-  if ((code.match(/canonicalizeCivilBirthDate\(input\.birthDate\)/g) ?? []).length !== 3) v.push('not-exactly-three-canonical-writes');
-  if ((code.match(/input\.birthDate/g) ?? []).length !== 3) v.push('input.birthDate-used-outside-the-helper');
-  for (const name of WRITERS) {
-    const start = code.indexOf(`export async function ${name}(`);
-    const end = code.indexOf('\nexport ', start + 10);
-    const body = start >= 0 ? code.slice(start, end < 0 ? undefined : end) : '';
-    if (!body.includes('canonicalizeCivilBirthDate(input.birthDate)')) v.push(`writer-without-canonicalization:${name}`);
+  if ((code.match(/canonicalizeCivilBirthDate\(input\.birthDate\)/g) ?? []).length !== 1) v.push('not-exactly-one-profile-canonical-write');
+  if ((code.match(/input\.birthDate/g) ?? []).length !== 1) v.push('input.birthDate-used-outside-the-helper');
+  if ((code.match(/chart\.birthDate/g) ?? []).length !== 1) v.push('chart.birthDate-used-outside-the-helper');
+  const profile = bodyOf(code, 'export async function updateBirthProfile(');
+  if (!profile.includes('canonicalizeCivilBirthDate(input.birthDate)')) v.push('writer-without-canonicalization:updateBirthProfile');
+  if (/new Date\(|Date\.UTC|toISOString\(|AT TIME ZONE|::date/.test(profile)) v.push('writer-builds-its-own-date:updateBirthProfile');
+  const helper = bodyOf(code, 'function savedPersonChartParams(');
+  if (!helper.includes('canonicalizeCivilBirthDate(chart.birthDate)')) v.push('chart-helper-without-canonicalization');
+  for (const name of SAVED_PERSON_WRITERS) {
+    const body = bodyOf(code, `export async function ${name}(`);
+    if (!body.includes('savedPersonChartParams(')) v.push(`writer-without-canonicalization:${name}`);
+    if (/\.birthDate\b/.test(body)) v.push(`writer-reads-birthDate-directly:${name}`);
     if (/new Date\(|Date\.UTC|toISOString\(|AT TIME ZONE|::date/.test(body)) v.push(`writer-builds-its-own-date:${name}`);
   }
   return v;
 };
 const dbSrc = read('apps/web/lib/db.ts');
-check('THE THREE WRITERS (updateBirthProfile, createSavedPerson, updateSavedPerson) each pass `canonicalizeCivilBirthDate(input.birthDate)` and nothing else can reach the birthDate parameter', writerViolations(dbSrc).length === 0);
-check('MUTATION: a writer reverted to the bare `input.birthDate`, a fourth bare use, a writer building its own Date, and a missing import are each detected', writerViolations(dbSrc.replace('canonicalizeCivilBirthDate(input.birthDate), input.birthTime, input.birthCityName', 'input.birthDate, input.birthTime, input.birthCityName')).includes('writer-without-canonicalization:updateBirthProfile') && writerViolations(dbSrc.replace(/canonicalizeCivilBirthDate\(input\.birthDate\), \/\/ B2: explicit UTC-midnight surrogate, never a bare date string\n      input\.birthTime,\n      input\.birthTimezone/, 'input.birthDate,\n      input.birthTime,\n      input.birthTimezone')).some((x) => x.startsWith('writer-without-canonicalization')) && writerViolations(`${dbSrc}\nconst leaked = (input: { birthDate: string }) => input.birthDate;`).includes('input.birthDate-used-outside-the-helper') && writerViolations(dbSrc.replace('export async function createSavedPerson(ownerUserId: string, input: SavedPersonInput): Promise<SavedPerson> {', 'export async function createSavedPerson(ownerUserId: string, input: SavedPersonInput): Promise<SavedPerson> {\n  const own = new Date(input.birthDate);')).includes('writer-builds-its-own-date:createSavedPerson') && writerViolations(dbSrc.replace("import { canonicalizeCivilBirthDate } from './birthDate';\n", '')).includes('helper-not-imported'));
+check('THE WRITERS (updateBirthProfile, createSavedPerson, updateSavedPerson) pass ONLY the canonical surrogate: the profile writer via `canonicalizeCivilBirthDate(input.birthDate)`, both SavedPerson writers via savedPersonChartParams -- nothing else can reach a birthDate parameter', writerViolations(dbSrc).length === 0);
+check('MUTATION: a profile writer reverted to the bare `input.birthDate`, the chart helper reverted to the bare `chart.birthDate`, a SavedPerson writer bypassing the helper, a fourth bare use, a writer building its own Date, and a missing import are each detected',
+  writerViolations(dbSrc.replace('canonicalizeCivilBirthDate(input.birthDate), input.birthTime, input.birthCityName', 'input.birthDate, input.birthTime, input.birthCityName')).includes('writer-without-canonicalization:updateBirthProfile')
+  && writerViolations(dbSrc.replace('canonicalizeCivilBirthDate(chart.birthDate)', 'chart.birthDate')).includes('chart-helper-without-canonicalization')
+  && writerViolations(dbSrc.replace('...savedPersonChartParams(chart),', 'chart?.birthDate ?? null, null, null, null, null, null,')).some((x) => x.startsWith('writer-without-canonicalization:createSavedPerson') || x.startsWith('writer-reads-birthDate-directly:createSavedPerson'))
+  && writerViolations(`${dbSrc}\nconst leaked = (input: { birthDate: string }) => input.birthDate;`).includes('input.birthDate-used-outside-the-helper')
+  && writerViolations(dbSrc.replace('export async function createSavedPerson(ownerUserId: string, input: SavedPersonInput, executor: Pool | PoolClient = pool): Promise<SavedPerson> {', 'export async function createSavedPerson(ownerUserId: string, input: SavedPersonInput, executor: Pool | PoolClient = pool): Promise<SavedPerson> {\n  const own = new Date(0);')).includes('writer-builds-its-own-date:createSavedPerson')
+  && writerViolations(dbSrc.replace("import { canonicalizeCivilBirthDate } from './birthDate';\n", '')).includes('helper-not-imported'));
 
 // ---- Part 5
 const diagnostic = read('deploy/diagnostics/birth-date-surrogate-check.sql');

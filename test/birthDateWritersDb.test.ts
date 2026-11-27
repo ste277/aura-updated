@@ -65,14 +65,14 @@ async function child() {
       const expected: any = natalContextFromBirthDetails(c.civil, c.time, c.tz);
       const created = await createSavedPerson(u0.id, { name: 'p', relationshipType: 'OTHER', birthDate: c.civil, birthTime: c.time, birthTimezone: c.tz });
       const createdStored = await utcOf('SavedPerson', created.id);
-      const createdIso = created.birthDate.toISOString();
+      const createdIso = created.birthDate!.toISOString();
       const updated = await updateSavedPerson(u0.id, created.id, { name: 'p', relationshipType: 'OTHER', birthDate: c.updatedCivil, birthTime: c.time, birthTimezone: c.tz });
       const updatedStored = await utcOf('SavedPerson', created.id);
       rows.push({
         civil: c.civil,
         user: { stored: await utcOf('User', u0.id), iso: user.birthDate!.toISOString(), roundTrip: user.birthDate!.toISOString().slice(0, 10) === c.civil, natal: { nakshatra: ctx.janmaNakshatra, rashi: ctx.janmaRashi, index: ctx.natalNakshatraIndex, moon: ctx.moonElement }, natalMatchesCivilFacts: JSON.stringify(ctx) === JSON.stringify(expected) || (ctx.janmaNakshatra === expected.janmaNakshatra && ctx.janmaRashi === expected.janmaRashi && ctx.natalNakshatraIndex === expected.natalNakshatraIndex), birthMoment: localDateTimeToUTC(user.birthDate!.toISOString().slice(0, 10), c.time, c.tz).toISOString(), expectedMoment: localDateTimeToUTC(c.civil, c.time, c.tz).toISOString() },
         savedCreate: { stored: createdStored, iso: createdIso, roundTrip: createdIso.slice(0, 10) === c.civil },
-        savedUpdate: { stored: updatedStored, iso: updated.birthDate.toISOString(), roundTrip: updated.birthDate.toISOString().slice(0, 10) === c.updatedCivil },
+        savedUpdate: { stored: updatedStored, iso: updated.birthDate!.toISOString(), roundTrip: updated.birthDate!.toISOString().slice(0, 10) === c.updatedCivil },
       });
     }
     // The REAL production path: real orchestrator deps (real personal muhurta context from the stored profile, real timing search) over the same request.
