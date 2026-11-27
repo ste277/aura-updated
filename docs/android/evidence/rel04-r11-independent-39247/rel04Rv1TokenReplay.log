@@ -1,0 +1,10 @@
+OK   synthetic token verifies before logout
+OK   logout responds 200 { loggedOut: true }
+OK   logout Set-Cookie empties as_session with Max-Age=0 on path /
+OK   logout Set-Cookie keeps HttpOnly and SameSite=Lax
+OK   logout response is Cache-Control: no-store
+OK   RV-1 RESIDUAL: a token copied before logout is still accepted afterwards
+OK   the copied token is rejected after its 30-day exp
+OK   a token with a swapped payload never verifies
+
+8 passed, 0 failed

@@ -125,16 +125,15 @@ const W = {
     await fresh();
     const s = await tab(impl);
     await s.q.enqueueOwned(item('race-y'));
-    const original = fidb.IDBIndex.prototype.getAll;
-    fidb.IDBIndex.prototype.getAll = function (...args: any[]) {
-      const req = original.apply(this, args);
-      if (this.name === 'owner' && this.objectStore.transaction.mode === 'readonly') {
-        fidb.IDBIndex.prototype.getAll = original; // deterministic barrier: between replay's read and its claim
-        req.addEventListener('success', () => { this.objectStore.transaction.db.transaction('records', 'readwrite').objectStore('records').put({ recordId: 'late-conflict', ownerUserId: A, clientRequestId: 'race-x', item: item('race-y'), fmt: 'r8', queuedAt: 3 }); });
-      }
-      return req;
-    };
-    try { const r = await replay(s); return { attempted: r.attempted, rows: rows(A, 'race-y') }; } finally { fidb.IDBIndex.prototype.getAll = original; }
+    // Deterministic barrier: the FIRST read-only read of the queue's records (replay's snapshot read), whichever
+    // read the implementation uses (R10/R11: the owner index; R12: a store scan); the conflict is written then.
+    const originalIndex = fidb.IDBIndex.prototype.getAll;
+    const originalStore = fidb.IDBObjectStore.prototype.getAll;
+    const restore = () => { fidb.IDBIndex.prototype.getAll = originalIndex; fidb.IDBObjectStore.prototype.getAll = originalStore; };
+    const inject = (req: any, db: IDBDatabase) => { restore(); req.addEventListener('success', () => { db.transaction('records', 'readwrite').objectStore('records').put({ recordId: 'late-conflict', ownerUserId: A, clientRequestId: 'race-x', item: item('race-y'), fmt: 'r8', queuedAt: 3 }); }); };
+    fidb.IDBIndex.prototype.getAll = function (...args: any[]) { const req = originalIndex.apply(this, args); if (this.name === 'owner' && this.objectStore.transaction.mode === 'readonly') inject(req, this.objectStore.transaction.db); return req; };
+    fidb.IDBObjectStore.prototype.getAll = function (...args: any[]) { const req = originalStore.apply(this, args); if (this.name === 'records' && this.transaction.mode === 'readonly') inject(req, this.transaction.db); return req; };
+    try { const r = await replay(s); return { attempted: r.attempted, rows: rows(A, 'race-y') }; } finally { restore(); }
   },
   async D3(impl: Impl, format: 'aura_q3' | 'aura_q4') {
     await fresh();

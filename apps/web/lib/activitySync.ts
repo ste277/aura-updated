@@ -27,7 +27,7 @@
  */
 import { AccountUnavailableError, captureAccountBinding, getTabId, getVerifiedAccount, isTransitionActive, isTransitionActiveNow, lockManager, reportUpgradeRequired, runActivityOperation, type AccountBinding, type AccountLease } from './accountSession';
 import { classifyHabitLogSyncOutcome } from './habitLogSyncPolicy';
-import { claimForDispatch, enqueueOwned, readOwnedQueue, releaseClaim, settleRecords, type QueuedHabitLog } from './offlineHabitQueue';
+import { canonicalPayload, claimForDispatch, enqueueOwned, readOwnedQueue, releaseClaim, settleRecords, transmissionCheck, type ClaimToken, type QueuedHabitLog } from './offlineHabitQueue';
 
 export type HabitLogPayload = Omit<QueuedHabitLog, 'tempId'>;
 
@@ -54,6 +54,13 @@ export type ActivityWriteResult =
 
 /** Statuses meaning "this session can't write this entry now" -- keep it for its account. */
 const ACCOUNT_HOLD = new Set([401, 403, 409, 428]);
+
+/** R12: the body sent is the CLAIMED item (the immutable claim representation), never an earlier cached copy. */
+function claimedBody(token: ClaimToken, fallback: HabitLogPayload): HabitLogPayload {
+  if (!token.item) return fallback;
+  const { tempId: _t, ownerUserId: _o, queuedAt: _q, recordId: _r, ...body } = token.item as QueuedHabitLog & { ownerUserId?: string; queuedAt?: number; recordId?: string };
+  return body;
+}
 
 function post(lease: AccountLease, fetchImpl: typeof fetch, payload: HabitLogPayload) {
   return fetchImpl('/api/habit-logs', {
@@ -105,9 +112,12 @@ export async function submitActivityLog(payload: HabitLogPayload, tempId: string
       await release();
       return outbox ? { kind: 'account-changed', keptForAccount: true } : { kind: 'not-stored' };
     }
+    // R12: the retired-storage state visible when transmission begins (synchronous; the send follows with no await).
+    const tc = transmissionCheck(token);
+    if (tc !== 'clear') { await release(); return tc === 'unavailable' ? { kind: 'storage-unavailable' } : { kind: 'not-stored' }; }
     let res: Response;
     try {
-      res = await post(lease, fetchImpl, payload);
+      res = await post(lease, fetchImpl, claimedBody(token, payload));
     } catch {
       await release();
       if (!outbox) return { kind: 'not-stored' };
@@ -173,9 +183,10 @@ async function replayLocked(fetchImpl: typeof fetch, binding: AccountBinding): P
       if (head.inFlight) continue; // another context (or this one) is sending it
       if (await isTransitionActiveNow()) { result.stoppedBecause = 'transition'; break; }
       // The handoff: atomically confirm the request is still queued and not being sent, and claim it.
-      const claim = await claimForDispatch(head.recordId, tab);
+      // R12: bound to what was inspected -- a replaced or modified record is refused ('changed'), never claimed.
+      const claim = await claimForDispatch(head.recordId, tab, { clientRequestId: head.item.clientRequestId, payload: canonicalPayload(head.item) });
       if (claim.status === 'failed') { result.stoppedBecause = 'unreadable'; break; }
-      if (claim.status !== 'claimed') continue; // settled/discarded meanwhile, or another attempt is sending it
+      if (claim.status !== 'claimed') continue; // settled/discarded/changed meanwhile, or another attempt is sending it
       const token = claim.claim;
       // Final checks with no await before the send.
       if (!lease.isCurrent() || isTransitionActive()) {
@@ -183,12 +194,14 @@ async function replayLocked(fetchImpl: typeof fetch, binding: AccountBinding): P
         result.stoppedBecause = lease.isCurrent() ? 'transition' : 'account-changed';
         break;
       }
-      const { tempId: _t, ownerUserId: _o, queuedAt: _q, recordId: _r, ...payload } = head.item;
+      const tc = transmissionCheck(token); // R12: synchronous, immediately before the send
+      if (tc !== 'clear') { await releaseClaim(token); if (tc === 'unavailable') { result.stoppedBecause = 'unreadable'; break; } continue; }
+      const { tempId: _t, ownerUserId: _o, queuedAt: _q, recordId: _r, ...cached } = head.item;
       result.attempted++;
       let status: number | 'network-error';
       let res: Response | null = null;
       try {
-        res = await post(lease, fetchImpl, payload);
+        res = await post(lease, fetchImpl, claimedBody(token, cached));
         status = res.status;
       } catch {
         status = 'network-error';
@@ -198,8 +211,8 @@ async function replayLocked(fetchImpl: typeof fetch, binding: AccountBinding): P
       const outcome = classifyHabitLogSyncOutcome(status);
       if (outcome === 'retry') { await releaseClaim(token); continue; } // no response or 5xx: ambiguous, keep
       if (outcome === 'confirmed') result.confirmed++;
-      // Settled: remove exactly the records of this identity that were read (claim cleared only if still ours).
-      const r = await settleRecords(group.map((g) => g.recordId), token, { owner: lease.account });
+      // Settled: R12 -- bound to the claim: only copies still carrying the claimed identity and payload are removed.
+      const r = await settleRecords([token.recordId ?? head.recordId], token, { owner: lease.account });
       result.removed += r.removed;
       result.removeFailed += r.failed;
     }

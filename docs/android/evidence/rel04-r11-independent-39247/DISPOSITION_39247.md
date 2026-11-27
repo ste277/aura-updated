@@ -1,0 +1,95 @@
+# 39247 AURA-ANDROID-REL-04 R11 independent verification
+
+**Implementation disposition — OPEN.** Keep ticket 39243 open at PR #392 handover head d150327. The exact R10 witnesses now pass, but the follow-up probes found new ways to post an activity without an eligible claim, delete a contradictory or unsent replacement copy, and incorrectly report that cleanup completed. The recorded CI-09 failure and unreadable v2 recovery remain separate conditions.
+
+## Structural assessment
+
+| Mechanism | Disposition | Verified behavior and remaining gap |
+|---|---|---|
+| Identity resolution | **PARTIAL** | Recovers a missing outer IndexedDB request ID when the account and nested request agree. Preserves ordinary Q3/Q4 and IndexedDB conflicts. An incomplete Q4 key can still be deleted or fail to block its candidate, a missing outer IndexedDB owner can hide a readable candidate, and response settlement bypasses the resolver (N3–N4). |
+| Transmission eligibility | **OPEN** | Submission and replay both call the same gate. That gate can approve a replacement while replay sends the stale original, and both paths accept a retired-storage snapshot that is stale before the claim is written (N1–N2). Auth leases and the server account check held in the separate sign-out and account-switch controls. |
+| Confirmed discard snapshot | **PARTIAL** | The original replacement identity is preserved and the approved identity is decided. An ordinary fresh claim protects the whole request, and an abort preserves the data. The decision prevents resurrection even when newly introduced copies survive. The physical removal guarantee is unverified by the outcome calculation when the copy set changes (N5). |
+| Logical outcome reporting | **PARTIAL** | The R10 possibly-sent retry defect is fixed. A failed reconciliation read correctly returns uncertain. Reporting can claim physical removal while copies remain, or claim pending cleanup when no physical copy remains (N5–N6). A committed claim alone also produces “still being sent” even when no POST has begun (C1). |
+
+## Original 39244 witnesses
+
+I copied the original probe and browser probe from the independent evidence directory, verified their bytes, and ran each unchanged against detached checkouts of 4a37173 and d150327. The baseline edge output is byte-identical to the 39244 log. The independently generated R11 edge output is byte-identical to the supplied R11 edge log. Both implementations ran the same tests and fault schedules.
+
+| Witness | R10 baseline | R11 observation and disposition |
+|---|---|---|
+| D1 — missing outer request ID | Copy preserved without decision. Same-ID submit confirmed, one row. | Physical copy removed, one discard decision, resubmit refused and zero rows. **CLOSED** for the missing request-ID case. |
+| D2 — contradictory IndexedDB candidate | Claim succeeded and a contradiction inserted after the initial read replayed, one row. | Both forms of the original case are refused, zero rows. **PARTIAL** for the claim invariant because replacement and retired-storage races remain (N1–N2). |
+| D3 — Q3/Q4 key names A, value names B | Hidden from both views. A could submit the candidate and create a row. | Both static cases are preserved and counted once as unidentified for A. A is refused, B is unaffected, zero rows. **PARTIAL** for the invariant because a contradiction can appear before claim and be missed (N2). |
+| D4 — replacement after discard confirmation | Unseen replacement deleted and decided. Approved original left undecided. | Replacement remains without a decision. Approved ID has a durable discard. **CLOSED** for the snapshot-identity witness. N5 addresses the accuracy of physical cleanup reporting. |
+| D5 — damaged in-flight copy plus identifiable retired copy | Retired copy removed despite a fresh claim, and prior-send language conflicted. | Fresh claim keeps the request and both copies. One possible prior send in the prompt, no discard decision and no assertion about past cancellation. **CLOSED** for the original witness. |
+| D6 — prior send across cleanup retry | Retry removed the retired copy and lost the warning, despite one server row. | First sign-out reports cleanup pending and possibly sent. Retry reports removed and possibly sent, still one server row. **CLOSED**. |
+| D7 — incomplete Q4 key | Unreadable entry with no record-ID delimiter removed and decided. | Original raw bytes preserved, one unidentified, no decision. **PARTIAL** because other incomplete-key forms still permit deletion or transmission (N4). |
+| P3 — committed discard with acknowledgement lost | Reports failed despite committed marker and surviving retired copy. | Reconciliation finds the discarded marker and correctly reports pending cleanup for the original case. Zero rows and retry refused. **PARTIAL** across storage combinations (N6). |
+
+The 39228 R9 probe also ran directly against R11. Its damaged v2 and IndexedDB copies each wrote one decision, rejected resubmission and produced zero rows. The original mixed-outcome message attributed the only possible prior send to the cleanup-pending activity.
+
+## Independent adversarial witnesses
+
+The independent probe exercises real queue, session and route code, in-memory IndexedDB with deterministic hooks, synthetic accounts, and the real habit-log handler over a synthetic server store. A row count refers to that store. The Chromium checks separately exercise actual browser storage, sessions and worker behavior on loopback. The 29/29 local Chromium run included original worker-restart, delayed-auth and acknowledgement controls.
+
+| ID | Disposition | Reproduction and result |
+|---|---|---|
+| N1 — stale replay payload and wrong settlement | **OPEN** | Queue A/old, then replace its physical record with A/new after replay reads the original snapshot and before its claim. The POST claims A/new but sends A/old. The server records one old row, and settlement deletes and marks unsent A/new as settled. With a B/new replacement, the POST holds a B claim but still sends A/old under A's session. One A row, zero B rows, B's copy survives. The account boundary protects server attribution, while the queue grants a claim for the wrong identity. [Claim](https://github.com/ste277/aura-updated/blob/d1503278ae43dd7c0477f809b8af4c645b1b8725/apps/web/lib/offlineHabitQueue.ts#L650-L665) [Replay and settlement](https://github.com/ste277/aura-updated/blob/d1503278ae43dd7c0477f809b8af4c645b1b8725/apps/web/lib/activitySync.ts#L170-L203) |
+| N2 — retired storage changes before the claim | **OPEN** | In the claim transaction, write *aura_q3:A:X* with nested owner B after the gate starts its decision read. This is after its localStorage inspection and before the claim. Run direct and replay separately. Each sends and confirms one A row, zero B rows, and leaves the contradictory copy. The shared gate uses a captured localStorage result across asynchronous IndexedDB operations. [Gate and direct submit](https://github.com/ste277/aura-updated/blob/d1503278ae43dd7c0477f809b8af4c645b1b8725/apps/web/lib/offlineHabitQueue.ts#L594-L635) [Replay claim](https://github.com/ste277/aura-updated/blob/d1503278ae43dd7c0477f809b8af4c645b1b8725/apps/web/lib/offlineHabitQueue.ts#L650-L665) |
+| N3 — definitive response deletes a contradictory copy | **OPEN** | Hold a successful response after the server saves A/X. Change the active copy's nested account to B while the response is held, then deliver it. One A row existed before the conflict and zero B rows. Settlement deletes the now-contradictory physical copy. The settlement path validates payload shape without re-resolving identity. [Settlement](https://github.com/ste277/aura-updated/blob/d1503278ae43dd7c0477f809b8af4c645b1b8725/apps/web/lib/offlineHabitQueue.ts#L697-L730) |
+| N4 — incomplete identity handling | **OPEN** | An incomplete *aura_q4:A:X* with a readable matching value is treated as damaged and removed with a marker. An unreadable *aura_q4:A:X:* is preserved but blocks the literal candidate *X:* and allows *X* to post one row. An active IndexedDB record with no outer owner but with nested A/X is absent from the owner index. It is preserved without a decision and does not block a new A/X submission, which creates one row. A missing owner supplies no authority to delete or assign the copy. [Resolver and Q4 parsing](https://github.com/ste277/aura-updated/blob/d1503278ae43dd7c0477f809b8af4c645b1b8725/apps/web/lib/offlineHabitQueue.ts#L385-L402) [Retired-key inspection](https://github.com/ste277/aura-updated/blob/d1503278ae43dd7c0477f809b8af4c645b1b8725/apps/web/lib/offlineHabitQueue.ts#L449-L464) [Owner-index gate](https://github.com/ste277/aura-updated/blob/d1503278ae43dd7c0477f809b8af4c645b1b8725/apps/web/lib/offlineHabitQueue.ts#L594-L607) |
+| N5 — inaccurate removal with surviving copies | **OPEN** | Confirm A/X, then introduce another active equivalent and a new Q3 key for X during logout. Both active copies are removed, the Q3 copy remains and the result claims removed=1, cleanupPending=0. In a second run, change the original copy to name B while adding the equivalent active copy. The contradictory row survives with the same removal claim and no unidentified outcome. Both runs commit one X discard, reject retry, and send zero rows. Decisions and preservation work while reporting is wrong. [Snapshot discard and cleanup](https://github.com/ste277/aura-updated/blob/d1503278ae43dd7c0477f809b8af4c645b1b8725/apps/web/lib/offlineHabitQueue.ts#L846-L920) |
+| N6 — incomplete reconciliation of an acknowledged-by-read commit | **OPEN** | Simulate a lost acknowledgement after discarding an IndexedDB-only request. Reconciliation reads the committed decision, but reports cleanupPending=1 and says a local copy could not be deleted. IndexedDB contains zero copies and no retired copy ever existed. With a failed reconciliation read, the result correctly reports uncertain=1 and failed=0. Both cases refuse the retry and create zero rows. This fault is injected at the acknowledgement boundary. It does not assume real browsers emit both transaction events. [Reconciliation](https://github.com/ste277/aura-updated/blob/d1503278ae43dd7c0477f809b8af4c645b1b8725/apps/web/lib/offlineHabitQueue.ts#L887-L903) |
+
+## Concurrency and regression controls
+
+- **C1, claim before sign-out and account switch.** For direct submission and replay, hold delivery of a committed claim result before HTTP, confirm and complete sign-out in another tab, then sign in as B before allowing the old operation to resume. Zero old-lease POSTs before or after release. B's new request confirms on B. A's retained request replays once only after A reauthenticates. Sign-out correctly keeps the request under the fresh claim, although the UI says it is being sent before the network has started.
+- **C2, already handed to the network.** Hold the original HTTP call immediately before server processing or immediately after the server commits and before the client receives the response. Confirmed sign-out leaves one total network attempt, zero new attempts, and a discarded decision with *possiblySent=true* in both runs. The before case has zero server rows. The after case retains its one server row even though the client aborted. The subsequent sign-out report does not assert server cancellation.
+- **Rollback and cleanup.** The original P1 fault after issuing a record delete rolls back the entire write transaction. The active and retired copies survive, there is no marker, and no row is posted. P2 preserves a committed decision across failed cleanup and account switching, with zero rows for A and one independently permitted B row for the same ID. The R10 regression suite's 20 submit/discard alternations pass. N5 and N6 concern reporting or incomplete reconciliation rather than resurrection.
+- **Healthy and failure paths.** All 15 targeted local suites exit zero, including R11 38/38, R10 25/25, R9 36/36, R8 43/43, R7 38/38, R6 22/22, R5 16/16, R4 queue 27/27 and SSR 21/21, account isolation 50/50, sign-out 19/19, Home→Find 15/15, token replay 8/8, pending replay reconciliation and reload visibility. These cover storage-read refusal, healthy direct submission, one successful offline replay, ordinary account/session fencing, and read-only quarantine of the released unowned legacy format. The exact previous witnesses remain closed where stated. The additional probes reopen the broader transmission, identity-preservation and reporting guarantees.
+
+## Evidence integrity and CI
+
+- Verified ancestry 4a37173 → abdd9d8 → d150327, with each adjacent commit being a direct parent. Runtime changes in abdd9d8 are confined to *offlineHabitQueue.ts* and *signOut.ts*. Its other changes comprise a CI test invocation, regression source and fixtures, and preserved review evidence. *activitySync.ts*, the service worker, session code and middleware are byte-identical across the R11 delta. The 347 paths in d150327 are exclusively the handover, readiness report and evidence. [Implementation](https://github.com/ste277/aura-updated/commit/abdd9d8192b77b9fcb844e9ad1e98cddded9b230) [Handover](https://github.com/ste277/aura-updated/commit/d1503278ae43dd7c0477f809b8af4c645b1b8725)
+- Matched all 19 handover hashes, 27 preserved R10 files against their local originals, the preserved R10 report byte-for-byte, all three vendored R10 modules against the original commit, and all five CI evidence hashes. Verified 252 math-core log hashes and 78 DB/browser/Next log hashes against manifests and exact CI commands and environment overrides. The preserved 39244 manifest names two probes with a *.ts* suffix while the repository appends *.txt*. Their contents match exactly after resolving this filename difference. Trailing whitespace occurs only in two captured logs. [Evidence manifest](https://github.com/ste277/aura-updated/blob/d1503278ae43dd7c0477f809b8af4c645b1b8725/docs/android/AURA_ANDROID_REL_04_R11_VERIFICATION_HANDOVER.md#checksums-sha256)
+- **45870363531 — 8/9.** Existing attempt one ran on abdd9d8 and failed in Day Constructor acceptance DB job 140083882465. **45873523321 — 8/9.** Existing attempt one ran on d150327 and failed in the same DB job, 140094706143. Both logs show the same *multiOccurrenceRhythmMoveCapacityDb* Recomposition same-week self-move assertion, at **23:26:14 IST** and **23:49:42 IST** on 26 November. Local supplied results are **75/76 DB**, with the same failure, **29/29 Chromium**, **14/14 Next rendering**, **252/252 math-core commands**, and three successful typecheck commands. [Implementation CI](https://github.com/ste277/aura-updated/actions/runs/45870363531) [Handover CI](https://github.com/ste277/aura-updated/actions/runs/45873523321)
+- The failing test is byte-identical on R10, R11, the final handover and a39f398, and imports neither changed runtime module. Its pinned excerpt computes a same-day move from wall time with a minimum 1-minute lead, a 15-minute move offset and a 20-minute duration. Both CI failures fall inside the suspected midnight-boundary window. This supports scope separation and the timing hypothesis. Root-cause resolution belongs to **CI-09 / 71038**. [CI stability note](https://github.com/ste277/aura-updated/blob/d1503278ae43dd7c0477f809b8af4c645b1b8725/docs/android/evidence/rel04-r11/CI_STABILITY_NOTE_45870363531.md)
+
+| Evidence anchor | Verified SHA-256 |
+|---|---|
+| Preserved R10 evidence manifest | 044f2224ca9b936633b0835e79cdb53386c00265be212a512f27aeff0b4d7ff9 |
+| R11 math-core manifest | 77d365dd87c085be96e01bfa8c723aaf82093cca14f0001d04b4eb54767ff007 |
+| R11 DB/browser manifest | 1ab2814addc027956185bd551e8818f7c13595ad9f0e9df79e67c77bbbf97530 |
+| R11 implementation CI evidence manifest | 9db9796785365ad867fca9aa7a15120fe31d7cb962ad11d10fd07c472f8f735b |
+| Unchanged R10 edge output at 4a37173 | 2942d4884afb6c5c173adbc0e9febd66df326d703985892f1c3fe4da0e3b07b9 |
+| Same probe at d150327 | 3739379e1e504e0d6f2784f07cb1c06e0279c1615099414be1dc0cdf7ed53df8 |
+
+## Unreadable v2 release acceptance
+
+**PARTIAL, separate release condition.** The unchanged Chromium probe passed on both commits. For A on the same origin and profile, unreadable v2 causes storage-unavailable for new submissions and zero replay attempts, including with queued activity before sign-out. Sign-out succeeds, removes the eligible readable activity, reports one unidentified entry and preserves the opaque bytes exactly. A remains blocked after sign-in, switching away and back, and closing and relaunching Chromium with the same profile. B on that profile and A on a clean profile each create one row, the only two POSTs observed. The R11 wording preserves uncertainty about previous sends.
+
+The R10 release-provenance record establishes the protected Preview exposure and the absence of v2 in the inspected Production lineage and public release artifacts. Require supported, account-scoped recovery before release to affected Preview, internal or sideloaded populations. Verify the configured native origins and test the procedure while preserving other accounts and unrelated data. No recovery change was part of this verification.
+
+## Reproduce in disposable checkouts
+
+Use the repository's installed Node and web test dependencies. Copy the accompanying *review-r11-independent.ts* into *test/* at d150327 and run:
+
+~~~sh
+export TS_NODE_COMPILER_OPTIONS='{"jsx":"react-jsx"}'
+npx ts-node --project tsconfig.jsdom-tests.json test/review-r11-independent.ts
+~~~
+
+For the historical comparison, copy the preserved *review-r10-edge.ts.txt* and *review-r10-browser.ts.txt* from *docs/android/evidence/rel04-r10-independent-39244/* into *test/*, dropping only the trailing *.txt*, in both 4a37173 and d150327. Run:
+
+~~~sh
+export TS_NODE_COMPILER_OPTIONS='{"jsx":"react-jsx"}'
+npx ts-node --project tsconfig.jsdom-tests.json test/review-r10-edge.ts
+npx ts-node --project tsconfig.jsdom-tests.json test/review-r10-browser.ts
+~~~
+
+The browser probe needs local Playwright Chromium, loopback and a writable temporary directory. From the accompanying evidence directory, *shasum -a 256 -c SHA256SUMS* verifies the files. The evidence verification script accepts the workspace containing the earlier 39244 disposition and evidence as its argument and runs from the R11 checkout root.
+
+## Closure recommendation
+
+Keep 39243 open and Auto-merge off. GitHub reports PR #392 open at d150327 with no Auto-merge request. Close implementation only after N1–N6 pass independent retest, with the exact original witnesses and the healthy and session-boundary controls still passing. Fresh integration CI remains on HOLD pending both independent implementation closure and CI-09 closure. Existing separate gates cover scoped v2 recovery for exposed populations, deployment isolation, owner approval, activation and rollback readiness, and native acceptance. This review used existing CI metadata, disposable local checkouts and synthetic tests. It made no PR, runtime, database test, deployment or activation changes.
+

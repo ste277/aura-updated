@@ -145,7 +145,8 @@ export function discardOutcomeMessage(r: SignOutResult): string | null {
       const kept = o.keptInFlight + o.failed;
       if (kept > 0) {
         const why: string[] = [];
-        if (o.keptInFlight > 0) why.push(`${o.keptInFlight} still being sent from another window`);
+        // R12: a claim may be taken before the network call starts -- never claim it is already on its way.
+        if (o.keptInFlight > 0) why.push(`${o.keptInFlight} still being sent, or about to be sent, from another window`);
         if (o.failed > 0) why.push(`${o.failed} couldn't be discarded because of a storage error`);
         // R11: no claim about later syncing -- a kept log may be paused; nothing about it was decided here.
         parts.push(`${plural(kept, '1 activity log was', '# activity logs were')} kept on this device for this account (${why.join('; ')}); nothing about ${kept === 1 ? 'it' : 'them'} was changed, and Aura will ask again the next time you sign out of this account.`);

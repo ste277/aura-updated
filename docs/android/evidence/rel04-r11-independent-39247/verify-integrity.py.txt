@@ -1,0 +1,61 @@
+from pathlib import Path
+import hashlib, subprocess, re, json, collections, sys
+
+digest = lambda p: hashlib.sha256(p.read_bytes()).hexdigest()
+git = lambda *args: subprocess.check_output(['git', *args])
+base = Path('docs/android/evidence')
+handover = Path('docs/android/AURA_ANDROID_REL_04_R11_VERIFICATION_HANDOVER.md')
+r11, r10 = base / 'rel04-r11', base / 'rel04-r10-independent-39244'
+prior = Path(sys.argv[1])
+actual = prior / 'AURA_ANDROID_REL_04_R10_INDEPENDENT_EVIDENCE_39244'
+impl = 'abdd9d8192b77b9fcb844e9ad1e98cddded9b230'
+head = 'd1503278ae43dd7c0477f809b8af4c645b1b8725'
+
+matches = re.findall(r'^\| .([^\x60]+). \| .([0-9a-f]{64}). \|$', handover.read_text(), re.M)
+assert len(matches) == 19
+for name, sha in matches:
+    assert digest(Path(name)) == sha, name
+    print(sha, name)
+for folder in [r10, r11/'ci-45870363531']:
+    checks = (folder/'SHA256SUMS').read_text().splitlines()
+    for line in checks:
+        sha, name = line.split()
+        path = folder/name
+        if not path.exists() and folder == r10 and path.suffix == '.ts':
+            path = path.with_suffix('.ts.txt')
+            print('Preserved manifest source renamed:', name, '->', path.name)
+        assert digest(path) == sha, name
+        if folder == r10:
+            assert (actual/name).read_bytes() == path.read_bytes(), name
+    print(folder, len(checks), 'hashes confirmed')
+report = 'AURA_ANDROID_REL_04_R10_INDEPENDENT_DISPOSITION_39244.md'
+assert (r10/'DISPOSITION_39244.md').read_bytes() == (prior/report).read_bytes()
+for module in ['offlineHabitQueue','activitySync','signOut']:
+    source = git('show','4a37173:apps/web/lib/'+module+'.ts')
+    assert source == Path('test/fixtures/rel04-r10-head',module+'.ts.txt').read_bytes(), module
+    print('Historical module verified', module)
+steps = [json.loads(l) for l in subprocess.check_output(['python3','test/evidence-tools/ciCommands.py'],text=True).splitlines()]
+select = lambda s: tuple(s[k] for k in ('job','name','run','env'))
+for folder, n in [('math-core-tests',252),('db-and-browser-tests',78)]:
+    mf = r11/folder/'manifest.json'
+    data = json.loads(mf.read_text())
+    assert data['head'] == impl and data['codeTreeClean'] and len(data['commands']) == n
+    expected = [select(x) for x in steps if x['job'] in data['jobs'] and x['run'].startswith('npx ts-node ') and '\n' not in x['run']]
+    assert expected == [select(x) for x in data['commands']]
+    for cmd in data['commands']:
+        assert digest(mf.parent/cmd['log']) == cmd['logSha256'], cmd['log']
+        if cmd['exit'] or cmd['signal']:
+            print('NONZERO',cmd['job'],cmd['run'],cmd['exit'],cmd['signal'])
+    print(folder,n,'checksums and workflow commands',dict(collections.Counter((x['job'],x['exit']) for x in data['commands'])))
+assert git('rev-parse',head+'^').decode().strip() == impl
+assert git('rev-parse',impl+'^').decode().strip() == '4a3717362070d2f65a170001a59048fafad6098f'
+final = git('diff','--name-only',impl,head).decode().splitlines()
+assert len(final) == 347
+assert all(p.startswith('docs/android/evidence/rel04-r11/') or p in ['docs/android/AURA_ANDROID_REL_04_APPLICATION_READINESS_REPORT.md',str(handover)] for p in final)
+assert git('diff','--name-only','4a37173',impl,'--','apps/').decode().splitlines() == ['apps/web/lib/offlineHabitQueue.ts','apps/web/lib/signOut.ts']
+refs = ['4a37173',impl,head,'a39f398']
+assert len({git('rev-parse',r+':test/multiOccurrenceRhythmMoveCapacityDb.test.ts') for r in refs}) == 1
+excerpt = git('show',impl+':test/multiOccurrenceRhythmMoveCapacityDb.test.ts').splitlines(keepends=True)[299:334]
+assert excerpt == (r11/'ci-45870363531/multiOccurrenceRhythmMoveCapacityDb.lines300-334.ts.txt').read_bytes().splitlines(keepends=True)
+print('Final scope: 347 documentation and evidence files. Runtime scope: queue and signOut only. DB test blob and pinned excerpt match.')
+
