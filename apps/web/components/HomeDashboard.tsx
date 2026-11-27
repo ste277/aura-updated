@@ -25,7 +25,7 @@ import type { TomorrowPreview } from '../lib/tomorrowPreview';
 import { deriveNextMeaningfulThing } from '../lib/nextMeaningfulThing';
 import type { PendingActivityPresentationItem } from '../lib/myDayPendingOverlay';
 import { LoggedEntryItem } from './CalendarViewSection';
-import { findAttachableOperation, UNVERIFIED_ACTIVITY_MESSAGE, type ActivityLogResult, type ActivityOperationRequest, type ActivityOperations, type CheckActivity } from '../lib/pendingReplayReconciliation';
+import { findAttachableOperation, UNVERIFIED_ACTIVITY_MESSAGE, recoveryOperationOf, type ActivityLogResult, type ActivityOperationRequest, type ActivityOperations, type CheckActivity } from '../lib/pendingReplayReconciliation';
 import { DayBuilderCard } from './DayBuilderCard';
 import { PersonalizationPromptCard } from './PersonalizationPromptCard';
 import { saveUpcomingPlanFromCandidate, PlanOverlapSaveError } from './PlanWithAuraView';
@@ -2281,6 +2281,8 @@ function GoodRightNowCard({
   // reattaches to after a remount / refresh / restart. Its state comes ONLY from the ID-keyed projection; a list,
   // a title match among server rows or an empty queue view never releases it.
   const [operationId, setOperationId] = useState<string | null>(null);
+  // R16: the user explicitly chose to log a SEPARATE activity although an earlier one is still open.
+  const [separate, setSeparate] = useState(false);
 
   const definition = card.activityId ? getActivityDefinition(card.activityId) : undefined;
   const action: ImmediateAction = definition?.experience.immediateAction ?? card.immediateAction ?? 'LOG_NOW';
@@ -2292,8 +2294,8 @@ function GoodRightNowCard({
   const operation = operationId ? operations?.[operationId] : undefined;
 
   useEffect(() => {
-    if (!operationId && attachable && status === 'idle') setOperationId(attachable.clientRequestId);
-  }, [operationId, attachable, status]);
+    if (!operationId && !separate && attachable && status === 'idle') setOperationId(attachable.clientRequestId);
+  }, [operationId, separate, attachable, status]);
 
   // R15 -- the card follows its operation's outcome (by request id).
   useEffect(() => {
@@ -2330,6 +2332,9 @@ function GoodRightNowCard({
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : '';
+      // R16: the shared recovery contract withheld a fresh submission -- follow THAT operation (its original id).
+      const recovered = recoveryOperationOf(err);
+      if (recovered) { setOperationId(recovered); setSeparate(false); }
       if (message === UNVERIFIED_ACTIVITY_MESSAGE) { setStatus('unresolved'); return; }
       setErrorText("Couldn't log. Try again.");
       setOperationId(null);
@@ -2343,7 +2348,9 @@ function GoodRightNowCard({
   const logWithDuration = async (durationMinutes: number) => {
     if (!onLogActivity) return;
     onLogged?.(planTitle);
-    const confirmed = await runLog(() => onLogActivity(planTitle, undefined, undefined, activeWindowName, durationMinutes, 'AURA_DO_NOW', definition?.muhurta.significance, card.activityId, { onOperation: (id) => setOperationId(id) }));
+    const asSeparate = separate;
+    setSeparate(false);
+    const confirmed = await runLog(() => onLogActivity(planTitle, undefined, undefined, activeWindowName, durationMinutes, 'AURA_DO_NOW', definition?.muhurta.significance, card.activityId, { onOperation: (id) => setOperationId(id), separate: asSeparate }));
     if (confirmed) {
       trackEvent('ACTIVITY_LOGGED_NOW', {
         metadata: {
@@ -2399,6 +2406,8 @@ function GoodRightNowCard({
           <button type="button" onClick={checkOperation} style={{ ...goodRightNowActionButtonStyle, flex: 1 }} aria-label={`Check again ${planTitle}`}>Check again</button>
           {operationId && operation && <button type="button" onClick={retryOperation} style={{ ...goodRightNowActionButtonStyle, flex: 1 }} aria-label={`Retry ${planTitle}`}>Retry</button>}
         </div>
+        {/* R16: a deliberately separate activity (identical intent allowed) -- never a silent replacement */}
+        <button type="button" onClick={() => { setSeparate(true); setOperationId(null); setStatus('idle'); }} style={{ ...goodRightNowSecondaryLinkStyle, marginTop: 4 }} aria-label={`Log ${planTitle} as a separate activity`}>Log as a separate activity</button>
       </div>
     );
   }

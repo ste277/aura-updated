@@ -131,6 +131,17 @@ function expectationOf(token: ClaimToken, account: string, body: HabitLogPayload
   return { account, clientRequestId: token.crid ?? body.clientRequestId, body: body as unknown as Record<string, unknown> };
 }
 
+/**
+ * R16 -- THE settlement rule both send paths use: the receipt a decoded answer justifies, or null (keep the copy,
+ * nothing settled). Accepted: the validated row. Rejected: only the route's DEFINITIVE refusal of this exact body
+ * with no possible earlier send (a later refusal cannot disprove an earlier commit).
+ */
+function settlementReceipt(decoded: Extract<DecodedHabitLogResponse, { kind: 'accepted' | 'rejected' }>, token: ClaimToken, account: string) {
+  if (decoded.kind === 'accepted') return acceptedReceipt(account, token.crid!, token.payload!, decoded.row);
+  if ((token.priorAttempts ?? 0) > 0) return null;
+  return rejectedReceipt(account, token.crid!, token.payload!, decoded.status, decoded.reason);
+}
+
 /** Test seam (negative controls): THE decoder both send paths use. */
 export const __decoder = { decode: decodeHabitLogResponse };
 
@@ -193,10 +204,11 @@ async function applyDirectAnswer(decoded: DecodedHabitLogResponse, token: ClaimT
     case 'retry': await release(); if (!outbox) return { kind: 'not-stored' }; return lease.isCurrent() ? { kind: 'queued' } : { kind: 'account-changed', keptForAccount: true };
     case 'unverified': await release(); return { kind: 'outcome-unknown', reason: 'unverified-response' }; // kept: replays under the same id
     case 'rejected': {
-      // R15: a later refusal cannot disprove an earlier send that may have committed.
-      const after = (token.priorAttempts ?? 0) > 0;
-      await settleTo(rejectedReceipt(lease.account, token.crid!, token.payload!, decoded.status, after));
-      return after ? { kind: 'outcome-unknown', reason: 'refused-after-possible-send' } : { kind: 'rejected', status: decoded.status };
+      const receipt = settlementReceipt(decoded, token, lease.account);
+      // R16: a later refusal cannot disprove an earlier send that may have committed -- kept, unresolved, not settled.
+      if (!receipt) { await release(); return { kind: 'outcome-unknown', reason: 'refused-after-possible-send' }; }
+      await settleTo(receipt);
+      return { kind: 'rejected', status: decoded.status };
     }
     case 'accepted': {
       // The server fact is established by the validated row; the receipt and the matching-copy removal are one
@@ -321,10 +333,9 @@ async function replayLocked(fetchImpl: typeof fetch, binding: AccountBinding): P
       if (decoded.kind === 'hold') { await releaseClaim(token); result.stoppedBecause = 'account-hold'; break; }
       if (decoded.kind === 'retry') { await releaseClaim(token); continue; } // no response or 5xx: ambiguous, keep
       if (decoded.kind === 'unverified') { await releaseClaim(token); result.unverified = (result.unverified ?? 0) + 1; continue; } // proves nothing: keep
+      const receipt = settlementReceipt(decoded, token, lease.account);
+      if (!receipt) { await releaseClaim(token); result.unverified = (result.unverified ?? 0) + 1; continue; } // R16: refusal after a possible send: kept
       if (decoded.kind === 'accepted') result.confirmed++;
-      const receipt = decoded.kind === 'accepted'
-        ? acceptedReceipt(lease.account, token.crid!, token.payload!, decoded.row)
-        : rejectedReceipt(lease.account, token.crid!, token.payload!, decoded.status, (token.priorAttempts ?? 0) > 0);
       // Settled: R12 -- bound to the claim: only copies still carrying the claimed identity and payload are removed.
       const r = await settleRecords([token.recordId ?? head.recordId], token, { owner: lease.account, receipt });
       result.removed += r.removed;

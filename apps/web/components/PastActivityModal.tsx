@@ -3,7 +3,7 @@
 import React, { useMemo, useRef, useState } from 'react';
 import { colors, radius, spacing, typography } from './theme';
 import { ModalShell, useModalA11y, PrimaryButton, SecondaryButton, ActivityChip, FieldLabel, FieldHint, TextInput, TextAreaInput, SelectInput } from './ui';
-import { UNVERIFIED_ACTIVITY_MESSAGE, type ActivityLogResult, type ActivityOperationRequest, type CheckActivity } from '../lib/pendingReplayReconciliation';
+import { recoveryOperationOf, UNVERIFIED_ACTIVITY_MESSAGE, type ActivityLogResult, type ActivityOperationRequest, type CheckActivity } from '../lib/pendingReplayReconciliation';
 
 interface PastActivityModalProps {
   isOpen?: boolean;
@@ -117,9 +117,9 @@ export function PastActivityModal({
     setLogTime(`${hrs}:${mins}`);
   };
 
-  const handleSubmit = async (e?: React.FormEvent) => {
+  const handleSubmit = async (e?: React.FormEvent, request?: { retryOf?: string; separate?: boolean }) => {
     if (e) e.preventDefault();
-    if (!activeTitle || submitting || isFutureTimestamp || unresolvedOperation) return;
+    if (!activeTitle || submitting || isFutureTimestamp || (unresolvedOperation && !request)) return;
 
     setSubmitting(true);
 
@@ -134,11 +134,14 @@ export function PastActivityModal({
         let operationId: string | null = null;
         let outcome: ActivityLogResult;
         try {
-          outcome = await onConfirmLog(activeTitle, cleanNotes, targetTimestamp, undefined, durationMinutes, 'MANUAL', explicitSignificance, undefined, { onOperation: (id) => { operationId = id; } });
+          outcome = await onConfirmLog(activeTitle, cleanNotes, targetTimestamp, undefined, durationMinutes, 'MANUAL', explicitSignificance, undefined, { onOperation: (id) => { operationId = id; }, ...(request ?? {}) });
         } catch (err) {
-          if (err instanceof Error && err.message === UNVERIFIED_ACTIVITY_MESSAGE) { setUnresolvedOperation({ id: operationId }); return; }
+          // R16: the shared recovery contract withheld this submission (an earlier operation for this activity is still
+          // open -- after a remount, navigation or restart too): show THAT operation's recovery, never a new id.
+          if (err instanceof Error && err.message === UNVERIFIED_ACTIVITY_MESSAGE) { setUnresolvedOperation({ id: recoveryOperationOf(err) ?? operationId }); return; }
           throw err;
         }
+        setUnresolvedOperation(null);
         if (outcome === 'unresolved') { setUnresolvedOperation({ id: operationId }); return; } // kept open: never a second entry
       } else {
         // Insights Correctness + Historical Integrity V1 -- activeWindow is
@@ -207,6 +210,18 @@ export function PastActivityModal({
                 Check again
               </button>
             )}
+            {unresolvedOperation.id && (
+              <>
+                {' · '}
+                <button type="button" onClick={() => { void handleSubmit(undefined, { retryOf: unresolvedOperation.id! }); }} style={{ background: 'none', border: 'none', color: 'inherit', textDecoration: 'underline', cursor: 'pointer', padding: 0, fontSize: 13 }}>
+                  Retry that entry
+                </button>
+              </>
+            )}
+            {' · '}
+            <button type="button" onClick={() => { void handleSubmit(undefined, { separate: true }); }} style={{ background: 'none', border: 'none', color: 'inherit', textDecoration: 'underline', cursor: 'pointer', padding: 0, fontSize: 13 }}>
+              Save as a separate activity
+            </button>
           </div>
         )}
         {/* When -- quick offsets + a native time input */}

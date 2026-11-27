@@ -76,6 +76,8 @@ export interface ActivityOperationView {
   logSource?: string;
   /** ms epoch the operation was anchored (queued / decided). */
   at: number;
+  /** The account the operation belongs to (the projection is account-scoped; R16 recovery never crosses accounts). */
+  account?: string;
 }
 export type ActivityOperations = Readonly<Record<string, ActivityOperationView>>;
 
@@ -109,7 +111,43 @@ export function findAttachableOperation(
 
 /** R15: what an activity-logging call resolves to (a definitive failure rejects). */
 export type ActivityLogResult = 'confirmed' | 'pending' | 'unresolved';
-/** R15: `retryOf` = the user's Retry of THAT operation (same request id and body); `onOperation` learns the id of the operation the call creates or resumes, before it is dispatched. */
-export interface ActivityOperationRequest { retryOf?: string; onOperation?: (clientRequestId: string) => void }
+/**
+ * R15: `retryOf` = the user's Retry of THAT operation (same request id and body); `onOperation` learns the id of the
+ * operation the call creates or resumes, before it is dispatched. R16: `separate` = the user explicitly chose to log
+ * a NEW, separate activity although an earlier one for the same activity is still open (identical intent allowed).
+ */
+export interface ActivityOperationRequest { retryOf?: string; onOperation?: (clientRequestId: string) => void; separate?: boolean }
+
+/**
+ * R16 (39258 G6) -- THE shared recovery contract every entry point goes through (page.tsx handleLogActivity), so it
+ * does not depend on any component's local state, on remounts or on a history response:
+ * a NEW submission for an activity that still has an OPEN operation (pending or unresolved, from the durable
+ * projection -- restart-safe) is withheld until the user chooses: recover THAT operation (Check again / Retry under
+ * its original id) or deliberately log a separate activity (`separate`). The activity match only decides when to
+ * ASK; it never resolves, releases, deduplicates or merges anything.
+ */
+export class ActivityRecoveryRequiredError extends Error {
+  constructor(readonly clientRequestId: string, readonly activityTitle: string) {
+    super(UNVERIFIED_ACTIVITY_MESSAGE);
+    this.name = 'ActivityRecoveryRequiredError';
+  }
+}
+export const recoveryOperationOf = (err: unknown): string | undefined => (err instanceof Error && err.name === 'ActivityRecoveryRequiredError' ? (err as ActivityRecoveryRequiredError).clientRequestId : undefined);
+export function findRecoverableOperation(
+  operations: ActivityOperations | undefined,
+  next: { activityTitle: string; activityId?: string }
+): ActivityOperationView | undefined {
+  if (!operations) return undefined;
+  const title = next.activityTitle.trim().toLowerCase();
+  let best: ActivityOperationView | undefined;
+  for (const op of Object.values(operations)) {
+    if (!isOpen(op)) continue;
+    const same = next.activityId && op.activityId ? op.activityId === next.activityId : op.activityTitle.trim().toLowerCase() === title;
+    if (same && (!best || op.at > best.at)) best = op;
+  }
+  return best;
+}
+/** R16: the account's operations that may have been saved but could not be verified (shown on every surface). */
+export const unresolvedOperations = (operations: ActivityOperations | undefined) => Object.values(operations ?? {}).filter((op) => op.status === 'unresolved').sort((a, b) => b.at - a.at);
 /** R15: "Check again" for one operation (or, without an id, a re-read of the account's operations). */
 export type CheckActivity = (clientRequestId?: string) => Promise<OperationStatus>;

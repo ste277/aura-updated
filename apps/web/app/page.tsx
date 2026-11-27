@@ -32,7 +32,7 @@ import { installAccountBoundFetch } from '../lib/accountBoundFetch';
 import { readLegacySnapshot } from '../lib/offlineHabitQueue';
 import { UPGRADE_MESSAGE } from '../lib/activitySync';
 import { submitActivityLog, replayOfflineQueue, checkActivityOperation, operationStatusOf, type HabitLogPayload } from '../lib/activitySync';
-import { UNVERIFIED_ACTIVITY_MESSAGE, type ActivityLogResult, type ActivityOperationRequest, type ActivityOperations, type ActivityOperationView, type OperationStatus } from '../lib/pendingReplayReconciliation';
+import { UNVERIFIED_ACTIVITY_MESSAGE, ActivityRecoveryRequiredError, findRecoverableOperation, unresolvedOperations, type ActivityLogResult, type ActivityOperationRequest, type ActivityOperations, type ActivityOperationView, type OperationStatus } from '../lib/pendingReplayReconciliation';
 import { refreshAfterHomeCompletion } from '../lib/homeRefresh';
 import { selectTodaysPendingActivities } from '../lib/myDayPendingOverlay';
 import type { GuidanceUiState } from '../lib/bestForYouViewModel';
@@ -199,7 +199,9 @@ function DashboardPageInner() {
       next[so.clientRequestId] = {
         clientRequestId: so.clientRequestId,
         account: owner,
-        status: so.status,
+        // R16: an in-memory UNRESOLVED (the last answer proved nothing) is never downgraded to "pending" merely because
+        // its copy is still stored; only terminal durable evidence (or a durable unresolved marker) replaces it.
+        status: prev?.status === 'unresolved' && so.status === 'pending' ? 'unresolved' : so.status,
         activityTitle: typeof body?.activityTitle === 'string' ? body.activityTitle : prev?.activityTitle ?? '',
         activityId: typeof (body as unknown as { activityId?: unknown } | null)?.activityId === 'string' ? (body as unknown as { activityId: string }).activityId : prev?.activityId,
         logSource: typeof body?.logSource === 'string' ? body.logSource : prev?.logSource,
@@ -1525,6 +1527,13 @@ function DashboardPageInner() {
         // R15: this device's operations could not be read, so an earlier operation may still be unresolved: no
         // new operation until a read succeeds.
         throw new Error(UNVERIFIED_ACTIVITY_MESSAGE);
+      } else if (!operation?.separate) {
+        // R16 (39258 G6): the shared recovery contract -- an OPEN operation for this activity (durable projection,
+        // so it survives remount, navigation and restart) withholds a fresh submission until the user recovers it
+        // or explicitly logs a separate activity.
+        const mine = Object.fromEntries(Object.entries(operationsRef.current).filter(([, op]) => op.account === binding.account));
+        const open = findRecoverableOperation(mine, { activityTitle, activityId });
+        if (open) { operation?.onOperation?.(open.clientRequestId); throw new ActivityRecoveryRequiredError(open.clientRequestId, open.activityTitle); }
       }
       const tempId = `temp-${Date.now()}`;
       let dispatchBody: HabitLogPayload;
@@ -2020,6 +2029,23 @@ function DashboardPageInner() {
           <button type="button" onClick={() => { void handleCheckActivity().catch(() => undefined); }} style={{ marginLeft: 6, textDecoration: 'underline', background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', padding: 0, fontSize: 13 }}>
             Check again
           </button>
+        </div>
+      )}
+      {unresolvedOperations(operations).filter((op) => op.account === user.id).length > 0 && (
+        // AURA-ANDROID-REL-04 R16 (39258 G6) -- the shared recovery action, on EVERY surface and after any remount,
+        // navigation or restart (the projection is read from durable storage): each unresolved operation keeps its
+        // original id; Check again / Retry act on exactly that operation.
+        <div role="status" data-operation-state="unresolved-list" style={{ width: '100%', maxWidth: 560, marginBottom: 12, padding: 12, borderRadius: 10, border: '1px solid var(--as-border)', background: 'var(--as-surface)', fontSize: 13 }}>
+          {UNVERIFIED_ACTIVITY_MESSAGE}
+          <ul style={{ margin: '6px 0 0', paddingLeft: 18 }}>
+            {unresolvedOperations(operations).filter((op) => op.account === user.id).map((op) => (
+              <li key={op.clientRequestId} data-operation-id={op.clientRequestId}>
+                {op.activityTitle}{' '}
+                <button type="button" onClick={() => { void handleCheckActivity(op.clientRequestId).catch(() => undefined); }} style={{ background: 'none', border: 'none', color: 'inherit', textDecoration: 'underline', cursor: 'pointer', padding: 0, fontSize: 13 }}>Check again</button>{' · '}
+                <button type="button" onClick={() => { void handleLogActivity(op.activityTitle, undefined, undefined, undefined, undefined, undefined, undefined, op.activityId, { retryOf: op.clientRequestId }).catch(() => undefined); }} style={{ background: 'none', border: 'none', color: 'inherit', textDecoration: 'underline', cursor: 'pointer', padding: 0, fontSize: 13 }}>Retry</button>
+              </li>
+            ))}
+          </ul>
         </div>
       )}
       {pausedCount > 0 && (

@@ -1036,6 +1036,10 @@ jobs:
         env:
           TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
         run: npx ts-node --project tsconfig.jsdom-tests.json test/rel04ActivityOperationContract.test.ts
+      - name: Run REL-04 R16 operation-contract correction test (39258 G4-G6 witnesses on e6a6a66 vs current; negative controls)
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/rel04R16OperationCorrection.test.ts
       - name: Run REL-04 R3-head (b323d2a) reproduction test
         env:
           TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
@@ -1220,6 +1224,10 @@ jobs:
         env:
           REL04_SKIP_BUILD: '1'
         run: npx ts-node test/rel04ActivityOperationHomeChromiumDb.test.ts
+      - name: Run REL-04 R16 closure test (production build, real Chromium, PostgreSQL; JSON 429, Calendar remount/restart, contradictory receipt)
+        env:
+          REL04_SKIP_BUILD: '1'
+        run: npx ts-node test/rel04R16HomeChromiumDb.test.ts
   web-build:
     name: Next.js production build
     runs-on: ubuntu-latest

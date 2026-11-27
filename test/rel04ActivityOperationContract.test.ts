@@ -104,6 +104,9 @@ const decisionsOf = async (crid: string) => (await queueDump()).tombstones.filte
 const acceptedMarkers = async (crid: string) => (await decisionsOf(crid)).filter((d: any) => d.serverOutcome === 'accepted').length;
 const copies = async (crid: string) => (await queueDump()).records.filter((r: any) => r.clientRequestId === crid).length;
 const posts = () => dev.count('POST', route);
+/** R16: the complete persisted row the route returns for body(id) (identity + every persisted-intent field). */
+const fullRow = (id: string, owner = A, title = 'reviewed activity', extra: Record<string, unknown> = {}) => ({ id: 'srv-1', userId: owner, clientRequestId: id, activityTitle: title, activityId: null, activeWindow: 'NEUTRAL', logMinuteOfDay: 0, logTimestamp: '2026-11-24T06:00:00.000Z', durationMinutes: 30, notes: null, logSource: 'MANUAL', activitySignificance: 'MEDIUM', ...extra });
+const acceptedMarker = (s: Stack, id: string, row: unknown, payloadOverride?: string) => { const pl = s.q.canonicalPayload(item(id)); return { recordId: s.q.decisionKey(A, id), ownerUserId: A, clientRequestId: id, payload: pl, decision: 'settled', serverOutcome: 'accepted', at: 1, fmt: 'r8', possiblySent: true, receipt: { v: 2, kind: 'accepted', owner: A, crid: id, payload: payloadOverride ?? pl, serverRecordId: 'srv-1', row, at: 1 } }; };
 
 // ---- answers that are NOT authoritative evidence of this operation (the route is never reached)
 type Fake = 'html200' | 'malformed-json' | 'empty-json' | 'wrong-account' | 'wrong-request' | 'wrong-intent' | 'missing-record-id' | 'redirect';
@@ -207,18 +210,23 @@ async function main() {
     const html404 = (async (i: any, init: any = {}) => (String(init.method ?? 'GET').toUpperCase() === 'POST' ? new Response('<html>not found</html>', { status: 404, headers: { 'content-type': 'text/html' } }) : dev.fetch(i, init))) as any;
     const r1 = await s.sync.submitActivityLog(body('html-404'), 'tmp', html404);
     const r2 = await s.sync.submitActivityLog({ ...body('json-400'), activityId: 'no-such-catalog-activity' } as any, 'tmp', dev.fetch as any);
+    const r3 = await s.sync.submitActivityLog({ ...body('bad-ts'), logTimestamp: 'not-a-date' } as any, 'tmp', dev.fetch as any);
+    const r3d = (await decisionsOf('bad-ts'))[0];
     check('B a non-route 4xx (HTML 404) is NOT a definitive failure: unresolved, copy kept', r1.kind === 'outcome-unknown' && (await copies('html-404')) === 1);
-    check('B the route\'s own JSON refusal (400 Unknown activity) is the definitive failure "rejected 400", with a rejected receipt and the copy removed', r2.kind === 'rejected' && r2.status === 400 && (await copies('json-400')) === 0 && (await decisionsOf('json-400')).some((d: any) => d.receipt?.kind === 'rejected' && d.receipt.status === 400));
+    // R16 (39258 G5): a refusal is definitive ONLY when the route's deterministic validation of THIS body says so and the
+    // client re-derives the same failure from its own request; "Unknown activity" cannot be re-derived -> unresolved.
+    check('B R16: the route\'s 400 "Unknown activity" is NOT definitive (unresolved; copy kept, no rejected receipt)', r2.kind === 'outcome-unknown' && (await copies('json-400')) === 1 && !(await decisionsOf('json-400')).some((d: any) => d.receipt));
+    check('B R16: the route\'s 400 "logTimestamp must be a valid date." for a body whose timestamp IS invalid is the definitive failure, with a v2 rejected receipt naming its reason', r3.kind === 'rejected' && r3.status === 400 && r3d?.receipt?.v === 2 && r3d.receipt.kind === 'rejected' && r3d.receipt.reason === 'invalid-timestamp');
   }
 
   // ================================================================ C/D: marker authority
   {
     const markerCases: Array<[string, (s: Stack, id: string) => Record<string, unknown>, string]> = [
       ['proofless legacy accepted marker (correct key, value and payload; no receipt)', (s, id) => ({ recordId: s.q.decisionKey(A, id), ownerUserId: A, clientRequestId: id, payload: s.q.canonicalPayload(item(id)), decision: 'settled', serverOutcome: 'accepted', at: 1, fmt: 'r8' }), 'outcome-unknown'],
-      ['receipt naming another server account', (s, id) => { const pl = s.q.canonicalPayload(item(id)); return { recordId: s.q.decisionKey(A, id), ownerUserId: A, clientRequestId: id, payload: pl, decision: 'settled', serverOutcome: 'accepted', at: 1, fmt: 'r8', receipt: { v: 1, kind: 'accepted', owner: A, crid: id, payload: pl, serverRecordId: 'srv-1', row: { id: 'srv-1', userId: B, clientRequestId: id, activityTitle: 'reviewed activity', logTimestamp: '2026-11-24T06:00:00.000Z', durationMinutes: 30 }, at: 1 } }; }, 'outcome-unknown'],
-      ['receipt bound to another payload', (s, id) => { const pl = s.q.canonicalPayload(item(id)); return { recordId: s.q.decisionKey(A, id), ownerUserId: A, clientRequestId: id, payload: pl, decision: 'settled', serverOutcome: 'accepted', at: 1, fmt: 'r8', receipt: { v: 1, kind: 'accepted', owner: A, crid: id, payload: pl + 'x', serverRecordId: 'srv-1', row: { id: 'srv-1', userId: A, clientRequestId: id, activityTitle: 'reviewed activity', logTimestamp: '2026-11-24T06:00:00.000Z', durationMinutes: 30 }, at: 1 } }; }, 'outcome-unknown'],
-      ['rejection after a possible earlier send', (s, id) => { const pl = s.q.canonicalPayload(item(id)); return { recordId: s.q.decisionKey(A, id), ownerUserId: A, clientRequestId: id, payload: pl, decision: 'settled', serverOutcome: 'rejected', at: 1, fmt: 'r8', receipt: { v: 1, kind: 'rejected', owner: A, crid: id, payload: pl, status: 400, afterPossibleSend: true, at: 1 } }; }, 'outcome-unknown'],
-      ['VALID matching accepted receipt (D)', (s, id) => { const pl = s.q.canonicalPayload(item(id)); return { recordId: s.q.decisionKey(A, id), ownerUserId: A, clientRequestId: id, payload: pl, decision: 'settled', serverOutcome: 'accepted', at: 1, fmt: 'r8', possiblySent: true, receipt: { v: 1, kind: 'accepted', owner: A, crid: id, payload: pl, serverRecordId: 'srv-1', row: { id: 'srv-1', userId: A, clientRequestId: id, activityTitle: 'reviewed activity', logTimestamp: '2026-11-24T06:00:00.000Z', durationMinutes: 30 }, at: 1 } }; }, 'already-recorded'],
+      ['receipt naming another server account', (s, id) => acceptedMarker(s, id, fullRow(id, B)), 'outcome-unknown'],
+      ['receipt bound to another payload', (s, id) => acceptedMarker(s, id, fullRow(id), s.q.canonicalPayload(item(id)) + 'x'), 'outcome-unknown'],
+      ['rejection after a possible earlier send', (s, id) => { const pl = s.q.canonicalPayload(item(id)); return { recordId: s.q.decisionKey(A, id), ownerUserId: A, clientRequestId: id, payload: pl, decision: 'settled', serverOutcome: 'rejected', at: 1, fmt: 'r8', receipt: { v: 2, kind: 'rejected', owner: A, crid: id, payload: pl, status: 400, reason: 'missing-title', afterPossibleSend: true, at: 1 } }; }, 'outcome-unknown'],
+      ['VALID matching accepted receipt (D)', (s, id) => acceptedMarker(s, id, fullRow(id)), 'already-recorded'],
       ['valid discard fence with a DAMAGED (null) payload', (s, id) => ({ recordId: s.q.decisionKey(A, id), ownerUserId: A, clientRequestId: id, payload: null, decision: 'discarded', at: 1, fmt: 'r8', possiblySent: true }), 'not-stored:discarded'],
     ];
     for (const [label, mk, expect] of markerCases) {

@@ -5,7 +5,7 @@ import { getActionCards, getActivityDiscoveryCards, ActionCard } from '../../../
 import { LoggedEntryItem } from './CalendarViewSection';
 import { triggerHaptic } from '../lib/haptics';
 import { StatusBadge } from './ui';
-import { isOpen, UNVERIFIED_ACTIVITY_MESSAGE, type ActivityLogResult, type ActivityOperationRequest, type ActivityOperations, type CheckActivity } from '../lib/pendingReplayReconciliation';
+import { isOpen, UNVERIFIED_ACTIVITY_MESSAGE, recoveryOperationOf, type ActivityLogResult, type ActivityOperationRequest, type ActivityOperations, type CheckActivity } from '../lib/pendingReplayReconciliation';
 
 export interface TimelineWindowItem {
   name: string;
@@ -257,7 +257,13 @@ export function TimelineView({
       // so this rollback + visible error, already written here, is now
       // actually reachable.
       console.error('Error logging activity:', err);
-      if (err instanceof Error && err.message === UNVERIFIED_ACTIVITY_MESSAGE) { setUnverifiedTitle(title); return; } // blocked: never a new id
+      if (err instanceof Error && err.message === UNVERIFIED_ACTIVITY_MESSAGE) {
+        // blocked: never a new id. R16: the shared recovery contract names the open operation -- follow it.
+        const recovered = recoveryOperationOf(err);
+        if (recovered) setTimelineOps((prev) => ({ ...prev, [normTitle]: recovered }));
+        setUnverifiedTitle(title);
+        return;
+      }
       setOptimisticLogged((prev) => prev.filter((item) => item !== normTitle));
       setTimelineOps((prev) => { const { [normTitle]: _gone, ...rest } = prev; return rest; });
       setLogError(`Could not log ${title}. Try again.`);

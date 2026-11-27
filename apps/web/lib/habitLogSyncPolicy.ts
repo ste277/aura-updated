@@ -112,6 +112,11 @@ export interface BoundServerRow {
   logMinuteOfDay?: number;
   logTimestamp: string;
   durationMinutes: number;
+  /** R16: the complete persisted intent travels with the row, so a stored receipt can be re-validated. */
+  activityId: string | null;
+  notes: string | null;
+  logSource: string;
+  activitySignificance: string;
 }
 export interface OperationExpectation {
   account: string;
@@ -143,15 +148,42 @@ export function bindServerRow(raw: unknown, expect: OperationExpectation): RowBi
       ...(typeof row.logMinuteOfDay === 'number' ? { logMinuteOfDay: row.logMinuteOfDay } : {}),
       logTimestamp: row.logTimestamp as string,
       durationMinutes: row.durationMinutes as number,
+      activityId: persisted.activityId,
+      notes: persisted.notes,
+      logSource: persisted.logSource,
+      activitySignificance: persisted.activitySignificance,
     },
   };
+}
+
+/**
+ * R16 (39258 G5) -- the ONLY refusals that establish definitive non-commit: the route's own deterministic
+ * validation failures, recognised by status AND exact message AND the client's own re-evaluation of the same rule
+ * on the exact dispatch body (a refusal the client cannot predict from its own request is not evidence). Anything
+ * else -- 429, 404, any other 4xx, an unknown message, an unsupported body -- proves nothing about whether this
+ * operation was or will be written: it stays UNRESOLVED, its copy and identity kept for same-id recovery.
+ */
+export const DEFINITIVE_REFUSALS = {
+  'missing-title': { status: 400, error: 'Missing required fields.' },
+  'invalid-timestamp': { status: 400, error: 'logTimestamp must be a valid date.' },
+} as const;
+export type DefinitiveRefusal = keyof typeof DEFINITIVE_REFUSALS;
+export function definitiveRefusal(body: Record<string, unknown>, status: number, error: unknown): DefinitiveRefusal | null {
+  if (status === DEFINITIVE_REFUSALS['missing-title'].status && error === DEFINITIVE_REFUSALS['missing-title'].error) {
+    return typeof body.activityTitle !== 'string' || !body.activityTitle.trim() ? 'missing-title' : null;
+  }
+  if (status === DEFINITIVE_REFUSALS['invalid-timestamp'].status && error === DEFINITIVE_REFUSALS['invalid-timestamp'].error) {
+    const title = typeof body.activityTitle === 'string' ? body.activityTitle.trim() : '';
+    return title && typeof body.logTimestamp === 'string' && !Number.isFinite(new Date(body.logTimestamp).getTime()) ? 'invalid-timestamp' : null;
+  }
+  return null;
 }
 
 export type DecodedHabitLogResponse =
   /** Validated success: the server holds exactly this operation. */
   | { kind: 'accepted'; row: BoundServerRow }
-  /** The route's own definitive refusal of this request (a JSON error answer, not redirected). */
-  | { kind: 'rejected'; status: number }
+  /** R16: the route's own DEFINITIVE refusal of this exact body (definitiveRefusal), under the current lease. */
+  | { kind: 'rejected'; status: number; reason: DefinitiveRefusal }
   /** No response, or the server reported its own failure: the commit is unknown -- retry under the same id. */
   | { kind: 'retry' }
   /** The session cannot write this entry now (kept for its account). */
@@ -192,7 +224,10 @@ export async function decodeHabitLogResponse(res: Response | 'network-error', ex
     if (!isJson(res)) return { kind: 'unverified', reason: 'refusal-media-type' };
     const b = await jsonBody(res);
     const err = b.ok ? (b.value as { error?: unknown } | null)?.error : undefined;
-    return typeof err === 'string' && err ? { kind: 'rejected', status: res.status } : { kind: 'unverified', reason: 'refusal-schema' };
+    const reason = definitiveRefusal(expect.body, res.status, err);
+    if (!reason) return { kind: 'unverified', reason: 'unsupported-refusal' }; // e.g. a JSON 429: temporary, never terminal
+    if (!leaseCurrent()) return { kind: 'unverified', reason: 'account-lease' };
+    return { kind: 'rejected', status: res.status, reason };
   }
   if (res.status !== 200) return { kind: 'unverified', reason: 'status' };
   if (!isJson(res)) return { kind: 'unverified', reason: 'media-type' };

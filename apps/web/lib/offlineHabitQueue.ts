@@ -1,5 +1,5 @@
 import type { LoggedEntryItem } from '../components/CalendarViewSection';
-import type { BoundServerRow } from './habitLogSyncPolicy';
+import { bindServerRow, definitiveRefusal, DEFINITIVE_REFUSALS, type BoundServerRow, type DefinitiveRefusal } from './habitLogSyncPolicy';
 
 /**
  * Pending Activity Reload Visibility V1 -- the shape page.tsx's own
@@ -245,16 +245,22 @@ type Decision = { recordId: string; ownerUserId: string; clientRequestId: string
  *   rejected  the route's own refusal; `afterPossibleSend` when an earlier dispatch may have committed (then it is
  *             NOT a definitive failure: the operation stays unresolved)
  */
-export const RECEIPT_VERSION = 1;
+/**
+ * R16 (39258 G4/G5): version 2. A v2 accepted receipt carries the COMPLETE validated server row (identity + persisted
+ * intent) and is re-validated with THE row binder (bindServerRow) against the operation's own canonical payload on
+ * every read, recovery and consumption. A v2 rejected receipt names its definitive reason, re-checked against the
+ * payload (definitiveRefusal). Version-1 receipts (R15 development builds) carried no complete intent: unverified.
+ */
+export const RECEIPT_VERSION = 2;
 export interface AcceptedReceipt { v: typeof RECEIPT_VERSION; kind: 'accepted'; owner: string; crid: string; payload: string; serverRecordId: string; row: BoundServerRow; at: number }
-export interface RejectedReceipt { v: typeof RECEIPT_VERSION; kind: 'rejected'; owner: string; crid: string; payload: string; status: number; afterPossibleSend: boolean; at: number }
+export interface RejectedReceipt { v: typeof RECEIPT_VERSION; kind: 'rejected'; owner: string; crid: string; payload: string; status: number; reason: DefinitiveRefusal; afterPossibleSend: boolean; at: number }
 export type SettlementReceipt = AcceptedReceipt | RejectedReceipt;
 
 export function acceptedReceipt(owner: string, crid: string, payload: string, row: BoundServerRow): AcceptedReceipt {
   return { v: RECEIPT_VERSION, kind: 'accepted', owner, crid, payload, serverRecordId: row.id, row: { ...row }, at: Date.now() };
 }
-export function rejectedReceipt(owner: string, crid: string, payload: string, status: number, afterPossibleSend: boolean): RejectedReceipt {
-  return { v: RECEIPT_VERSION, kind: 'rejected', owner, crid, payload, status, afterPossibleSend, at: Date.now() };
+export function rejectedReceipt(owner: string, crid: string, payload: string, status: number, reason: DefinitiveRefusal, afterPossibleSend = false): RejectedReceipt {
+  return { v: RECEIPT_VERSION, kind: 'rejected', owner, crid, payload, status, reason, afterPossibleSend, at: Date.now() };
 }
 
 /**
@@ -280,12 +286,21 @@ export function validReceipt(r: unknown, owner: string, crid: string, payload: s
   if (!r || typeof r !== 'object') return null;
   const x = r as Record<string, unknown>;
   if (x.v !== RECEIPT_VERSION || x.owner !== owner || x.crid !== crid || x.payload !== payload) return null;
+  let body: Record<string, unknown>;
+  try { const v = JSON.parse(payload); if (!v || typeof v !== 'object' || Array.isArray(v)) return null; body = v; } catch { return null; }
+  if (body.clientRequestId !== crid) return null; // the canonical payload names its own request
   if (x.kind === 'accepted') {
-    const row = x.row as Record<string, unknown> | undefined;
-    if (!nonEmpty(x.serverRecordId) || !row || row.id !== x.serverRecordId || row.userId !== owner || row.clientRequestId !== crid) return null;
+    if (!nonEmpty(x.serverRecordId)) return null;
+    // THE same binding rule as a POST answer or GET evidence: account, request, record id AND persisted intent.
+    const bound = bindServerRow(x.row, { account: owner, clientRequestId: crid, body });
+    if (!bound.ok || bound.row.id !== x.serverRecordId) return null;
     return x as unknown as AcceptedReceipt;
   }
-  if (x.kind === 'rejected' && typeof x.status === 'number' && typeof x.afterPossibleSend === 'boolean') return x as unknown as RejectedReceipt;
+  if (x.kind === 'rejected' && typeof x.status === 'number' && x.afterPossibleSend === false && typeof x.reason === 'string' && x.reason in DEFINITIVE_REFUSALS) {
+    const reason = x.reason as DefinitiveRefusal;
+    if (DEFINITIVE_REFUSALS[reason].status !== x.status || definitiveRefusal(body, x.status, DEFINITIVE_REFUSALS[reason].error) !== reason) return null;
+    return x as unknown as RejectedReceipt;
+  }
   return null;
 }
 export function decisionAuthority(value: unknown, owner: string, crid: string, payload?: string): DecisionAuthority {
@@ -446,7 +461,8 @@ async function writeDecision(st: Stores, owner: string, crid: string, payload: s
   if (prior) {
     // R15: a marker that proves nothing is upgraded ONLY by positive authoritative evidence (a validated accepted
     // receipt) or replaced by the user's own durable discard; every valid decision stays first-write-wins.
-    const upgrade = decisionAuthority(prior, owner, crid).kind === 'unverified' && (receipt?.kind === 'accepted' || decision === 'discarded');
+    const validAccepted = receipt?.kind === 'accepted' && payload !== null && validReceipt(receipt, owner, crid, payload) !== null;
+    const upgrade = decisionAuthority(prior, owner, crid).kind === 'unverified' && (validAccepted || decision === 'discarded');
     if (!upgrade) {
       if (possiblySent && !prior.possiblySent) { const merged = { ...prior, possiblySent: true }; await asPromise(st.tombstones.put(merged)); return merged; }
       return prior;
@@ -975,6 +991,8 @@ export async function settleRecords(recordIds: Iterable<string>, token?: ClaimTo
         // R15: the receipt applies only to the exact identity it was validated for; the matching copies are removed
         // in the SAME transaction that persists it (only copies carrying this account, request id and payload).
         const receipt = opts.receipt && validReceipt(opts.receipt, o, crid, payload) ? opts.receipt : undefined;
+        // R16: a receipt that does not validate for THIS identity grants no settlement and no deletion authority.
+        if (opts.receipt && !receipt) { out.paused!++; continue; }
         const serverOutcome = receipt ? (receipt.kind === 'accepted' ? 'accepted' : 'rejected') : opts.serverOutcome;
         for (const copy of await activeCopies(st, o, crid, payload)) { await asPromise(st.records.delete(copy.recordId)); out.removed++; }
         await writeDecision(st, o, crid, payload, 'settled', now, true, serverOutcome, receipt);
@@ -1028,6 +1046,8 @@ export function onOperationsChanged(owner: string, cb: () => void): () => void {
  * copies, in one transaction. A valid discard / failure / other decision is never overridden.
  */
 export async function recordVerifiedReceipt(receipt: AcceptedReceipt): Promise<boolean> {
+  // R16: the receipt is validated (row binder against its own payload) BEFORE anything is removed.
+  if (validReceipt(receipt, receipt.owner, receipt.crid, receipt.payload)?.kind !== 'accepted') return false;
   try {
     const ok = await tx('readwrite', async (st) => {
       const a = decisionAuthority(await asPromise(st.tombstones.get(decisionKey(receipt.owner, receipt.crid))), receipt.owner, receipt.crid, receipt.payload);
