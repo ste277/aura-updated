@@ -1,0 +1,116 @@
+$ npx ts-node test/missedRecovery.test.ts
+# job=math-core-tests step=Run Missed recovery test env={}
+OK   57. an elapsed UPCOMING plan is recovery-eligible and reads MISSED
+OK   57. ACTIVE (happening now): no Missed Recovery
+OK   57. IMMINENT (starts soon): no Missed Recovery
+OK   57. future UPCOMING: no Missed Recovery
+OK   57. LOGGED (elapsed): no Missed Recovery
+OK   57. SKIPPED (elapsed): no Missed Recovery
+OK   57. MOVED (elapsed predecessor): no Missed Recovery
+OK   57/38. CANCELLED is not MISSED and not recoverable
+OK   57/49. no missed plan -> nothing recoverable (no section, no empty state)
+OK   58/44. now just BEFORE the end: not missed, not recoverable
+OK   58/44. now EXACTLY at the end: not missed (the agenda contract is end < now)
+OK   58/44. now just AFTER the end: missed and recoverable
+OK   42/58. cross-midnight: starts yesterday, ends today, end elapsed, UPCOMING -> MISSED and recoverable (absolute instants)
+OK   42/58. cross-midnight at now === end: NOT yet missed
+OK   44. a mounted Home whose agenda was built BEFORE the end re-derives MISSED against the live clock: at 10:00 not missed, at 10:01 missed, no longer "current"
+OK   43. MISSED derivation is instant-based: the recovery helper never touches a timezone, minute-of-day or the legacy converter
+OK   59/7. MISSED Done -> exactly POST /api/plans/m/log (no other endpoint)
+OK   59/10. MISSED Skip -> exactly POST /api/plans/m/skip
+OK   59/12. MISSED Move -> exactly POST /api/plans/m/move with only { newStartAt }
+OK   6/59. the recovery action set is exactly Done, Skip, Move -- no Cancel
+OK   60. Done HTTP 400: not confirmed, MISSED stays recoverable, guard released, retry issues a fresh request
+OK   60. Done HTTP 401: not confirmed, MISSED stays recoverable, guard released, retry issues a fresh request
+OK   60. Done HTTP 404: not confirmed, MISSED stays recoverable, guard released, retry issues a fresh request
+OK   60. Done HTTP 409: not confirmed, MISSED stays recoverable, guard released, retry issues a fresh request
+OK   60. Done HTTP 500: not confirmed, MISSED stays recoverable, guard released, retry issues a fresh request
+OK   60. Done network error: not confirmed, MISSED stays recoverable, guard released, retry issues a fresh request
+OK   60. Done malformed success (200, junk body): not confirmed, MISSED stays recoverable, guard released, retry issues a fresh request
+OK   60. Skip HTTP 400: not confirmed, MISSED stays recoverable, guard released, retry issues a fresh request
+OK   60. Skip HTTP 401: not confirmed, MISSED stays recoverable, guard released, retry issues a fresh request
+OK   60. Skip HTTP 404: not confirmed, MISSED stays recoverable, guard released, retry issues a fresh request
+OK   60. Skip HTTP 409: not confirmed, MISSED stays recoverable, guard released, retry issues a fresh request
+OK   60. Skip HTTP 500: not confirmed, MISSED stays recoverable, guard released, retry issues a fresh request
+OK   60. Skip network error: not confirmed, MISSED stays recoverable, guard released, retry issues a fresh request
+OK   60. Skip malformed success (200, junk body): not confirmed, MISSED stays recoverable, guard released, retry issues a fresh request
+OK   60. Move HTTP 400: not confirmed, MISSED stays recoverable, guard released, retry issues a fresh request
+OK   60. Move HTTP 401: not confirmed, MISSED stays recoverable, guard released, retry issues a fresh request
+OK   60. Move HTTP 404: not confirmed, MISSED stays recoverable, guard released, retry issues a fresh request
+OK   60. Move HTTP 409: not confirmed, MISSED stays recoverable, guard released, retry issues a fresh request
+OK   60. Move HTTP 500: not confirmed, MISSED stays recoverable, guard released, retry issues a fresh request
+OK   60. Move network error: not confirmed, MISSED stays recoverable, guard released, retry issues a fresh request
+OK   60. Move malformed success (200, junk body): not confirmed, MISSED stays recoverable, guard released, retry issues a fresh request
+OK   31. Done: a 200 whose plan is not LOGGED is FAILED (validation not weakened for MISSED)
+OK   32. Skip: a 200 whose plan is not SKIPPED is FAILED
+OK   33. Move: successor not UPCOMING / successor === original / from not MOVED are all FAILED (no fabricated successor)
+OK   61/20. Done + Skip: at most one lifecycle request (the second is BUSY), guard released afterwards
+OK   61/20. Done + Move: at most one lifecycle request (the second is BUSY), guard released afterwards
+OK   61/20. Skip + Move: at most one lifecycle request (the second is BUSY), guard released afterwards
+OK   61/20. Move + Move: at most one lifecycle request (the second is BUSY), guard released afterwards
+OK   61/20. Skip + Done: at most one lifecycle request (the second is BUSY), guard released afterwards
+OK   61/20. Move + Done: at most one lifecycle request (the second is BUSY), guard released afterwards
+OK   62/24. stale agenda MISSED + confirmed Done -> Completed, no longer Missed, no recovery controls
+OK   62/25. stale agenda MISSED + confirmed Skip -> Skipped, no recovery controls
+OK   62/26. stale agenda MISSED + confirmed Move (B today) -> A gone from the live Timeline, B at its new time and not missed, no recovery controls
+OK   26. a Move to TOMORROW does not inject B into today's Timeline; A is not recoverable
+OK   23. a fresh agenda (already LOGGED / SKIPPED) plus the confirmed fact agrees: resolved either way
+OK   50. resolving one missed plan leaves another independently recoverable
+OK   50. multiple MISSED plans are each recoverable, in existing chronological Timeline order, with no bulk/queue
+OK   17. MISSED alone is excluded from ACTIVE_PLAN / IMMINENT_PLAN
+OK   17. a missed plan never displaces the current actionable plan in Right Now
+OK   17. a plan that elapsed while Home stayed mounted leaves ACTIVE_PLAN (no stale "happening now")
+OK   27. after a confirmed Done / Skip / Move the stale reminder for the plan stays suppressed (plan-id masking; the reminder collection is untouched)
+OK   29. agenda stale + reminders fresh: the fact dominates the stale MISSED
+OK   29. agenda fresh + reminders stale: the stale reminder for the resolved plan is masked, nothing recoverable
+OK   29. agenda stale + another Home source failed (no guidance): a confirmed Skip still wins
+OK   28. every-refresh-fails: the confirmed fact map alone keeps A resolved on the untouched stale agenda (never reverts to MISSED); Move keeps A hidden
+OK   22. the next-item filter also skips a resolved missed plan
+OK   6. Missed Recovery offers Done, Skip and Move -- and NO Cancel
+OK   7/10/12/20. recovery calls the SAME shared handlers (one executor / one guard / one fact map): no second executor, no new request code
+OK   12/15. exactly ONE Move picker exists, shared by Right Now and Missed Recovery; one default-selection call site (no forked picker/default)
+OK   14. timezone: recovery + dashboard never use the legacy total function; Move stays on the strict resolver via resolveMoveDestination
+OK   3/4/78. MISSED is derived, not persisted: no migration directory's own contents reference missedAt/missed_at (count-independent -- holds regardless of how many unrelated migrations exist), no missedAt anywhere in source, no MISSED status written by the plan domain
+OK   16/18. the Timeline places recovery beneath the derived-MISSED row through a render slot, shows the calm "Missed" label, and owns no lifecycle logic
+OK   46. accessibility: labelled group, per-action labels naming the activity, Move trigger id for focus return; the Move form keeps labelled fields and Escape/Cancel
+OK   45/19. mobile: the three direct actions wrap (flexWrap) with 44px targets and no fixed widths; no overflow menu
+OK   47/48. focus: Done/Skip from the Timeline focus the resolved row (fallback: the Timeline region); Move keeps D3 behavior; row and region are programmatically focusable
+OK   21. no optimistic lifecycle: in every handler the confirmed fact is written only after the FAILED/non-MOVED branch has returned
+OK   51/52/53/54/55. no automatic recovery, recomposition, Timing Search, Constructor, Day Review or analytics in the recovery path
+OK   81. no new plan route / lifecycle endpoint: the plan routes remain log, move, skip
+OK   56. the recovery helper is small and pure: it imports only the agenda derivation and Home id helpers, no DB
+OK   HPG4-2. zero missed plans -> zero eligible ids (the bulk action does not render)
+OK   HPG4-2. exactly one missed plan -> exactly one eligible id (the >=2 button-visibility gate is a separate UI decision on this same list, not a different eligibility rule)
+OK   HPG4-2. two missed plans -> both eligible, in the Timeline's own existing chronological order, deduplicated
+OK   HPG4-2. no DONE / SKIPPED / future / CANCELLED activity is ever included -- excluded by missedRecoveryPlanId itself, not a second filter here
+OK   HPG4-2. a concurrently-resolved activity (a confirmed outcome already recorded for it) is excluded even though its stale agenda still says MISSED -- a mid-batch race with another device is never re-targeted
+OK   HPG4-2. the eligible set is a pure function of the arguments given, recomputed fresh each call -- never a cached/stale snapshot: the SAME timeline with an updated confirmed-outcomes map yields a different, smaller result
+OK   HPG4-2. all-success batch: exactly one POST /skip per eligible id, both SKIPPED, zero failures
+OK   HPG4-2. partial-success batch: each item attempted independently; succeeded/failed counted per item, never all-or-nothing
+OK   HPG4-2. all-failure batch: every item still attempted, all counted failed, no false success ever claimed
+OK   HPG4-2. missing/invalid response body: FAILED for both, never a false success -- same existing single-item contract, unchanged
+OK   HPG4-2. retry after partial success re-derives eligibility fresh (only the still-unresolved item), never replays the original stale id list
+OK   HPG4-2. duplicate-submission protection is a synchronous ref checked before any state write or await (same idiom as recomposition's own acceptInFlight / the executor's own inFlight Set) -- never React state alone, which cannot catch a same-tick double click
+OK   HPG4-2. no DONE mutation is possible from this path: the handler calls planExecutor.current.skip, never .complete, anywhere in its body
+OK   HPG4-2. the button only appears at 2+ eligible (missedSkipEligibleCount >= 2) and disables itself while busy -- the exact same skippingPlanIds busy set individual rows already read, not a new mechanism
+OK   HPG4-2. the confirmed-fact write happens only AFTER a SKIPPED result (no optimistic write), matching every other Home execution handler's discipline
+OK   HPG4-2. "Skip all missed" never appears inside the per-row renderMissedRecovery block (it is a page-level action, not a third per-row control) -- the banned-automation guard above (check 185) already proves the per-row module stays free of it
+OK   62. summarizeSkipAllOutcome: all-SKIPPED -> all succeeded, zero failed
+OK   62. summarizeSkipAllOutcome: a mix of SKIPPED/FAILED/BUSY -> only SKIPPED counts toward succeeded
+OK   62. summarizeSkipAllOutcome: all-failed (no SKIPPED anywhere) -> zero succeeded
+OK   62. summarizeSkipAllOutcome: an empty outcome list -> zero/zero, never a divide-by-zero or NaN
+OK   63. handleSkipAllMissed delegates its ENTIRE tally to summarizeSkipAllOutcome -- no manual succeeded/failed +=' arithmetic survives anywhere in the handler body (the exact pattern that let a counting regression slip past every other check in this file until now)
+OK   64. HPG4-3 -- the busy guard is released from an explicit finally block wrapping the batch's own await, so it is released even if collectSkipAllOutcomes unexpectedly throws (not only on the ordinary success path as before) -- never left permanently stuck, and a later call after a prior batch finished is allowed to proceed
+OK   65. handleSkipAllMissed's own outcomes array is built by calling the REAL exported collectSkipAllOutcomes (not a reimplemented loop) -- the exact second half of the gap an independent review found: corrupting Home's collection, not the tally, still passed every check in this file until this line existed to prove the handler has no parallel collection path
+OK   69. the per-item skip callback returns the ACTUAL executor result variable, never a hardcoded success literal -- unit-testing collectSkipAllOutcomes in isolation (checks 66-68 above) cannot catch a caller that hands it a callback claiming success regardless of the real outcome; this is the precise caller-side wiring bug an independent review's own Control B demonstrated slips past every test that only exercises collectSkipAllOutcomes/summarizeSkipAllOutcome directly
+OK   66. an item already busy (e.g. a concurrent individual Skip/Done/Move in flight on it) is collected as BUSY and never attempted -- the real skip transport is called for every OTHER item only
+OK   67. collectSkipAllOutcomes runs strictly sequentially (each item's skipOne fully resolves before the next one starts), never in parallel
+OK   68. collectSkipAllOutcomes composed with the REAL summarizeSkipAllOutcome on a mixed batch (one busy, one failed, two succeeded) produces the correct end-to-end counts -- the genuine production pipeline, not two isolated unit tests of its two halves
+OK   HPG4-3. collectSkipAllOutcomes genuinely propagates an unexpected skipOne throw rather than swallowing it -- the precondition that makes the handler's explicit try/finally (check 64) load-bearing
+OK   HPG4-3. Home: the outcome notice's role is conditional on succeeded === 0 (alert for all-failed, status otherwise) -- the exact literal expression, not a reimplementation
+OK   HPG4-3. Home: the existing success/partial-success/all-failed message text is byte-unchanged by the accessibility fix
+OK   HPG4-3. Home: no confirmation dialog was added alongside the accessibility or guard-cleanup fixes
+
+ALL MISSED RECOVERY CHECKS PASSED
+
+# exit=0 signal=

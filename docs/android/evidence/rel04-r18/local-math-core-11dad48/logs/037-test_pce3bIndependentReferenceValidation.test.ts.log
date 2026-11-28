@@ -1,0 +1,32 @@
+$ npx ts-node test/pce3bIndependentReferenceValidation.test.ts
+# job=math-core-tests step=Run PCE-3B independent reference validation (strict checks fail CI; observational findings are report-only, printed to this step's own log, and never fail it -- see the test file's own doc comment) env={}
+=== PCE-3B: Marriage/Griha Pravesh independent reference validation ===
+13 fixtures loaded, all DrikPanchang / New Delhi / Asia-Kolkata (see fixtures file for the disclosed location-coverage gap).
+OK   [STRICT] MARRIAGE-FAV-2026-02-06: Nakshatra matches published (Hasta)
+OK   [STRICT] MARRIAGE-FAV-2026-02-06: Tithi name matches published ignoring paksha (Panchami)
+OK   [STRICT] GRIHA_PRAVESH-FAV-2026-02-20: Nakshatra matches published (Uttara Bhadrapada)
+OK   [STRICT] GRIHA_PRAVESH-FAV-2026-02-20: Tithi name matches published ignoring paksha (Tritiya)
+OK   [STRICT] GRIHA_PRAVESH-FAV-2026-03-06: Nakshatra matches published (Chitra)
+OK   [STRICT] GRIHA_PRAVESH-FAV-2026-03-06: Tithi name matches published ignoring paksha (Tritiya)
+OK   [STRICT] MARRIAGE-EXCL-VENUS-COMBUSTION-2026-01-15: isCombust('Venus') agrees with published "Shukra Tara Asta"
+OK   [STRICT] MARRIAGE-EXCL-JUPITER-COMBUSTION-2026-08-01: isCombust('Jupiter') agrees with published "Guru Tara Asta"
+OK   [STRICT] MARRIAGE-EXCL-YOGA-2026-02-07: noon Yoga (Shula) is one of Aura's own Marriage avoid-Yogas, agreeing with published "Prohibited Yoga is corrupting most of the day"
+OK   [STRICT] GRIHA_PRAVESH-EXCL-WEEKDAY-2026-02-08: date resolves to Sunday as published
+OBS  GRIHA_PRAVESH-EXCL-WEEKDAY-2026-02-08: Aura has no Vara (weekday) rule for Griha Pravesh at all -- category C, traditional rule difference, not a defect.
+OBS  MARRIAGE-FAV-2026-02-08-MIDNIGHT-CROSSING: Nakshatra DISAGREES (Aura: Chitra, published: Swati); Tithi DISAGREES (Aura: Krishna Shasthi, published: Saptami, window starts only 8min after local midnight -- classification F, unresolved, requires a Tithi-transition-instant investigation, not fixed here).
+OBS  GRIHA_PRAVESH-FAV-2026-02-06-TRANSITION-SPANNING: Aura at published window-start instant: Nakshatra=Hasta, Tithi=Krishna Panchami. Published pair: Nakshatra="Chitra, Hasta", Tithi="Shashthi, Panchami" (ambiguous by source format -- category D, see fixture limitations).
+OBS  GRIHA_PRAVESH-EXCL-TITHI-2026-02-14: Noon-sample Tithi "Dvadashi" is NOT in Aura's own Griha Pravesh avoid-Tithi list. Exact instant published by DrikPanchang is unknown (day-level reason only), so this is recorded as unresolved (category D/F), not a confirmed gap.
+OBS  GRIHA_PRAVESH-EXCL-ADHIKA-MASA-2026-05-16 / GRIHA_PRAVESH-EXCL-ADHIKA-MASA-2026-05-17: Aura's classifySynodicMonthContaining() returns "NORMAL" for 2026-05-16 and "ADHIKA" for 2026-05-17 -- NEITHER is ADHIKA, though published source flags both as Adhika/leap-month-related. Aura DOES detect a real 2026 Adhika Masa, but for synodic month 2026-06-15..2026-07-14, about one lunar month later than these published dates. Classified as unresolved convention/boundary difference (category B/F), NOT a confirmed defect -- Aura's leap-month detection is not absent, just not coincident with this specific publisher's flagged dates. Also: Aura's Griha Pravesh rule pack has no period-exclusion rule at all today regardless (category C, matches PCE-1/PCE-3A's already-identified gap).
+OBS  MARRIAGE-EXCL-SOLAR-MONTH-2026-09-01: "Prohibited Solar month" claim not compared against a specific Aura function in this pass -- Aura's Chaturmas machinery is lunar/Sankranti-framed, not solar-month-framed by name, and whether these are the same underlying mechanism is unresolved (category F). Recorded as a research gap for a future milestone, not investigated further here.
+
+=== OBSERVATIONAL SUMMARY (never fails this test) ===
+OBS  GRIHA_PRAVESH-EXCL-WEEKDAY-2026-02-08: Aura has no Vara (weekday) rule for Griha Pravesh at all -- category C, traditional rule difference, not a defect.
+OBS  MARRIAGE-FAV-2026-02-08-MIDNIGHT-CROSSING: Nakshatra DISAGREES (Aura: Chitra, published: Swati); Tithi DISAGREES (Aura: Krishna Shasthi, published: Saptami, window starts only 8min after local midnight -- classification F, unresolved, requires a Tithi-transition-instant investigation, not fixed here).
+OBS  GRIHA_PRAVESH-FAV-2026-02-06-TRANSITION-SPANNING: Aura at published window-start instant: Nakshatra=Hasta, Tithi=Krishna Panchami. Published pair: Nakshatra="Chitra, Hasta", Tithi="Shashthi, Panchami" (ambiguous by source format -- category D, see fixture limitations).
+OBS  GRIHA_PRAVESH-EXCL-TITHI-2026-02-14: Noon-sample Tithi "Dvadashi" is NOT in Aura's own Griha Pravesh avoid-Tithi list. Exact instant published by DrikPanchang is unknown (day-level reason only), so this is recorded as unresolved (category D/F), not a confirmed gap.
+OBS  GRIHA_PRAVESH-EXCL-ADHIKA-MASA-2026-05-16 / GRIHA_PRAVESH-EXCL-ADHIKA-MASA-2026-05-17: Aura's classifySynodicMonthContaining() returns "NORMAL" for 2026-05-16 and "ADHIKA" for 2026-05-17 -- NEITHER is ADHIKA, though published source flags both as Adhika/leap-month-related. Aura DOES detect a real 2026 Adhika Masa, but for synodic month 2026-06-15..2026-07-14, about one lunar month later than these published dates. Classified as unresolved convention/boundary difference (category B/F), NOT a confirmed defect -- Aura's leap-month detection is not absent, just not coincident with this specific publisher's flagged dates. Also: Aura's Griha Pravesh rule pack has no period-exclusion rule at all today regardless (category C, matches PCE-1/PCE-3A's already-identified gap).
+OBS  MARRIAGE-EXCL-SOLAR-MONTH-2026-09-01: "Prohibited Solar month" claim not compared against a specific Aura function in this pass -- Aura's Chaturmas machinery is lunar/Sankranti-framed, not solar-month-framed by name, and whether these are the same underlying mechanism is unresolved (category F). Recorded as a research gap for a future milestone, not investigated further here.
+
+ALL PCE-3B STRICT CHECKS PASSED
+
+# exit=0 signal=

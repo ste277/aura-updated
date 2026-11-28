@@ -1,0 +1,56 @@
+$ npx ts-node --project tsconfig.jsdom-tests.json test/rel04AccountIsolation.test.ts
+# job=math-core-tests step=Run REL-04 account isolation integration test (IR-01/IR-03) env={"TS_NODE_COMPILER_OPTIONS":"{\"jsx\":\"react-jsx\"}"}
+OK   SB1 habit-logs route: A expected + B session -> 409 account_mismatch, zero db calls
+OK   SB2 habit-logs route: unbound (old client), signed in -> 503 client_upgrade_required, no-store, nothing written
+OK   SB3 habit-logs route: unbound + expired session -> the same 503 (decided before authentication, never 401)
+OK   SB4 the header never authorizes: bound request without a session -> 401
+OK   SB5 plans route (real handler): mismatch -> 409; unbound -> 503 upgrade (signed in and expired); zero db calls
+OK   SB6 logout bound to A while the session is B -> 409, cookie untouched (no Set-Cookie)
+OK   SB7 (R3) unbound legacy logout is refused (503 upgrade, no-store) and never clears a cookie
+OK   SB8 middleware: account-sensitive READ stating A with B's cookie -> 409 (no B data returned)
+OK   SB9 middleware passes an invalid session through; the route answers 401
+OK   C1 sign-out asked about the 2 pending logs, acknowledged, discarded exactly them
+OK   C1 B replays nothing; nothing of A stored under B
+OK   C2 the running replay is aborted by the transition
+OK   C2 sign-out waited, then counted all 3 still-pending logs
+OK   C2 nothing reached the server under B
+OK   C3(before) sign-out aborted the in-flight write; its outcome is unresolved, so it STAYS in A's queue
+OK   C3(before) the confirmation counts it, says it may already be saved, and Cancel keeps A signed in
+OK   C3(before) replay with the original clientRequestId resolves it exactly once for A (server had not committed)
+OK   C3(after) sign-out aborted the in-flight write; its outcome is unresolved, so it STAYS in A's queue
+OK   C3(after) the confirmation counts it, says it may already be saved, and Cancel keeps A signed in
+OK   C3(after) replay with the original clientRequestId resolves it exactly once for A (server had committed)
+OK   C4 refused by the server (409), kept for A, nothing stored for B
+OK   C5a two tabs enqueue for A: both entries kept (no shared-array overwrite)
+OK   C5b a second tab's replay while one runs is excluded by the shared lock
+OK   C5c tab1 settled and removed only the entries it read; tab2's new entry survived
+OK   C5d confirmed discard removes exactly the confirmed snapshot; work added afterwards is kept for A
+OK   C6 without Web Locks two tabs may replay concurrently; nothing is lost and nothing is duplicated (clientRequestId)
+OK   C7a write fails AND storage write fails -> not stored and NOT sent (R9: storage-unavailable, never claimed pending, no POST)
+OK   C7b unreadable storage: asked (cannot check) and Cancel keeps the session
+OK   C7c removal failure after acknowledged logout: signed out AND reported truthfully (2 not removed)
+OK   C7d the entries that could not be removed stay A's: never sent under B
+OK   C8a logout request that never settles: bounded; reconciled to the same account -> failed, A kept with its queue
+OK   C8b acknowledgement body that never finishes (server DID sign out): bounded, reconciled -> signed-out-unconfirmed, queue kept
+OK   C8c logout AND reconciliation never settle: bounded -> unverified; bound writes refused; queue kept
+OK   C8d recovery: a fresh session answer resumes A (the Retry path)
+OK   C9a 500 after the server changed the session is NOT treated as "still A": reconciled -> signed-out-unconfirmed
+OK   C9b 500 with the session unchanged: A resumes only after a fresh session answer
+OK   C9c unexpected answer 'html200' is never an acknowledgement; reconciled -> failed, A kept
+OK   C9c unexpected answer 'redirect' is never an acknowledgement; reconciled -> failed, A kept
+OK   C9c unexpected answer 'json200-wrong' is never an acknowledgement; reconciled -> failed, A kept
+OK   C9c unexpected answer 'json-suffix-type' is never an acknowledgement; reconciled -> failed, A kept
+OK   C10 (Web Locks) sign-in in another tab while logout is pending is refused (BUSY), no verify-code sent
+OK   C10 (Web Locks) a concurrent logout in another tab is refused (busy): one logout request
+OK   C10 (Web Locks) after the logout completes, B signs in and is confirmed; the old logout cannot clear it
+OK   C10 (marker fallback) sign-in in another tab while logout is pending is refused (BUSY), no verify-code sent
+OK   C10 (marker fallback) a concurrent logout in another tab is refused (busy): one logout request
+OK   C10 (marker fallback) after the logout completes, B signs in and is confirmed; the old logout cannot clear it
+OK   C11 A's logout carrying B's session is refused by the server: B stays signed in; client switches to B; A's queue kept
+OK   C12a concurrent same-epoch answers: the newer (B) wins; the late older (A) answer is never applied -- its caller gets the newer answer
+OK   C12b the held "A" answer across a cross-tab invalidation is discarded; a fresh check finds B (A is not restored)
+OK   C12c a session read in flight when a transition starts is aborted (never applied); the caller gets stale or a FRESH re-check; account unchanged after Cancel
+
+50 passed, 0 failed
+
+# exit=0 signal=

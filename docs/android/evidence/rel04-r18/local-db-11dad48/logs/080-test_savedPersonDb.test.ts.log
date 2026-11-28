@@ -1,0 +1,22 @@
+$ npx ts-node test/savedPersonDb.test.ts
+# job=day-constructor-acceptance-db-tests step=Run SavedPerson DB test env={}
+OK   createSavedPerson returns a persisted row with an id
+OK   createSavedPerson persists the exact name/relationship submitted
+OK   createSavedPerson is owned by the creating user
+OK   listSavedPeople returns exactly ownerA's people, in alphabetical order
+OK   listSavedPeople for ownerA never includes ownerB's person
+OK   listSavedPeople for ownerB only returns ownerB's person
+OK   getSavedPersonForOwner returns null when the id belongs to a DIFFERENT owner (ownerB requesting ownerA's person)
+OK   updateSavedPerson throws when ownerB attempts to update ownerA's person
+OK   deleteSavedPerson throws when ownerB attempts to delete ownerA's person
+OK   The cross-owner update/delete attempts left ownerA's record completely untouched
+OK   updateSavedPerson (correct owner) succeeds and persists the change
+OK   getSavedPersonNatalContext returns a natal context for a valid, owned person
+OK   getSavedPersonNatalContext derives a Janma Nakshatra
+OK   getSavedPersonNatalContext derives a Janma Rashi
+OK   getSavedPersonNatalContext returns null (not another owner's data) when called with the wrong owner
+OK   deleteSavedPerson (correct owner) actually removes the row
+
+ALL SAVED PERSON DB CHECKS PASSED
+
+# exit=0 signal=

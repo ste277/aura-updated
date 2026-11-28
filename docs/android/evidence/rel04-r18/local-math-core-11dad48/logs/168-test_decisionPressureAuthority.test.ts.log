@@ -1,0 +1,83 @@
+$ npx ts-node test/decisionPressureAuthority.test.ts
+# job=math-core-tests step=Run decision pressure authority test env={}
+=== the real tree conforms to the authority model ===
+OK   THE REAL PRODUCTION TREE HAS ZERO AUTHORITY VIOLATIONS (589 production files scanned)
+OK   the scanned set is the whole production surface (apps/web lib/app/components and every package src), and the deriver, evidence and facts modules are in it
+=== the authority chain, pinned stage by stage ===
+OK   STAGE 1 -- providers produce the MUTABLE DecisionFacts transport: the Goal provider imports and returns DecisionFacts and never touches DecisionEvidence or pressure
+OK   STAGE 2 -- DecisionFacts is the transport type, defined once in decisionFacts.ts (an exported mutable interface, not readonly)
+OK   STAGE 3 -- the ONE converter facts -> evidence is `buildDecisionEvidence(facts)`, defined in decisionEvidence.ts and called from exactly one other production place: the preparation stage
+OK   STAGE 4 -- DecisionEvidence is the immutable, readonly, by-value authority: its module imports only types, freezes, and carries no policy
+OK   STAGE 5 -- the deriver accepts ONLY immutable evidence (`readonly evidence: DecisionEvidence | undefined`) and imports it from decisionEvidence
+OK   STAGE 6 -- the pressure type is categorical and defined once, in the deriver: `NONE | LAST_KNOWN_OPPORTUNITY`
+OK   the compile-time limit is documented, not relied on: DecisionFacts IS structurally assignable to DecisionEvidence (this line type-checks), so the guard above -- not the compiler -- is what keeps facts out of policy
+OK   the real chain end to end on pure data: facts -> evidence (a distinct, frozen copy) -> pressure LAST_KNOWN_OPPORTUNITY; the mutable facts object is not the evidence
+=== exact allowlists (any new reader must be added on purpose) ===
+OK   PRESSURE LITERAL AUTHORITY: `LAST_KNOWN_OPPORTUNITY`, `DecisionPressure`, `deriveDecisionPressure` and every pressure identifier appear in exactly five production files -- the P2b deriver, since O5 P3b the two inert shadow modules and, since O5 P4a, the two inert promotion-input modules that consume its derived value (none of them is read by the Constructor)
+OK   the word "pressure" appears only in the deriver, the P3b shadow modules, the P4a promotion-input modules and the stronger-than-pressure helper (whose names mark a position in the precedence order), and in unrelated UI copy ("low-pressure practice" in the action-card catalog)
+OK   ONLY THE INERT SHADOW AND PROMOTION-INPUT MODULES IMPORT THE DERIVER (P3b / P4a): the evaluator and the assembler import its type, the observation and preparation boundaries call it over immutable evidence; nothing in the Constructor, comparator, placement, capacity, replenishment, preview, signing, acceptance or persistence imports it, and there is no active policy consumer (P4 / P5 add consumers deliberately, by amending PRESSURE_IMPORTER_ALLOW and then satisfying the consumer rules)
+OK   DECISIONFACTS BOUNDARY: exactly eight production files import or name the mutable transport -- orchestrator, preview boundary, DayIntent field, evidence converter, preparation stage, the facts module, the Goal provider and the opportunity enrichment
+OK   DECISIONFACTS CANNOT BECOME POLICY AUTHORITY: no module that names pressure, imports the deriver or imports DecisionEvidence for policy also names DecisionFacts (the deriver and every future consumer are on the evidence side of the boundary)
+OK   EVIDENCE BOUNDARY: only the preparation stage and the deriver import DecisionEvidence; only they, the evidence module and the orchestrator that invokes the stage name it
+OK   NOTHING READS DECISIONFACTS TO DECIDE: the `.decisionFacts` DayIntent field and the by-intent facts map are read only at the orchestrator / preview boundary that carries them
+OK   RAW FIELD "remainingInPeriod": read only by its allowlisted producer / transport / evidence / deriver modules
+OK   RAW FIELD "completedInPeriod": read only by its allowlisted producer / transport / evidence / deriver modules
+OK   RAW FIELD "committedInPeriod": read only by its allowlisted producer / transport / evidence / deriver modules
+OK   RAW FIELD "targetPerPeriod": read only by its allowlisted producer / transport / evidence / deriver modules
+OK   RAW FIELD "LOCAL_CALENDAR_WEEK": read only by its allowlisted producer / transport / evidence / deriver modules
+OK   RAW FIELD "afterStartViableDays": read only by its allowlisted producer / transport / evidence / deriver modules
+OK   RAW FIELD "afterStartUnknownDays": read only by its allowlisted producer / transport / evidence / deriver modules
+OK   RAW FIELD "afterStartEvaluatedDays": read only by its allowlisted producer / transport / evidence / deriver modules
+OK   RAW FIELD "startDateState": read only by its allowlisted producer / transport / evidence / deriver modules
+OK   RAW FIELD "viableDays": read only by its allowlisted producer / transport / evidence / deriver modules
+OK   RAW FIELD "unknownDays": read only by its allowlisted producer / transport / evidence / deriver modules
+OK   RAW FIELD "durationBasis": read only by its allowlisted producer / transport / evidence / deriver modules
+OK   RAW FIELD "GENERIC_FALLBACK": read only by its allowlisted producer / transport / evidence / deriver modules
+OK   RAW FIELD "KNOWN_FEASIBLE": read only by its allowlisted producer / transport / evidence / deriver modules
+OK   RAW FIELD "coverage" (an everyday word elsewhere): wherever it appears with the opportunity-fact vocabulary it is in the producer / transport / evidence / deriver modules only
+OK   SINGLE DERIVATION AUTHORITY: of all production code, ONLY the deriver compares a raw scarcity field (`afterStartViableDays`, `afterStartUnknownDays`, `durationBasis`, `startDateState`, `remainingInPeriod`, ...) -- producers assign, the evidence module copies, nobody else decides
+=== inertness: nothing that decides, places, persists or presents mentions pressure ===
+OK   the Constructor, precedence comparator, placement, capacity, replenishment loop, preview boundary, signing, acceptance, persistence, Recomposition, presentation, providers, preparation and evidence modules contain no pressure reference
+OK   COMPARATOR UNREAD: `compareByOverloadPrecedence` (the overload precedence the Constructor sorts by) reads no decision facts, evidence, recurrence, opportunity, pressure or raw fact field
+OK   the Constructor, its capacity module and the replenishment / placement code never import the evidence, facts or deriver modules (dayConstructor.ts and dayCapacity.ts name none of them)
+OK   NO PERSISTENCE: no Prisma model or field, and no migration directory's own contents, mentions pressure; no migration was added (count-independent)
+OK   NO PREVIEW / SIGNING / DAYINTENT FIELD: the preview request, the signed result integrity module, DayIntent and ProposedItem / DeferredItem carry no pressure
+OK   DECISION-MODULE INVENTORY: the decision / pressure / contention / shadow / opportunity modules are exactly the known set -- since P2c: the P3a contention trace, the three P3b shadow-stage modules and the two P2d scheduling-snapshot modules (read-consistency only; neither carries pressure policy) and, since P4b2a, the pure promotion contention authority (a typed projection of P3a events; no pressure read) and, since P4b4, the inert same-run shadow policy composition (composes P4b2 / P4b3 over one run; reads no pressure) and, since O5 SHADOW EVIDENCE, the pure per-run evidence derivation (reuses the real selector / gate / materializer; reads no pressure) and, since P4b5, the server-controlled shadow execution boundary (OFF by default; mode check, failure isolation and minimal metrics only); no active-policy or explanation module exists yet (P4 / P5 own them and must amend this list)
+OK   no production identifier for an ACTIVE pressure policy or a pressure explanation exists (the P3a contention trace and the P3b shadow stage are the sanctioned, inert additions; their own guards, contentionTraceArchitecture.test.ts and shadowPressureArchitecture.test.ts, own their producer and consumer allowlists)
+OK   the contention trace is orthogonal to pressure: the trace module and every file that names it mention no pressure, evidence or DecisionFacts -- except the two inert P3b shadow modules and the two inert P4a promotion-input modules, which are the sanctioned places the two observations are combined (nothing of the P2c authority chain is read by the trace itself)
+=== consumers, source neutrality and value-vs-pressure (rules on the real deriver; consumer rules are vacuous until a consumer exists) ===
+OK   SOURCE NEUTRALITY: the deriver branches on no Goal, goal-demand, manual, automatic, provenance, hand-off, Rhythm, intent id, title, activity id or UI source (and has no id, title or source input)
+OK   VALUE vs PRESSURE: the deriver reads no importance, deadline, original order or target date -- importance / deadline are user / value / explicit-precedence signals; pressure is the temporal cost of deferral, and no module combines them (P2c does not)
+OK   the pressure CONSUMER set is exactly the two inert P3b shadow modules and the two inert P4a promotion-input modules, and EVERY consumer rule holds for them on the real tree (no DecisionFacts, no raw fact field, no source concept, no importance / deadline / original order / target date -- the value vocabulary lives only in the separate stronger-than-pressure helper, which names no pressure, evidence or facts)
+=== MUTATIONS OF THE GUARD: each violation class, injected into the real tree, is detected ===
+OK   MUTATION: the deriver reads DecisionFacts instead of DecisionEvidence (imports the mutable transport) -> detected
+OK   MUTATION: the deriver swaps its evidence input for facts (`readonly evidence` replaced by `readonly facts: DecisionFacts`) -> detected
+OK   MUTATION: a SECOND module reimplements pressure from the raw recurrence / opportunity fields -> detected (raw-field readers and the single comparison authority)
+OK   MUTATION: a second module reads durationBasis / startDateState to decide something of its own -> detected
+OK   MUTATION: a source-specific pressure branch (`intentId.startsWith("goal-demand")`) in the deriver -> detected
+OK   MUTATION: the deriver combines pressure with importance / a deadline -> detected
+OK   MUTATION: a direct pressure read inside the precedence comparator file (dayIntent.ts imports and calls the deriver) -> detected
+OK   MUTATION: pressure read inside the Constructor / placement (dayConstructor.ts names LAST_KNOWN_OPPORTUNITY) -> detected
+OK   MUTATION: pressure added to the preview, the signed result, acceptance persistence or the schema surface -> detected
+OK   MUTATION: a pressure consumer that also reads DecisionFacts, a raw fact field, a source concept or importance -> detected by every consumer rule
+OK   MUTATION: a new module imports the immutable evidence outside the preparation stage and the deriver -> detected
+OK   MUTATION: a new module names DecisionFacts outside the transport allowlist -> detected
+OK   MUTATION: the stronger-than-pressure helper names pressure / evidence / facts (value and pressure merged into one module) -> detected
+OK   MUTATION: a shadow consumer that reads a value signal or a source concept -> detected by the consumer rules
+OK   the mutations were applied to in-memory copies only: the real tree still has zero violations afterwards
+=== behavior anchors (the semantic mutations: fallback or an unknown day must never qualify) ===
+OK   ANCHOR: the fully qualifying scarce evidence is LAST_KNOWN_OPPORTUNITY; the same evidence with a GENERIC_FALLBACK duration is NONE (fallback never qualifies)
+OK   ANCHOR: an UNKNOWN later day never qualifies (afterStartUnknownDays 1 with the totals kept consistent)
+OK   ANCHOR: PARTIAL / UNKNOWN coverage, an UNKNOWN or infeasible start day, and a later viable day never qualify
+OK   ANCHOR: absent evidence and FIXED flexibility are NONE
+=== required CI wiring (a guard that is not run guards nothing) ===
+OK   the authority guard and the pure catalog-reachability suite run in the required PURE job (math-core-tests = "Ephemeris / panchang tests")
+OK   the real-producer reachability suite runs in the required DB job (day-constructor-acceptance-db-tests = "Day Constructor acceptance DB tests")
+OK   the P2b suites and the P2a evidence suites are still required where they were (pure: decisionPressure, decisionPressureArchitecture, decisionEvidence, decisionEvidenceArchitecture; DB: decisionPressureDb, decisionEvidenceDb)
+=== no flaky mechanics (the #201 lesson) and honest claims ===
+OK   the new behavioral suites assert product invariants only: no heap layout (ctid), VACUUM, query-plan, random, timer or wall-clock mechanics
+OK   no assertion label in the new behavioral suites claims pressure is wired or active, changes a Constructor outcome, is snapshot-consistent, or that P4 is ready
+OK   P2D RETAINED: the evidence and preparation modules still contain no REPEATABLE READ / snapshot machinery -- DecisionEvidence is immutable, but its recurrence and opportunity inputs are not yet read from one coherent scheduling snapshot (P2c may approve P3 shadow; it must not approve P4 activation)
+ALL DECISION PRESSURE AUTHORITY CHECKS PASSED
+
+# exit=0 signal=

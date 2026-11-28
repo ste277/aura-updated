@@ -1,0 +1,21 @@
+$ npx ts-node test/dailyGuidanceDailyRhythmAlignment.test.ts
+# job=math-core-tests step=Run Daily Guidance Daily Rhythm alignment test env={}
+OK   1. dailyRhythmPrefsFromUser reads workStart/workEnd/workDays verbatim off the User row
+OK   6. missing Daily Rhythm preferences (fields absent) -> workStart/workEnd both null, workDays []
+OK   7. incomplete preferences (workStart set, workEnd null) are read as-is, not coerced/guessed
+OK   2. personal activity with an outside-work candidate in the batch -> only outside-work candidates survive
+OK   2. the surviving candidates keep their original relative order (earlier-batch candidate stays rank 1)
+OK   1/8. personal activity, no outside-work candidate available -> falls back to the full original set (never empty)
+OK   3. work activity (deep-work) on a workday -> only the inside-work candidate is kept (re-baselined by AURA-PREF-01: work activities now prefer working hours)
+OK   3b. work activity with no inside-work candidate -> full original set (never empty) (re-baselined by AURA-PREF-01: work activities now prefer working hours)
+OK   4. short-break activity (tea-break) during work hours -> unchanged, never excluded
+OK   5. personal activity on a non-configured workday (Saturday) -> unchanged, no workday restriction inherited
+OK   6 (composed). no Daily Rhythm preferences configured -> unchanged for a personal activity too (unconfigured = no-op)
+OK   7 (composed). incomplete preferences (one field null) -> treated as unconfigured, safe no-op, no exception thrown
+OK   9. an unclassifiable activity -> unchanged, no classification guessed, stable existing order preserved
+OK   CONTROL A target: an outside-work candidate IS promoted to rank 1 when Daily Rhythm applies
+OK   CONTROL B target: an all-inside-work-hours personal activity still yields a non-empty (fallback) result
+
+ALL DAILY GUIDANCE DAILY RHYTHM ALIGNMENT CHECKS PASSED
+
+# exit=0 signal=

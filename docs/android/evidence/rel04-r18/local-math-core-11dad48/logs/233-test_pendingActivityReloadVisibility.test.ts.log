@@ -1,0 +1,53 @@
+$ npx ts-node --project tsconfig.jsdom-tests.json test/pendingActivityReloadVisibility.test.ts
+# job=math-core-tests step=Run pending activity reload visibility test env={}
+OK   readOfflineHabitQueue reads back the one queued entry
+OK   the reconstructed entry has syncStatus === 'pending' (4. no accidental promotion -- always literal, never derived)
+OK   the reconstructed entry preserves activityTitle/loggedAt/notes/source/significance from the queue
+OK   two queued entries both reconstruct independently
+OK   each keeps its own distinct id (clientRequestId)
+OK   reconstructing the same queued item twice yields the same id (stable identity across repeated reloads)
+OK   clientRequestId is carried onto the reconstructed entry itself (never a freshly generated identity)
+OK   an item removed from the queue is no longer read back
+OK   the remaining still-queued item is still read back
+OK   no queue key at all -> empty array, no throw
+OK   corrupt JSON -> empty array, no throw
+OK   a non-array value -> empty array, no throw
+OK   a malformed sibling is dropped while a valid sibling in the SAME queue still reconstructs (one bad item does not destroy the rest)
+OK   an invalid logSource degrades to the safe MANUAL default rather than propagating garbage
+OK   3. confirmed entries always survive the merge unconditionally
+OK   13. dedupe -- a confirmed entry with the same clientRequestId wins; the reconstructed pending duplicate is dropped (exactly one logical row remains)
+OK   17. retry preservation -- a pending entry with NO confirmed counterpart, but still present in the live queue (5xx/network retry), survives the merge
+OK   16. permanent-rejection removal -- a pending entry with NO confirmed counterpart AND no longer in the queue (4xx, already removed) is dropped, not left as a zombie (PR #86's own invariant, preserved)
+OK   confirmed entries from OTHER activities are unaffected by an unrelated pending entry's fate
+OK   a pending entry with no clientRequestId at all is never preserved (cannot be reconciled against the queue, so it must not linger indefinitely)
+OK   an empty existing logEntries reconstructs every queued item
+OK   13. dedupe -- a queued item already represented by a CONFIRMED entry (same clientRequestId) is excluded from reconstruction (strong identity only, no title/timestamp heuristic)
+OK   a queued item already present by id (already reconstructed, or a live optimistic entry sharing the id) is not reconstructed again -- idempotent, no duplicate pending rows
+OK   reconstructing the same queue repeatedly never produces a duplicate: selecting against its own prior reconstruction output yields nothing new
+OK   a title/timestamp-only heuristic is never used for dedup -- two DIFFERENT clientRequestIds with the same title both reconstruct independently (no accidental collapsing)
+OK   14A. reconstruction-first ordering: pending appears, then confirmed fetch resolves and preserves it via the merge
+OK   14B. confirmed-first ordering: confirmed fetch resolves against empty state, then reconstruction runs and adds the still-queued pending entry without duplicating
+OK   15. replay success: pending X + now-confirmed X (same clientRequestId, queue entry removed) -> exactly one X remains, confirmed
+OK   page.tsx imports the extracted helpers from the new lib module
+OK   loadUserDataAndLogs calls mergeConfirmedLogEntries (no re-implemented inline merge logic)
+OK   the confirmed fetch propagates clientRequestId from the server row onto each entry
+OK   the reload-reconstruction effect calls selectQueueItemsToReconstruct (no re-implemented inline selection logic)
+OK   an empty queue is a no-op in the reconstruction (no unnecessary setLogEntries call)
+OK   AURA-ANDROID-REL-04: reconstruction reads only the verified account's queue (R4: awaited IndexedDB read, dropped if the account changed meanwhile; R8: view read with the paused count)
+OK   handleLogActivity resolves to the shared ActivityLogResult (R15 adds 'unresolved')
+OK   the only change to handleLogActivity itself is stamping the already-generated clientRequestId onto the pending-marked entry (R15: isMine = the optimistic entry or the operation's existing row, which a Retry reuses)
+OK   handleLogActivity's optimistic entry is projected from the operation's immutable dispatch body, carrying its outbox clientRequestId (AURA-ANDROID-REL-04 R2/R15)
+OK   page.tsx still generates clientRequestId once per log attempt via generateClientRequestId() (PR #86 idempotency untouched; AURA-MOBILE-01-M2-B/AND-01: not crypto.randomUUID() directly, which throws outside a secure context)
+OK   the (dormant) queue replay classifies via the shared decodeHabitLogResponse (lib/activitySync.ts); page.tsx never triggers it (online-first)
+OK   the replay queue-removal/retention logic classifies accepted / retry / unverified / rejected (R15)
+OK   Plan logging (handlePlanLogged) remains separate and untouched in page.tsx
+OK   Timing Location save orchestration (handleLocationChanged) remains untouched in page.tsx
+OK   LocationPicker.tsx was not touched by this change (no reference to offlineHabitQueue there)
+OK   CalendarViewSection.tsx's pending-row StatusBadge treatment (PR #90) is untouched
+OK   Timeline.tsx's PR #90 pending count/badge treatment is untouched
+OK   InsightsView.tsx's PR #90 confirmed-only evidence filter is untouched
+OK   InsightsView.tsx's Recent Activity Trail still visibly labels a pending entry (untouched)
+
+ALL PENDING ACTIVITY RELOAD VISIBILITY CHECKS PASSED
+
+# exit=0 signal=

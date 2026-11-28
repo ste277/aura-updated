@@ -267,15 +267,18 @@ async function main() {
         await r.abort('failed'); // ... and the response never arrives
       });
       await logOnce(a);
-      await a.getByText(/Saved offline/, { exact: false }).first().waitFor({ timeout: 10000 });
+      // R18 (39265, online-first): the cut answer leaves the operation UNRESOLVED (no automatic replay); the user's
+      // explicit Retry on the shared notice converges under the same id.
+      await a.getByText(/Couldn't verify whether this activity was saved|Not confirmed yet/, { exact: false }).first().waitFor({ timeout: 10000 });
       const committed = (await S.rows()).length;
       await a.clock.setFixedTime(new Date(FIXED + 61_000)); // past the claim lifetime
-      await a.evaluate(() => window.dispatchEvent(new Event('online')));
+      await a.locator('[data-operation-state="unresolved-list"]').getByRole('button', { name: 'Retry', exact: true }).first().click();
       await a.getByText(/Logged at/, { exact: false }).first().waitFor({ timeout: 10000 }).catch(() => undefined);
+      for (let i = 0; i < 60 && (await inspect(a)).records.length; i++) await a.waitForTimeout(250);
       await a.waitForTimeout(500);
       const rows = await S.rows();
       const final = await inspect(a);
-      check(`E real Home: the route committed (${committed} row) but the response was cut -> pending under the same id; the replay converges on the SAME row (1 row, 1 id; ${S.posts.a.length} POSTs with one id)`, committed === 1 && rows.length === 1 && new Set(S.posts.a.map((p) => p.body.clientRequestId)).size === 1 && S.posts.a.length === 2 && final.tombstones.some((d: any) => d.receipt?.serverRecordId === rows[0].id));
+      check(`E real Home: the route committed (${committed} row) but the response was cut -> unresolved under the same id; the explicit Retry converges on the SAME row (1 row, 1 id; ${S.posts.a.length} POSTs with one id)`, committed === 1 && rows.length === 1 && new Set(S.posts.a.map((p) => p.body.clientRequestId)).size === 1 && S.posts.a.length === 2 && final.tombstones.some((d: any) => d.receipt?.serverRecordId === rows[0].id));
       await S.ctx.close();
     }
 

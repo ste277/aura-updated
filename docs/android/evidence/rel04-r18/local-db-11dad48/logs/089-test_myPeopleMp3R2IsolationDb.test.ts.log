@@ -1,0 +1,16 @@
+$ npx ts-node --project tsconfig.jsdom-tests.json test/myPeopleMp3R2IsolationDb.test.ts
+# job=day-constructor-acceptance-db-tests step=Run AURA-MP-3-R2 My People isolation DB test env={}
+OK   Precondition: every connection of this process defaults to REPEATABLE READ (a plain BEGIN runs at repeatable read)
+OK   R2 dismissal and special-day DELETE each run at READ COMMITTED despite the REPEATABLE READ default
+OK   R2 dismissal first, special-day DELETE second (RR default): DELETE waited, both 200, no orphan, unrelated rows kept
+OK   R2 special-day DELETE first, dismissal second (RR default): dismissal waited, then 404 (never a serialization 500), nothing written, unrelated rows kept
+OK   R2 special-day DELETE ran at READ COMMITTED
+OK   R2 dismissal and person DELETE (incl. its cascade) each run at READ COMMITTED despite the REPEATABLE READ default
+OK   R2 dismissal first, person DELETE second (RR default): DELETE waited, both 200, no orphan, unrelated rows kept
+OK   R2 person DELETE first, dismissal second (RR default): dismissal waited, then 404 (never a serialization 500), nothing written, unrelated rows kept
+OK   R2 person DELETE and its cascade ran at READ COMMITTED
+OK   R2: none of the owner's dismissals outlives its special day under a REPEATABLE READ default
+
+ALL MY PEOPLE MP-3-R2 ISOLATION DB CHECKS PASSED (10)
+
+# exit=0 signal=

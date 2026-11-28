@@ -1,0 +1,41 @@
+$ npx ts-node --project tsconfig.jsdom-tests.json test/rel04R18OnlineFirst.test.ts
+# job=math-core-tests step=Run REL-04 R18 online-first test (39262 G10/G11 witnesses on ab3c15b vs current; generative consumer agreement; no automatic dispatch) env={"TS_NODE_COMPILER_OPTIONS":"{\"jsx\":\"react-jsx\"}"}
+OK   fixture rel04-r17-head/offlineHabitQueue.ts.txt == ab3c15b apps/web/lib/offlineHabitQueue.ts
+OK   fixture rel04-r17-head/activitySync.ts.txt == ab3c15b apps/web/lib/activitySync.ts
+OK   fixture rel04-r17-head/habitLogSyncPolicy.ts.txt == ab3c15b apps/web/lib/habitLogSyncPolicy.ts
+OK   fixture rel04-r17-head/pendingReplayReconciliation.ts.txt == ab3c15b apps/web/lib/pendingReplayReconciliation.ts
+W G10 {"R17":{"ops":[],"again":"confirmed","retryA":"outcome-unknown","posts":1,"rows":2,"copyKept":true},"R18":{"ops":[{"id":"unattributed:record:5a68938acf002d52","status":"unresolved","retryable":false,"title":"Review exact original"}],"again":"recovery-required","named":"unattributed:record:5a68938acf002d52","retryA":"outcome-unknown","posts":0,"rows":1,"copyKept":true}}
+OK   W G10 -- R17 (negative control) reproduces: the contradictory copy contributes no intent; the identical new entry is sent under a NEW id (2 rows)
+OK   W G10 -- R18: the contradictory copy is UNATTRIBUTED account evidence (unresolved, "Review exact original", no Retry); the identical new entry is refused in the claiming transaction (recovery-required -> unattributed:record:5a68938acf002d52); an explicit Retry under the original id sends nothing (outcome-unknown); 0 POSTs, 1 row, copy preserved
+W G11 {"R17":{"checkAgain":"already-recorded","retry":"already-recorded","projection":{"status":"unresolved","conflict":true,"retryable":false},"unchanged":true,"posts":0,"rows":1,"records":2},"R18":{"checkAgain":"outcome-unknown","reason":"conflict","retry":"outcome-unknown","projection":{"status":"unresolved","conflict":true,"retryable":false},"unchanged":true,"posts":0,"rows":1,"records":2}}
+OK   W G11 -- R17 (negative control) reproduces: Check again and Retry report the operation as already recorded although a conflicting copy survives
+OK   W G11 -- R18: Check again reports the decision (outcome-unknown/conflict) and so does Retry (outcome-unknown); the projection is a conflict without Retry; nothing written (storage unchanged), 0 POSTs, 1 row, both copies kept
+CHECK-AGAIN {"R17":{"kind":"already-recorded","unchanged":false,"posts":0},"R18":{"kind":"outcome-unknown","reason":"server-has-it","unchanged":true,"posts":0,"retry":"confirmed","rows":1,"copies":0}}
+OK   Check again -- R17 (negative control): a GET match WRITES (receipt persisted, copy removed)
+OK   Check again -- R18 is read-only: the server has it (server-has-it); storage unchanged, 0 POSTs; the user's Retry then finishes under the same id (confirmed, 1 row, 0 copies)
+OK   N10 dropping unattributed evidence from discovery is detected: the identical new entry is sent (confirmed; 2 rows)
+OK   N11 letting a valid receipt decide before the surviving copies is detected: Check again reports already-recorded with a conflicting copy present
+OK   N12 removing the automatic-dispatch boundary is detected: without any user action the stored activity is sent (1 attempted, 1 POST)
+OK   N13 removing the pre-dispatch offline refusal is detected: a NEW activity is stored while offline (queued; 1 record)
+OK   generative consumer agreement: 135/135 evidence combinations (live copies x blocked copies x markers x server state) -- projection, Check again (read-only), explicit Retry with each body, a new submission and automatic dispatch all act on THE decision; dispatches, retained copies and returned outcomes agree; independent oracles for conflicts and withheld entries hold
+OK   automatic dispatch boundary: a stored unconfirmed activity (queued -> status unresolved) is never sent by replay (disabled, 0 POSTs); the copy is kept
+OK   offline before dispatch: a NEW activity stores nothing (not-stored/offline); an explicit Retry leaves its operation untouched (not-stored/offline); 0 POSTs
+OK   ambiguous submission (outcome-unknown) is kept across restart (stored pending, retryable true); Retry converges on ONE row under the original id (confirmed); a second Retry reports the same (already-recorded, still 1 row, no copy)
+OK   multi-tab explicit Retry: while tab 1 holds the claim, tab 2 sends nothing (queued -> unresolved); tab 1 converges (confirmed); 1 POST, 1 row
+OK   sign-out discard fences a later Retry (removed 1; Retry -> not-stored/discarded; 0 POSTs, 0 rows)
+OK   zero automatic POSTs: after a restart with an unresolved activity (shown before true, after true) and an REL-05 legacy queue, startup + 'online' + visibilitychange sent 0 requests; the only request afterwards is the user's own submission (["Morning reading"])
+OK   REL-05 upgrade: the legacy queue is never sent and never modified (kept byte-identical; notice shown true)
+OK   offline before dispatch (Calendar): "You're offline, so this activity wasn't saved" (true); nothing stored (0), nothing sent, no unresolved operation
+PAGE G10 {"sent":0,"rows":1,"retry":false,"separate":true,"kept":1}
+OK   G10 (page) contradictory copy after restart: the identical Calendar Save is withheld (0 POSTs, 1 row); no Retry is offered (the identity cannot be trusted); a deliberately separate entry is; the copy is kept
+PAGE G11 {"shownBefore":true,"stillShown":true,"retry":false,"unchanged":true,"sent":0}
+OK   G11 (page) a valid receipt beside a conflicting copy: the conflict is shown, Check again keeps it (no confirmation), offers no Retry, writes nothing and sends nothing
+OK   ambiguous Calendar submission across restart: the shared notice offers Retry (true); Retry converges on ONE row under the original id (1 row, 1 id); no copy, no notice left
+OK   one decision, one boundary: requestState is a view of decideOperations (true); automatic replay has ONE boundary and no app caller (true); Check again writes nothing (true); no surface interprets markers or receipts (true); no automatic-sync promise in the UI (true)
+
+27 passed, 0 failed
+Error saving activity log: Error: You're offline, so this activity wasn't saved. Try again when you're back online.
+    at /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/android-rel-04-app/apps/web/app/page.tsx:1677:15
+    at async handleSubmit (/Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/android-rel-04-app/apps/web/components/PastActivityModal.tsx:139:21)
+
+# exit=0 signal=

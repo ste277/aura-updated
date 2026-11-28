@@ -1,0 +1,80 @@
+$ npx ts-node test/goalActivityRhythmPreferences.test.ts
+# job=math-core-tests step=Run My Rhythm preferences test env={}
+OK   W1. empty weekday list is valid (no preference)
+OK   W2. weekdays are returned sorted ascending
+OK   W3. Sunday (0) and Saturday (6) are both valid
+OK   W4. rejects weekday value [7]
+OK   W4. rejects weekday value [-1]
+OK   W4. rejects weekday value [1.5]
+OK   W4. rejects weekday value ["1"]
+OK   W4. rejects weekday value [null]
+OK   W4. rejects weekday value [null]
+OK   W4. rejects weekday value [null]
+OK   W5. rejects a duplicate weekday (never silently de-duplicated)
+OK   W6. rejects a non-array
+OK   W7. does not mutate the input array
+OK   T1. vocabulary is exactly the timing engine time preferences minus ANY
+OK   T2. accepts MORNING
+OK   T2. accepts AFTERNOON
+OK   T2. accepts EVENING
+OK   T2. accepts NIGHT
+OK   T3. rejects time of day "ANY"
+OK   T3. rejects time of day "morning"
+OK   T3. rejects time of day "DAWN"
+OK   T3. rejects time of day ""
+OK   T3. rejects time of day 1
+OK   T3. rejects time of day null
+OK   T3. rejects time of day undefined
+OK   D1. accepts duration 15
+OK   D1. accepts duration 30
+OK   D1. accepts duration 45
+OK   D1. accepts duration 360
+OK   D2. rejects duration 0
+OK   D2. rejects duration -5
+OK   D2. rejects duration 14
+OK   D2. rejects duration 361
+OK   D2. rejects duration 30.5
+OK   D2. rejects duration null
+OK   D2. rejects duration null
+OK   D2. rejects duration "30"
+OK   D2. rejects duration null
+OK   P1. empty object is a valid no-op patch
+OK   P2. null clears each field (weekdays clear to [])
+OK   P3. sets each field
+OK   P4. an absent key is absent from the patch (unchanged, not cleared)
+OK   P5. rejects an unknown key (a typo is never ignored)
+OK   P6. rejects a non-object / array / null
+OK   P7. rejects invalid nested values
+OK   N1. a legacy/default row (weekdays {} / nulls) normalizes to no preferences
+OK   N2. a NULL weekday array also normalizes to no preference
+OK   N3. corrupt persisted values fall back to "no preference" per field, never become a constraint
+OK   N4. one corrupt field does not discard the valid ones
+OK   N5. persist -> normalize round-trips
+OK   N6. hasAnyRhythmPreference is false only for no preferences
+OK   N7. isGoalActivityRhythmPaused: NULL = active, any timestamp = paused
+OK   C1. 1x a week on Sundays only is consistent ("every Sunday")
+OK   C2. 3x a week on Mon/Wed/Fri is consistent
+OK   C3. 3x a week on Sundays only is REJECTED under once-per-day (cannot be satisfied)
+OK   C4. no weekday preference never conflicts with any target
+OK   C5. MULTIPLE_PER_DAY lifts the distinct-day requirement
+OK   C6. any preference on a NONE rhythm is rejected
+OK   R1. pause keeps target and every preference; action PAUSE
+OK   R2. resume is action CLEAR and keeps everything else
+OK   R3. a preferences-only update keeps the pause state (KEEP)
+OK   R4. clearing one field leaves the others
+OK   R5. raising the target above the preferred day count is rejected (merged state validated)
+OK   R6. raising the target together with enough days is accepted
+OK   R7. switching to NONE clears preferences and pause (the existing { rhythm: NONE } edit keeps working)
+OK   R8. switching to NONE while SETTING a preference is rejected
+OK   R9. switching to NONE with explicit clears is accepted
+OK   R10. pausing a NONE (finite) activity is rejected
+OK   R11. resuming a NONE (finite) activity is rejected
+OK   R12. setting preferences on a NONE activity is rejected
+OK   R13. making a NONE activity weekly WITH preferences in one request is accepted
+OK   R14. a rhythm-only update (R5 behavior) keeps existing preferences
+OK   R15. resolve never mutates the current settings object
+OK   R16. NO_RHYTHM_PREFERENCES is frozen (cannot be mutated by a caller)
+
+All checks passed.
+
+# exit=0 signal=

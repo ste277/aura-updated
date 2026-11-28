@@ -1,0 +1,39 @@
+$ npx ts-node --project tsconfig.jsdom-tests.json test/myPeopleMp3Db.test.ts
+# job=day-constructor-acceptance-db-tests step=Run AURA-MP-3 My People linked plans and Home guidance DB test env={}
+OK   Home: exactly ONE card, the soonest surfaced day (Ravi's anniversary today), "+1 more" for the birthday in 3 days
+OK   Home: days outside their window are not shown (Graduation in 20 days; Meera with no reminder)
+OK   Home: no private note, chart detail or score in the card
+OK   Home: on the day there is no "Not now" (it would repeat); "Not this year" is offered
+OK   Home "Plan something" hands off to Plan (person, anniversary-dinner, window starting today) -- nothing saved
+OK   Home "+N more" opens My People
+OK   Home "Not this year" (on the day) -> one dismissal at the occurrence date; the next day (birthday in 3 days) is shown instead
+OK   Home: ahead of the day, "Not now" is offered
+OK   Home "Not now" (ahead) -> the ahead key only; no card left (nothing repeats)
+OK   Upcoming API: dismissed flags (anniversary: Not this year; birthday: Not now) and the rest untouched
+OK   Upcoming API: never carries notes
+OK   Dismissal never changes the special day itself
+OK   dismissal: no session -> 401
+OK   dismissal: unknown scope / missing body -> 400
+OK   dismissal: another owner's special day -> 404, nothing written
+OK   dismissal: unknown id -> 404
+OK   dismissal: a day outside its reminder window -> 409, nothing written (20 days; reminder off)
+OK   dismissal: a client-supplied date is ignored (key derived on the server)
+OK   dismissal: repeating it is idempotent (no duplicate rows)
+OK   dismissal: 404 while My People is off on the server
+OK   POST /api/plans with the owner's savedPersonId -> 200, link persisted
+OK   POST /api/plans with another owner's person -> 404 and NO plan created
+OK   My People OFF: savedPersonId is ignored (plan created, link NULL); the existing link is kept
+OK   Move keeps the person link on the new plan (old plan MOVED)
+OK   Move never carries a link to another owner's person (owner-checked -> NULL)
+OK   Person detail "Plan time with Ravi" -> hand-off {person, catch-up}; nothing saved
+OK   Special day "Plan something" -> birthday-party around the birthday (day before .. day after)
+OK   My People OFF: no "Plan time with" or "Plan something" actions on the legacy screen
+OK   My People OFF (server): no Home card (upcoming answers 404)
+OK   Public flag OFF: no Home card and no request at all
+OK   Isolation: another account sees only its own upcoming day and none of the owner's dismissals
+OK   Delete person: plans kept (incl. the moved one) with the link set to NULL; dismissals removed
+OK   Delete person: the other account's data is untouched
+
+ALL MY PEOPLE MP-3 DB CHECKS PASSED (33)
+
+# exit=0 signal=

@@ -1,0 +1,46 @@
+$ npx ts-node test/goalActivityExecution.test.ts
+# job=math-core-tests step=Run Goal activity execution test env={}
+OK   DONE + null currentValue -> valid
+OK   DONE + omitted currentValue -> valid
+OK   DONE + numeric currentValue -> invalid
+OK   DONE + currentValue 0 -> invalid (DONE carries no numeric progress at all, not even zero)
+OK   DURATION + valid target + null currentValue -> valid
+OK   DURATION + valid target + positive currentValue -> valid
+OK   DURATION + currentValue > target -> valid (actual may exceed target, never clamped)
+OK   DURATION + fractional currentValue -> valid, preserved exactly (12.5 minutes)
+OK   MEASURED_TARGET + valid target/unit + null currentValue -> valid
+OK   MEASURED_TARGET + fractional currentValue -> valid (2.5 km)
+OK   MEASURED_TARGET + currentValue > target -> valid (25/20 pages)
+OK   currentValue = 0 -> valid for DURATION (0 is real, observed progress)
+OK   currentValue = 0 -> valid for MEASURED_TARGET
+OK   currentValue < 0 -> invalid for DURATION
+OK   currentValue < 0 -> invalid for MEASURED_TARGET
+OK   currentValue = NaN -> invalid
+OK   currentValue = Infinity -> invalid
+OK   an invalid underlying CompletionRequirement (DONE + target) is still rejected -- G2.1 rules are not bypassed here
+OK   an invalid underlying CompletionRequirement (MEASURED_TARGET without unit) is still rejected
+OK   an unknown kind is rejected
+OK   toPersistedGoalActivityExecutionSnapshot(DONE) -> explicit "DONE" string, never null (unlike GoalActivity itself)
+OK   toPersistedGoalActivityExecutionSnapshot(DURATION) persists kind+target+currentValue, null unit
+OK   toPersistedGoalActivityExecutionSnapshot(MEASURED_TARGET) persists all fields
+OK   fromPersistedGoalActivityExecutionSnapshot round-trips a valid DURATION row, fractional currentValue preserved
+OK   fromPersistedGoalActivityExecutionSnapshot round-trips a valid MEASURED_TARGET row
+OK   fromPersistedGoalActivityExecutionSnapshot throws on a genuinely corrupt row (no legacy fallback, unlike GoalActivity normalization)
+OK   20. a snapshot taken while the live requirement was "20 pages" is untouched by a LATER, different live requirement ("30 pages") -- the snapshot object itself never reads anything live
+OK   DONE: actualValue absent -> ok, value null
+OK   DONE: actualValue supplied -> invalid
+OK   DONE: actualValue = 0 supplied -> still invalid (DONE carries no numeric progress at all)
+OK   30. DURATION: omitted -> defaults to the REQUIREMENT target (30), never PlannedActivity.durationMinutes (this helper never even sees scheduling duration)
+OK   31. DURATION: override (18) preserved exactly, does not fall back to target
+OK   32. MEASURED_TARGET: omitted -> defaults to target (20)
+OK   33. MEASURED_TARGET: override (12) preserved exactly
+OK   34. MEASURED_TARGET: actualValue (25) exceeding target (20) -> accepted verbatim, no clamp, no validation failure
+OK   35. zero is a valid explicit actualValue for DURATION (plan still becomes LOGGED via the existing completion action regardless)
+OK   35. zero is a valid explicit actualValue for MEASURED_TARGET
+OK   36. negative actualValue rejected for DURATION
+OK   36. NaN actualValue rejected
+OK   36. Infinity actualValue rejected
+OK   38. resolving against an EXISTING execution's own immutable snapshot (target 20) rather than a changed live GoalActivity (target 30) -- proven by simply passing the snapshot requirement, never the live one
+ALL GOAL ACTIVITY EXECUTION CHECKS PASSED
+
+# exit=0 signal=

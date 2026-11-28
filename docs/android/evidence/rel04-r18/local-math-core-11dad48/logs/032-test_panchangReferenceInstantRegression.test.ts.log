@@ -1,0 +1,20 @@
+$ npx ts-node test/panchangReferenceInstantRegression.test.ts
+# job=math-core-tests step=Run Panchang reference-instant regression test env={}
+OK   1. ground-truth fixture sanity: noon and 9pm IST Dec 8 2026 genuinely disagree on Nakshatra (a real within-day transition exists)
+OK   1. panchangSummaryAt() at 9pm matches ground truth, not the noon default
+OK   1. panchangSummaryAt() at 9pm does NOT equal the noon-default value (the exact defect this fix closes)
+OK   2. [NAKSHATRA] evaluateMuhurthamCandidateAt.panchangSummary matches ground truth at the requested evening instant
+OK   3. [TITHI] fixture sanity: 4am and noon IST Dec 9 2026 genuinely disagree on Tithi
+OK   3. [TITHI] evaluateMuhurthamCandidateAt reports the pre-transition Tithi before, and the post-transition Tithi after, through the real call site
+OK   4. [YOGA] fixture sanity: 2am and 6pm IST Dec 14 2026 genuinely disagree on Yoga
+OK   4. [YOGA] evaluateMuhurthamCandidateAt reports the pre-transition Yoga before, and the post-transition Yoga after, through the real call site
+OK   5. [KARANA] fixture sanity: 10am and 2pm IST Dec 5 2026 genuinely disagree on Karana
+OK   5. [KARANA] evaluateMuhurthamCandidateAt reports the pre-transition Karana before, and the post-transition Karana after, through the real call site
+OK   6. fixture sanity: the best window instant and local noon genuinely disagree on Nakshatra for 2026-12-07
+OK   6. [day-scan] findMuhurthams.panchangSummary matches the BEST WINDOW's own instant, not the noon default
+OK   7. evaluateMuhurthamCandidateAt score is deterministic/stable for the identical instant (sanity)
+OK   7. findMuhurthams' ranking score for the best window equals a direct evaluateMuhurthamCandidateAt check of that SAME instant -- the panchangSummary fix changed display data only, never the score/ranking input
+
+ALL PANCHANG REFERENCE INSTANT REGRESSION CHECKS PASSED
+
+# exit=0 signal=

@@ -1,0 +1,15 @@
+OK   S0 the production build serves (next start)
+versions {"chromium":"151.0.7922.34","node":"v26.5.0"}
+R18-G10 {"original":"ce099a01-23e5-477d-ac99-6393a5ec8977","sent":[],"rows":[{"id":"9d932786-caa1-42bb-81f4-07bcd34457b2","clientRequestId":"ce099a01-23e5-477d-ac99-6393a5ec8977","activityTitle":"Review exact original","logTimestamp":"2026-11-27T04:30:00.000Z","durationMinutes":30,"logSource":"MANUAL"}],"retry":0,"separate":1,"records":[{"outer":"ce099a01-23e5-477d-ac99-6393a5ec8977","nested":"ce099a01-23e5-477d-ac99-6393a5ec8977-replaced-nested-id"}]}
+OK   G10 contradictory copy after restart: the identical Calendar Save sends NOTHING (1 row, original id); no Retry is offered; a separate entry is; the copy is kept
+R18-G11 {"original":"49381023-5a94-4a44-9c9c-87946d762a6d","afterText":"Check again · This device holds conflicting copies of this entry, so Aura won't send it.","retryAfter":0,"unchanged":true,"reloadText":"Check again · This device holds conflicting copies of this entry, so Aura won't send it.","sent":0,"rows":1,"records":2}
+OK   G11 valid receipt beside a conflicting copy: after Check again the conflict is still shown with no Retry; storage unchanged; nothing sent; the same after reload; 1 row, both copies kept
+R18-automatic {"automatic":0,"legacyKept":true,"shown":1,"sent":[{"activityTitle":"Review exact original","activeWindow":"ABHIJIT","logMinuteOfDay":600,"logTimestamp":"2026-11-27T04:30:00.000Z","durationMinutes":30,"logSource":"MANUAL","activitySignificance":"MEDIUM","clientRequestId":"0bb0b5aa-6518-41cc-981c-1b2131a00e20"}],"rows":[{"id":"afadb578-24fd-42a4-a595-9e30d0e8f596","clientRequestId":"0bb0b5aa-6518-41cc-981c-1b2131a00e20","activityTitle":"Review exact original","logTimestamp":"2026-11-27T04:30:00.000Z","durationMinutes":30,"logSource":"MANUAL"}],"copies":0,"receipt":{"v":2,"kind":"accepted","row":"afadb578-24fd-42a4-a595-9e30d0e8f596"}}
+OK   zero automatic activity POSTs: restart, offline->online, visibility and reload with an unresolved activity and an REL-05 legacy queue sent 0 requests; the legacy queue is byte-identical
+OK   ambiguous submission across restart: the shared notice shows it; Retry sends the ORIGINAL id and body; 1 PostgreSQL row; a valid v2 receipt names it; no copy left
+R18-two-tabs {"posts":["6c6af05e-7603-4f2d-9f6d-7b657cdb46ee","6c6af05e-7603-4f2d-9f6d-7b657cdb46ee"],"rows":[{"id":"b1ecdee1-3865-4188-8e5b-b144d2b4cc63","clientRequestId":"6c6af05e-7603-4f2d-9f6d-7b657cdb46ee","activityTitle":"Review exact original","logTimestamp":"2026-11-27T04:30:00.000Z","durationMinutes":30,"logSource":"MANUAL"}],"copies":0}
+OK   two tabs press Retry together: every request carries the original id; exactly 1 PostgreSQL row; no copy left
+R18-offline {"msg":1,"records":0,"posts":0}
+OK   offline before dispatch (real offline context): the Calendar Save stores nothing and sends nothing; the online-first message is shown; coming back online sends nothing
+
+7 passed, 0 failed

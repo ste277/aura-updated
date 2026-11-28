@@ -1,0 +1,22 @@
+$ npx ts-node test/locationPickerNativeGeolocation.test.ts
+# job=math-core-tests step=Run LocationPicker native geolocation test env={}
+OK   requestCurrentLocation dispatches to the native path when Capacitor.isNativePlatform() is true, before ever touching window.isSecureContext/navigator.geolocation
+OK   Capacitor and Geolocation are imported from the first-party @capacitor packages (not a third-party polyfill)
+OK   the same Capacitor.isNativePlatform() branch pattern already used by lib/haptics.ts and lib/windowNotifications.ts is reused here, not a new ad hoc platform-detection mechanism
+OK   the native path checks existing permissions before requesting new ones (Geolocation.checkPermissions)
+OK   the native path requests ONLY coarseLocation, never fine/precise location -- matching this app's declared AndroidManifest permission and its city-level-accuracy need (AURA-MOBILE-01-M1)
+OK   a denied native permission produces the SAME user-facing message as the web PERMISSION_DENIED path (M2-D: one shared message table in lib/locationErrors.ts, both platforms map to the same permission_denied kind)
+OK   the native path only calls getCurrentPosition after permission is confirmed granted, never unconditionally
+OK   the native getCurrentPosition call uses enableHighAccuracy: false, matching this app's coarse-only design (no fine-location permission is declared, and the plugin ignores high-accuracy without it anyway)
+OK   the native path has its own catch-all failure handler (never an unhandled promise rejection reaching the user as a crash)
+OK   the native getCurrentPosition call is bounded by an explicit app-level timeout -- the plugin's own `timeout` option is ignored on Android (M2-D: single-flight acquireNativeLocation + waitWithTimeout at NATIVE_LOCATION_TIMEOUT_MS = 30 s, timer cleared on settle)
+OK   both the native and web GPS paths route through the one shared resolveGpsCoordinates helper (no second/competing coordinate-to-pending translation)
+OK   resolveGpsCoordinates never saves automatically -- the result lands in `pending` state via setPending, never onChanged/PATCH directly, on either platform
+OK   the web path still checks window.isSecureContext === false with its own distinct message, byte-identical to before AND-03
+OK   the web path still uses navigator.geolocation.getCurrentPosition (not replaced by the native plugin)
+OK   the web path still passes the same explicit timeout options, unchanged (M2-D: via the WEB_LOCATION_TIMEOUT_MS = 10_000 constant)
+OK   AndroidManifest.xml still declares the ACCESS_COARSE_LOCATION <uses-permission> tag only -- no ACCESS_FINE_LOCATION tag, no new permission added for AND-03 (the manifest's own M1 comment mentioning "ACCESS_FINE_LOCATION" by name, to document that it's deliberately excluded, is expected and fine -- only an actual <uses-permission> tag for it would be a problem)
+
+All locationPickerNativeGeolocation checks passed.
+
+# exit=0 signal=

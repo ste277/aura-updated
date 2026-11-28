@@ -1,0 +1,11 @@
+$ npx ts-node test/formatTimeLeft.test.ts
+# job=math-core-tests step=Run Home dashboard time-left formatting test env={}
+OK   Strips a leading "In " (nextShift.startsIn format, scoreEngine.ts)
+OK   Strips a trailing " left" (currentWindow.timeRemaining format, HomeDashboard.tsx)
+OK   Leaves a bare duration with neither wrapper unchanged
+OK   "In " strip is case-insensitive
+OK   Never leaves a leading "In " in the output for any known input shape
+
+ALL FORMAT TIME LEFT CHECKS PASSED
+
+# exit=0 signal=

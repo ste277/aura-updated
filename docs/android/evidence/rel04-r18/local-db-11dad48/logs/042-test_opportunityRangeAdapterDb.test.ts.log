@@ -1,0 +1,31 @@
+$ npx ts-node test/opportunityRangeAdapterDb.test.ts
+# job=day-constructor-acceptance-db-tests step=Run opportunity range adapter DB test env={}
+=== OVERLAP QUERY (half-open, user-scoped) ===
+OK   plan starting BEFORE the range and ending inside it is returned (the day query would miss it)
+OK   plan inside, plan starting inside and ending after, and a plan spanning the whole range are returned
+OK   plans merely TOUCHING the range (end == from, start == to) are not returned (half-open)
+OK   CANCELLED plans are excluded by the query (same SQL filter as the day query)
+OK   SKIPPED/LOGGED/MOVED rows ARE returned by the query -- lifecycle is applied by the canonical rule, not in SQL
+OK   another user's plan inside the same range is never returned (user-scoped)
+OK   results are ordered by start
+=== END TO END: REAL DEPS -> ADAPTER ===
+OK   adapter returns OK for the authenticated user
+OK   active UPCOMING plans block (starts-before, inside, ends-after, spanning)
+OK   LOGGED blocks
+OK   SKIPPED, MOVED and CANCELLED never block (canonical lifecycle)
+OK   exactly the 5 active overlapping plans are blockers; touching/other-user plans are absent
+OK   blockers are tagged as fixed plans regardless of any scheduling mode
+OK   user A Tuesday (no window in A's template) is KNOWN EMPTY -- B's Tuesday template did not leak in
+OK   user A Wednesday has A's own 09:00-12:00 IST window
+OK   user B sees only B's template (Tuesday 09:00-17:00) and only B's plan
+OK   cross-user: B's result contains none of A's plans
+OK   an unconfigured user (real DB flag false) is UNKNOWN for every date, with no plans
+=== QUERY COUNT (real deps, counted) ===
+OK   1 day: one availability load + one plan query
+OK   2 days: still one + one
+OK   7 days: still one + one (query count independent of the number of days)
+=== ZERO WRITES ===
+OK   plans, availability periods, availability flags, occurrences and plan rows (incl. updatedAt) are byte-identical after repeated adaptation
+ALL OPPORTUNITY RANGE ADAPTER DB CHECKS PASSED
+
+# exit=0 signal=
