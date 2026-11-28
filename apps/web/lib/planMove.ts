@@ -312,13 +312,18 @@ export async function applyMoveWrites(
     `INSERT INTO "PlannedActivity"
        (id, "userId", title, "activityType", icon, status, "plannedStartAt", "plannedEndAt", "durationMinutes",
         "windowType", "windowLabel", "matchLabel", score, recommendation, "calendarUrl",
-        "eventTimezone", "eventLocationName", "schedulingMode", "activityId", "rescheduledFromPlanId")
-     VALUES ($1, $2, $3, $4, $5, 'UPCOMING', $6, $7, $8, 'NEUTRAL', NULL, NULL, NULL, NULL, $9, $10, $11, $12, $13, $14)
+        "eventTimezone", "eventLocationName", "schedulingMode", "activityId", "rescheduledFromPlanId", "savedPersonId")
+     VALUES ($1, $2, $3, $4, $5, 'UPCOMING', $6, $7, $8, 'NEUTRAL', NULL, NULL, NULL, NULL, $9, $10, $11, $12, $13, $14,
+             (SELECT id FROM "SavedPerson" WHERE id = $15 AND "ownerUserId" = $2))
      RETURNING *`,
     [
       bId, userId, a.title, a.activityType, a.icon, newStartAt, newEndAt, a.durationMinutes,
       buildGoogleCalendarUrl(a.title, newStartAt.toISOString(), newEndAt.toISOString()),
       a.eventTimezone, a.eventLocationName, parseSchedulingMode(a.schedulingMode), a.activityId ?? null, a.id,
+      // AURA-MP-3: the successor keeps the My People link (Move, Home Move and
+      // Recomposition all write here). Owner-checked subselect, like the
+      // plan writers in db.ts: a link to anyone but this owner's person -> NULL.
+      a.savedPersonId ?? null,
     ]
   );
 

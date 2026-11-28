@@ -641,6 +641,41 @@ export async function getPersonOccasionForOwner(ownerUserId: string, personId: s
   return result.rows[0] ?? null;
 }
 
+/** AURA-MP-3 -- one special day by id, owner-scoped (under any of the
+ * owner's people). Another owner's or an unknown id -> null (route: 404). */
+export async function getPersonOccasionByIdForOwner(ownerUserId: string, occasionId: string): Promise<PersonOccasion | null> {
+  const result = await pool.query(`SELECT * FROM "PersonOccasion" WHERE id = $1 AND "ownerUserId" = $2`, [occasionId, ownerUserId]);
+  return result.rows[0] ?? null;
+}
+
+/**
+ * AURA-MP-3 -- Home special-day dismissals (design 4.4). Stored as
+ * ReminderAttention rows with scheduledItemType 'PERSON_OCCASION' (a plain
+ * string column: no migration), keyed by the occurrence (see
+ * lib/personOccasions.ts occasionDismissalKeys). Deleted with the special
+ * day or the person (deletePersonOccasion / deleteSavedPerson above).
+ * The caller has already verified the occasion is the owner's.
+ */
+export async function markPersonOccasionDismissed(userId: string, occasionId: string, reminderAt: Date): Promise<void> {
+  await pool.query(
+    `INSERT INTO "ReminderAttention" (id, "userId", "scheduledItemType", "scheduledItemId", "reminderAt")
+     VALUES ($1, $2, 'PERSON_OCCASION', $3, $4)
+     ON CONFLICT ("userId", "scheduledItemType", "scheduledItemId", "reminderAt") DO UPDATE SET "seenAt" = now()`,
+    [randomUUID(), userId, occasionId, reminderAt]
+  );
+}
+
+/** AURA-MP-3 -- the owner's dismissal keys for these special days. */
+export async function listPersonOccasionDismissals(userId: string, occasionIds: string[]): Promise<Array<{ scheduledItemId: string; reminderAt: Date }>> {
+  if (occasionIds.length === 0) return [];
+  const result = await pool.query(
+    `SELECT "scheduledItemId", "reminderAt" FROM "ReminderAttention"
+      WHERE "userId" = $1 AND "scheduledItemType" = 'PERSON_OCCASION' AND "scheduledItemId" = ANY($2::text[])`,
+    [userId, occasionIds]
+  );
+  return result.rows;
+}
+
 /**
  * R1 F4: partial UPDATE as ONE atomic read-merge-validate-write. The row is
  * locked FOR UPDATE (owner- and person-scoped), the patch is merged onto the

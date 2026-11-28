@@ -26,6 +26,8 @@ import {
   type OccasionFormValues,
   type OccasionKind,
   type OccasionRow,
+  type PersonPlanHandoff,
+  planHandoffForOccasion,
   type UpcomingRow,
 } from '../lib/myPeopleOccasionUi';
 
@@ -98,6 +100,7 @@ export function SpecialDaysSection({
   chartBirthDate,
   currentYear,
   onChanged,
+  onPlanOccasion,
 }: {
   personId: string;
   personName: string;
@@ -105,6 +108,8 @@ export function SpecialDaysSection({
   chartBirthDate: string | null;
   currentYear: number;
   onChanged: () => void;
+  /** AURA-MP-3 -- "Plan something" for this day (opens Plan; nothing is saved here). */
+  onPlanOccasion?: (handoff: PersonPlanHandoff) => void;
 }) {
   const [editing, setEditing] = useState<{ kind: 'NEW' } | { kind: 'EDIT'; occasion: OccasionRow } | null>(null);
   const [confirmingDelete, setConfirmingDelete] = useState<string | null>(null);
@@ -164,7 +169,10 @@ export function SpecialDaysSection({
                     <SecondaryButton onClick={() => setConfirmingDelete(null)}>Keep</SecondaryButton>
                   </div>
                 ) : (
-                  <div style={{ display: 'flex', gap: spacing.lg, marginTop: spacing.xs }}>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: spacing.lg, marginTop: spacing.xs }}>
+                    {onPlanOccasion && o.next && (
+                      <TextButton onClick={() => onPlanOccasion(planHandoffForOccasion({ personId, kind: o.kind, date: o.next!.date, daysUntil: o.next!.daysUntil }))}>Plan something</TextButton>
+                    )}
                     <TextButton onClick={() => { setConfirmingDelete(null); setEditing({ kind: 'EDIT', occasion: o }); }}>Edit day</TextButton>
                     <TextButton onClick={() => setConfirmingDelete(o.id)}>Remove day</TextButton>
                   </div>

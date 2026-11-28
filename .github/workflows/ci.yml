@@ -164,6 +164,10 @@ jobs:
       # cleared payload contract.
       - name: Run AURA-MP-2 My People special-day UI helpers test
         run: npx ts-node test/myPeopleMp2Ui.test.ts
+      # AURA-MP-3 (62018) -- pure rules: Home card selection (one card, reminder
+      # windows), "Not now" / "Not this year" keys, plan hand-offs, wording.
+      - name: Run AURA-MP-3 My People Home and plan hand-off rules test
+        run: npx ts-node test/myPeopleMp3Ui.test.ts
       # AURA-MP-1 -- special-day date logic: unknown year, 29 Feb, rollover,
       # the user's local midnight, surfacing windows. Pure, no database.
       - name: Run AURA-MP-1 special-day date logic test
@@ -359,6 +363,12 @@ jobs:
       # People null-chart test above.)
       - name: Run AURA-MP-2 My People leap-day list (jsdom) test
         run: npx ts-node --project tsconfig.jsdom-tests.json test/myPeopleMp2LeapDayJsdom.test.ts
+      # AURA-MP-3 (62018) -- the real Plan tab planning with a person: main Find
+      # route while My People is on (shared route unchanged while off), link
+      # saved only on "Use this time", quick-add keeps the planning context.
+      # (jsdom: after the apps/web dependency install.)
+      - name: Run AURA-MP-3 My People plan with a person (jsdom) test
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/myPeopleMp3PlanJsdom.test.ts
       # AURA-REM-01 (PV-F03) -- mounted DeviceNotificationSettings in every
       # permission/availability state (never "on" without a running
       # scheduler), dispatch auth, too-late cutoff, no page-load prompt.
@@ -1754,3 +1764,7 @@ jobs:
       # isolation, deletion cascade and the feature switch.
       - name: Run AURA-MP-2 My People journeys DB test
         run: npx ts-node --project tsconfig.jsdom-tests.json test/myPeopleMp2Db.test.ts
+      # AURA-MP-3 (62018) -- Home card + dismissal route, linked plans, Move
+      # keeping the link, deletion, isolation and the switch (real routes + DB).
+      - name: Run AURA-MP-3 My People linked plans and Home guidance DB test
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/myPeopleMp3Db.test.ts
