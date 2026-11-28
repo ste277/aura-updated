@@ -61,6 +61,8 @@ import { trackEvent } from '../lib/trackEvent';
 import { generateClientRequestId } from '../lib/clientId';
 import { createAuthFence, fetchSessionBootstrap, signOutDurably, SIGN_OUT_FAILED_MESSAGE } from '../lib/sessionClient';
 import { useAndroidBackButton } from '../lib/useAndroidBackButton';
+import { FULL_ACTIVITY_CATALOG } from '../../../packages/recommendation/src/personalizedTasks';
+import type { PersonPlanHandoff } from '../lib/myPeopleOccasionUi';
 import {
   loadNotificationPrefs,
   saveNotificationPrefs,
@@ -241,7 +243,8 @@ export default function DashboardPage() {
   // matching `activity`'s text. The `?activity=` URL entry point below has
   // no such id available, so it correctly stays title-only, exactly as
   // before this field was added.
-  const [planPrefill, setPlanPrefill] = useState<{ activity: string; activityId?: string; key: number; horizon?: PlanningHorizon } | null>(() => {
+  // AURA-MP-3 -- personId/startDate/endDate: a My People hand-off (pre-fill only).
+  const [planPrefill, setPlanPrefill] = useState<{ activity: string; activityId?: string; key: number; horizon?: PlanningHorizon; personId?: string; startDate?: string; endDate?: string } | null>(() => {
     if (typeof window === 'undefined') return null;
     const requested = new URLSearchParams(window.location.search).get('activity');
     return requested?.trim() ? { activity: requested.trim(), key: Date.now() } : null;
@@ -1787,6 +1790,17 @@ export default function DashboardPage() {
   // resolved a genuine catalog id (never derive one here from `activity`'s
   // text). Every existing caller that doesn't have one keeps working
   // exactly as before -- the title-only path is entirely unchanged.
+  // AURA-MP-3 -- Home card / My People -> Plan. Pre-fills Find a Time with
+  // the catalog activity, the person and (optionally) the dates; the user
+  // still searches and explicitly saves a time there.
+  const handlePlanWithPerson = useCallback((handoff: PersonPlanHandoff) => {
+    const activity = FULL_ACTIVITY_CATALOG.find((a) => a.id === handoff.activityId);
+    if (!activity) return;
+    const withDates = Boolean(handoff.startDate && handoff.endDate);
+    setPlanPrefill({ activity: activity.title, activityId: activity.id, key: Date.now(), horizon: withDates ? 'CUSTOM' : undefined, personId: handoff.personId, startDate: handoff.startDate, endDate: handoff.endDate });
+    setActiveTab('plan');
+  }, []);
+
   const handleOpenPlan = useCallback((activity?: string, activityId?: string) => {
     const cleanActivity = activity?.trim();
     if (cleanActivity) {
@@ -1989,6 +2003,8 @@ export default function DashboardPage() {
       <div style={{ width: '100%', maxWidth: 760 }}>
         {activeTab === 'home' && (
           <HomeDashboard
+            onPlanWithPerson={handlePlanWithPerson}
+            onOpenMyPeople={() => { setPeopleReturnTo('home'); setActiveTab('people'); }}
             userId={user?.id}
             userName={userNameDisplay}
             energyScore={energyInsight.score}
@@ -2094,6 +2110,9 @@ export default function DashboardPage() {
             initialActivityId={planPrefill?.activityId}
             initialActivityKey={planPrefill?.key}
             initialHorizon={planPrefill?.horizon}
+            initialPersonId={planPrefill?.personId}
+            initialCustomStartDate={planPrefill?.startDate}
+            initialCustomEndDate={planPrefill?.endDate}
             onOpenPeople={() => { setPeopleReturnTo('plan'); setActiveTab('people'); }}
             focusMomentsKey={momentsFocusKey}
             focusMomentToken={momentsFocusToken}
@@ -2171,7 +2190,7 @@ export default function DashboardPage() {
 
         {activeTab === 'chart' && <BirthChartSection />}
 
-        {activeTab === 'people' && <PeopleView onBack={() => setActiveTab(peopleReturnTo)} />}
+        {activeTab === 'people' && <PeopleView onBack={() => setActiveTab(peopleReturnTo)} onPlanWithPerson={handlePlanWithPerson} />}
 
         {activeTab === 'activity' && (
           <CalendarViewSection

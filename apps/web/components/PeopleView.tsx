@@ -7,7 +7,7 @@ import * as theme from './theme';
 import { colors, spacing, typography } from './theme';
 import { SurfaceCard, PrimaryButton, SecondaryButton, DestructiveButton, EmptyState, FieldLabel, FieldHint, TextInput, TextAreaInput, SelectInput } from './ui';
 import { ComingUpList, SpecialDaysSection, KIND_ICON, birthdayFromChartDate, formatSavedDay, occasionTitle, type OccasionRow, type UpcomingRow } from './MyPeopleOccasions';
-import { COMING_UP_DAYS, LIST_NEXT_OCCASION_DAYS, personNextOccasionLine } from '../lib/myPeopleOccasionUi';
+import { COMING_UP_DAYS, LIST_NEXT_OCCASION_DAYS, personNextOccasionLine, planHandoffForPerson, type PersonPlanHandoff } from '../lib/myPeopleOccasionUi';
 import { isMyPeopleClientEffective, isMyPeoplePresentationEnabled, MY_PEOPLE_CAPABILITY_HEADER } from '../lib/myPeopleGate';
 
 export type RelationshipType = 'PARTNER' | 'SPOUSE' | 'FAMILY' | 'FRIEND' | 'OTHER' | 'PARENT' | 'CHILD' | 'SIBLING';
@@ -68,6 +68,8 @@ function Avatar({ name }: { name: string }) {
 
 interface PeopleViewProps {
   onBack: () => void;
+  /** AURA-MP-3 -- start Plan's Find a Time with this person (My People only). */
+  onPlanWithPerson?: (handoff: PersonPlanHandoff) => void;
 }
 
 const RELATIONSHIP_OPTIONS: Array<{ value: RelationshipType; label: string; icon: string; myPeopleOnly?: boolean }> = [
@@ -92,7 +94,7 @@ export const RELATIONSHIP_ICON: Record<RelationshipType, string> = Object.fromEn
 
 type ViewMode = { kind: 'LIST' } | { kind: 'ADD' } | { kind: 'DETAIL'; personId: string } | { kind: 'EDIT'; personId: string };
 
-export function PeopleView({ onBack }: PeopleViewProps) {
+export function PeopleView({ onBack, onPlanWithPerson }: PeopleViewProps) {
   const [mode, setMode] = useState<ViewMode>({ kind: 'LIST' });
   const [people, setPeople] = useState<SavedPersonRow[] | null>(null);
   const [error, setError] = useState('');
@@ -171,6 +173,7 @@ export function PeopleView({ onBack }: PeopleViewProps) {
       {mode.kind === 'DETAIL' && (
         <PersonDetail
           personId={mode.personId}
+          onPlanWithPerson={onPlanWithPerson}
           onEdit={() => setMode({ kind: 'EDIT', personId: mode.personId })}
           onDeleted={() => {
             loadPeople();
@@ -278,7 +281,7 @@ function MyPeopleList({ people, upcoming, onAddPerson, onViewPerson }: { people:
   );
 }
 
-function PersonDetail({ personId, onEdit, onDeleted }: { personId: string; onEdit: () => void; onDeleted: () => void }) {
+function PersonDetail({ personId, onEdit, onDeleted, onPlanWithPerson }: { personId: string; onEdit: () => void; onDeleted: () => void; onPlanWithPerson?: (handoff: PersonPlanHandoff) => void }) {
   const [person, setPerson] = useState<SavedPersonDetail | null>(null);
   const [error, setError] = useState('');
   const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -367,6 +370,14 @@ function PersonDetail({ personId, onEdit, onDeleted }: { personId: string; onEdi
 
         {!effective && chartBlock}
 
+        {effective && onPlanWithPerson && (
+          // AURA-MP-3 (design 5.4) -- the single primary action. It only opens
+          // Plan with the person preselected; nothing is saved until the user
+          // picks and confirms a time there.
+          <PrimaryButton onClick={() => onPlanWithPerson(planHandoffForPerson(person.id))} style={{ marginTop: spacing.lg, width: '100%' }}>
+            Plan time with {person.name}
+          </PrimaryButton>
+        )}
         <SecondaryButton onClick={onEdit} style={{ marginTop: spacing.lg }}>
           Edit
         </SecondaryButton>
@@ -380,6 +391,7 @@ function PersonDetail({ personId, onEdit, onDeleted }: { personId: string; onEdi
           chartBirthDate={person.birthDate ?? null}
           currentYear={new Date().getFullYear()}
           onChanged={() => setReloadKey((k) => k + 1)}
+          onPlanOccasion={onPlanWithPerson}
         />
       )}
 
@@ -612,7 +624,8 @@ function timezoneOptions(extra: Array<string | null | undefined>): string[] {
   return Array.from(new Set([...offered, ...extra.filter((z): z is string => Boolean(z))])).sort();
 }
 
-function PersonForm({ mode, personId, onSaved, onCancel, myPeopleEffective: listEffective = false, serverEnabled: listServerEnabled = false }: { mode: 'ADD' | 'EDIT'; personId?: string; onSaved: () => void; onCancel: () => void; myPeopleEffective?: boolean; serverEnabled?: boolean }) {
+/** Also reused by Plan's "+ Add someone" quick-add (AURA-MP-3), which needs the new person's id. */
+export function PersonForm({ mode, personId, onSaved, onCancel, myPeopleEffective: listEffective = false, serverEnabled: listServerEnabled = false }: { mode: 'ADD' | 'EDIT'; personId?: string; onSaved: (createdId?: string) => void; onCancel: () => void; myPeopleEffective?: boolean; serverEnabled?: boolean }) {
   const [customCities, setCustomCities] = useState<CityOption[]>([]);
   const [name, setName] = useState('');
   // AURA-MP-2: optional My People fields (presented only while effective).
@@ -736,6 +749,8 @@ function PersonForm({ mode, personId, onSaved, onCancel, myPeopleEffective: list
             throw new Error(`${name.trim()} was saved, but the birthday wasn't. Add it from their page.`);
           }
         }
+        onSaved(created.id);
+        return;
       }
       onSaved();
     } catch (err) {
