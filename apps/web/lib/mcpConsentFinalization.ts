@@ -1,7 +1,7 @@
 import type { Pool, PoolClient } from 'pg';
 import { storageKey } from '../../../packages/mcp-tools/src/auth/postgresAdapter';
 import { authorizationCovered } from '../../../packages/mcp-tools/src/auth/consentFinalization';
-import { SESSION_CLEANUP_BOUNDS, SESSION_LOOKUP_BOUNDS, SESSION_WRITE_BOUNDS, SYSTEM_SESSION_CLOCK, type SessionClock, type SessionQueryBounds } from './authSessionDb';
+import { SESSION_CLEANUP_BOUNDS, SESSION_LOOKUP_BOUNDS, SESSION_WRITE_BOUNDS, SYSTEM_SESSION_CLOCK, sqlLiteral, type SessionClock, type SessionQueryBounds } from './authSessionDb';
 import { SessionVerificationUnavailableError } from './sessionErrors';
 
 /**
@@ -30,6 +30,10 @@ import { SessionVerificationUnavailableError } from './sessionErrors';
  */
 
 const TIMED_OUT = Symbol('timed out');
+/** SQLSTATE the commit guard raises when the approving session is no longer live at the COMMIT boundary. */
+export const CONSENT_SESSION_NOT_LIVE_SQLSTATE = 'P0A02';
+/** The commit guard refused: nothing was committed. */
+class CommitGuardRefused extends Error {}
 
 function onClientError(err: unknown): void {
   console.error(`[mcp-consent] checked-out client error (${err instanceof Error ? err.name : 'Error'})`);
@@ -55,7 +59,9 @@ async function boundedTransaction<T>(
   bounds: Required<SessionQueryBounds>,
   deadlineAt: number,
   work: (client: PoolClient) => Promise<T>,
-  clock: SessionClock = SYSTEM_SESSION_CLOCK
+  clock: SessionClock = SYSTEM_SESSION_CLOCK,
+  /** SQL run in the SAME simple-query message as COMMIT, immediately before it (or null). */
+  commitGuard: (value: T) => string | null = () => null
 ): Promise<T> {
   const end = Math.min(deadlineAt, clock.now() + bounds.deadlineMs);
   const remaining = () => end - clock.now();
@@ -98,12 +104,16 @@ async function boundedTransaction<T>(
     if (value === TIMED_OUT) throw new SessionVerificationUnavailableError('deadline', 'failed');
     // Nothing is committed unless the COMMIT is sent with budget left.
     if (!(remaining() >= 1)) throw new SessionVerificationUnavailableError('deadline', 'failed');
+    const guard = commitGuard(value);
     let committed: { command?: string } | typeof TIMED_OUT;
     try {
-      committed = (await race(client.query('COMMIT'), remaining(), clock)) as { command?: string } | typeof TIMED_OUT;
+      const reply = (await race(client.query(guard ? `${guard}; COMMIT` : 'COMMIT'), remaining(), clock)) as unknown;
+      committed = reply === TIMED_OUT ? TIMED_OUT : ((Array.isArray(reply) ? reply[reply.length - 1] : reply) as { command?: string });
     } catch (err) {
       const code = (err as { code?: unknown } | null)?.code;
       release(true);
+      // The guard raised in the COMMIT message: PostgreSQL skipped the COMMIT, nothing committed.
+      if (guard && code === CONSENT_SESSION_NOT_LIVE_SQLSTATE) throw new CommitGuardRefused();
       // PostgreSQL itself rejected the COMMIT: nothing committed.
       if (typeof code === 'string' && /^(23|25|40)/.test(code)) throw new SessionVerificationUnavailableError('driver', 'failed');
       throw new SessionVerificationUnavailableError('driver', 'uncertain');
@@ -121,7 +131,7 @@ async function boundedTransaction<T>(
   } catch (err) {
     // Unknown connection state: discard it; PostgreSQL rolls the open transaction back.
     release(true);
-    if (err instanceof SessionVerificationUnavailableError) throw err;
+    if (err instanceof SessionVerificationUnavailableError || err instanceof CommitGuardRefused) throw err;
     throw new SessionVerificationUnavailableError('driver', 'failed');
   }
 }
@@ -152,7 +162,24 @@ export async function finalizeConsent(pool: Pool, input: FinalizeConsentInput, c
   if (!input.grantId || !input.clientId || authorization.length === 0 || input.session.userId !== input.userId) return 'refused';
   const lifetime = Math.floor(input.grantLifetimeSeconds) + FINALIZATION_RETENTION_MARGIN_SECONDS;
   if (!(lifetime > 0)) return 'refused';
-  const inserted = await boundedTransaction(
+  // I2-R3 (39251-1): session validity is decided at the finalization BOUNDARY, not at transaction
+  // start. The INSERT uses clock_timestamp() (not now(), which is fixed when the transaction
+  // begins), and -- because a FOR SHARE that waited on a row lock is not re-evaluated when the
+  // row is unchanged -- a guard in the SAME message as COMMIT re-checks, at that instant and while
+  // this transaction still holds the row FOR SHARE (so logout cannot interleave), that the token's
+  // session is unrevoked and unexpired by the database clock. If not, COMMIT never runs.
+  const expiresIso = input.session.expiresAt.toISOString();
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(expiresIso)) return 'refused';
+  const commitGuard = (inserted: boolean) =>
+    inserted
+      ? `DO $mcp_consent_commit$ BEGIN IF NOT EXISTS (SELECT 1 FROM "AuthSession" WHERE "idHash" = ${sqlLiteral(input.session.idHash, 'idHash')} ` +
+        `AND "userId" = ${sqlLiteral(input.userId, 'userId')} AND "expiresAt" = '${expiresIso}'::timestamptz ` +
+        `AND "revokedAt" IS NULL AND "expiresAt" > clock_timestamp()) ` +
+        `THEN RAISE EXCEPTION 'mcp_consent_session_not_live' USING ERRCODE = '${CONSENT_SESSION_NOT_LIVE_SQLSTATE}'; END IF; END $mcp_consent_commit$`
+      : null;
+  let inserted: boolean;
+  try {
+    inserted = await boundedTransaction(
     pool,
     SESSION_WRITE_BOUNDS,
     input.deadlineAt,
@@ -162,7 +189,7 @@ export async function finalizeConsent(pool: Pool, input: FinalizeConsentInput, c
          SELECT $1, s."userId", $3, $4, s."idHash", now() + make_interval(secs => $5::int)
            FROM "AuthSession" s
           WHERE s."idHash" = $6 AND s."userId" = $2 AND s."expiresAt" = $7
-            AND s."revokedAt" IS NULL AND s."expiresAt" > now()
+            AND s."revokedAt" IS NULL AND s."expiresAt" > clock_timestamp()
             FOR SHARE OF s
          ON CONFLICT ("grantKey") DO NOTHING
          RETURNING 1 AS ok`,
@@ -170,8 +197,13 @@ export async function finalizeConsent(pool: Pool, input: FinalizeConsentInput, c
       );
       return r.rowCount === 1;
     },
-    clock
-  );
+    clock,
+    commitGuard
+    );
+  } catch (err) {
+    if (err instanceof CommitGuardRefused) return 'refused';
+    throw err;
+  }
   return inserted ? 'finalized' : 'refused';
 }
 

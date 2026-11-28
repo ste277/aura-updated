@@ -306,18 +306,40 @@ function sendPage(res: ServerResponse, status: number, title: string, body: stri
 <style>body{font-family:system-ui,sans-serif;max-width:32rem;margin:3rem auto;padding:0 1rem;line-height:1.5}button{font:inherit;padding:.5rem 1rem;margin-right:.5rem}</style></head><body>${body}</body></html>`);
 }
 
-async function readForm(req: IncomingMessage): Promise<URLSearchParams | null> {
+const BODY_TIMED_OUT = Symbol('consent body not received within the deadline');
+
+/**
+ * Reads the url-encoded consent form (size limit MAX_FORM_BYTES, unchanged).
+ * I2-R3 (39251-3): bounded by `waitMs`, what REMAINS of the request's own
+ * budget (the consent POST's 2 000 ms deadline) -- no separate timeout. A
+ * body not fully received in time yields BODY_TIMED_OUT.
+ */
+async function readForm(req: IncomingMessage, waitMs: number = Infinity): Promise<URLSearchParams | null | typeof BODY_TIMED_OUT> {
   const type = String(req.headers['content-type'] ?? '').split(';')[0].trim().toLowerCase();
   if (type !== 'application/x-www-form-urlencoded') return null;
-  const chunks: Buffer[] = [];
-  let total = 0;
-  for await (const chunk of req) {
-    const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-    total += buf.length;
-    if (total > MAX_FORM_BYTES) return null;
-    chunks.push(buf);
+  if (!(waitMs > 0)) return BODY_TIMED_OUT;
+  const reading = (async () => {
+    const chunks: Buffer[] = [];
+    let total = 0;
+    for await (const chunk of req) {
+      const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      total += buf.length;
+      if (total > MAX_FORM_BYTES) return null;
+      chunks.push(buf);
+    }
+    return new URLSearchParams(Buffer.concat(chunks).toString('utf8'));
+  })();
+  reading.catch(() => undefined);
+  if (!Number.isFinite(waitMs)) return reading;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const expired = new Promise<typeof BODY_TIMED_OUT>((resolve) => {
+    timer = setTimeout(() => resolve(BODY_TIMED_OUT), waitMs);
+  });
+  try {
+    return await Promise.race([reading, expired]);
+  } finally {
+    clearTimeout(timer);
   }
-  return new URLSearchParams(Buffer.concat(chunks).toString('utf8'));
 }
 
 /** I2-R2 (F2, approved): one consent-approval budget, and the least that must remain to attempt finalization. */
@@ -846,7 +868,14 @@ ${duration}${manage}
     if (req.method !== 'POST' || (action !== 'confirm' && action !== 'abort')) return sendPage(res, 405, 'Invalid request', '<h1>Invalid request</h1>');
     const origin = req.headers.origin;
     if (origin !== undefined && origin !== issuer) return sendPage(res, 403, 'Forbidden', '<h1>Forbidden</h1>');
-    const form = await readForm(req);
+    const form = await readForm(req, requestBudgetRemainingMs());
+    if (form === BODY_TIMED_OUT) {
+      // I2-R3: the body did not arrive inside the consent deadline. Answer 503 and close the
+      // connection, so a late body is never read or processed; nothing has been written.
+      audit({ event: 'oauth.error', outcome: 'store_unavailable', clientId: client.client_id, errorCode: 'ConsentBodyDeadline' });
+      res.once('finish', () => req.socket?.destroy());
+      return sendPage(res, 503, 'Temporarily unavailable', '<h1>Aura is temporarily unavailable</h1><p>The connection was not completed. Try again in a moment.</p>', { 'retry-after': '1', connection: 'close' });
+    }
     const presented = form?.get('csrf') ?? '';
     if (!csrfValid(presented, uid, user.userId)) return sendPage(res, 403, 'Forbidden', '<h1>Forbidden</h1>');
     if (accountChanged) return finish(req, res, { error: 'login_required', error_description: 'The signed-in account changed.' });

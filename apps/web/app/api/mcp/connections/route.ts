@@ -1,5 +1,7 @@
 import { remoteMcpConfigFromEnv } from '../../../../lib/mcpRemoteConfig';
 import { resolveRuntimeMcpAuthMode } from '../../../../lib/mcpAuthGate';
+import { isStoreUnavailableError } from '../../../../../../packages/mcp-tools/src/security/deadline';
+import { SessionVerificationUnavailableError } from '../../../../lib/sessionErrors';
 
 /**
  * AURA-MCP-02-I2b -- connected assistants for the signed-in Aura user.
@@ -20,7 +22,11 @@ import { resolveRuntimeMcpAuthMode } from '../../../../lib/mcpAuthGate';
 export const dynamic = 'force-dynamic';
 
 const notFound = () => new Response('Not Found', { status: 404, headers: { 'cache-control': 'no-store' } });
-const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
+const json = (status: number, body: unknown, extra: Record<string, string> = {}) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store', ...extra } });
+// I2-R3 (39251-2): authorization state that cannot be read is an outage (503 + Retry-After), never
+// "no connections" and never a 500. Only the typed unavailability errors are mapped.
+const unavailable = () => json(503, { error: 'temporarily_unavailable' }, { 'retry-after': '1' });
+const isUnavailable = (err: unknown) => isStoreUnavailableError(err) || err instanceof SessionVerificationUnavailableError;
 const MAX_BODY = 1024;
 
 async function handle(req: Request): Promise<Response> {
@@ -39,7 +45,13 @@ async function handle(req: Request): Promise<Response> {
       if (!userId) return json(401, { error: 'sign_in_required' });
       const local = getLocalMcpAuth(config);
       if (req.method === 'GET') {
-        const connections = await local.server.listUserConnections(userId);
+        let connections: Awaited<ReturnType<typeof local.server.listUserConnections>>;
+        try {
+          connections = await local.server.listUserConnections(userId);
+        } catch (err) {
+          if (isUnavailable(err)) return unavailable();
+          throw err;
+        }
         // One row per client (a client may hold more than one grant).
         const byClient = new Map<string, { clientId: string; label: string; connectedAt: number | null }>();
         for (const c of connections) {
@@ -62,7 +74,13 @@ async function handle(req: Request): Promise<Response> {
           return json(400, { error: 'invalid_json' });
         }
         if (typeof clientId !== 'string' || !/^[A-Za-z0-9._:-]{1,64}$/.test(clientId)) return json(400, { error: 'invalid_client_id' });
-        const revoked = await local.server.revokeUserClientGrants(userId, clientId);
+        let revoked: number;
+        try {
+          revoked = await local.server.revokeUserClientGrants(userId, clientId);
+        } catch (err) {
+          if (isUnavailable(err)) return unavailable();
+          throw err;
+        }
         return json(200, { disconnected: revoked > 0 });
       }
       return new Response('Method Not Allowed', { status: 405, headers: { allow: 'GET, POST', 'cache-control': 'no-store' } });

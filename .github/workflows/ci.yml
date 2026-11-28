@@ -1385,6 +1385,15 @@ jobs:
           # Synthetic, CI-only: the local MCP gate refuses the public development fallback.
           AUTH_SECRET: ci-i2r2-synthetic-session-secret-0123456789
         run: npx ts-node test/mcpConsentFinalizationDb.test.ts
+      # AURA-AUTH-SESSION-01-I2-R3 (39253): natural session expiry at the
+      # finalization boundary (incl. a row-lock wait), GET /api/mcp/connections
+      # 503 on a listing outage (real route), and the consent body read inside
+      # the 2 s consent deadline (delayed delivery). Same two databases.
+      - name: Run session I2-R3 focused regression DB test (AUTH-SESSION-01-I2-R3)
+        env:
+          AURA_MCP_OAUTH_DATABASE_URL: postgresql://aura_ci:aura_ci@localhost:5432/aura_ci_mcp_oauth
+          AUTH_SECRET: ci-i2r3-synthetic-session-secret-0123456789
+        run: npx ts-node test/authSessionI2R3Db.test.ts
       - name: Verify every repository migration was recorded as applied
         run: |
           set -euo pipefail

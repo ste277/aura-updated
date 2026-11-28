@@ -252,7 +252,8 @@ async function startProxy(upstream: string) {
   url.host = `127.0.0.1:${(server.address() as AddressInfo).port}`;
   return { url: url.toString(), rules, close: () => new Promise<void>((r) => { for (const s of sockets) s.destroy(); server.close(() => r()); }) };
 }
-const isLoneCommit = (c: Buffer) => c.includes('COMMIT') && !/SELECT|INSERT|UPDATE|DELETE|\$auth_session_commit\$/.test(c.toString('latin1'));
+// The finalization's COMMIT message (I2-R3: it carries the commit-boundary session guard).
+const isLoneCommit = (c: Buffer) => c.includes('COMMIT') && c.includes('$mcp_consent_commit$');
 
 // ------------------------------------------------------------------ child (crash) --
 async function childMain(token: string) {
