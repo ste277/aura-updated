@@ -39,6 +39,8 @@ import {
   getUserById,
   linkGoalActivityToPlannedActivity,
   lockGoalParentLifecycleForPlanning,
+  lockLinkedPeopleForGoalActivities,
+  carryGoalActivityPersonToPlan,
   materializeGoalActivityRhythmOccurrence,
   linkCaptureToPlannedActivity,
   type PlannedActivity,
@@ -435,6 +437,9 @@ export async function persistAcceptedConstructedDay(
     }
 
     const linkedGoalActivityIds = [...new Set(rawGoalActivityIds)];
+    // AURA-MP-4 -- the linked rhythms' people are locked first (person ->
+    // rhythm -> plan, the order a person DELETE uses); a no-op without links.
+    await lockLinkedPeopleForGoalActivities(userId, linkedGoalActivityIds, client);
     if (linkedGoalActivityIds.length > 0) {
       const lifecycle = await lockGoalParentLifecycleForPlanning(userId, linkedGoalActivityIds, client);
       const notActive: AcceptanceDiagnostic[] = decision.writeIntents
@@ -519,6 +524,13 @@ export async function persistAcceptedConstructedDay(
             // -- never silently continue. Same rollback contract as above.
             throw goalActivityNotAvailableError();
           }
+        }
+        // AURA-MP-4 -- a plan for a person-linked rhythm keeps that person.
+        const carried = await carryGoalActivityPersonToPlan(userId, goalActivityId, plan.id, client);
+        // AURA-MP-4-R1 (F2): the response reports the persisted association.
+        if (carried) {
+          plans.push(carried);
+          continue;
         }
       }
 

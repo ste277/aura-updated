@@ -112,6 +112,10 @@ async function main() {
   const { goal } = await createGoalWithActivities({ userId: user.id, title: 'Get fit (HGR3-C2 fixture)', targetDate: null, activities: [] });
   const activity = await addGoalActivity(user.id, goal.id, { title: 'Run', activityId: 'workout', rhythm: { kind: 'N_PER_WEEK', targetPerWeek: 1 } });
   if (!activity) throw new Error('fixture setup failed: addGoalActivity returned null');
+  // AURA-MP-4-R1 -- a person-linked rhythm (direct fixture row; no switch needed): weekly acceptance carries the person.
+  const linkedPersonId = `mp4r1-weekly-${user.id}`;
+  await sql('INSERT INTO "SavedPerson" (id, "ownerUserId", name) VALUES ($1, $2, $3)', [linkedPersonId, user.id, 'Synthetic weekly person']);
+  await sql('UPDATE "GoalActivity" SET "savedPersonId" = $1 WHERE id = $2', [linkedPersonId, activity.id]);
 
   const plansOf = async () => sql(`SELECT id, status, "plannedStartAt", "plannedEndAt" FROM "PlannedActivity" WHERE "userId" = $1 ORDER BY "plannedStartAt"`, [user.id]);
 
@@ -139,6 +143,8 @@ async function main() {
     const pendingA = selectSessionsPendingSubmission(drafts1);
     check('2. selectSessionsPendingSubmission includes every freshly-proposed (PENDING) session', pendingA.length === drafts1.length);
     const acceptResultA = await submitAcceptance(acceptanceIdA, pendingA);
+    const associated = await sql('SELECT "savedPersonId" FROM "PlannedActivity" WHERE "userId" = $1', [user.id]);
+    check('AURA-MP-4-R1: weekly acceptance stores every plan for the person-linked rhythm with that person', associated.length > 0 && associated.every((plan: any) => plan.savedPersonId === linkedPersonId));
     check('2. the real weekly-accept endpoint, parsed through this UI\'s own real response parser, reports a genuine ACCEPTED outcome', acceptResultA.status === 'OK' && acceptResultA.summary.acceptedCount === pendingA.length);
     if (acceptResultA.status !== 'OK') throw new Error('fixture precondition failed: initial acceptance did not succeed');
     const draftsAfterA = applyAcceptanceSummaryToDrafts(drafts1, pendingA, acceptResultA.summary);

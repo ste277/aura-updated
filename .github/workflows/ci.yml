@@ -168,6 +168,10 @@ jobs:
       # windows), "Not now" / "Not this year" keys, plan hand-offs, wording.
       - name: Run AURA-MP-3 My People Home and plan hand-off rules test
         run: npx ts-node test/myPeopleMp3Ui.test.ts
+      # AURA-MP-4 (62025) -- pure Relationship Rhythm rules: existing catalog
+      # activities only, server-side validation, plain wording.
+      - name: Run AURA-MP-4 Relationship Rhythm rules test
+        run: npx ts-node test/myPeopleMp4Rules.test.ts
       # AURA-MP-1 -- special-day date logic: unknown year, 29 Feb, rollover,
       # the user's local midnight, surfacing windows. Pure, no database.
       - name: Run AURA-MP-1 special-day date logic test
@@ -1791,3 +1795,11 @@ jobs:
       # nothing global): the transactions must still run at READ COMMITTED.
       - name: Run AURA-MP-3-R2 My People isolation DB test
         run: npx ts-node --project tsconfig.jsdom-tests.json test/myPeopleMp3R2IsolationDb.test.ts
+      # AURA-MP-4 (62025) -- Relationship Rhythms with migration 0058: explicit
+      # creation only, ownership (API + composite FK), lifecycle, plans
+      # carrying the person, person deletion pausing and unlinking rhythms,
+      # forced interleavings in both orders, atomicity and the switch.
+      - name: Run AURA-MP-4 Relationship Rhythms DB test
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/myPeopleMp4RhythmsDb.test.ts
+      - name: Run AURA-MP-4 Keep in touch screen DB test
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/myPeopleMp4UiDb.test.ts
