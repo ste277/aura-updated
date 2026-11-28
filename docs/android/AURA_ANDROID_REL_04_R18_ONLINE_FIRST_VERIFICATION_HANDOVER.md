@@ -84,6 +84,14 @@ Local on `11dad48` (clean tree; PostgreSQL 16, Chromium 151.0.7922.34, Node v26.
 
 Logs: `docs/android/evidence/rel04-r18/local-*-11dad48/`, `local-r18/`. The follow-up commit changes only `test/rel04ActivityOperationHomeChromiumDb.test.ts` and docs. Hosted CI: §6.1, added after the run.
 
+### 6.1 Hosted runs 46163965630 (`1e3c9d4`) and 46163945253 (`c93ce5d`) — 8/9 each, preserved, not rerun
+
+Main advanced to `45e9cca` (#411, AURA-MP-4 Relationship Rhythms) before these runs. In both, every R18 / REL-04 check passed, including the G10/G11 witnesses, the 135/135 generative matrix, N10–N13, zero automatic POSTs, offline refusal and two-tab Retry. The only failure was main's new `myPeopleMp4RhythmsDb`: it called the account-bound `POST /api/plans` without `X-Aura-Expected-Account` (503 `client_upgrade_required`), and the Move/Delete/planning checks cascaded from that. This is the same test-only class as MP-1 and MP-3. Logs and checksums: `~/Desktop/Claude/AuraEvidence/REL-04-R18-CI-46163965630/`, `…-46163945253/`.
+
+### 6.2 Integration of main `45e9cca`
+
+Merge `e2814ff`, with no conflicts. Main's plans-route change (a person lock and a person carry-over inside the transaction) leaves the REL-04 `refuseUnboundWrite` / `refuseAccountMismatch` guards untouched. Test-only: the MP-4 suite's plan POSTs state the request's own session account (`rel04BoundTestHeaders`); assertions unchanged, 49/49. Local on `e2814ff` (clean tree): **DB 91/91, math-core 277/277** (`integration/local-*-e2814ff/`).
+
 ## 7. Remaining limitations and release conditions
 
 - Unattributed evidence (a contradictory or unidentifiable copy) withholds a new entry of the same activity and offers no Retry. The user may log a separate activity or discard at sign-out. A conflicting operation is never sent and is not resolved by Check again (read-only).

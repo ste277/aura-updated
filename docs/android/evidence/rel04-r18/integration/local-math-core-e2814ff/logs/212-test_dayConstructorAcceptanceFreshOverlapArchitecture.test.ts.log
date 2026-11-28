@@ -1,0 +1,35 @@
+$ npx ts-node test/dayConstructorAcceptanceFreshOverlapArchitecture.test.ts
+# job=math-core-tests step=Run acceptance fresh-overlap architecture test env={}
+OK   acceptance freshness uses the canonical overlap loader with the acceptance TRANSACTION client: listPlannedActivitiesOverlappingRange(userId, bounds.from, bounds.to, client)
+OK   it does NOT use the start-scoped listPlannedActivitiesForDay anywhere in the acceptance persistence code
+OK   the loader runs on the transaction client: createRealAcceptanceDeps takes the client and nothing in the loader reads from the global pool
+OK   the deps are built from the SAME transaction client the writes use
+OK   one fresh-blocker query per acceptance: the loader makes a single call, with no loop and no per-item query
+OK   the loader asks for exactly the SIGNED window: the validation passes request.constructionWindow.start/end verbatim and never a civil day
+OK   the blocker list is server-derived only: the acceptance request carries exactly clientRequestId, constructionWindow and proposedItems -- no blocker list, no freshness flag
+OK   ORDER: the existing advisory lock is acquired first, then replay classification/claims, then evaluateAcceptance (which performs the fresh read), then the accepted-plan writes
+OK   the fresh read happens inside evaluateAcceptance (validateAgainstFreshBlockers), before any write intent is produced
+OK   a rejected decision ROLLS BACK before any write (rejection returns before the write loop)
+OK   the transaction and lock are unchanged: one beginTransaction, one lock site in this file, the unchanged key
+OK   rejection still depends on item-vs-blocker overlap (a blocker loaded for the WINDOW never rejects by itself)
+OK   the lifecycle filter is unchanged and still applied after the load
+OK   the in-memory overlap formula is unchanged (strict, half-open; the known zero-length debt is NOT altered here)
+OK   db.ts still contains exactly ONE half-open overlap predicate over plannedStartAt/plannedEndAt for the loaders (no new overlap SQL)
+OK   acceptance persistence contains no PlannedActivity SQL of its own
+OK   the canonical overlap loader is shared by the range loader, the Constructor and acceptance
+OK   updated deliberately by schedule-write S2 (this check previously pinned POST /api/plans as unlocked): the S1 acceptance read is unchanged, and createPlannedActivity itself still takes no lock -- the manual writer's serialization lives in the route's own transaction
+OK   NO S2: createPlannedActivity (db.ts) takes no lock
+OK   the schedule-write lock sites (sharing the "day-constructor-accept:" key) are exactly the three existing ones (acceptance, Move, Recomposition acceptance); no helper was extracted
+OK   no lock timeout was introduced anywhere in production code (re-baselined by AURA-AUTH-SESSION-01-I1: only lib/authSessionDb.ts may set one, for session queries; lib/sessionErrors.ts only names the reasons)
+OK   the session-store timeout module never touches the schedule-write lock (no advisory lock, no "day-constructor-accept:" key)
+OK   the session error-label module contains no SQL at all (it cannot set a timeout)
+OK   Move and Recomposition acceptance are untouched in kind: they still use their own overlap-correct findBlockingPlanForRange
+OK   no database exclusion constraint or schema change for plans: the schema has no exclusion/overlap construct
+OK   signing, integrity and Goal authorization modules are untouched by this slice: acceptance persistence imports no new module beyond the reviewed HPG3-A3a error-contract module
+OK   no policy vocabulary in the acceptance persistence or the acceptance validation (pressure, scarcity, promotion, shadow, DecisionEvidence)
+OK   the DB test makes no race-free / global-consistency / universal-non-overlap claim in any assertion label
+OK   the DB test records the known limit (a writer that BYPASSES the lock) explicitly
+OK   the DB test covers the required cases: same-day in-progress, overnight, same-window control, left/right adjacent, ±1 ms, full-span, disjoint blocker, cross-user, multiple blockers/items, atomicity, claim rollback/retry/replay, Goal side effects, cross-midnight, DST, row volume, query count, lock order
+ALL ACCEPTANCE FRESH-OVERLAP ARCHITECTURE CHECKS PASSED
+
+# exit=0 signal=

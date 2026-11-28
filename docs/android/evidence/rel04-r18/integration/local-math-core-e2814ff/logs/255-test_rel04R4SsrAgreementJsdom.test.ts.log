@@ -1,0 +1,27 @@
+$ npx ts-node --project tsconfig.jsdom-tests.json test/rel04R4SsrAgreementJsdom.test.ts
+# job=math-core-tests step=Run REL-04 R4 server-rendered account agreement and bound download test env={"TS_NODE_COMPILER_OPTIONS":"{\"jsx\":\"react-jsx\"}"}
+OK   S1 (R5) the server render of Plan Day is the neutral checking state, and the page module reads no session, cookie or database (no account-derived props exist to serialize)
+OK   S1 (R5) app/goals/page.tsx reads no session, cookie or database (nothing account-derived in its response)
+OK   S1 (R5) app/goals/[goalId]/page.tsx reads no session, cookie or database (nothing account-derived in its response)
+OK   S1 (R5) app/captures/page.tsx reads no session, cookie or database (nothing account-derived in its response)
+OK   S2 (R5) before the first verification answers: checking state only, and NO bootstrap request has been sent
+OK   S2 the first verification does not change the epoch (why the R3 epoch-only reload missed it)
+OK   S2 (R5) after verification (Bob) the bootstrap is fetched ONCE, stating Bob, and Bob's day is shown -- the query string is forwarded
+OK   S3 Alice verified -> Alice's day
+OK   S3 after cross-tab news Alice's day is unmounted immediately (checking state), before re-verification answers
+OK   S3 (R5) re-verification answers Bob -> a fresh bootstrap for Bob (stated Bob) and Bob's day; no page reload is involved
+OK   S4 failed first verification -> "couldn't confirm" with Try again; no bootstrap request
+OK   S4 Try again verifies, then fetches and shows the day
+OK   S5 (R5) AccountScoped has no automatic reload path at all (no location.reload, no sessionStorage guard) -- so storage being unavailable cannot cause a reload loop
+OK   S6 Goals: list fetched only after verification, stating Alice
+OK   S6 (R5) the bootstrap route is account-scoped by the real middleware: headerless -> 503, another account -> 409
+OK   D1 export download states the tapped account and saves Alice's file
+OK   D2 account changed while the download was in flight -> account-changed, nothing handed to the browser
+OK   D3 a binding from before the change is refused before any request
+OK   D4 headerless export (old link navigation) -> 503 client_upgrade_required; stating Alice while Bob is signed in -> 409
+OK   D5 in-app calendar download states Bob and saves; headerless feed (subscription/link) still answers; a stated mismatch is refused
+OK   D6 during a sign-in/out the download is refused (no request)
+
+21 passed, 0 failed
+
+# exit=0 signal=

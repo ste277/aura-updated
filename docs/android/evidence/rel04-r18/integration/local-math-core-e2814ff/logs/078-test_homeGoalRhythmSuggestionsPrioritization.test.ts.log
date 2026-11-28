@@ -1,0 +1,27 @@
+$ npx ts-node test/homeGoalRhythmSuggestionsPrioritization.test.ts
+# job=math-core-tests step=Run Home Goal Rhythm prioritization and overflow test env={}
+OK   1. zero eligible activities -> empty visible and overflow
+OK   2. one eligible activity -> appears visible, no overflow
+OK   3. exactly three eligible -> all three visible, zero overflow (boundary)
+OK   4. more than three eligible -> exactly 3 visible, 2 overflow, nothing dropped (5 total preserved)
+OK   5. ordering is deterministic (highest remainingThisWeek first, stable goalActivityId tie-break) regardless of input order
+OK   6. every eligible suggestion is reachable (visible + overflow), each with its correct real identity, none fabricated
+OK   7. [STRUCTURAL] the card toggles a real expand/collapse state and slices visible+overflow vs visible-only, matching "View all"/"Show less"
+OK   8a. before dismissal: ga-1/ga-2/ga-3 visible, ga-4 is overflow
+OK   8b. dismissing ga-2 (a visible item) promotes ga-4 (the overflow item) into the visible set, preserving relative order of the rest
+OK   9a. computeGoalRhythmHomeView never mutates its input suggestions array/objects
+OK   9b. the real "Not now" click handler contains no fetch/write call -- it only updates local dismissedGoalRhythmIds React state
+OK   10. prioritization reorders but never rewrites a suggestion's own identity fields (goalActivityId/goalId/planHandoff all byte-identical to the source object)
+OK   11a. an overflow suggestion carries its real planHandoff unchanged (fromGoal/activities match its own goalId/goalActivityId exactly)
+OK   11b. [STRUCTURAL] the card renders visible and overflow suggestions through the SAME single .map() over `shown` -- no separate/special-cased overflow render path
+OK   12. [STRUCTURAL] the existing guidance/"Best For You" rendering is untouched, and the new dedup call's own first argument is goalRhythmSuggestions, never the guidance feed
+OK   13. [STRUCTURAL] goalActivityRhythm.ts's own eligibility formula/export is still present verbatim (this PR's new files only ever CONSUME HomeGoalRhythmSuggestion, never re-derive remainingThisWeek/targetPerWeek)
+OK   14. [STRUCTURAL] HGR2's touched files introduce no Daily Rhythm filtering of their own (still exclusively Plan My Day's, unchanged)
+OK   15. [STRUCTURAL] "View all"/"Not now"/"Plan it" are real keyboard-focusable button elements with aria-expanded on the toggle and a 44px minimum touch target
+OK   dup-a. a suggestion whose activityId is already shown elsewhere on Home is suppressed
+OK   dup-b. a suggestion with a null activityId is never suppressed (nothing to collide on)
+OK   dup-c. a suggestion with a genuinely distinct activityId is kept
+OK   dup-d. a suggestion sharing the SUPPRESSED suggestion's title but with a DIFFERENT activityId is kept -- dedup is never title-text-based
+ALL HOME GOAL RHYTHM SUGGESTIONS PRIORITIZATION CHECKS PASSED
+
+# exit=0 signal=

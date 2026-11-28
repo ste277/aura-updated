@@ -1,0 +1,37 @@
+$ npx ts-node test/decisionFactPreparationDb.test.ts
+# job=day-constructor-acceptance-db-tests step=Run decision fact preparation DB test env={}
+=== real contested slot: facts prepared BEFORE construction, attached unchanged AFTER ===
+OK   the real preview is READY with a real contest: exactly one proposed, one deferred
+OK   P0c baseline preserved: the HIGH candidate is proposed and the LOW candidate is deferred
+OK   real sequence: both initial searches, THEN the two range loads, THEN the replenishment re-search (which only follows the first construction)
+OK   PREPARED BEFORE CONSTRUCTION, not recomputed after: exactly one availability load and one plan query for the range, both before the replenishment re-search
+OK   the Constructor output is byte-identical with and without preparation
+OK   both candidates carry real recurrence AND opportunity facts (the loser's facts survive in the resolved-intent metadata)
+OK   candidate-local supply: both report the same viable days (3: Wed, Thu, Fri) -- nothing allocated between them -- over their own 60-minute durations
+OK   independent recomputation equals the attached opportunity facts for both candidates
+OK   the real persisted blockers shaped the supply: the planning day (Wed) is KNOWN_FEASIBLE only through its single 11:00-12:00 slot, and Thu/Fri contribute the 2 after-start viable days
+=== input reversal and no consumption ===
+OK   reversed submission order: HIGH still wins, LOW still deferred, byte-identical with and without preparation
+OK   the prepared facts do not depend on submission order (same facts for the same intent)
+OK   without a range-deps wiring no opportunity facts exist at all (pre-O4 behavior)
+=== zero writes ===
+OK   previews wrote nothing: no plan, occurrence or availability row changed
+=== unconfigured availability ===
+OK   UNCONFIGURED stays UNKNOWN: every evaluated day unknown, 0 viable, coverage UNKNOWN (not a COMPLETE zero)
+OK   and the day built is unchanged by it
+=== query counts: 0 / 1 / 3 / 10 fact-bearing candidates ===
+OK   0 fact-bearing candidate(s): preview READY and no candidate has opportunity facts
+     0 fact-bearing -> goal discovery 1, goal facts 1, orchestrator availability 1, orchestrator plans 1, range availability 0, range plans 0
+OK   1 fact-bearing candidate(s): preview READY and every candidate carries opportunity facts
+     1 fact-bearing -> goal discovery 1, goal facts 1, orchestrator availability 1, orchestrator plans 1, range availability 1, range plans 1
+OK   3 fact-bearing candidate(s): preview READY and every candidate carries opportunity facts
+     3 fact-bearing -> goal discovery 1, goal facts 1, orchestrator availability 1, orchestrator plans 1, range availability 1, range plans 1
+OK   10 fact-bearing candidate(s): preview READY and every candidate carries opportunity facts
+     10 fact-bearing -> goal discovery 1, goal facts 1, orchestrator availability 1, orchestrator plans 1, range availability 1, range plans 1
+OK   0 fact-bearing candidates: no range load at all (one orchestrator availability load and one orchestrator plan query only)
+OK   1, 3 and 10 candidates: exactly ONE range availability load and ONE range plan query each (no candidate-linear growth)
+OK   the orchestrator's own availability and plan loads are one each for every candidate count (unchanged)
+OK   Goal discovery and Rhythm-facts queries are one each regardless of candidate count (unchanged)
+ALL DECISION FACT PREPARATION DB CHECKS PASSED
+
+# exit=0 signal=

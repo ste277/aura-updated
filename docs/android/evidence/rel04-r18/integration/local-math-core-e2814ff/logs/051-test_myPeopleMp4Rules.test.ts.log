@@ -1,0 +1,16 @@
+$ npx ts-node test/myPeopleMp4Rules.test.ts
+# job=math-core-tests step=Run AURA-MP-4 Relationship Rhythm rules test env={}
+OK   Every choice maps to an EXISTING catalog activity (no new catalog entries; ranking unchanged)
+OK   Choices cover call, visit, dinner, time together and walk
+OK   Default titles name the person ("Call Amma", "Dinner with Amma")
+OK   Default goal title is "Stay close to {name}"
+OK   Valid request: weekly rhythm, activity from the choice (client activityId ignored), call duration 30 min, trimmed title
+OK   Optional preferences use the existing Life Rhythm parser and override the default duration
+OK   Existing-goal attachment is parsed (trimmed id)
+OK   Invalid requests are all rejected (unknown choice, empty/long title, 0 or fractional cadence, missing/blank goal, unknown preference)
+OK   Cadence wording is plain ("Once a week", "Twice a week", "3 times a week")
+OK   No guilt or scoring words in any wording
+
+ALL MY PEOPLE MP-4 RULES CHECKS PASSED (10)
+
+# exit=0 signal=

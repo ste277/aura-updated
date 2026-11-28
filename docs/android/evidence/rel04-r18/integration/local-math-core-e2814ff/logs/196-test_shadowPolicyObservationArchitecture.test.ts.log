@@ -1,0 +1,43 @@
+$ npx ts-node test/shadowPolicyObservationArchitecture.test.ts
+# job=math-core-tests step=Run shadow policy observation architecture test env={}
+=== the real tree conforms ===
+OK   THE REAL PRODUCTION TREE HAS ZERO SHADOW-POLICY ARCHITECTURE VIOLATIONS (592 production files scanned)
+=== zero consumers, single callers, untouched upstream ===
+OK   ONE PRODUCTION CONSUMER (O5 P4b5): the composition vocabulary exists in exactly FOUR production files (itself, the server-controlled shadow execution boundary, its only value importer and caller, and -- since O5 P4c3 -- the pure active selector and -- since the O5 SHADOW EVIDENCE slice -- the pure evidence derivation, both TYPE-only importers of its run / observation contracts, which uses it INSTEAD of the plain orchestration -- pinned by shadowPolicyExecutionArchitecture.test.ts); nothing else imports or calls it, and the composition itself is unaware of modes, sinks and telemetry
+OK   EXACTLY ONE CALLER EACH: the orchestration boundary is called only by itself and this composition; the generator only by itself and this composition; the predicate only by itself and the typed accepted-counterfactual authority (O5 P4c3), whose mint this composition alone calls
+OK   NOT PUBLIC / SIGNED / PERSISTED / ACCEPTED: no preview, signing, acceptance, persistence, Recomposition, Move, presentation, route, scheduling-context, trace, basis, placements, input, contention, attempts, generator, predicate, preparation or orchestration module names the composition
+OK   NO PERSISTENCE, NO SCHEMA: the Prisma schema and every migration directory's own contents mention no shadow policy observation; no migration was added (count-independent)
+OK   UPSTREAM UNTOUCHED: the generator and the predicate never name the composition, and dayConstructor.ts still exports exactly the comparator, `constructDay` and `constructDayWithTrace`
+OK   #208 SCOPE: the composition (which READS Dates and emits ISO strings only) is on the protected Date-mutator list
+OK   REQUIRED CI: the P4b4 behavior and architecture suites are mandatory steps in the pure job
+OK   P4b3 TIMING-FLOOR GRID DEBT IS COMMITTED AND CANNOT BE REMOVED: the behavior suite pins the 50-cell baseline-fit x relocated-fit x direction grid and the same-fit start-independence fixtures; the architecture suite pins the constant comparator shell (candidateOrder 0, fixed instants)
+=== SAME RUN by construction; one observation per PromotionInput; the composition decides nothing ===
+OK   THE ONLY SEAM IS (request, deps): `observeShadowPolicy` runs the orchestration boundary exactly once (one `await`, one `async`) and no function that accepts a basis, placements, a PromotionInput, a pair, a run or a counterfactual is exported -- the four P4b3 authorities cannot be supplied independently
+OK   IMPORTS: exactly five -- the orchestration boundary, the generator and the predicate as the only VALUE imports; request / deps / result, the LocalCounterfactual, reason and timing-fit contracts as TYPES
+OK   GENERATOR / PREDICATE USE: one generator call site and one predicate call site; the generator receives exactly the run-level basis, placements and attempts plus ITS OWN pair; the predicate exactly the run-level basis and placements, the pair's PromotionInput and the generated counterfactual; the predicate is gated on a READY generation
+OK   ONE OBSERVATION PER PROMOTION from its own typed pair, in source order: one `.map` over `run.promotions`, no index access or zipping, no loop, early stop, sort, filter, selection or ranking (nothing stops at, picks or ranks an ACCEPT)
+OK   LAYERS AND REASONS: GENERATION_UNAVAILABLE / ACCEPTANCE_UNAVAILABLE / REJECT / ACCEPT, each carrying the exact source reason (no translation, no competing vocabulary); the run level is explicit (UNAVAILABLE { RUN_NOT_READY | PREPARATION_FAILED | OBSERVATION_FAILED }, or READY { observations }) and the Constructor result is passed through untouched
+OK   NO POLICY, NO SECOND RUN: no pressure, timing-rank, importance, deadline, originalOrder, scoring or ranking; no second orchestration, derivation, projection, Constructor call, load, query or timing search; no baseline read or replacement; no signing, persistence, logging, environment or randomness; no raw trace, evidence, facts or candidate history
+OK   OUTPUT OWNERSHIP: every output is frozen; instants are ISO strings (no Date is constructed or exposed); the summary is exactly { promoted, displacedOwnerIds, relocatedOwners, unplacedOwnerIds, baselinePlacementCount, counterfactualPlacementCount } -- no authority, schedule copy or trace
+OK   FAILURE ISOLATION: each pair is guarded and degrades to ITS OWN unavailable outcome with the existing reason of the failing stage; a run-level failure is a distinct OBSERVATION_FAILED; no shadow failure can abort or alter the returned result
+OK   NO OFF | SHADOW | ACTIVE SWITCH, flag or environment exists in this slice, and nothing is wired into Plan Day
+=== MUTATIONS: each violation, injected into an in-memory copy, is detected ===
+OK   MUTATION: a SECOND ORCHESTRATION / second search / reload of evidence, facts, durations or availability / a second pressure derivation -> detected
+OK   MUTATION: an INDEPENDENT AUTHORITY API (an exported function taking a basis / placements / PromotionInput / counterfactual / run) -> detected
+OK   MUTATION: FIRST ACCEPT ONLY / STOP AFTER ACCEPT / RANK ACCEPTS / SELECT A WINNER (a loop with break, a sort, a filter, a selection field) -> detected
+OK   MUTATION: ZIP BY INDEX / parallel arrays / cross-candidate authority (pairing a counterfactual with another candidate's input) -> detected
+OK   MUTATION: SHARED BASELINE broken (a later observation consumes an earlier counterfactual as its baseline: the generator is handed anything but the run-level authorities) -> detected
+OK   MUTATION: the predicate is called WITHOUT a READY generation, twice, or the generator more than once -> detected
+OK   MUTATION: POLICY IN P4b4 (reading pressure, timing rank, importance, deadline or originalOrder to decide; a shadow-specific ACCEPT / REJECT rule or translated reason) -> detected
+OK   MUTATION: COLLAPSE UNAVAILABLE / DROP A REJECT REASON (the layers merged, a reason dropped from the observation, a new outcome added) -> detected
+OK   MUTATION: APPLY / SIGN / PERSIST an ACCEPT, replace the returned result, read the baseline schedule -> detected
+OK   MUTATION: DB / clock / randomness / environment / async fan-out -> detected
+OK   MUTATION: INPUT MUTATION / SHARED OUTPUT / UNFROZEN OUTPUT / exposed Dates / authority dump -> detected
+OK   MUTATION: a PRODUCTION CONSUMER / public wiring / a route, preview or persistence surface naming the composition -> detected
+OK   MUTATION (O5 P4c4a): the composition binds ANOTHER baseline than its own run's `prepared.result` (a foreign / empty object, or the baseline dropped at either hand-off) -> detected
+OK   MUTATION: another caller of the orchestration boundary, the generator or the predicate -> detected
+OK   MUTATION: the per-pair isolation is removed, a run-level failure is conflated with a pair failure, the run level swallows a not-READY baseline -> detected
+OK   the mutations were applied to in-memory copies only: the real tree still has zero violations afterwards
+ALL SHADOW POLICY ARCHITECTURE CHECKS PASSED
+
+# exit=0 signal=

@@ -1,0 +1,123 @@
+$ npx ts-node test/mcpOAuthI2b.test.ts
+# job=math-core-tests step=Run I2b OAuth production-readiness test env={}
+OK   F6 store: 25 concurrent consumes of one code -> exactly 1 succeeds, 24 replay errors
+OK   F6 store: replay revoked the grant behind the code
+OK   F6 store: replay error is an OAuth invalid_grant
+OK   F6 store: an expired code cannot be consumed
+OK   store: expired entries are invisible and cleaned up
+OK   multi-instance: authorization completes across instances (shared store + keys)
+OK   F6: 12 concurrent redemptions of one code across 3 instances -> exactly 1 token
+OK   F6: losing redemptions get invalid_grant (400)
+OK   F6: replay revoked the grant, so even the winning token is dead
+OK   audit: replay detection recorded
+OK   F6: a fresh authorization after replay works
+OK   multi-instance: token verifies on instance 0
+OK   multi-instance: token verifies on instance 1
+OK   multi-instance: token verifies on instance 2
+OK   refresh: no refresh token without offline_access
+OK   refresh: no refresh token for a client not allowed to refresh
+OK   refresh: consent page says how long it stays connected
+OK   refresh: allowed client + consented offline_access -> refresh token
+OK   refresh: rotation returns a NEW refresh token and a working access token
+OK   refresh: replaying the rotated refresh token -> invalid_grant
+OK   refresh: replay revoked the whole chain (newest refresh token dead too)
+OK   refresh: replay revoked the access token from the rotation
+OK   refresh: 8 concurrent uses of one refresh token -> at most 1 success
+OK   refresh: idle-expired refresh token refused
+OK   refresh: chain refused after the absolute lifetime even when rotated in time
+OK   audit: refresh recorded as oauth.token_refreshed
+OK   connections: list shows the connected client with Aura label
+OK   connections: another user sees only their own
+OK   disconnect: revokes the grant
+OK   disconnect: access token dead on every instance
+OK   disconnect: refresh token dead
+OK   disconnect: other user's token unaffected
+OK   connections: list empty after disconnect
+OK   ID token (default "disabled"): openid is stripped -- token issued without openid and without an ID token
+OK   ID token (default): MCP scope alone still authorizes
+OK   ID token (pairwise): a client whose redirect URIs span hosts is refused at startup
+OK   ID token: sub is not the Aura user id
+OK   ID token: sub is stable for the same client
+OK   ID token: sub differs between clients (pairwise)
+OK   ID token: no email or profile claims
+OK   ID token: signed with the configured first key
+OK   keys: RSA-2048 + EC P-256 rotation set accepted
+OK   keys: RSA-1024 rejected
+OK   keys: public-only key rejected
+OK   keys: duplicate kid rejected
+OK   keys: missing kid rejected
+OK   keys: symmetric (oct/HS256) rejected
+OK   keys: garbage rejected
+OK   keys: env loader returns configured material, first key signs
+OK   keys: short cookie key rejected (and the value is not echoed)
+OK   keys: reused secret across roles rejected
+OK   rotation: consent reached on old-key instance
+OK   rotation: an in-flight authorization started under the old cookie key completes after rotation
+OK   rotation: JWKS publishes new and old signing keys, public parts only
+OK   I2b-R1 seal: round trip
+OK   I2b-R1 seal: ciphertext reveals nothing of the identifier
+OK   I2b-R1 seal: fresh IV per value (same input -> different output)
+OK   I2b-R1 seal: tampered IV / ciphertext / tag each fail closed
+OK   I2b-R1 seal: a value moved to another row or field fails (AAD binding)
+OK   I2b-R1 seal: malformed values fail closed
+OK   I2b-R1 seal: without the key a value cannot be opened
+OK   I2b-R1 seal: rotation -- [new, old] opens values sealed with old
+OK   I2b-R1 seal: rotation -- new values use the new key (old-only sealer cannot open them)
+OK   I2b-R1 seal: missing, short or duplicate keys refused at construction
+OK   I2b-R1 protect: Interaction session.cookie dropped, returnTo sealed, rest unchanged
+OK   I2b-R1 protect: input payload is not mutated
+OK   I2b-R1 unprotect: returnTo restored
+OK   I2b-R1 protect: Session state.secret sealed and restorable
+OK   I2b-R1 unprotect: a plaintext value where a seal is required fails closed
+OK   I2b-RR-1 protect: Session state.postLogoutRedirectUri sealed (no uid, no URL), clientId unchanged
+OK   I2b-RR-1 unprotect: both state fields restored exactly
+OK   I2b-RR-1 unprotect: sealed state fields cannot be swapped (field binding)
+OK   I2b-RR-1 unprotect: a plaintext postLogoutRedirectUri fails closed
+OK   I2b-RR-1: a Session without state (normal case) still round-trips
+OK   I2b-RR-2 unprotect: an Interaction with no returnTo fails closed (not a half-valid record)
+OK   I2b-RR-2 unprotect: null / number / object returnTo fail closed
+OK   R1-L2: trusted header read when it is a single IP
+OK   R1-L2: X-Forwarded-For is never used, even if present
+OK   R1-L2: Forwarded header is never used
+OK   R1-L2: a list in the trusted header (spoof appended) -> null
+OK   R1-L2: repeated trusted header (Node array) -> null
+OK   R1-L2: garbage / port / empty -> null
+OK   R1-L2: IPv4-mapped IPv6 normalised to IPv4 (one bucket)
+OK   R1-L2: socket mode ignores every header
+OK   R1-L2: none mode yields no address
+OK   R1-L2: untrusted header names refused at configuration time
+OK   F5 AS: per-address limit enforced across instances (5 allowed, then 429)
+OK   F5 AS: rotating X-Forwarded-For / X-Real-IP does not create new buckets in socket mode
+OK   F5 AS: throttled response has Retry-After and no body detail
+OK   F5 AS: a second client address has its own allowance, then the global ceiling applies
+OK   audit: throttling recorded
+OK   F5 MCP: invalid-token flood from one address is throttled after 4
+OK   F5 MCP: throttled requests never reach token verification (no DB lookup)
+OK   F5 MCP: another address keeps its own allowance
+OK   F5 MCP: global ceiling caps all addresses together (and address-less requests)
+OK   policy: https and loopback redirect URIs accepted
+OK   policy: unsafe redirect URIs rejected
+OK   policy: HTML in label, duplicate ids and unknown fields rejected
+OK   policy: valid registry parses
+OK   policy: the authorization server refuses an invalid client registry at startup
+OK   preflight: empty environment is not ready
+OK   preflight: complete synthetic staging environment is ready
+OK   preflight: a deployment without a trusted proxy header is not ready (R1-L2)
+OK   preflight: in-memory state is not ready (F6 / R1-L1)
+OK   preflight: non-https issuer is not ready
+OK   preflight: problems never echo secret values
+OK   return: only same-origin interaction paths accepted
+OK   return: open-redirect attempts refused
+OK   return: signed-out user gets a sign-in link that returns to this interaction
+OK   consent: page links to Connected assistants for disconnecting
+OK   expired: an unknown/expired interaction explains how to recover
+OK   failed authorization: prompt=none without consent returns an OAuth error, not a code
+OK   audit: keyed userRef differs from the unkeyed digest (F10)
+OK   audit: userRef never equals or contains the user id
+OK   audit/logs: no access token, refresh token or code in any audit line or console output
+OK   audit: every audit line is the redacted JSON shape
+
+All 116 AURA-MCP-02-I2b offline OAuth security checks passed.
+oidc-provider WARNING: Unsupported runtime. Use Node.js v22.x LTS, or a later LTS release.
+
+# exit=0 signal=

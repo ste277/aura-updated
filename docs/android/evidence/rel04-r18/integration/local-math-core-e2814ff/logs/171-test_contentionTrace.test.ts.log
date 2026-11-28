@@ -1,0 +1,85 @@
+$ npx ts-node test/contentionTrace.test.ts
+# job=math-core-tests step=Run contention trace test env={}
+=== strict-mode precondition ===
+OK   this file runs in strict mode: a write to a frozen object THROWS
+=== the definition: HIGH vs LOW on one 60-minute slot (non-overloaded day) ===
+OK   baseline behavior is unchanged: HIGH stays Proposed, LOW stays Deferred (CONFLICTS_WITH_PROPOSED_ITEM)
+OK   TRACE: LOW lost the candidate interval [10:00,11:00) to HIGH, who already owned [10:00,11:00) -- exactly one event, round 0
+OK   EVENT SHAPE: exactly loser, winner, attempted start/end, winner start/end and round -- Constructor identity and instants only (no source, activity, title, Goal, provenance or user-facing field)
+OK   instants are ISO-8601 UTC strings; the round is an integer
+OK   NON-OVERLOAD CONTENTION: the day is NOT labelled overloaded (requested 120 of 480 minutes) yet real candidate-vs-candidate contention occurred -- capacityState cannot gate contention
+OK   P3b FACT: the Deferred candidate is identifiable as one that actually contended with a Proposed owner (loser in the trace, owner still Proposed in the final day)
+=== reverse input, candidate order and determinism ===
+OK   REVERSE INPUT: the production outcome is the same baseline (HIGH Proposed, LOW Deferred) and the trace identifies the same historical owner and loser
+OK   the trace is independent of input array order AND of candidate array order: reversing both leaves an identical trace and an identical constructed day
+OK   DETERMINISM: 20 repetitions give byte-identical traces
+=== equal importance, deadline precedence: contention is recorded, never interpreted ===
+OK   EQUAL IMPORTANCE: submission order still decides (unchanged) -- HIGH (first) is Proposed, LOW (second) Deferred; the trace records the actual loser
+OK   EQUAL IMPORTANCE, reversed array: the same winner/loser (originalOrder is carried by the intent)
+OK   swapping originalOrder swaps the actual loser, and the trace follows the outcome (LOW first now owns the slot)
+OK   DEADLINE TODAY: the existing precedence (deadline today above importance) is unchanged -- LOW is Proposed, HIGH Deferred -- and the trace records contention only (HIGH lost to LOW)
+OK   EARLIER NON-TODAY DEADLINE: importance still outranks it (unchanged) -- HIGH without a deadline beats MEDIUM with an earlier one; the trace does not interpret either
+OK   among equal importance the existing earlier-deadline rule is unchanged -- the one with a deadline owns the slot, the other is the recorded loser
+=== fragmentation: aggregate free minutes look sufficient, concrete interval ownership decides ===
+OK   FRAGMENTATION: after HIGH the day still has 180 free minutes (>= LOW's 90), yet LOW is Deferred because its only candidate interval [10:30,12:00) overlaps HIGH's [10:00,11:00)
+OK   the trace reflects CONCRETE interval ownership, not aggregate capacity: attempted [10:30,12:00) over owner [10:00,11:00)
+OK   the attempted interval is the EXACT derived interval, not the requested day or a longer candidate span: a 90-minute candidate window [10:30,13:00) for a 60-minute intent attempts [10:30,11:30)
+=== NOT CONTENTION: controls that must produce ZERO events ===
+OK   EXTERNAL BLOCKER: a candidate that loses only to an existing PlannedActivity (BLOCKED_BY_COMMITMENT) is not candidate-vs-candidate contention -- zero events
+OK   A candidate overlapping BOTH an external blocker and a Proposed owner is rejected by the blocker gate first (the reason recorded at that evaluation point): the Proposed overlap is not the reason, so zero events
+OK   AVAILABILITY: a candidate rejected only by a configured availability gap is not contention -- zero events
+OK   OUTSIDE THE CONSTRUCTION WINDOW: an interval outside the window is rejected as such -- zero events even while another candidate holds the day
+OK   NO CANDIDATES: a candidate with no candidate intervals is not contention -- zero events (NO_CANDIDATES)
+OK   DURATION: a candidate interval too short for its duration cannot be "individually usable" -- zero events (INSUFFICIENT_DURATION)
+OK   an intent whose duration is unknown never reaches a candidate -- zero events (DURATION_UNKNOWN)
+OK   NO CONFLICT: two candidates in different slots are both Proposed -- the trace is the shared empty trace
+OK   CAPACITY LABEL ALONE IS NEVER EVIDENCE: a genuinely OVERLOADED day whose candidates never overlap (only fixed blockers and distinct slots) has zero events
+OK   A final Deferred reason never proves contention either way: NO_CANDIDATES with no earlier conflict is zero events, and (below) NO_CANDIDATES after a conflict still has the event
+=== half-open boundaries ===
+OK   BOUNDARY TOUCH: a candidate that starts exactly when the Proposed interval ends ([11:00,12:00) vs [10:00,11:00)) does not conflict -- LOW is Proposed, zero events
+OK   BOUNDARY TOUCH: a candidate that ends exactly when the Proposed interval starts ([09:00,10:00) vs [10:00,11:00)) does not conflict -- zero events
+OK   TRUE OVERLAP: a one-minute overlap ([10:59,11:59) vs [10:00,11:00)) IS contention
+OK   TRUE OVERLAP at the other end: one minute into the Proposed interval from before ([09:01,10:01)) is contention
+=== multiple attempts, multiple owners, duplicates ===
+OK   MULTIPLE ATTEMPTS: two of three candidate intervals are blocked by the Proposed owner -> two distinct events (not collapsed), in a deterministic order (attempted start), even though LOW is then PLACED on its free interval
+OK   the same two events come out whatever order the candidates were supplied in
+OK   all attempts blocked: LOW is Deferred (CONFLICTS_WITH_PROPOSED_ITEM) and BOTH attempted intervals are on record
+OK   NO DUPLICATE EVENTS: the same interval offered twice for one loser yields ONE event (identical loser, owner, attempted interval, owner interval and round)
+OK   MULTIPLE OWNERS: an attempted interval [10:15,11:15) overlapping two adjacent Proposed intervals yields one event PER OWNER, in placement order (H1 then H2) -- no arbitrary single owner
+OK   the existing single-owner Constructor attribution (`conflicts[].conflictingIntentId`) is unchanged: still the first placed owner
+=== FIXED participates in ownership like any other proposed interval ===
+OK   a FLEXIBLE candidate that overlaps a FIXED item's interval loses to it (FIXED is reserved first, unchanged) -- the trace records the concrete conflict with no special policy meaning
+OK   two overlapping FIXED intents: the one later in precedence loses (FIXED_WINDOW_CONFLICT, unchanged); its constraint is the attempted interval
+OK   a FIXED intent rejected by an external blocker is not contention -- zero events
+OK   touching FIXED intervals do not conflict -- both Proposed, zero events
+=== the orchestrator: history across Constructor rounds (the known P0c pattern) ===
+OK   P0C PATTERN: B first loses to a Proposed owner; replenishment then leaves B with NO_CANDIDATES -- the FINAL Deferred reason is NO_CANDIDATES (no trace of the conflict in the result)
+OK   FINAL NO_CANDIDATES REGRESSION: the accumulated trace STILL proves the earlier candidate-vs-candidate conflict (B lost [11:00,12:00) to A, round 0) -- history is not erased by the later round
+OK   P3b FACT after the final reason: B is Deferred, is a recorded loser, and its historical owner A is still Proposed in the final day
+OK   MULTI-ROUND: when the replenished candidate conflicts again, BOTH rounds' events survive in round order (round 0 [11:00,12:00), then round 1 [11:30,12:30)) -- earlier history is appended to, never overwritten
+OK   MULTI-ROUND: when replenishment RESOLVES the conflict (B is placed in round 1), the round-0 event remains as historical fact
+OK   ROUND NUMBERING is deterministic: the first Constructor pass is 0, each replenishment re-run the next integer
+OK   the accumulated trace is deterministic across repeated runs
+OK   AGGREGATION: an event identical in every field including the round is kept once; distinct rounds are kept separately
+=== tracing changes NOTHING: result, preview, tokens, queries, searches ===
+OK   OUTPUT: the orchestrated result is byte-identical with and without a trace request (Proposed, Deferred, conflicts, capacity, warnings, resolved intents)
+OK   TOKENS: the signed preview body, every acceptance token included, is identical (the trace is not part of the preview or its signature)
+OK   QUERY / SEARCH PROFILE: the same loader calls and the same timing searches (same count, same excluded-interval sizes) -- tracing adds no query, no candidate generation and no second pass
+OK   the preview carries no contention anywhere (it is not part of the public contract)
+OK   CONSTRUCTOR RESULT: for every shape (contest, equal importance reversed, multi-owner, FIXED, blocker, invalid window) `constructDayWithTrace(input).result` and `constructDay(input)` are byte-identical
+OK   a failed construction (invalid window / no usable capacity) returns the shared empty trace
+OK   the Constructor input is not mutated by tracing
+=== independent of decision pressure, evidence and facts (scheduling mechanics only) ===
+OK   PRESSURE / FACTS INDEPENDENCE: the trace is identical with no facts, with recurrence + opportunity facts on both candidates, and with maximally scarce facts on only the loser (the Constructor and its trace read none of them)
+OK   and the constructed day is unchanged by those facts too (HIGH Proposed, B Deferred NO_CANDIDATES)
+=== source neutrality at the Constructor boundary ===
+OK   SOURCE NEUTRALITY: equivalent scheduling inputs produce the equivalent trace whether the ids look like a Goal automatic demand, a manual hand-off or a typed row (the Constructor sees Constructor identity only)
+=== immutability and defensive ownership ===
+OK   the trace, its events array and every event are frozen
+OK   STRICT-MODE WRITES FAIL LOUDLY: reassigning any event field, adding a key, pushing to events and replacing events all throw
+OK   DEFENSIVE OWNERSHIP: mutating the candidate's Date after construction cannot change a recorded event (instants are copied as immutable strings)
+OK   a caller's mutation of one returned trace cannot affect another call's trace or the Constructor result
+OK   building from no attempts is empty, and the shared empty trace is frozen
+ALL CONTENTION TRACE CHECKS PASSED
+
+# exit=0 signal=

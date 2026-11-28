@@ -1,0 +1,80 @@
+$ npx ts-node test/goalActivityDailyOccurrenceEligibilityDb.test.ts
+# job=day-constructor-acceptance-db-tests step=Run Goal activity daily occurrence eligibility DB test env={}
+OK   1. first same-day creation SAVES
+OK   1. second same-day creation REJECTED (daily cap)
+OK   1. exactly ONE occurrence row exists (no orphan from the rejected second attempt)
+OK   2. day 1 creation SAVES
+OK   2. day 2 (different local day) creation ALSO SAVES
+OK   2. exactly TWO occurrence rows exist
+OK   3. occurrence 1 of 2 (day 1) SAVES
+OK   3. a SAME-DAY second attempt is rejected by the DAILY cap, even though weekly capacity remains (1 of 2 used)
+OK   3. occurrence 2 of 2 (day 2, different day) SAVES -- weekly capacity still correctly tracked
+OK   3. a THIRD attempt (day 3, a different day, weekly capacity now exhausted) is rejected by the WEEKLY cap
+OK   4. occurrence 1 (day 1) SAVES
+OK   4. a SAME-DAY second occurrence SAVES (MULTIPLE_PER_DAY bypasses the daily cap)
+OK   4. a THIRD same-day attempt is rejected -- weekly capacity (2/week) still applies independently of the daily bypass
+OK   5. exactly ONE of two true-concurrent same-day creation attempts succeeds
+OK   5. exactly ONE occurrence row exists after the race resolves
+OK   6. setup: an occurrence exists on day -1
+     6. [natural] move=OK create=409 liveOnContestedDay=1 liveTotal=1 occurrences=1
+OK   6. Move-into-day-0 and create-on-day-0 cannot BOTH succeed (serialized, never double-booked)
+OK   6. exactly ONE of Move and create succeeds (the loser is rejected by the daily cap)
+OK   6. exactly ONE live occurrence exists on the contested day (day 0) afterward
+OK   6. Move won: create was rejected with 409 and persisted no plan and no occurrence
+OK   6. Move won: the ORIGINAL occurrence (same id) now sits on day 0 and day -1 is free
+OK   6. Move won: the predecessor plan is MOVED with exactly one successor
+OK   6. Move won: exactly ONE live occurrence in total
+OK   6a. setup: an occurrence exists on day -1
+     6a. [move-first] move=OK create=409 liveOnContestedDay=1 liveTotal=1 occurrences=1
+OK   6a. Move-into-day-0 and create-on-day-0 cannot BOTH succeed (serialized, never double-booked)
+OK   6a. exactly ONE of Move and create succeeds (the loser is rejected by the daily cap)
+OK   6a. the forced ordering held: Move won
+OK   6a. exactly ONE live occurrence exists on the contested day (day 0) afterward
+OK   6a. Move won: create was rejected with 409 and persisted no plan and no occurrence
+OK   6a. Move won: the ORIGINAL occurrence (same id) now sits on day 0 and day -1 is free
+OK   6a. Move won: the predecessor plan is MOVED with exactly one successor
+OK   6a. Move won: exactly ONE live occurrence in total
+OK   6b. setup: an occurrence exists on day -1
+     6b. [create-first] move=DAILY_CAPACITY_EXCEEDED create=200 liveOnContestedDay=1 liveTotal=2 occurrences=2
+OK   6b. Move-into-day-0 and create-on-day-0 cannot BOTH succeed (serialized, never double-booked)
+OK   6b. exactly ONE of Move and create succeeds (the loser is rejected by the daily cap)
+OK   6b. the forced ordering held: create won
+OK   6b. exactly ONE live occurrence exists on the contested day (day 0) afterward
+OK   6b. create won: Move was rejected with DAILY_CAPACITY_EXCEEDED
+OK   6b. create won: the rejected Move persisted nothing (no successor plan; predecessor still UPCOMING)
+OK   6b. create won: the legitimate day -1 occurrence is preserved, unchanged
+OK   6b. create won: exactly one new plan and occurrence on day 0 (two live in total, one per day)
+OK   7. Move across midnight succeeds
+OK   7. the occurrence's scheduledLocalDate transferred to the NEW day
+OK   7. the SOURCE day is now free (a new occurrence there succeeds)
+OK   8. setup: two occurrences on two different days
+OK   8. Move of A into B's already-occupied day is REJECTED with DAILY_CAPACITY_EXCEEDED
+OK   8. A remains UPCOMING, untouched by the rejected Move
+OK   9. Move across a week boundary succeeds and both snapshots are non-null
+OK   9. scheduledLocalDate matches the NEW instant's own day
+OK   10. a same-day second attempt is blocked while the first is still UPCOMING
+OK   10. after cancelling the first, a new same-day occurrence SUCCEEDS (cancelled never blocks)
+OK   11. a same-day second attempt is STILL blocked once the first is LOGGED (completed, not just upcoming)
+OK   12. setup: the LOGGED plan was genuinely hard-deleted
+OK   12. the occurrence row survives with plannedActivityId cleared but scheduledLocalDate INTACT
+OK   12. a same-day second attempt is STILL blocked after hard-deletion -- the snapshot alone is sufficient, no execution-row ambiguity needed
+OK   12b. setup: a surviving GoalActivityExecution confirms the completion really happened
+OK   12b. the daily check returns UNRESOLVED for an UNRELATED future day, never silently ELIGIBLE (an unattributable historical completion is not proof any given day is free)
+OK   12b. a creation attempt on an unrelated future day is REJECTED (fail-closed on the unresolved conflict), never silently allowed
+OK   13. setup: a normal occurrence is created
+OK   13. a partially-populated snapshot (date present, timezone null) throws rather than silently guessing
+OK   14. an archived Goal's activity is rejected (GOAL_NOT_ACTIVE, the HPG2 P0 guard -- still runs BEFORE the new daily check, unweakened)
+OK   14. the error is the archived-Goal message specifically, not a generic/daily one
+OK   14. no occurrence was created for the archived Goal's activity
+OK   15. first request SAVES
+OK   15. an identical retry (same clientRequestId) returns the SAME plan, 200, never a daily-cap rejection
+OK   15. exactly ONE occurrence row exists after the retry (idempotency, not a second materialization)
+OK   16. setup: first occurrence SAVES
+OK   16. the same-day second attempt is rejected
+OK   16. no orphan PlannedActivity row was committed by the rejected attempt
+OK   16. no orphan GoalActivityOccurrence row was committed by the rejected attempt
+OK   DC. first Day Constructor acceptance SAVES
+OK   DC. a second, SAME-DAY Day Constructor acceptance is REJECTED (SAVE_FAILED) by the same daily cap
+ALL HPG3-A2 DAILY OCCURRENCE ELIGIBILITY CHECKS PASSED
+
+# exit=0 signal=

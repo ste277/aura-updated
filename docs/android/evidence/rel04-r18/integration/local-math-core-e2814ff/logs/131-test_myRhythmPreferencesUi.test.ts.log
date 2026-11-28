@@ -1,0 +1,57 @@
+$ npx ts-node test/myRhythmPreferencesUi.test.ts
+# job=math-core-tests step=Run MR3 My Rhythm preferences UI test env={}
+OK   P1. draftFromSaved mirrors saved settings (duration as text)
+OK   P2. an untouched draft builds no PATCH (no spurious write)
+OK   P3. weekday chips are Monday-first but keep the stored 0=Sunday encoding
+OK   P4. toggling a day keeps ascending order; toggling twice is a no-op
+OK   P5. days only
+OK   P6. time only
+OK   P7. duration only
+OK   P8. frequency only
+OK   P9. clearing all three sends [] / null / null
+OK   P10. scenario 1 from scratch: one body with rhythm and all three preferences
+OK   P11. switching to Once sends ONLY { rhythm: NONE } (server clears preferences; never sends a preference for a non-weekly activity)
+OK   P12. Once -> weekly with preferences sends both together
+OK   V1. 3x/week on 2 days is blocked with an explanation (no silent scheduling elsewhere)
+OK   V2. raising frequency above the chosen days is blocked too
+OK   V3. MULTIPLE_PER_DAY activities are not held to one-day-per-session
+OK   V4. no days = any day (allowed, with a note)
+OK   V5. invalid duration "5" is blocked
+OK   V5. invalid duration "14" is blocked
+OK   V5. invalid duration "361" is blocked
+OK   V5. invalid duration "45.5" is blocked
+OK   V5. invalid duration "abc" is blocked
+OK   V5. invalid duration "-30" is blocked
+OK   V6. duration bounds 15 and 360 are accepted; blank = default
+OK   V7. an invalid custom frequency (null) blocks saving
+OK   V8. switching to Once with saved preferences explains they will be cleared
+OK   A1. legacy activity without MR1 fields = weekly, no preferences, once-per-day
+OK   A2. daily frequency mapping matches the server rule (only enforceable ONCE_PER_DAY needs distinct days)
+OK   S1. summary "Mon, Wed, Fri · Morning · 45 min" (Monday-first, regardless of stored order)
+OK   S2. no preferences -> no summary line
+OK   S3. every engine time-of-day has a user-facing label
+OK   L1. Home deep link targets the activity anchor on Goal Detail
+OK   PD1. a rhythm handoff row shows its preferred time and length instead of "Automatic"
+OK   PD2. a row without rhythm preferences is unchanged ("Flexible · Automatic")
+OK   PD3. an explicit row duration still wins over the rhythm default
+OK   PD4. a fixed-time row does not show the rhythm time-of-day
+OK   PD5. a rhythm deferred by its preferred time gets a specific explanation and a next step
+OK   PD6. no note for rows without a time preference, for fixed-time rows, or for other reasons
+OK   G1. the weekday selector exists in the editor (RHYTHM_WEEKDAY_CHIPS, aria-pressed toggles)
+OK   G2. setup surfaces (RhythmPicker, Goal Detail, Create Goal) still have no weekday picker (guard 59 intent kept)
+OK   G3. progressive disclosure: preferences hidden behind "Add days, time or length" unless already set
+OK   G4. the editor has exactly one fetch and it is the PATCH .../rhythm endpoint
+OK   G5. duplicate-submission guard: a synchronous in-flight ref, checked before every write
+OK   G6. Cancel restores the saved draft and is disabled while saving
+OK   G7. a failed save keeps the draft and shows the reason (no reset)
+OK   G8. Pause/Resume send only { paused } -- never preferences
+OK   G9. Goal Detail: a paused rhythm is never selectable for planning and shows a Paused badge
+OK   G10. Home card links to the rhythm settings without adding a second .map()
+OK   G11. Home paused note offers "Resume or edit" via the same deep link
+OK   G12. no new migration was added by MR3 (re-baselined by AURA-REM-01: only its own additive 0054 heartbeat migration is allowed; re-baselined by AURA-AUTH-SESSION-01-I1 for 0055 and AURA-MP-1 for 0056 and AURA-MP-4 for its additive 0058)
+OK   G13. mobile layout: weekdays are one 7-column row of 44px-high targets; no control below 44px high
+OK   G14. time of day uses wrapping chips (no nowrap segmented control that overflows 320px)
+
+ALL MR3 UI CHECKS PASSED
+
+# exit=0 signal=

@@ -1,0 +1,19 @@
+$ npx ts-node test/windowOverlap.test.ts
+# job=math-core-tests step=Run window overlap test env={}
+OK   Abhijit + overlapping Rahu Kalam: Abhijit reports Rahu as an overlap
+OK   Abhijit + overlapping Rahu Kalam: Rahu Kalam reports Abhijit as an overlap (symmetric)
+OK   Non-overlapping windows report empty overlaps for both
+OK   findWindowOverlaps returns one entry per input window even with no overlaps
+OK   Windows that only touch at a shared boundary instant are not reported as overlapping
+OK   Partial overlap (B ends inside A) is detected both directions
+OK   Fully-contained window is detected as an overlap of the container
+OK   Container is detected as an overlap of the fully-contained window
+OK   A window is never listed as its own overlap
+OK   With 3 windows, the two that overlap still find each other and the third stays isolated
+OK   Real fixture: Abhijit genuinely overlaps Gulika on 2026-07-28 (matches panchangDay.test.ts's fixture)
+OK   Real fixture: every window entry is present exactly once
+OK   findWindowOverlaps does not mutate or reorder the input array
+
+ALL WINDOW OVERLAP CHECKS PASSED
+
+# exit=0 signal=

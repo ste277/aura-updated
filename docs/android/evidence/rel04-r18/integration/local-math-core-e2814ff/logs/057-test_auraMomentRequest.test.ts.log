@@ -1,0 +1,57 @@
+$ npx ts-node test/auraMomentRequest.test.ts
+# job=math-core-tests step=Run Aura Moment request validation test env={}
+OK   A valid GENERAL request is accepted
+OK   Parsed startAt/endAt are real Date objects
+OK   ratingLabel is carried through when recognized
+OK   savedPersonId is null for a non-SHARED scope even if never supplied
+OK   A valid SHARED request with savedPersonId is accepted
+OK   ratingLabel is optional -- omitting it is accepted, resolves to null
+OK   An invalid scope is rejected with 400
+OK   Missing scope is rejected
+OK   A momentEligible everyday activity (tea-break, not Muhurtham-eligible) is now accepted
+OK   A momentEligible everyday activity added in this PR (date-night) is accepted
+OK   A non-momentEligible activity (task-1, a Home daily-assistant playbook card) is rejected
+OK   A missing activityId is rejected
+OK   An unknown activityId is rejected
+OK   source PLAN is accepted
+OK   source MUHURTHAM is accepted
+OK   An invalid source is rejected
+OK   A missing source is rejected
+OK   A malformed startAt is rejected
+OK   A malformed endAt is rejected
+OK   endAt before startAt is rejected (negative duration)
+OK   A duration under 15 minutes is rejected
+OK   A duration over 360 minutes is rejected
+OK   A duration of exactly 15 minutes is accepted
+OK   An unrecognized ratingLabel string is rejected (not an open free-text field)
+OK   A ratingLabel from the wrong scope's vocabulary is still accepted (validated as a closed SET across all scopes, not scope-matched)
+OK   A non-string ratingLabel is rejected
+OK   SHARED scope without savedPersonId is rejected
+OK   SHARED scope with a blank savedPersonId is rejected
+OK   PERSONAL scope never requires savedPersonId
+OK   isValidMomentResponse accepts ACCEPTED
+OK   isValidMomentResponse accepts ANOTHER_TIME
+OK   isValidMomentResponse rejects an arbitrary string
+OK   isValidMomentResponse rejects a non-string value
+OK   isValidMomentResponse rejects undefined
+OK   isValidMomentResponse rejects null
+OK   isValidAlternativePreference accepts EARLIER
+OK   isValidAlternativePreference accepts LATER
+OK   isValidAlternativePreference accepts DIFFERENT_DAY
+OK   isValidAlternativePreference accepts NO_PREFERENCE
+OK   isValidAlternativePreference rejects an arbitrary string
+OK   isValidAlternativePreference rejects free text (no comments in V1)
+OK   isValidAlternativePreference rejects a non-string value
+OK   isValidAlternativePreference rejects null/undefined
+OK   isValidAlternativePreference rejects an object (no structured date-range payloads)
+OK   isValidAlternativeIndex accepts 0
+OK   isValidAlternativeIndex accepts up to MAX_ALTERNATIVES - 1 (2)
+OK   isValidAlternativeIndex rejects MAX_ALTERNATIVES itself (3)
+OK   isValidAlternativeIndex rejects a negative index
+OK   isValidAlternativeIndex rejects a non-integer
+OK   isValidAlternativeIndex rejects a string index
+OK   isValidAlternativeIndex rejects null/undefined
+
+ALL AURA MOMENT REQUEST CHECKS PASSED
+
+# exit=0 signal=

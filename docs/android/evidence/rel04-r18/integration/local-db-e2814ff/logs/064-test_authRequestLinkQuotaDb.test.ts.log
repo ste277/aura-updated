@@ -1,0 +1,290 @@
+$ npx ts-node test/authRequestLinkQuotaDb.test.ts
+# job=day-constructor-acceptance-db-tests step=Run sign-in rate-limit concurrency DB test (AURA-AUTH-01) env={"TS_NODE_COMPILER_OPTIONS":"{\"jsx\":\"react\"}"}
+OK   1. one email x10 concurrent: exactly 3 permitted (got 3), 7 refused with 429 (got 7)
+OK   1. one email: exactly 3 emails sent (got 3) and 3 AuthCode rows
+OK   2. one IP x10 concurrent (10 emails): exactly 3 permitted (got 3), 7 x 429
+OK   2. one IP: exactly 3 emails sent (got 3) and 3 rows for the IP
+OK   3. sequential: email and IP rows both count (200,200,200,429 for the IP; 200,429 for the email)
+OK   3. concurrent mix: 3 for the shared email + 3 for the shared IP = 6 permitted (got 6), no errors
+OK   3. 27 concurrent cross requests: only 200/429 (no deadlock or 500), every email and IP at most 3 rows [3,2,2,3,2,2]
+OK   4. failed send: 502 with the existing message
+OK   4. failed send: its own row removed, the earlier good row kept
+OK   4. the released slot is usable again: 2 more succeed, then 429 (3 in total)
+OK   5. concurrent failures: 1 delivered, 2 failed; responses match (200=1, 502=2)
+OK   5. every delivered code keeps its row, every failed code has none, rows = delivered (1) <= 3
+OK   6. malformed body -> 400 "Malformed request body."
+OK   6. non-object body -> 400 "A valid JSON request body is required."
+OK   6. invalid email -> 400 "A valid email is required."
+OK   6. success -> 200 {sent:true}; over quota -> 429 with the existing message
+OK   6. email is trimmed and lower-cased before counting and storing (unchanged)
+OK   6. no client IP: the email quota still applies (3 then 429)
+OK   7. dev (no provider, not production, no magic-link opt-in): returns devLoginCode only and stores the row
+OK   7. local dev with the opt-in: returns devLoginUrl + devLoginCode and stores the row
+OK   7. production without a provider: 500 with the existing message, no credentials, no row left, no send
+OK   8. request-link then verify-code with the emailed code: 200 {ok:true} and a session cookie
+OK   8. the same code cannot be used twice (401, unchanged)
+OK   8. open registration: a first sign-in creates the account
+
+24 checks, all passed
+[auth] request-link rate-limited {
+  emailRef: 'd72c9e09d0c7cfe5',
+  ip: '198.51.100.a1-auth01-1795884323835',
+  recent: 3
+}
+[auth] request-link rate-limited {
+  emailRef: 'd72c9e09d0c7cfe5',
+  ip: '198.51.100.a2-auth01-1795884323835',
+  recent: 3
+}
+[auth] request-link rate-limited {
+  emailRef: 'd72c9e09d0c7cfe5',
+  ip: '198.51.100.a3-auth01-1795884323835',
+  recent: 3
+}
+[auth] request-link rate-limited {
+  emailRef: 'd72c9e09d0c7cfe5',
+  ip: '198.51.100.a6-auth01-1795884323835',
+  recent: 3
+}
+[auth] request-link rate-limited {
+  emailRef: 'd72c9e09d0c7cfe5',
+  ip: '198.51.100.a9-auth01-1795884323835',
+  recent: 3
+}
+[auth] request-link rate-limited {
+  emailRef: 'd72c9e09d0c7cfe5',
+  ip: '198.51.100.a8-auth01-1795884323835',
+  recent: 3
+}
+[auth] request-link rate-limited {
+  emailRef: 'd72c9e09d0c7cfe5',
+  ip: '198.51.100.a7-auth01-1795884323835',
+  recent: 3
+}
+[auth] request-link rate-limited {
+  emailRef: '4cea616591f3cbb4',
+  ip: '198.51.100.one-ip-auth01-1795884323835',
+  recent: 3
+}
+[auth] request-link rate-limited {
+  emailRef: '1aca66529534bad1',
+  ip: '198.51.100.one-ip-auth01-1795884323835',
+  recent: 3
+}
+[auth] request-link rate-limited {
+  emailRef: '45a4943be0e9aefe',
+  ip: '198.51.100.one-ip-auth01-1795884323835',
+  recent: 3
+}
+[auth] request-link rate-limited {
+  emailRef: '8ac7550227e0bf45',
+  ip: '198.51.100.one-ip-auth01-1795884323835',
+  recent: 3
+}
+[auth] request-link rate-limited {
+  emailRef: 'd3b197a21b22841c',
+  ip: '198.51.100.one-ip-auth01-1795884323835',
+  recent: 3
+}
+[auth] request-link rate-limited {
+  emailRef: '7848b43065a1f028',
+  ip: '198.51.100.one-ip-auth01-1795884323835',
+  recent: 3
+}
+[auth] request-link rate-limited {
+  emailRef: 'fa6b07bb088c2330',
+  ip: '198.51.100.one-ip-auth01-1795884323835',
+  recent: 3
+}
+[auth] request-link rate-limited {
+  emailRef: '6d756ad1a110708e',
+  ip: '198.51.100.c1-auth01-1795884323835',
+  recent: 3
+}
+[auth] request-link rate-limited {
+  emailRef: '597b832dfe7fc3f9',
+  ip: '198.51.100.c3-auth01-1795884323835',
+  recent: 3
+}
+[auth] request-link rate-limited {
+  emailRef: 'adb7c6e93e116ca8',
+  ip: '198.51.100.mx3-auth01-1795884323835',
+  recent: 3
+}
+[auth] request-link rate-limited {
+  emailRef: 'b58d0b043f4bd1d0',
+  ip: '198.51.100.mix-auth01-1795884323835',
+  recent: 3
+}
+[auth] request-link rate-limited {
+  emailRef: 'adb7c6e93e116ca8',
+  ip: '198.51.100.mx4-auth01-1795884323835',
+  recent: 3
+}
+[auth] request-link rate-limited {
+  emailRef: 'ba778e8bd9952436',
+  ip: '198.51.100.mix-auth01-1795884323835',
+  recent: 3
+}
+[auth] request-link rate-limited {
+  emailRef: '93dc30c784c46238',
+  ip: '198.51.100.x0-auth01-1795884323835',
+  recent: 3
+}
+[auth] request-link rate-limited {
+  emailRef: '93dc30c784c46238',
+  ip: '198.51.100.x1-auth01-1795884323835',
+  recent: 3
+}
+[auth] request-link rate-limited {
+  emailRef: '93dc30c784c46238',
+  ip: '198.51.100.x2-auth01-1795884323835',
+  recent: 3
+}
+[auth] request-link rate-limited {
+  emailRef: '93dc30c784c46238',
+  ip: '198.51.100.x0-auth01-1795884323835',
+  recent: 3
+}
+[auth] request-link rate-limited {
+  emailRef: '93dc30c784c46238',
+  ip: '198.51.100.x1-auth01-1795884323835',
+  recent: 3
+}
+[auth] request-link rate-limited {
+  emailRef: '93dc30c784c46238',
+  ip: '198.51.100.x2-auth01-1795884323835',
+  recent: 3
+}
+[auth] request-link rate-limited {
+  emailRef: '17e6e920accaf176',
+  ip: '198.51.100.x0-auth01-1795884323835',
+  recent: 3
+}
+[auth] request-link rate-limited {
+  emailRef: '17e6e920accaf176',
+  ip: '198.51.100.x2-auth01-1795884323835',
+  recent: 3
+}
+[auth] request-link rate-limited {
+  emailRef: '17e6e920accaf176',
+  ip: '198.51.100.x1-auth01-1795884323835',
+  recent: 3
+}
+[auth] request-link rate-limited {
+  emailRef: '17e6e920accaf176',
+  ip: '198.51.100.x0-auth01-1795884323835',
+  recent: 3
+}
+[auth] request-link rate-limited {
+  emailRef: '17e6e920accaf176',
+  ip: '198.51.100.x2-auth01-1795884323835',
+  recent: 3
+}
+[auth] request-link rate-limited {
+  emailRef: '17e6e920accaf176',
+  ip: '198.51.100.x1-auth01-1795884323835',
+  recent: 3
+}
+[auth] request-link rate-limited {
+  emailRef: '17e6e920accaf176',
+  ip: '198.51.100.x2-auth01-1795884323835',
+  recent: 3
+}
+[auth] request-link rate-limited {
+  emailRef: 'abe54318c8a8f5aa',
+  ip: '198.51.100.x0-auth01-1795884323835',
+  recent: 3
+}
+[auth] request-link rate-limited {
+  emailRef: 'abe54318c8a8f5aa',
+  ip: '198.51.100.x1-auth01-1795884323835',
+  recent: 3
+}
+[auth] request-link rate-limited {
+  emailRef: 'abe54318c8a8f5aa',
+  ip: '198.51.100.x0-auth01-1795884323835',
+  recent: 4
+}
+[auth] request-link rate-limited {
+  emailRef: 'abe54318c8a8f5aa',
+  ip: '198.51.100.x1-auth01-1795884323835',
+  recent: 4
+}
+[auth] request-link rate-limited {
+  emailRef: 'abe54318c8a8f5aa',
+  ip: '198.51.100.x2-auth01-1795884323835',
+  recent: 3
+}
+[auth] request-link rate-limited {
+  emailRef: 'abe54318c8a8f5aa',
+  ip: '198.51.100.x1-auth01-1795884323835',
+  recent: 4
+}
+[auth] request-link rate-limited {
+  emailRef: 'abe54318c8a8f5aa',
+  ip: '198.51.100.x2-auth01-1795884323835',
+  recent: 3
+}
+[auth] sign-in email send failed {
+  emailRef: '0c14e544df632b02',
+  err: { name: 'Error', message: 'Resend API error (503): stub outage' }
+}
+[auth] request-link rate-limited {
+  emailRef: '0c14e544df632b02',
+  ip: '198.51.100.f1-auth01-1795884323835',
+  recent: 3
+}
+[auth] request-link rate-limited {
+  emailRef: '8bacfeb76b20a43f',
+  ip: '198.51.100.fc3-auth01-1795884323835',
+  recent: 3
+}
+[auth] request-link rate-limited {
+  emailRef: '8bacfeb76b20a43f',
+  ip: '198.51.100.fc5-auth01-1795884323835',
+  recent: 3
+}
+[auth] request-link rate-limited {
+  emailRef: '8bacfeb76b20a43f',
+  ip: '198.51.100.fc8-auth01-1795884323835',
+  recent: 3
+}
+[auth] request-link rate-limited {
+  emailRef: '8bacfeb76b20a43f',
+  ip: '198.51.100.fc4-auth01-1795884323835',
+  recent: 3
+}
+[auth] request-link rate-limited {
+  emailRef: '8bacfeb76b20a43f',
+  ip: '198.51.100.fc6-auth01-1795884323835',
+  recent: 3
+}
+[auth] request-link rate-limited {
+  emailRef: '8bacfeb76b20a43f',
+  ip: '198.51.100.fc7-auth01-1795884323835',
+  recent: 3
+}
+[auth] request-link rate-limited {
+  emailRef: '8bacfeb76b20a43f',
+  ip: '198.51.100.fc9-auth01-1795884323835',
+  recent: 3
+}
+[auth] sign-in email send failed {
+  emailRef: '8bacfeb76b20a43f',
+  err: { name: 'Error', message: 'Resend API error (503): stub outage' }
+}
+[auth] sign-in email send failed {
+  emailRef: '8bacfeb76b20a43f',
+  err: { name: 'Error', message: 'Resend API error (503): stub outage' }
+}
+[auth] request-link rate-limited {
+  emailRef: '77458874963d0a6b',
+  ip: '198.51.100.codes-auth01-1795884323835',
+  recent: 3
+}
+[auth] request-link rate-limited { emailRef: '815f762774ab2948', ip: null, recent: 3 }
+[auth] no email provider configured (MOM_API_KEY+MOM_FROM_EMAIL or RESEND_API_KEY); refusing to expose sign-in credentials
+[auth] verify-code: no active code { emailRef: '07421e22564dd970' }
+
+# exit=0 signal=

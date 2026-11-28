@@ -1,0 +1,14 @@
+$ npx ts-node --project tsconfig.jsdom-tests.json test/myPeopleMp2LeapDayJsdom.test.ts
+# job=math-core-tests step=Run AURA-MP-2 My People leap-day list (jsdom) test env={}
+OK   helper: leap-day flag from upcoming -> "(for 29 Feb)"
+OK   helper: a real 28 February (flag false) is not annotated
+OK   helper: no upcoming data -> no annotation (never inferred from the date)
+OK   upcoming is requested once, within the API window (1-60) and covering the list window (60)
+OK   people list: Leela's 29 Feb birthday observed on 28 Feb shows "(for 29 Feb)"
+OK   people list: Ravi's real 28 Feb birthday is NOT annotated
+OK   Coming up still shows only the next 30 days (Sita at 10 days; the 45-day birthdays are not in it)
+OK   server disabled: no upcoming request and no special-day line or annotation (legacy list)
+
+ALL MY PEOPLE MP-2 LEAP-DAY LIST CHECKS PASSED (8)
+
+# exit=0 signal=

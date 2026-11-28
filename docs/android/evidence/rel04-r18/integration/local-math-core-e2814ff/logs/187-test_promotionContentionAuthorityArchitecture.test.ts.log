@@ -1,0 +1,44 @@
+$ npx ts-node test/promotionContentionAuthorityArchitecture.test.ts
+# job=math-core-tests step=Run promotion contention authority architecture test env={}
+=== the real tree conforms ===
+OK   THE REAL PRODUCTION TREE HAS ZERO PROMOTION-CONTENTION-AUTHORITY ARCHITECTURE VIOLATIONS (592 production files scanned)
+=== confinement, producer, raw trace, zero scheduling consumers ===
+OK   THE AUTHORITY VOCABULARY EXISTS IN EXACTLY THREE PRODUCTION FILES: the pure module, the internal promotion boundary that produces it and (O5 P4b2, a TYPE-only consumer) the pure local counterfactual generator; only the boundary calls it
+OK   RAW TRACE BOUNDARY: the raw P3a trace / event vocabulary appears only in the producers and the two pure P3b / P4a consumers, the promotion boundary and THIS module -- a future generator cannot import it; the module's output contract holds only strings-free typed attempts
+OK   NOT A SCHEDULING CONSUMER: no Constructor, comparator, capacity, trace, basis, placements, assembler, orchestrator, search, preview, signing, acceptance, persistence, Recomposition, Move, route or scheduling-context module mentions the authority
+OK   NO PERSISTENCE, NO SCHEMA: the Prisma schema and every migration directory's own contents mention no contention authority; no migration was added (count-independent)
+OK   NO NEW EXTERNAL EXPOSURE: the authority is neither signed, serialized into a preview body nor returned by any route -- no production file other than the boundary, the module and the type-only generator names it
+=== the module is a minimal, pure, neutral projection ===
+OK   IMPORTS: exactly six imports -- five TYPE imports (timing fit, trace, promotion input, basis outcome, placements outcome) and ONE value import, the shared normalization -- hence no Constructor, search, database, clock or orchestrator can be reached
+OK   MINIMUM CONTRACT: the authority is exactly { candidateIntentId, attempts } and an attempt exactly { ownerIntentId, start, end, timingFit? }; reasons are the four infrastructural ones; exports are the five reviewed names
+OK   SINGLE SOURCE AND PROJECTION FIDELITY: the module is a scoped view over the ONE shared normalization (it reads no raw event); it reads only the normalized slot fields; owners come only from the PromotionInput ids; slots are iterated in order of discovery with no sort
+OK   NO POLICY, NO PRESSURE, NO HISTORY: the module names no pressure, importance, deadline, order, timing fit, candidate order, round, winner interval, candidate list, acceptance, safety or counterfactual term
+OK   NO DATABASE, SNAPSHOT, CLOCK, SEARCH, CONSTRUCTOR, ASYNC, LOG OR GENERIC CLONE
+OK   FRESH DATES: exactly two `new Date(` allocations, each a copy of the shared normalization's own Date, each frozen -- so no authority Date is shared with the run-level attempt authority, the trace, an input, the basis or a placement
+OK   FAIL CLOSED: not-READY run, unknown / placed candidate, unknown / unplaced / duplicate / empty owners, zero matches and unsupported owners all return UNAVAILABLE; the projection cannot throw
+=== the boundary: one authority per input, same run, isolated failure, no second orchestration ===
+OK   PRODUCER: exactly one projection call, inside the isolated `contentionFor` wrapper; exactly one hand-over, from the SAME diagnostics (trace, basis, placements), after the inputs are assembled and after construction; one authority per PromotionInput
+OK   NO CALLER CAN MANUFACTURE AN AUTHORITY: the boundary signature is still (request, deps) -- no caller-supplied trace, input, basis or placements
+OK   NORMAL PATH UNTOUCHED: the orchestrator and the normal `orchestrateConstructDay` entry point do not name the authority
+=== event authority, NOT search history ===
+OK   NO CANDIDATE HISTORY: the ConstructionBasis still holds exactly its seven fields (initial + final lists, nothing per round); the orchestrator still has exactly one T1 capture and two candidate-map writes; no history identifier exists
+OK   THE SEARCH AND THE CONSTRUCTOR ARE UNTOUCHED: DEFAULT_FIND_LIMIT is still 3, the orchestrator still has exactly two timing-search sites and two construction sites, and the Constructor names no authority
+OK   BASIS AND PLACEMENTS UNCHANGED IN SHAPE: neither names the authority, and the basis module exports are unchanged
+=== the Date guard covers the module ===
+OK   #208 SCOPE: the module is on the protected Date-mutator list (zero exceptions) -- and the scanner debt (regex-literal blindness) is carried unchanged, not hidden
+=== MUTATIONS: each violation, injected into an in-memory copy, is detected ===
+OK   MUTATION: the raw trace is exposed (a file other than the boundary names a trace / event; the output contract holds a trace; a future generator reads events) -> detected
+OK   MUTATION: candidate-list history is captured for every replenishment round (a second capture, a per-round collection in the basis or the orchestrator) -> detected
+OK   MUTATION: a database query / snapshot, a clock read, a timing search, a Constructor or orchestrator call, async, logging in the module -> detected
+OK   MUTATION: pressure / policy / acceptance vocabulary, owner pressure read, round / winner interval / candidate order carried -> detected
+OK   MUTATION: the filters weaken (other losers kept, unauthorized owners kept, owners taken from the trace), the order is policy-sorted, dedup is dropped -> detected
+OK   MUTATION: a shared (aliased) or non-fresh Date, an unfrozen output -> detected
+OK   MUTATION: the module loses fail-closed handling (zero match allowed, owner support unchecked, throwing projection, a value import) -> detected
+OK   MUTATION: the public preview / signing / acceptance / persistence / route / schema surfaces, the Constructor, the basis, the placements or the orchestrator name the authority -> detected
+OK   MUTATION: a production consumer of the authority appears (a generator importing the module, a second projection call) -> detected
+OK   MUTATION: the boundary hands over a different run (a caller-supplied basis), runs a second orchestration, loses the isolating wrapper or the one-per-input shape -> detected
+OK   MUTATION: the search limit or the search / construction sites change -> detected
+OK   the mutations were applied to in-memory copies only: the real tree still has zero violations afterwards
+ALL PROMOTION CONTENTION AUTHORITY ARCHITECTURE CHECKS PASSED
+
+# exit=0 signal=

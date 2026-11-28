@@ -1,0 +1,64 @@
+$ npx ts-node test/homeSkip.test.ts
+# job=math-core-tests step=Run Home Skip test env={}
+OK   27. ACTIVE_PLAN: Skip is offered (and Done)
+OK   27/58. IMMINENT_PLAN: Done unchanged, Skip absent
+OK   27/59. Opportunity: no Skip
+OK   27/59. context/open: no Skip
+OK   27/59. a MISSED plan is not shown as Right Now: no Skip in C2
+OK   27/59. completed and skipped plans: no Skip (resolved, never Right Now)
+OK   28. plannedStartAt <= now: ACTIVE at exactly start -> Skip eligible
+OK   28. now <= plannedEndAt: ACTIVE at exactly end -> Skip eligible
+OK   28. one ms before start (IMMINENT) and one ms after end (MISSED): no Skip
+OK   43/12. Skip confirmed: A can no longer be ACTIVE_PLAN, Right Now falls to context
+OK   13. Timeline keeps A (not removed) and renders it SKIPPED, resolved, not completed
+OK   22. Done stays COMPLETED and Skip stays SKIPPED (never a generic resolved state)
+OK   10/21. PR B adapter: overlayLoggedPlans(Set) is exactly the COMPLETED form, and an empty overlay returns the same array
+OK   19/46. a stale refresh still showing A as UPCOMING (CURRENT in the agenda): the confirmed SKIPPED overlay wins
+OK   20. once authoritative data says SKIPPED the overlay is redundant with no flicker back to UPCOMING (same status, still resolved)
+OK   29/54. a midnight-spanning plan is ACTIVE before midnight and Skip is available
+OK   29/54. after confirmation it immediately becomes SKIPPED and Right Now advances (absolute instants, no minute-of-day math)
+OK   29. the same plan after local midnight: eligibility follows Right Now (ACTIVE) and Skip stays available
+OK   30/55. overlapping A and B: existing ordering picks A; Skip A -> B becomes Right Now, and B is skippable
+OK   31/56. active A + current Opportunity: Skip A -> the Opportunity becomes Right Now (no Skip on it)
+OK   32/57. the only actionable plan skipped -> existing context/open state
+OK   14/47. a stale reminder targeting a confirmed-SKIPPED plan is excluded immediately
+OK   16/47. [A, B]: A skipped -> B; [A, B, C]: A then B resolved (Skip or Done) -> C; all resolved -> no card
+OK   48. Done regression: a confirmed COMPLETED plan still filters its reminder (Set form and Map form)
+OK   14. identity is target.planId only: same title/time on a different plan id is never filtered
+OK   15. the authoritative reminder list is never mutated (only its Home projection is filtered)
+OK   16/49. next meaningful thing: skipped A cannot survive as the starting-soon reminder; B (unrelated) is not suppressed
+OK   16/49. all resolved: no reminder card and no agenda "next" pointing at the skipped plan
+OK   49. agendaWithoutResolvedNext: a resolved next item is replaced by the next unresolved one; an unrelated next item is untouched
+OK   18/45. Skip confirmed, then plans/habits/logs/my-day/guidance/Aura Updates ALL fail: Home stays authenticated, A is SKIPPED, no Skip/Done for A, Right Now advanced, stale reminder filtered, no "Skip failed"
+OK   21. Done regression through the same generalized model: COMPLETED overlay, Right Now advances, reminder filtered
+OK   5/7/26. Skip is POST /api/plans/<id>/skip only (never the log route) and succeeds only when the server reports SKIPPED
+OK   5. a 200 whose plan is not SKIPPED (e.g. LOGGED) is FAILED: never a false skip
+OK   6/34/44. Skip POST 500: FAILED (retryable), no confirmation, and no session side effect (the executor never touches the user)
+OK   6/34/44. Skip POST 404: FAILED (retryable), no confirmation, and no session side effect (the executor never touches the user)
+OK   6/34/44. Skip POST 409: FAILED (retryable), no confirmation, and no session side effect (the executor never touches the user)
+OK   6/34/44. Skip POST 401: FAILED (retryable), no confirmation, and no session side effect (the executor never touches the user)
+OK   6/34/44. Skip POST network: FAILED (retryable), no confirmation, and no session side effect (the executor never touches the user)
+OK   6/34/44. Skip POST bad json: FAILED (retryable), no confirmation, and no session side effect (the executor never touches the user)
+OK   6/44. after a failed Skip nothing is confirmed: A is still ACTIVE with both Done and Skip
+OK   35/52. lost response: FAILED locally (A stays actionable), then the retry returns the idempotent SKIPPED result
+OK   7/36/53. Skip/Skip burst: exactly one POST; the extra activations are BUSY
+OK   8/37/53. Done then Skip before the first response: only the Done (log) request is issued; Skip is BUSY
+OK   8/37/53. Skip then Done before the first response: only the Skip request is issued; Done is BUSY
+OK   53. Done/Done burst: one log request (PR B behavior preserved)
+OK   7/53. the guard is per plan and released after completion: a different plan (and the same plan afterwards) is not blocked
+OK   3/27. Skip renders only under skippablePlanIdNow (ACTIVE_PLAN), with an activity-specific accessible name, "Skipping…" while in flight, and a real disabled state
+OK   3. the whole Right Now card is not a Skip control: exactly two call sites -- the Right Now Skip button and the Missed Recovery Skip button (PR E) -- never a card/row click
+OK   4. Done is still separate: same Done button, same log endpoint, gated on completablePlanIdNow
+OK   5/44. no optimistic Skip: the SKIPPED fact is written only after the FAILED branch has returned
+OK   17. reconciliation is secondary: the existing quiet refresh (onPlanCompleted) runs in its own try/catch AFTER the confirmed fact and cannot fail the Skip
+OK   7/8. one execution guard: all four handlers (Done, Skip, Move, Skip-all-missed) consult the same executor (isBusy) before touching state, and there is no second guard
+OK   33. a failed Skip is plan-owned and shown as an alert only while that plan is the skippable one; it never signs out or replaces Home
+OK   9/11/14. one execution-fact map feeds the timeline overlay, the reminder filter and the next-item filter
+OK   40/41/42. no confirmation modal, no replan/Move/carry-forward CTA and no Day Constructor call in the Skip path
+OK   38. after a confirmed Skip focus moves to the stable Right Now region (tabIndex -1), never left on the unmounted button; no focus trap or new focus framework
+OK   7. no new API routes: the only Skip endpoint is the C1 route; no home-specific route exists
+OK   4/22. selector, Composer, Constructor and the Skip domain are untouched by C2 (Right Now already treats SKIPPED as resolved)
+OK   64. no migration by C2: the specific, already-known migration set from Skip C1/Move D2/F1/Goals V2 G2.1/G2.2.1 is present (baseline presence check, count-independent)
+ALL HOME SKIP CHECKS PASSED
+
+# exit=0 signal=
