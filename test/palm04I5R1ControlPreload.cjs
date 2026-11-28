@@ -10,6 +10,7 @@ const path = require('path');
 const ROOT = path.join(__dirname, '..');
 const CAMERA = path.join(ROOT, 'apps/web/lib/palm-analysis/camera.ts');
 const READING = path.join(ROOT, 'packages/palm-reading-engine/e1/src/reading.ts');
+const GATE = path.join(ROOT, 'test/palmG5I1PrivacyGate.test.ts');
 const UI = path.join(ROOT, 'apps/web/components/palm-scan/PalmImageInput.tsx');
 // The first three are the independent reviewer's 50362 controls, verbatim.
 const CONTROLS = {
@@ -17,6 +18,9 @@ const CONTROLS = {
   'nonvideo-disabled': [CAMERA, "tracks.some((t) => t.kind !== 'video')", "(false && tracks.some((t) => t.kind !== 'video'))"],
   'automatic-start': [UI, 'const unsubscribeCamera = cam.subscribe(setCamera);', "const unsubscribeCamera = cam.subscribe(setCamera); if (cam.support() === 'available') void cam.start();"],
   'preview-failure-ignored': [CAMERA, '(p as Promise<void>).then(undefined, failed);', '(p as Promise<void>).then(undefined, () => undefined);'],
+  // D6-I1-R1 controls (50369 F1, F2)
+  'd6r1-retain-landmarks': [UI, 'return d ? Object.freeze({ width: d.imageWidth, height: d.imageHeight }) : null;', 'return d ? (Object.freeze({ width: d.imageWidth, height: d.imageHeight, landmarks: d.landmarks }) as PanelImageSize) : null;'],
+  'd6r1-textual-only-scan': [GATE, '  return [...new Set([...syntax, ...textual])];', "  void syntax; return [...strip(text).matchAll(/(?:from\\s+|import\\s*\\(\\s*|require\\s*\\(\\s*)['\"]([^'\"]+)['\"]/g)].map((m) => m[1]);"],
   // D6-I1 controls
   'd6-app-interpretation': [UI, '<strong>What the tradition says: </strong>{it.text.reading}</p>', '<strong>What the tradition says: </strong>{it.text.reading} This shows you will succeed.</p>'],
   'd6-stale-reading': [UI, 'const confirmedValid = !!confirmed && confirmed.key === reviewKey && !cleared;', 'const confirmedValid = !!confirmed && !cleared;'],

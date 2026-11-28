@@ -1061,6 +1061,8 @@ jobs:
         run: npx ts-node test/palmD6I1Reading.test.ts
       - name: Run personalised reading component tests (PALM-D6-I1, jsdom)
         run: npx ts-node --project tsconfig.jsdom-tests.json test/palmD6I1ReadingJsdom.test.ts
+      - name: Run personalised reading landmark-retention tests (PALM-D6-I1-R1, mounted React state, jsdom)
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/palmD6I1R1RetentionJsdom.test.ts
       - name: Run personalised reading browser tests (PALM-D6-I1, loader parity, journeys, DR-1; runner's Google Chrome, no network)
         env:
           PALM_BROWSER_CHANNEL: chrome

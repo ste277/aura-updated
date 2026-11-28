@@ -103,11 +103,22 @@ const G6_GUARD_ASSERTION = `line: "${E1_APP_IMPORT}",`;
 const scanView = (f: Src): Src => (f.rel === G6_GUARD_TEST && f.text.split(G6_GUARD_ASSERTION).length === 2 ? { rel: f.rel, text: f.text.replace(G6_GUARD_ASSERTION, '') } : f);
 const LIB_REF = /(?:from\s+|import\s*\(\s*|require\s*\(\s*)['"][^'"]*lib\/palm-analysis\/[^'"]*['"]/g;
 type Src = { rel: string; text: string };
+// AURA-PALM-D6-I1-R1 (50369 F2): every module specifier a source names -- SYNTAX-AWARE via the TypeScript scanner
+// (ts.preProcessFile: named, default, namespace and SIDE-EFFECT imports, re-exports, import() and require() with literal
+// paths, in TS/TSX/JS/MJS), UNION the earlier textual scan (kept so that import text inside string literals still counts,
+// which is what the approved G6 assertion exception and its negatives rely on), now including side-effect imports.
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const tsScanner = require('typescript');
+function moduleSpecifiers(text: string): string[] {
+  const syntax: string[] = tsScanner.preProcessFile(text, true, true).importedFiles.map((f: { fileName: string }) => f.fileName);
+  const textual = [...strip(text).matchAll(/(?:\bfrom\s+|\bimport\s*\(\s*|\brequire\s*\(\s*|\bimport\s+)['"]([^'"]+)['"]/g)].map((m) => m[1]);
+  return [...new Set([...syntax, ...textual])];
+}
 /** B2 with the E1-R3 exception: files outside palm-scan that reference lib/palm-analysis (static, dynamic or require). */
 const LIB_ROOT = 'apps/web/lib/palm-analysis/';
 /** Every import / dynamic import / require specifier in `text` that resolves (relatively) into lib/palm-analysis or names it. */
 function libRefs(rel: string, text: string): string[] {
-  const specs = [...strip(text).matchAll(/(?:from\s+|import\s*\(\s*|require\s*\(\s*)['"]([^'"]+)['"]/g)].map((m) => m[1]);
+  const specs = moduleSpecifiers(text);
   return specs.filter((sp) => /lib\/palm-analysis\//.test(sp) || (sp.startsWith('.') && `${path.posix.normalize(path.posix.join(path.posix.dirname(rel), sp))}/`.startsWith(LIB_ROOT)));
 }
 function b2Violations(files: Src[]): string[] {
@@ -138,7 +149,7 @@ function importersClosure(files: Src[], target: string): string[] {
     return base;
   };
   const deps = new Map<string, string[]>();
-  for (const f of files) deps.set(f.rel, [...strip(f.text).matchAll(/(?:from\s+|import\s*\(\s*|require\s*\(\s*)['"]([^'"]+)['"]/g)].map((m) => resolve(f.rel, m[1])).filter((x): x is string => !!x));
+  for (const f of files) deps.set(f.rel, moduleSpecifiers(f.text).map((sp) => resolve(f.rel, sp)).filter((x): x is string => !!x));
   const reached = new Set<string>([target]);
   let grew = true;
   while (grew) { grew = false; for (const [k, ds] of deps) if (!reached.has(k) && ds.some((d) => reached.has(d))) { reached.add(k); grew = true; } }
@@ -195,6 +206,18 @@ const neg: Array<[string, Src[], 'b2' | 'closure' | 'app']> = [
   ['the G6 guard test carries a second copy of the import string', [{ rel: G6_GUARD_TEST, text: `${read(G6_GUARD_TEST)}\nconst again = ${JSON.stringify(E1_APP_IMPORT)};` }], 'closure'],
   ['the G6 guard test requires the E1 interface', [{ rel: G6_GUARD_TEST, text: `${read(G6_GUARD_TEST)}\nconst r = require('../../e1/src/reading');` }], 'closure'],
   ['another package test file uses the approved assertion text', [{ rel: 'packages/palm-reading-engine/prototype/test/other.test.mjs', text: `const x = { ${G6_GUARD_ASSERTION} };` }], 'closure'],
+  // D6-I1-R1 (50369 F2): the independently demonstrated bypass, and every import form, in the G6 guard test and elsewhere
+  ['F2 bypass: a side-effect import of E1 in the G6 guard test', [{ rel: G6_GUARD_TEST, text: `${read(G6_GUARD_TEST)}\nimport '../../e1/src/reading.ts';` }], 'closure'],
+  ['a side-effect import of E1 in an app module', [{ rel: 'apps/web/lib/side.ts', text: "import '../../../packages/palm-reading-engine/e1/src/reading';" }], 'closure'],
+  ['a named import of E1', [{ rel: 'apps/web/lib/named.ts', text: "import { generateConfirmedScannerReading } from '../../../packages/palm-reading-engine/e1/src/reading';" }], 'closure'],
+  ['a default import of E1', [{ rel: 'apps/web/lib/dflt.ts', text: "import reading from '../../../packages/palm-reading-engine/e1/src/reading';" }], 'closure'],
+  ['a namespace import of E1', [{ rel: 'apps/web/lib/ns.ts', text: "import * as e1 from '../../../packages/palm-reading-engine/e1/src/reading';" }], 'closure'],
+  ['a dynamic import of E1 (literal path)', [{ rel: 'apps/web/lib/dyn.ts', text: "export const load = () => import('../../../packages/palm-reading-engine/e1/src/reading');" }], 'closure'],
+  ['a require of E1 (literal path)', [{ rel: 'packages/other/req.js', text: "const e1 = require('../palm-reading-engine/e1/src/reading');" }], 'closure'],
+  ['a star re-export of E1', [{ rel: 'apps/web/lib/rex.ts', text: "export * from '../../../packages/palm-reading-engine/e1/src/reading';" }], 'closure'],
+  ['a named re-export of E1', [{ rel: 'apps/web/lib/rex2.ts', text: "export { generateConfirmedScannerReading as g } from '../../../packages/palm-reading-engine/e1/src/reading';" }], 'closure'],
+  ['a multi-line import of E1', [{ rel: 'apps/web/lib/ml.ts', text: "import {\n  generateConfirmedScannerReading,\n} from\n  '../../../packages/palm-reading-engine/e1/src/reading';" }], 'closure'],
+  ['a side-effect import of lib/palm-analysis outside palm-scan (B2)', [{ rel: 'apps/web/lib/side2.ts', text: "import './palm-analysis/features';" }], 'b2'],
 ];
 const neg2 = neg as Array<[string, Src[], 'b2' | 'closure' | 'app']>;
 for (const [name, files, kind] of neg2) {

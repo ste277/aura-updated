@@ -745,6 +745,13 @@ const isCleared = (e: unknown) => e instanceof TracingError && e.code === 'conte
 /** Mark a gesture invalid; the first reason is kept and nothing ever clears it (sticky). */
 const invalidateSample = (g: Gesture, why: 'outside' | 'unverifiable') => { if (!g.invalid) g.invalid = why; };
 
+/** D6-I1-R1: the only construction data the panel keeps -- the analysed image size, never landmarks. */
+type PanelImageSize = Readonly<{ width: number; height: number }>;
+const imageSizeOf = (c: PalmConstructionContext): PanelImageSize | null => {
+  const d = c.read(); // a fresh copy; only the two numbers below survive this call
+  return d ? Object.freeze({ width: d.imageWidth, height: d.imageHeight }) : null;
+};
+
 export function PalmTracingPanel({ context, imageSource, onClose, onRestart }: PalmTracingPanelProps) {
   const ids = useId();
   const instructionId = `${ids}-instruction`;
@@ -758,15 +765,17 @@ export function PalmTracingPanel({ context, imageSource, onClose, onRestart }: P
   const modelRef = useRef<TracingModel | null>(model);
   modelRef.current = model;
 
-  // P4-I5: the panel's copy of the landmarks is held in state so that clearing the panel really drops it (it used to
-  // stay referenced until the panel unmounted). A new context reads its own copy.
-  const [held, setHeld] = useState<{ context: PalmConstructionContext; data: ReturnType<PalmConstructionContext['read']> }>(() => ({ context, data: context.read() }));
-  if (held.context !== context) setHeld({ context, data: context.read() });
-  const data = held.context === context ? held.data : null;
-  const imgW = data?.imageWidth ?? 0;
-  const imgH = data?.imageHeight ?? 0;
+  // D6-I1-R1 (50369 F1): the panel keeps NO landmark copy. It needs only the analysed image size (for the drawing
+  // geometry) and whether the photo was available; both are taken from one context.read() and the rest of that copy
+  // (the 21 landmarks, quality codes) is dropped at once. The tracing model reads the context on demand for every
+  // operation, so tracing, editing and re-confirmation need nothing more. Clearing drops the size too.
+  const [held, setHeld] = useState<{ context: PalmConstructionContext; size: PanelImageSize | null }>(() => ({ context, size: imageSizeOf(context) }));
+  if (held.context !== context) setHeld({ context, size: imageSizeOf(context) });
+  const size = held.context === context ? held.size : null;
+  const imgW = size?.width ?? 0;
+  const imgH = size?.height ?? 0;
 
-  const [cleared, setCleared] = useState<boolean>(model === null || data === null);
+  const [cleared, setCleared] = useState<boolean>(model === null || size === null);
   const readViews = useCallback((m: TracingModel | null): readonly TracingLineView[] | null => {
     if (!m) return null;
     try { return m.lines(); } catch (e) { if (isCleared(e)) return null; throw e; }
@@ -804,15 +813,15 @@ export function PalmTracingPanel({ context, imageSource, onClose, onRestart }: P
     const v = readViews(model);
     setViews(v);
     try { setGuides(model ? model.guides() : null); } catch { setGuides(null); }
-    setCleared(!v || !held.data);
-    // runs for a NEW context only (held.context), never when markCleared drops the landmark copy
+    setCleared(!v || !held.size);
+    // runs for a NEW context only (held.context), never when markCleared drops the image size
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [model, held.context, readViews, invalidateGesture]);
 
   const markCleared = useCallback(() => {
     invalidateGesture();
     try { modelRef.current?.lines(); } catch { /* a revoked model discards its own traces on this call */ }
-    setHeld((h) => (h.data === null ? h : { context: h.context, data: null })); // P4-I5: drop the landmark copy now
+    setHeld((h) => (h.size === null ? h : { context: h.context, size: null })); // drop the panel's image size now (no landmarks are held)
     setViews(null);
     setGuides(null);
     setConfirmed(null); setAcknowledged(null); setMode('trace');
