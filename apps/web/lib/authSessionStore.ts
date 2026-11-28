@@ -137,6 +137,12 @@ export interface SessionOperationOptions {
   clock?: SessionClock;
   /** Called once per attempt (tests / diagnostics). */
   observe?: (event: SessionAttemptEvent) => void;
+  /**
+   * I2-R1 (39247-02): an absolute deadline on `clock` (monotonic ms) shared by
+   * a caller pipeline (Rev 3 §8.1). It can only SHORTEN an operation's own
+   * maximum; it never extends one.
+   */
+  deadlineAt?: number;
 }
 
 /** A revoke retry is attempted only if at least this much of the caller deadline remains. */
@@ -237,7 +243,7 @@ export interface CommitAuthorization {
 /** The caller's COMMIT, classified. Only 'committed' carries an authorization. */
 export type CallerCommitDecision =
   | { readonly outcome: 'committed'; readonly authorization: CommitAuthorization }
-  | { readonly outcome: 'rolled_back'; readonly reason: 'aborted_transaction' | 'rejected_at_commit' | 'transaction_mismatch' }
+  | { readonly outcome: 'rolled_back'; readonly reason: 'aborted_transaction' | 'rejected_at_commit' | 'transaction_mismatch' | 'not_sent_deadline' }
   | { readonly outcome: 'ambiguous'; readonly reason: 'connection' | 'deadline' | 'unexpected_reply' };
 
 /** What a read-back after an AMBIGUOUS commit may say. Never session material. */
@@ -289,9 +295,11 @@ export async function commitAuthSessionTransaction(
   }
   provisionalStates.set(provisional, 'committing'); // synchronous: a second call cannot pass the check above
   const clock = opts.clock ?? SYSTEM_SESSION_CLOCK;
+  // I2-R1: min(COMMIT maximum, what remains of the caller's shared deadline).
+  const commitWaitMs = Math.min(SESSION_WRITE_BOUNDS.deadlineMs, (opts.deadlineAt ?? Number.POSITIVE_INFINITY) - clock.now());
   let handle: unknown;
   const deadline = new Promise<'deadline'>((resolve) => {
-    handle = clock.setTimer(() => resolve('deadline'), SESSION_WRITE_BOUNDS.deadlineMs);
+    handle = clock.setTimer(() => resolve('deadline'), Math.max(0, commitWaitMs));
   });
   const finish = (decision: CallerCommitDecision): CallerCommitDecision => {
     clock.clearTimer(handle);
@@ -303,6 +311,9 @@ export async function commitAuthSessionTransaction(
     return Object.freeze(decision);
   };
   if (!TXID_PATTERN.test(txid)) return finish({ outcome: 'rolled_back', reason: 'transaction_mismatch' });
+  // I2-R1: no budget left -> the COMMIT is never sent, so nothing committed.
+  // The caller still owns (and must ROLLBACK or discard) its open transaction.
+  if (!(commitWaitMs >= 1)) return finish({ outcome: 'rolled_back', reason: 'not_sent_deadline' });
   const text =
     `DO $auth_session_commit$ BEGIN ` +
     `IF txid_current_if_assigned() IS DISTINCT FROM ${txid}::bigint ` +
@@ -383,7 +394,7 @@ export async function classifyAmbiguousCommit(
     pool,
     `SELECT 1 AS found FROM "AuthSession" WHERE "idHash" = ${sqlLiteral(provisional.idHash, 'idHash')} AND "userId" = ${sqlLiteral(provisional.userId, 'userId')}`,
     SESSION_LOOKUP_BOUNDS,
-    { clock: opts.clock }
+    { clock: opts.clock, deadlineAt: opts.deadlineAt }
   );
   return rows.length === 1 ? 'committed_undisclosed' : 'not_committed';
 }
@@ -405,7 +416,7 @@ export async function lookupAuthSession(pool: Pool, idHash: string, userId: stri
     pool,
     `SELECT "userId", "expiresAt" FROM "AuthSession" WHERE ${liveWhere(idHash, userId)}`,
     SESSION_LOOKUP_BOUNDS,
-    { clock: opts.clock }
+    { clock: opts.clock, deadlineAt: opts.deadlineAt }
   );
   if (rows.length === 0) return null;
   if (rows.length !== 1 || rows[0].userId !== userId) throw new SessionVerificationUnavailableError('shape');
@@ -425,7 +436,7 @@ export async function lookupAuthSessionWithUser(
     `SELECT s."expiresAt" AS "authSessionExpiresAt", u.* FROM "AuthSession" s ` +
       `JOIN "User" u ON u.id = s."userId" WHERE ${liveWhere(idHash, userId, 's')}`,
     SESSION_LOOKUP_BOUNDS,
-    { clock: opts.clock }
+    { clock: opts.clock, deadlineAt: opts.deadlineAt }
   );
   if (rows.length === 0) return null;
   if (rows.length !== 1 || rows[0].id !== userId) throw new SessionVerificationUnavailableError('shape');

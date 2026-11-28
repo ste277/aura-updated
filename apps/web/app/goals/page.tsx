@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { cookies } from 'next/headers';
 import { getSessionWithUserFromCookieStore } from '../../lib/session';
+import { pageSessionOrUnavailable } from '../../lib/sessionPage';
 import { GoalsListClient } from './GoalsListClient';
 
 /**
@@ -24,11 +25,10 @@ export const metadata: Metadata = {
 };
 
 // AURA-AUTH-SESSION-01-I2 (E2): database-backed verification through
-// lib/session.ts (the joined session + user lookup). An outage throws
-// SessionVerificationUnavailableError, so the page fails instead of
-// rendering as signed out.
+// lib/session.ts (the joined session + user lookup). An outage answers
+// 503 with Retry-After (lib/sessionPage.ts, I2-R1), never signed out.
 async function resolveAuthenticated(): Promise<boolean> {
-  return (await getSessionWithUserFromCookieStore(cookies())) !== null;
+  return (await pageSessionOrUnavailable(() => getSessionWithUserFromCookieStore(cookies()), '/goals')) !== null;
 }
 
 export default async function GoalsPage() {

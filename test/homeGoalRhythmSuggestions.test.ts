@@ -145,7 +145,6 @@ async function main() {
 
     // Plan My Day's own path (planDayBootstrap.ts's resolveAutomaticGoalDemand), same underlying facts.
     const planDayDeps: AutomaticGoalDemandBootstrapDeps = {
-      getSessionToken: () => 'tok',
       verifySession: () => ({ userId: 'user-1' }),
       ...countingDeps(rows, facts).deps,
     };
@@ -204,7 +203,6 @@ async function main() {
     check('10a. the mapped suggestion carries the exact source goalId/goalActivityId into its planHandoff', suggestion?.planHandoff.fromGoal === 'goal-identity' && suggestion?.planHandoff.activities === 'ga-identity');
 
     const handoffDeps: GoalActivityHandoffDeps = {
-      getSessionToken: () => 'tok',
       verifySession: () => ({ userId: 'user-1' }),
       listGoalActivities: async () => [{ id: 'ga-identity', title: 'Read', activityId: null, status: 'SUGGESTED', plannedActivityId: null, linkedPlanStatus: null }],
     };

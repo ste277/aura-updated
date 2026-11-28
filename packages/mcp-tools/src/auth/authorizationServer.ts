@@ -5,7 +5,7 @@ import Provider, { errors, interactionPolicy, type InteractionDetails } from 'oi
 import { MCP_SCOPE, type AccessTokenVerifier } from '../http/remoteMcpHandler';
 import { noopAuditSink, type McpAuditSink } from '../security/audit';
 import { nodeAddressRequest, resolveClientAddressDetailed, type ClientAddressSource } from '../security/clientAddress';
-import { isStoreUnavailableError, outsideRequestBudget, runWithRequestBudget } from '../security/deadline';
+import { isStoreUnavailableError, outsideRequestBudget, runWithRequestBudget, StoreUnavailableError } from '../security/deadline';
 import { buildPreAuthRules, type BucketHasher } from '../security/preAuthRules';
 import type { McpRateLimiter } from '../security/rateLimit';
 import { validateClientRegistry } from './clientPolicy';
@@ -183,7 +183,12 @@ export interface AuraOAuthServerOptions {
   /** The only resource tokens can be issued for, e.g. http://localhost:3000/api/mcp. */
   resourceUrl: string;
   clients: readonly AuraOAuthClient[];
-  /** Resolves the signed-in Aura user from the request, or null. */
+  /**
+   * Resolves the signed-in Aura user from the request, or null when there is
+   * no valid session. THROWS when the session cannot be verified (session
+   * store unavailable): that is an outage (503, retry), never "signed out"
+   * (I2-R1, 39246-03).
+   */
   resolveSessionUser: (req: IncomingMessage) => Promise<{ userId: string } | null> | { userId: string } | null;
   /**
    * AURA-AUTH-SESSION-01-I2 (B3): optional guard around issuing a consented
@@ -291,8 +296,8 @@ const PAGE_HEADERS: Record<string, string> = {
   'x-content-type-options': 'nosniff',
 };
 
-function sendPage(res: ServerResponse, status: number, title: string, body: string): void {
-  res.writeHead(status, PAGE_HEADERS);
+function sendPage(res: ServerResponse, status: number, title: string, body: string, headers: Record<string, string> = {}): void {
+  res.writeHead(status, { ...PAGE_HEADERS, ...headers });
   res.end(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(title)}</title>
 <style>body{font-family:system-ui,sans-serif;max-width:32rem;margin:3rem auto;padding:0 1rem;line-height:1.5}button{font:inherit;padding:.5rem 1rem;margin-right:.5rem}</style></head><body>${body}</body></html>`);
 }
@@ -346,13 +351,20 @@ export function createAuraOAuthServer(options: AuraOAuthServerOptions): AuraOAut
   const refreshAllowed = (clientId: string) => refresh && clientsById.get(clientId)?.allow_refresh === true;
 
   // F1: never trust the provider's own login session on its own.
+  // I2-R1 (39246-03): null = not signed in (invalid, missing or revoked
+  // session); a resolver that THROWS could not verify the session, which is an
+  // outage: it surfaces as StoreUnavailableError (503 + Retry-After), so an
+  // unavailable session store never turns into a sign-in-required flow. Both
+  // fail closed: nothing is granted or issued.
   async function currentAuraUser(req: IncomingMessage): Promise<{ userId: string } | null> {
+    let user: { userId: string } | null;
     try {
-      const user = await options.resolveSessionUser(req);
-      return user && typeof user.userId === 'string' && user.userId.length > 0 ? user : null;
-    } catch {
-      return null; // fail closed
+      user = await options.resolveSessionUser(req);
+    } catch (err) {
+      if (isStoreUnavailableError(err)) throw err;
+      throw new StoreUnavailableError('error');
     }
+    return user && typeof user.userId === 'string' && user.userId.length > 0 ? user : null;
   }
   const { base: basePolicy, Check } = interactionPolicy;
   const policy = basePolicy();
@@ -455,7 +467,14 @@ export function createAuraOAuthServer(options: AuraOAuthServerOptions): AuraOAut
       },
     },
     // Error pages carry the OAuth error code only (no descriptions/stack).
-    renderError: async (ctx: { type: string; body: string; status: number }, out: { error?: string }) => {
+    renderError: async (ctx: { type: string; body: string; status: number; set?: (k: string, v: string) => void }, out: { error?: string }) => {
+      // I2-R1 (39246-03): an unavailable session or OAuth store is a retryable outage.
+      if (ctx.status === 503) {
+        ctx.set?.('retry-after', '1');
+        ctx.type = 'html';
+        ctx.body = '<!doctype html><meta charset="utf-8"><title>Temporarily unavailable</title><p>Aura is temporarily unavailable. Nothing was changed.</p><p>Try again in a moment.</p>';
+        return;
+      }
       const code = String(out.error ?? 'server_error');
       const hint =
         code === 'login_required' || code === 'consent_required' || code === 'interaction_required'
@@ -752,7 +771,15 @@ export function createAuraOAuthServer(options: AuraOAuthServerOptions): AuraOAut
     }
     if (details.uid !== uid) return sendPage(res, 400, 'Request expired', '<h1>This connection request is no longer valid</h1><p>Return to your assistant and start connecting again.</p>');
 
-    const user = await currentAuraUser(req);
+    let user: { userId: string } | null;
+    try {
+      user = await currentAuraUser(req);
+    } catch (err) {
+      if (!isStoreUnavailableError(err)) throw err;
+      // I2-R1 (39246-03): an outage, not "signed out" -- never the sign-in page.
+      audit({ event: 'oauth.error', outcome: 'store_unavailable', errorCode: 'SessionUnavailable' });
+      return sendPage(res, 503, 'Temporarily unavailable', '<h1>Aura is temporarily unavailable</h1><p>Your sign-in could not be checked just now. Nothing was changed. Try again in a moment.</p>', { 'retry-after': '1' });
+    }
     if (!user) {
       if (req.method === 'POST') return sendPage(res, 401, 'Sign in required', '<h1>Sign in required</h1>');
       const returnTo = `${INTERACTION_PREFIX}${encodeURIComponent(uid)}`;
@@ -811,9 +838,17 @@ ${duration}${manage}
       audit({ event: 'oauth.grant', outcome: 'denied', clientId: client.client_id, userId: user.userId });
       return finish(req, res, { error: 'access_denied', error_description: 'The user denied access.' });
     }
-    const grantId = options.guardConsentGrant
-      ? await options.guardConsentGrant(req, user.userId, () => grantFor(details, user.userId))
-      : await grantFor(details, user.userId);
+    let grantId: string | null;
+    try {
+      grantId = options.guardConsentGrant
+        ? await options.guardConsentGrant(req, user.userId, () => grantFor(details, user.userId))
+        : await grantFor(details, user.userId);
+    } catch (err) {
+      if (!isStoreUnavailableError(err)) throw err;
+      // I2-R1 (39246-03): the session re-check or the store could not answer -- 503, not sign-in.
+      audit({ event: 'oauth.error', outcome: 'store_unavailable', clientId: client.client_id, errorCode: err.name });
+      return sendPage(res, 503, 'Temporarily unavailable', '<h1>Aura is temporarily unavailable</h1><p>The connection was not completed. Try again in a moment.</p>', { 'retry-after': '1' });
+    }
     if (grantId === null) return sendPage(res, 401, 'Sign in required', '<h1>Sign in required</h1>');
     audit({ event: 'oauth.grant', outcome: 'ok', clientId: client.client_id, userId: user.userId });
     return finish(req, res, { consent: { grantId } });

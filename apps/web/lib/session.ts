@@ -28,7 +28,7 @@
  */
 import type { Pool, PoolClient } from 'pg';
 import { getAuthSecret } from './auth';
-import { createSessionPool, SESSION_WRITE_BOUNDS } from './authSessionDb';
+import { createSessionPool, SESSION_WRITE_BOUNDS, SYSTEM_SESSION_CLOCK, type SessionClock } from './authSessionDb';
 import {
   createSessionTokenV2,
   deriveSessionKey,
@@ -216,7 +216,7 @@ export async function getSessionWithUserFromCookieStore(store: CookieSource): Pr
 }
 
 /** The active session cookie's value from a raw Cookie header (E4, MCP consent). */
-export function readSessionCookieFromHeader(cookieHeader: string | null | undefined): string | null {
+function readSessionCookieFromHeader(cookieHeader: string | null | undefined): string | null {
   if (!cookieHeader) return null;
   const name = activeSessionCookieName();
   for (const part of cookieHeader.split(';')) {
@@ -275,19 +275,59 @@ function onCheckedOutClientError(err: unknown): void {
  * 'unavailable' and no session material: a rolled-back transaction also
  * un-consumes the code; an ambiguous commit discards the connection.
  *
- * Bounds: acquisition 500 ms (pool), SET LOCAL statement/lock timeouts of the
- * foreground write budget, and one 2 s client deadline for everything before
- * the COMMIT (the COMMIT has its own 2 s bound in the store).
+ * Bounds (I2-R1, 39247-02; Rev 3 §8.1): ONE absolute 2 s caller deadline,
+ * taken on a monotonic clock BEFORE pool acquisition, covers acquisition, the
+ * pre-commit work, the COMMIT and the release read-back. Every phase waits at
+ * most min(its own maximum, what remains); the SET LOCAL statement / lock /
+ * idle-in-transaction limits are clamped the same way. Past the deadline no
+ * session material is ever returned: a COMMIT with no budget left is never
+ * sent, one whose reply is late is ambiguous (connection discarded, no
+ * cookie), and a late read-back fails closed (the authorization is consumed).
  */
 export async function createSignInSession(
   userId: string,
-  inTransaction: (client: PoolClient) => Promise<boolean>
+  inTransaction: (client: PoolClient) => Promise<boolean>,
+  clock: SessionClock = SYSTEM_SESSION_CLOCK
 ): Promise<SignInSessionResult> {
+  const deadlineAt = clock.now() + SESSION_WRITE_BOUNDS.deadlineMs;
+  const remaining = () => deadlineAt - clock.now();
+  /** Races `work` against what remains of the shared deadline. */
+  const within = async <T>(work: Promise<T>, cap: number = Number.POSITIVE_INFINITY): Promise<T> => {
+    const wait = Math.min(cap, remaining());
+    work.catch(() => {});
+    if (!(wait > 0)) throw PRE_COMMIT_TIMED_OUT;
+    let timer: unknown;
+    const timeout = new Promise<typeof PRE_COMMIT_TIMED_OUT>((resolve) => {
+      timer = clock.setTimer(() => resolve(PRE_COMMIT_TIMED_OUT), wait);
+    });
+    try {
+      const r = await Promise.race([work, timeout]);
+      if (r === PRE_COMMIT_TIMED_OUT) throw PRE_COMMIT_TIMED_OUT;
+      return r as T;
+    } finally {
+      clock.clearTimer(timer);
+    }
+  };
+
   let pool: Pool;
   let client: PoolClient;
+  let abandoned = false;
   try {
     pool = getSessionPool();
-    client = await pool.connect();
+    const connecting = pool.connect();
+    // A checkout that completes after the budget is spent goes straight back, discarded.
+    connecting.then(
+      (c) => {
+        if (abandoned) c.release(new Error('auth-session sign-in checkout abandoned'));
+      },
+      () => {}
+    );
+    try {
+      client = await within(connecting, SESSION_WRITE_BOUNDS.acquireTimeoutMs);
+    } catch (err) {
+      abandoned = true;
+      throw err;
+    }
   } catch {
     return { kind: 'unavailable' };
   }
@@ -299,46 +339,33 @@ export async function createSignInSession(
     client.off('error', onCheckedOutClientError);
     client.release(discard ? new Error('auth-session sign-in connection discarded') : undefined);
   };
-  const startedAt = performance.now();
-  const step = async <T>(work: Promise<T>): Promise<T> => {
-    const remaining = SESSION_WRITE_BOUNDS.deadlineMs - (performance.now() - startedAt);
-    if (!(remaining > 0)) throw PRE_COMMIT_TIMED_OUT;
-    work.catch(() => {});
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const timeout = new Promise<typeof PRE_COMMIT_TIMED_OUT>((resolve) => {
-      timer = setTimeout(() => resolve(PRE_COMMIT_TIMED_OUT), remaining);
-    });
-    try {
-      const r = await Promise.race([work, timeout]);
-      if (r === PRE_COMMIT_TIMED_OUT) throw PRE_COMMIT_TIMED_OUT;
-      return r as T;
-    } finally {
-      clearTimeout(timer);
-    }
-  };
   try {
-    await step(
+    const left = Math.floor(remaining());
+    if (left < 1) throw PRE_COMMIT_TIMED_OUT;
+    const statementMs = Math.min(SESSION_WRITE_BOUNDS.statementTimeoutMs, left);
+    const lockMs = Math.min(SESSION_WRITE_BOUNDS.lockTimeoutMs, statementMs);
+    await within(
       client.query(
-        `BEGIN; SET LOCAL statement_timeout = '${SESSION_WRITE_BOUNDS.statementTimeoutMs}ms'; ` +
-          `SET LOCAL lock_timeout = '${SESSION_WRITE_BOUNDS.lockTimeoutMs}ms'; ` +
-          `SET LOCAL idle_in_transaction_session_timeout = '5000ms'`
+        `BEGIN; SET LOCAL statement_timeout = '${statementMs}ms'; ` +
+          `SET LOCAL lock_timeout = '${lockMs}ms'; ` +
+          `SET LOCAL idle_in_transaction_session_timeout = '${left}ms'`
       )
     );
-    if (!(await step(inTransaction(client)))) {
-      await step(client.query('ROLLBACK'));
+    if (!(await within(inTransaction(client)))) {
+      await within(client.query('ROLLBACK'));
       release(false);
       return { kind: 'rejected' };
     }
-    const provisional = await step(createAuthSessionInTransaction(client, userId));
-    const decision = await commitAuthSessionTransaction(client, provisional);
+    const provisional = await within(createAuthSessionInTransaction(client, userId));
+    const decision = await commitAuthSessionTransaction(client, provisional, { clock, deadlineAt });
     if (decision.outcome === 'ambiguous') {
       release(true);
       return { kind: 'unavailable' };
     }
     if (decision.outcome === 'rolled_back') {
-      // The caller still owns an aborted / mismatched transaction (R3): roll it back.
+      // The caller still owns an aborted / mismatched / unsent transaction (R3): roll it back.
       try {
-        await step(client.query('ROLLBACK'));
+        await within(client.query('ROLLBACK'));
         release(false);
       } catch {
         release(true);
@@ -346,8 +373,13 @@ export async function createSignInSession(
       return { kind: 'unavailable' };
     }
     release(false);
-    const session = await releaseCommittedAuthSession(pool, decision.authorization);
-    return session ? { kind: 'issued', session } : { kind: 'unavailable' };
+    // The read-back runs on what remains; the authorization is consumed either way (fail closed).
+    try {
+      const session = await releaseCommittedAuthSession(pool, decision.authorization, { clock, deadlineAt });
+      return session ? { kind: 'issued', session } : { kind: 'unavailable' };
+    } catch {
+      return { kind: 'unavailable' };
+    }
   } catch {
     // Unknown connection state (statement error, deadline, driver): discard it;
     // PostgreSQL rolls the open transaction back when the backend ends.

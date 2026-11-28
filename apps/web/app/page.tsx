@@ -59,7 +59,7 @@ import { resolveTzOffsetMinutes, getDatePartsInTimezone } from '../lib/timezone'
 import { formatDisplayName } from '../lib/displayName';
 import { trackEvent } from '../lib/trackEvent';
 import { generateClientRequestId } from '../lib/clientId';
-import { fetchSessionBootstrap, signOutDurably, SIGN_OUT_FAILED_MESSAGE } from '../lib/sessionClient';
+import { createAuthFence, fetchSessionBootstrap, signOutDurably, SIGN_OUT_FAILED_MESSAGE } from '../lib/sessionClient';
 import { useAndroidBackButton } from '../lib/useAndroidBackButton';
 import {
   loadNotificationPrefs,
@@ -133,6 +133,8 @@ export default function DashboardPage() {
   const [sessionRetryTick, setSessionRetryTick] = useState(0);
   // D8 / B6 -- sign-out in progress, and the message shown when it could not be confirmed.
   const [signingOut, setSigningOut] = useState(false);
+  // I2-R1 (39246-05): fences authenticated refreshes around sign-out (lib/sessionClient.ts).
+  const authFenceRef = useRef(createAuthFence());
   const [signOutError, setSignOutError] = useState<string | null>(null);
   // Onboarding V1 PR 1 -- Location Trust Foundation: lets the global
   // disclosure banner's action land directly on the already-expanded
@@ -404,9 +406,15 @@ export default function DashboardPage() {
 
   // Parallelize Session & Initial Data Fetches
   const loadUserDataAndLogs = useCallback(async () => {
+    // I2-R1 (39246-05): paused while signing out; a result is applied only if
+    // no sign-out started or ended since this refresh began.
+    const ticket = authFenceRef.current.begin();
+    if (ticket === null) return;
+    const current = () => authFenceRef.current.isCurrent(ticket);
     try {
       // AURA-AUTH-SESSION-01-I2: 503 / offline = unknown, never signed out (N7).
       const boot = await fetchSessionBootstrap<{ user?: SessionUser; onboardingResolved?: boolean }>((input, init) => fetch(input, init));
+      if (!current()) return;
       if (boot.kind === 'unknown') {
         setSessionUnavailable(true);
         return;
@@ -435,18 +443,24 @@ export default function DashboardPage() {
         fetch('/api/habits'),
         fetch('/api/plans'),
       ]);
+      if (!current()) return;
 
       if (logsRes.ok) {
-        applyConfirmedLogs(await logsRes.json());
+        const logs = await logsRes.json();
+        if (!current()) return;
+        applyConfirmedLogs(logs);
       }
 
       if (habitsRes.ok) {
         const habitsData = await habitsRes.json();
+        if (!current()) return;
         setHabits(habitsData);
       }
 
       if (plansRes.ok) {
-        setPlannedActivities(await plansRes.json());
+        const plans = await plansRes.json();
+        if (!current()) return;
+        setPlannedActivities(plans);
       }
     } catch {
       // AURA-AUTH-SESSION-01-I2 (N7): a failed refresh after the session check
@@ -1595,18 +1609,31 @@ export default function DashboardPage() {
   // AURA-AUTH-SESSION-01-I2 (D8): signed out ONLY after the server confirmed
   // the revocation (200). Otherwise one automatic retry, then
   // "Couldn't sign out. Try again." and the user stays signed in.
+  // I2-R1 (39246-05): authenticated refreshes are paused for the duration, and
+  // any refresh begun before or during it is fenced off, so a late result can
+  // never restore the signed-in state after the logout was confirmed.
   const handleLogout = useCallback(async () => {
+    if (authFenceRef.current.signingOut) return;
     setSignOutError(null);
     setSigningOut(true);
-    const outcome = await signOutDurably((input, init) => fetch(input, init));
-    setSigningOut(false);
+    authFenceRef.current.startSignOut();
+    let outcome: 'signed_out' | 'failed' = 'failed';
+    try {
+      outcome = await signOutDurably((input, init) => fetch(input, init));
+    } finally {
+      authFenceRef.current.endSignOut();
+      setSigningOut(false);
+    }
     if (outcome === 'signed_out') {
       setUser(null);
       setPlannedActivities([]);
     } else {
+      // Still signed in (the revocation was not confirmed): show the error and
+      // re-check, so state refreshed during the attempt is current again.
       setSignOutError(SIGN_OUT_FAILED_MESSAGE);
+      loadUserDataAndLogs();
     }
-  }, []);
+  }, [loadUserDataAndLogs]);
 
   // AURA-AUTH-SESSION-01-I2 (N7): while the first session check is unknown,
   // retry a bounded number of times (every 3 s, at most 10) without ever

@@ -959,6 +959,12 @@ jobs:
         run: npx ts-node test/authSessionCoverage.test.ts
       - name: Run session client outcome test (AUTH-SESSION-01-I2)
         run: npx ts-node test/authSessionClient.test.ts
+      # AURA-AUTH-SESSION-01-I2-R1 (39247) F5/F6 -- the Home sign-out fence with
+      # overlapping refresh / logout / re-authentication (deferred fetches), and
+      # the real /find client after a session-store 503 (never the guest path on
+      # an unknown session). jsdom; after "Install web deps". No database.
+      - name: Run session client logout-race and unknown-state test (AUTH-SESSION-01-I2-R1)
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/authSessionI2R1ClientJsdom.test.ts
       # AURA-AUTH-SESSION-01-I1 R1 (39233) -- controlled-clock tests of the single
       # absolute caller deadline / outcome classification / revoke retry, and the
       # compile-time provisional-vs-committed result contract. No database.
@@ -1328,6 +1334,17 @@ jobs:
       # timeout (503), the production __Host- cookie contract and the cron cleanup.
       - name: Run session I2 integration DB test (AUTH-SESSION-01-I2)
         run: npx ts-node test/authSessionI2Db.test.ts
+      # AURA-AUTH-SESSION-01-I2-R1 (39247) F2 -- ONE 2 s sign-in budget across
+      # acquisition, pre-commit work, COMMIT and release read-back (latency proxy,
+      # real routes); F3 -- a session-store outage is 503 + Retry-After at MCP
+      # consent (real local authorization server) and at E2 pages, never sign-in.
+      - name: Run session I2-R1 shared sign-in deadline DB test (AUTH-SESSION-01-I2-R1)
+        run: npx ts-node test/authSessionI2R1DeadlineDb.test.ts
+      - name: Run session I2-R1 outage outcome DB test (AUTH-SESSION-01-I2-R1)
+        env:
+          # Synthetic, CI-only: the local MCP gate refuses the public development fallback.
+          AUTH_SECRET: ci-i2r1-synthetic-session-secret-0123456789
+        run: npx ts-node test/authSessionI2R1OutageDb.test.ts
       - name: Verify every repository migration was recorded as applied
         run: |
           set -euo pipefail

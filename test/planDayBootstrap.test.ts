@@ -16,7 +16,7 @@ function check(label: string, condition: boolean) {
 
 interface DepsFixture {
   deps: PlanDayBootstrapDeps;
-  calls: { getSessionToken: number; verifySession: number; getUser: number; now: number };
+  calls: { verifySession: number; getUser: number; now: number };
   getUserArgs: string[];
 }
 
@@ -27,19 +27,15 @@ function fixture(overrides: {
   user?: { timezone: string; availabilityConfigured?: boolean } | null;
   now?: Date;
 } = {}): DepsFixture {
-  const calls = { getSessionToken: 0, verifySession: 0, getUser: 0, now: 0 };
+  const calls = { verifySession: 0, getUser: 0, now: 0 };
   const getUserArgs: string[] = [];
-  const token = overrides.token === null ? undefined : (overrides.token ?? 'real-token');
-  const session = overrides.session === undefined ? { userId: 'user-A' } : overrides.session;
+  // I2-R1: no cookie = no verified session (the page resolved it through lib/session.ts).
+  const session = overrides.token === null ? null : overrides.session === undefined ? { userId: 'user-A' } : overrides.session;
   const user = overrides.user === undefined ? { timezone: 'Asia/Kolkata' } : overrides.user;
   const now = overrides.now ?? new Date('2026-09-16T12:00:00.000Z');
 
   const deps: PlanDayBootstrapDeps = {
-    getSessionToken: () => {
-      calls.getSessionToken += 1;
-      return token;
-    },
-    verifySession: (t) => {
+    verifySession: () => {
       calls.verifySession += 1;
       return session;
     },
@@ -131,7 +127,7 @@ async function main() {
     const f = fixture({ token: null });
     const result = await resolvePlanDayServerProps(f.deps);
     check('9. no cookie token -> null (unauthenticated), never throws', result === null);
-    check('10. no cookie token means verifySession/getUser/now are never called', f.calls.verifySession === 0 && f.calls.getUser === 0 && f.calls.now === 0);
+    check('10. no verified session means getUser/now are never called', f.calls.verifySession === 1 && f.calls.getUser === 0 && f.calls.now === 0);
   }
   {
     const f = fixture({ session: null });
@@ -148,7 +144,7 @@ async function main() {
   {
     const f = fixture();
     await resolvePlanDayServerProps(f.deps);
-    check('15. getSessionToken is called exactly once per resolution', f.calls.getSessionToken === 1);
+    check('15. the verified session is read exactly once per resolution', f.calls.verifySession === 1);
   }
 
   // ============================================================

@@ -175,7 +175,7 @@ async function main() {
     const activityAfter1 = detailAfter1.activities.find((a: any) => a.id === gaC!.id);
     check('C. 1 of 5 committed: derivedState is PLANNED, and the canonical rhythm.eligibleForAnotherOccurrence (feeding GoalDetailClient\'s isSelectable) is TRUE -- selectable', activityAfter1.derivedState === 'PLANNED' && activityAfter1.rhythm.eligibleForAnotherOccurrence === true && activityAfter1.rhythm.remainingThisWeek === 4);
     const manualHandoff1 = await resolveGoalActivityHandoff(
-      { getSessionToken: () => token, verifySession: () => ({ userId: user.id }), listGoalActivities: (uid: string, gid: string) => listGoalActivitiesWithLinkedPlanStatus(uid, gid), loadGoalActivityRhythmFacts: (uid: string, gaId: string, tz: string) => loadGoalActivityRhythmFacts(uid, gaId, tz) } as any,
+      { verifySession: () => ({ userId: user.id }), listGoalActivities: (uid: string, gid: string) => listGoalActivitiesWithLinkedPlanStatus(uid, gid), loadGoalActivityRhythmFacts: (uid: string, gaId: string, tz: string) => loadGoalActivityRhythmFacts(uid, gaId, tz) } as any,
       goalC.id, gaC!.id, '2026-10-07', TZ
     );
     check('C. resolveGoalActivityHandoff (the manual path) ALSO admits it -- manual and automatic paths agree', manualHandoff1.some((h) => h.id === gaC!.id));
@@ -192,7 +192,7 @@ async function main() {
     const activityAfter5 = detailAfter5.activities.find((a: any) => a.id === gaC!.id);
     check('C. 5 of 5 committed: rhythm.eligibleForAnotherOccurrence is FALSE -- not selectable', activityAfter5.derivedState === 'PLANNED' && activityAfter5.rhythm.eligibleForAnotherOccurrence === false && activityAfter5.rhythm.remainingThisWeek === 0);
     const manualHandoff5 = await resolveGoalActivityHandoff(
-      { getSessionToken: () => token, verifySession: () => ({ userId: user.id }), listGoalActivities: (uid: string, gid: string) => listGoalActivitiesWithLinkedPlanStatus(uid, gid), loadGoalActivityRhythmFacts: (uid: string, gaId: string, tz: string) => loadGoalActivityRhythmFacts(uid, gaId, tz) } as any,
+      { verifySession: () => ({ userId: user.id }), listGoalActivities: (uid: string, gid: string) => listGoalActivitiesWithLinkedPlanStatus(uid, gid), loadGoalActivityRhythmFacts: (uid: string, gaId: string, tz: string) => loadGoalActivityRhythmFacts(uid, gaId, tz) } as any,
       goalC.id, gaC!.id, '2026-10-07', TZ
     );
     check('C. with capacity exhausted, resolveGoalActivityHandoff correctly refuses it too -- still agrees with automatic discovery', manualHandoff5.length === 0);

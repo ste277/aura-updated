@@ -71,14 +71,12 @@ export function resolvePlanDayBootstrap(userTimezone: string, now: Date, horizon
 }
 
 export interface PlanDayBootstrapDeps {
-  /** `() => cookies().get(activeSessionCookieName())?.value` in production. */
-  getSessionToken: () => string | undefined;
-  /** AURA-AUTH-SESSION-01-I2: the database-backed verification of
-   * lib/session.ts (async; throws on an outage, so the page fails instead of
-   * rendering signed out) -- the SAME canonical verification every route uses (this
-   * ticket's own section 15: reuse the existing mechanism, never a
-   * second auth model). */
-  verifySession: (token: string) => { userId: string } | null | Promise<{ userId: string } | null>;
+  /** AURA-AUTH-SESSION-01-I2-R1 (39246-04): the VERIFIED session identity,
+   * resolved once per render by the page through lib/session.ts (the only
+   * session-cookie reader, Rev 3 §2.3). These resolvers never see a cookie or
+   * token value. null = not authenticated; a session-store outage never
+   * arrives here (the page answers 503 first). */
+  verifySession: () => { userId: string } | null | Promise<{ userId: string } | null>;
   /** `getUserById` (db.ts), passed by reference. `availabilityConfigured`
    * is optional here (this ticket's own section 8) -- the real `User` row
    * always carries it, but a test fixture supplying only `{ timezone }`
@@ -116,10 +114,7 @@ export interface PlanDayBootstrapDeps {
  * scope.
  */
 export async function resolvePlanDayServerProps(deps: PlanDayBootstrapDeps, horizon: PlanningHorizon = 'TODAY'): Promise<PlanDayServerProps | null> {
-  const token = deps.getSessionToken();
-  if (!token) return null;
-
-  const session = await deps.verifySession(token);
+  const session = await deps.verifySession();
   if (!session) return null;
 
   const user = await deps.getUser(session.userId);
@@ -166,14 +161,8 @@ export interface GoalActivityHandoffItem {
 }
 
 export interface GoalActivityHandoffDeps {
-  /** Same shape as `PlanDayBootstrapDeps.getSessionToken` -- a second,
-   * independent session read (this file's own established convention:
-   * `resolvePlanDayServerProps` above already does its own; every Goals
-   * route (app/goals/page.tsx, app/goals/[goalId]/page.tsx) already does
-   * its own too). A cookie read + HMAC verify is cheap; this is not a
-   * meaningful duplication cost. */
-  getSessionToken: () => string | undefined;
-  verifySession: (token: string) => { userId: string } | null | Promise<{ userId: string } | null>;
+  /** Same verified-identity seam as `PlanDayBootstrapDeps.verifySession`. */
+  verifySession: () => { userId: string } | null | Promise<{ userId: string } | null>;
   /** `listGoalActivitiesWithLinkedPlanStatus` (db.ts), passed by
    * reference -- the SAME already-merged PR A read this ticket's own
    * section 40's "reuse the already-merged PR A APIs" instruction asks
@@ -223,9 +212,7 @@ export async function resolveGoalActivityHandoff(deps: GoalActivityHandoffDeps, 
   const requestedIds = Array.from(new Set(activitiesParam.split(',').map((id) => id.trim()).filter(Boolean))).slice(0, MAX_PLAN_DAY_INTENTS);
   if (requestedIds.length === 0) return [];
 
-  const token = deps.getSessionToken();
-  if (!token) return [];
-  const session = await deps.verifySession(token);
+  const session = await deps.verifySession();
   if (!session) return [];
 
   const requestedIdSet = new Set(requestedIds);
@@ -313,8 +300,8 @@ export interface CaptureHandoffItem {
 }
 
 export interface CaptureHandoffDeps {
-  getSessionToken: () => string | undefined;
-  verifySession: (token: string) => { userId: string } | null | Promise<{ userId: string } | null>;
+  /** Same verified-identity seam as `PlanDayBootstrapDeps.verifySession`. */
+  verifySession: () => { userId: string } | null | Promise<{ userId: string } | null>;
   /** `listCapturesWithLinkedPlanStatus` (db.ts), passed by reference. */
   listCaptures: (
     userId: string
@@ -333,9 +320,7 @@ export async function resolveCaptureHandoff(deps: CaptureHandoffDeps, capturesPa
   const requestedIds = Array.from(new Set(capturesParam.split(',').map((id) => id.trim()).filter(Boolean))).slice(0, MAX_PLAN_DAY_INTENTS);
   if (requestedIds.length === 0) return [];
 
-  const token = deps.getSessionToken();
-  if (!token) return [];
-  const session = await deps.verifySession(token);
+  const session = await deps.verifySession();
   if (!session) return [];
 
   const requested = new Set(requestedIds);
@@ -390,8 +375,8 @@ export type AutomaticGoalDemandBootstrapResult =
   | { status: 'LOAD_FAILED' };
 
 export interface AutomaticGoalDemandBootstrapDeps extends GoalDemandCandidatesDeps {
-  getSessionToken: () => string | undefined;
-  verifySession: (token: string) => { userId: string } | null | Promise<{ userId: string } | null>;
+  /** Same verified-identity seam as `PlanDayBootstrapDeps.verifySession`. */
+  verifySession: () => { userId: string } | null | Promise<{ userId: string } | null>;
 }
 
 /**
@@ -421,9 +406,7 @@ export async function resolveAutomaticGoalDemand(
 ): Promise<AutomaticGoalDemandBootstrapResult> {
   if (!planningLocalDate || !timezone) return { status: 'OK', suggestions: [], manualCanonicalGoalActivityIds: [] };
 
-  const token = deps.getSessionToken();
-  if (!token) return { status: 'OK', suggestions: [], manualCanonicalGoalActivityIds: [] };
-  const session = await deps.verifySession(token);
+  const session = await deps.verifySession();
   if (!session) return { status: 'OK', suggestions: [], manualCanonicalGoalActivityIds: [] };
 
   const result = await loadEligibleGoalDemand(deps, session.userId, planningLocalDate, timezone);

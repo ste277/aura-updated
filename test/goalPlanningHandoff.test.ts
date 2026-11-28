@@ -165,7 +165,6 @@ check(
 // ============================================================
 function makeDeps(overrides: Partial<GoalActivityHandoffDeps> = {}): GoalActivityHandoffDeps {
   return {
-    getSessionToken: () => 'tok',
     verifySession: () => ({ userId: 'user-1' }),
     listGoalActivities: async () => [],
     ...overrides,
@@ -212,7 +211,7 @@ async function main() {
   {
     // H. ownership resolution -- no session at all.
     const rows: Row[] = [{ id: 'ga-real', title: 'x', activityId: null, status: 'SUGGESTED', plannedActivityId: null, linkedPlanStatus: null }];
-    const result = await resolveGoalActivityHandoff(makeDeps({ getSessionToken: () => undefined, listGoalActivities: async () => rows }), 'goal-1', 'ga-real');
+    const result = await resolveGoalActivityHandoff(makeDeps({ verifySession: () => null, listGoalActivities: async () => rows }), 'goal-1', 'ga-real');
     check('H. no session token -> empty result, never seeds anything', result.length === 0);
   }
   {

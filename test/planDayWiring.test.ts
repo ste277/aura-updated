@@ -103,8 +103,8 @@ function main() {
     // invariant it proves -- widened to "getUserById appears as one of
     // the named imports from lib/db", still real substring matching,
     // never weakened to "imports something from lib/db".
-    '21. page.tsx (the Server Component route shell) reuses the canonical, database-backed session verification (AURA-AUTH-SESSION-01-I2: lib/session.ts getSessionFromCookieStore/activeSessionCookieName, plus getUserById) -- no second auth model',
-    planDayPageSource.includes("import { activeSessionCookieName, getSessionFromCookieStore } from '../../lib/session'") && /import \{[^}]*\bgetUserById\b[^}]*\} from '\.\.\/\.\.\/lib\/db'/.test(planDayPageSource) && !planDayPageSource.includes('verifySessionToken')
+    '21. page.tsx (the Server Component route shell) reuses the canonical, database-backed session verification (AURA-AUTH-SESSION-01-I2 / I2-R1: lib/session.ts getSessionFromCookieStore through the 503 page boundary, no raw cookie read, plus getUserById) -- no second auth model',
+    planDayPageSource.includes("import { getSessionFromCookieStore } from '../../lib/session'") && planDayPageSource.includes("import { pageSessionOrUnavailable } from '../../lib/sessionPage'") && !/cookies\(\)\.get\(/.test(planDayPageSource) && /import \{[^}]*\bgetUserById\b[^}]*\} from '\.\.\/\.\.\/lib\/db'/.test(planDayPageSource) && !planDayPageSource.includes('verifySessionToken')
   );
 
   // ============================================================

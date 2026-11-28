@@ -12,13 +12,14 @@ import {
   type AddressUnresolvedReason,
   type ClientAddressSource,
 } from '../../../packages/mcp-tools/src/security/clientAddress';
-import { MCP_PG_POOL_BOUNDS } from '../../../packages/mcp-tools/src/security/deadline';
+import { MCP_PG_POOL_BOUNDS, StoreUnavailableError } from '../../../packages/mcp-tools/src/security/deadline';
+import { SessionVerificationUnavailableError } from './sessionErrors';
 import { randomBytes } from 'crypto';
 import { createPostgresRateLimiter } from '../../../packages/mcp-tools/src/security/postgresRateLimit';
 import { createBucketHasher, deriveBucketKey, type BucketHasher } from '../../../packages/mcp-tools/src/security/preAuthRules';
 import { createFixedWindowRateLimiter, type McpRateLimiter } from '../../../packages/mcp-tools/src/security/rateLimit';
 import type { RemoteMcpConfig } from '../../../packages/mcp-tools/src/http/remoteMcpHandler';
-import { getSessionFromCookieHeader, readSessionCookieFromHeader, withSessionShareLock } from './session';
+import { getSessionFromCookieHeader, withSessionShareLock } from './session';
 import { resolveRuntimeMcpAuthMode } from './mcpAuthGate';
 
 /**
@@ -111,9 +112,6 @@ function boundedPool(connectionString: string, role: 'store' | 'limiter'): Pool 
 // Survives Next dev hot reloads within one process.
 const globalRef = globalThis as typeof globalThis & { __auraMcpLocalOAuth?: LocalState };
 
-export function readSessionCookieValue(cookieHeader: string | null | undefined): string | null {
-  return readSessionCookieFromHeader(cookieHeader);
-}
 
 /**
  * Aura user id from a Cookie header (database-backed, lib/session.ts), or
@@ -131,10 +129,16 @@ export async function sessionUserFromCookie(cookieHeader: string | null | undefi
  * concurrent logout is strictly ordered before (no grant: null) or after it.
  */
 async function guardConsentGrant(req: IncomingMessage, userId: string, issue: () => Promise<string>): Promise<string | null> {
-  const session = await getSessionFromCookieHeader(req.headers.cookie);
-  if (!session || session.userId !== userId) return null;
-  const locked = await withSessionShareLock(session, issue);
-  return locked.ok ? locked.value : null;
+  try {
+    const session = await getSessionFromCookieHeader(req.headers.cookie);
+    if (!session || session.userId !== userId) return null;
+    const locked = await withSessionShareLock(session, issue);
+    return locked.ok ? locked.value : null;
+  } catch (err) {
+    // I2-R1 (39246-03): a session-store outage is 503 at the consent handler, never "sign in".
+    if (err instanceof SessionVerificationUnavailableError) throw new StoreUnavailableError('error');
+    throw err;
+  }
 }
 
 /** Only an explicit loopback database may hold local OAuth state. */

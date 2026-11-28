@@ -60,7 +60,6 @@ check('F. only Goal rows carry goalActivityId', mixed.map((r) => r.goalActivityI
 
 // ---- C. duplicate GoalActivity ids in the query ----
 const deps: GoalActivityHandoffDeps = {
-  getSessionToken: () => 't',
   verifySession: () => ({ userId: 'u' }),
   listGoalActivities: async () => [
     { id: 'a', title: 'A', activityId: null, status: 'SUGGESTED', plannedActivityId: null, linkedPlanStatus: null },

@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { cookies } from 'next/headers';
-import { activeSessionCookieName, getSessionFromCookieStore } from '../../lib/session';
+import { getSessionFromCookieStore } from '../../lib/session';
+import { pageSessionOrUnavailable } from '../../lib/sessionPage';
 import { getUserById, listGoalActivitiesWithLinkedPlanStatus, listCapturesWithLinkedPlanStatus, loadGoalActivityRhythmFacts } from '../../lib/db';
 import { resolvePlanDayServerProps, resolveGoalActivityHandoff, resolveCaptureHandoff, resolveAutomaticGoalDemand, markCanonicalGoalDemandHandoff } from '../../lib/planDayBootstrap';
 import { createRealGoalDemandCandidatesDeps } from '../../lib/goalDemandCandidates';
@@ -49,12 +50,17 @@ export default async function PlanDayPage({
   searchParams: { horizon?: string | string[]; fromGoal?: string | string[]; activities?: string | string[]; captures?: string | string[] };
 }) {
   const horizon = parseHorizonSearchParam(searchParams.horizon);
-  // AURA-AUTH-SESSION-01-I2 (E2): one database-backed session verification per
-  // render, shared by every resolver below (the cookie cannot change mid-render).
+  // AURA-AUTH-SESSION-01-I2 (E2) / I2-R1 (39246-04): the session is resolved
+  // ONCE per render through lib/session.ts -- the only session-cookie reader --
+  // and only the verified identity reaches the resolvers below. An outage
+  // answers 503 with Retry-After (lib/sessionPage.ts), never signed out.
+  const query = new URLSearchParams();
+  for (const [k, v] of Object.entries(searchParams)) if (typeof v === 'string') query.set(k, v);
+  const qs = query.toString();
+  const returnTo = qs ? `/plan-day?${qs}` : '/plan-day';
   let verified: ReturnType<typeof getSessionFromCookieStore> | null = null;
-  const verifySession = () => (verified ??= getSessionFromCookieStore(cookies()));
+  const verifySession = () => (verified ??= pageSessionOrUnavailable(() => getSessionFromCookieStore(cookies()), returnTo));
   const bootstrap = await resolvePlanDayServerProps({
-    getSessionToken: () => cookies().get(activeSessionCookieName())?.value,
     verifySession,
     getUser: (userId) => getUserById(userId),
     now: () => new Date(),
@@ -69,7 +75,6 @@ export default async function PlanDayPage({
   const activitiesParam = typeof searchParams.activities === 'string' ? searchParams.activities : null;
   const goalActivities = await resolveGoalActivityHandoff(
     {
-      getSessionToken: () => cookies().get(activeSessionCookieName())?.value,
       verifySession,
       listGoalActivities: (userId, goalId) => listGoalActivitiesWithLinkedPlanStatus(userId, goalId),
       loadGoalActivityRhythmFacts: (userId, goalActivityId, timezone) => loadGoalActivityRhythmFacts(userId, goalActivityId, timezone),
@@ -87,7 +92,6 @@ export default async function PlanDayPage({
   const capturesParam = typeof searchParams.captures === 'string' ? searchParams.captures : null;
   const captures = await resolveCaptureHandoff(
     {
-      getSessionToken: () => cookies().get(activeSessionCookieName())?.value,
       verifySession,
       listCaptures: (userId) => listCapturesWithLinkedPlanStatus(userId),
     },
@@ -108,7 +112,6 @@ export default async function PlanDayPage({
   // inside the resolver itself.
   const automaticGoalDemand = await resolveAutomaticGoalDemand(
     {
-      getSessionToken: () => cookies().get(activeSessionCookieName())?.value,
       verifySession,
       ...createRealGoalDemandCandidatesDeps(),
     },

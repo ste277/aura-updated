@@ -143,7 +143,7 @@ async function main() {
   const accept = async (body: unknown) => (await acceptRoute(fakeAcceptReq(body))).json();
   const eligibility = async (planningLocalDate: string) => loadEligibleGoalDemand(createRealGoalDemandCandidatesDeps(), user.id, planningLocalDate, TZ);
   const autoSuggestions = async (planningLocalDate: string) =>
-    resolveAutomaticGoalDemand({ getSessionToken: () => 'tok', verifySession: () => ({ userId: user.id }), ...createRealGoalDemandCandidatesDeps() }, planningLocalDate, TZ, []);
+    resolveAutomaticGoalDemand({ verifySession: () => ({ userId: user.id }), ...createRealGoalDemandCandidatesDeps() }, planningLocalDate, TZ, []);
   /** The canonical Rhythm eligibility arithmetic fed with real DB facts,
    * independent of loadEligibleGoalDemand's own SEPARATE structural
    * discovery-boundary filter -- which excludes a GoalActivity entirely

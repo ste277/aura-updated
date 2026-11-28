@@ -98,7 +98,6 @@ const dbRows: Record<string, Row[]> = {
   u2: [{ id: 'theirs', title: 'Theirs', status: 'OPEN', completedAt: null, linkedPlanStatus: null }],
 };
 const deps = (userId: string | null, seen: string[] = []): CaptureHandoffDeps => ({
-  getSessionToken: () => (userId ? 'tok' : undefined),
   verifySession: () => (userId ? { userId } : null),
   listCaptures: async (uid) => {
     seen.push(uid);

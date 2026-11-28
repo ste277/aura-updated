@@ -165,7 +165,7 @@ async function main() {
     await setRhythm(RB.id, 2);
 
     const idOf = (ga: { id: string }) => encodeGoalDemandIntentId(DATE, ga.id);
-    const realBootstrapDeps = (userId: string) => ({ getSessionToken: () => 'tok', verifySession: () => ({ userId }) });
+    const realBootstrapDeps = (userId: string) => ({ verifySession: () => ({ userId }) });
 
     // ------------------------------------------------------------------
     console.log('=== server marking through the REAL handoff + bootstrap ===');

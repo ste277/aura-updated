@@ -95,7 +95,7 @@ async function main() {
   {
     const rows = [row({ goalActivityId: 'ga-run' }), row({ goalActivityId: 'ga-med', title: 'Meditate', rhythmTargetPerWeek: 2 })];
     const base = deps(rows, {}, { 'ga-run': [TODAY] });
-    const bootstrapDeps: AutomaticGoalDemandBootstrapDeps = { ...base, getSessionToken: () => 'tok', verifySession: () => ({ userId: 'u1' }) };
+    const bootstrapDeps: AutomaticGoalDemandBootstrapDeps = { ...base, verifySession: () => ({ userId: 'u1' }) };
     const auto = await resolveAutomaticGoalDemand(bootstrapDeps, TODAY, TZ, []);
     check('3. already-scheduled-today activity is NOT offered in Aura suggests', auto.status === 'OK' && !auto.suggestions.some((s) => s.goalActivityId === 'ga-run'));
     check('3. other eligible activities are still offered', auto.status === 'OK' && auto.suggestions.some((s) => s.goalActivityId === 'ga-med'));

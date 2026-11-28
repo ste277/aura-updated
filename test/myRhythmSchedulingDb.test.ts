@@ -163,10 +163,10 @@ async function main() {
     check('S20. Home lists the rhythm as paused, still showing its confirmed next session', (h2.pausedRhythms ?? []).some((x) => x.goalActivityId === run.id && x.nextOccurrence?.start === new Date(firstAccepted.plannedStartAt).toISOString()));
     check('S21. paused: absent from Home this-week and next-week demand', !h2.candidates.some((c) => c.goalActivityId === run.id) && !(h2.nextWeekCandidates ?? []).some((c) => c.goalActivityId === run.id));
     check('S22. paused: weekly proposal NOT_ELIGIBLE for both weeks', (await propose(tokA, run.id)).body.status === 'NOT_ELIGIBLE' && (await propose(tokA, run.id, 'NEXT')).body.status === 'NOT_ELIGIBLE');
-    const autoDeps = { ...createRealGoalDemandCandidatesDeps(), getSessionToken: () => tokA, verifySession: (t: string) => verifyTestSessionToken(t) };
+    const autoDeps = { ...createRealGoalDemandCandidatesDeps(), verifySession: () => verifyTestSessionToken(tokA) };
     const autoPaused: any = await resolveAutomaticGoalDemand(autoDeps as any, today, IST, []);
     check('S23. paused: Plan My Day does not auto-suggest it', autoPaused.status === 'OK' && !autoPaused.suggestions.some((c: any) => c.goalActivityId === run.id));
-    const handoffDeps = { getSessionToken: () => tokA, verifySession: autoDeps.verifySession, listGoalActivities: listGoalActivitiesWithLinkedPlanStatus, loadGoalActivityRhythmFacts };
+    const handoffDeps = { verifySession: autoDeps.verifySession, listGoalActivities: listGoalActivitiesWithLinkedPlanStatus, loadGoalActivityRhythmFacts };
     const handoffPaused = await resolveGoalActivityHandoff(handoffDeps as any, goal.id, run.id, today, IST);
     check('S24. paused: the Goal -> Plan My Day handoff no longer previews it (MR1 preview inconsistency resolved)', handoffPaused.length === 0);
     check('S25. pausing left the confirmed plans byte-identical', JSON.stringify(await sql(`SELECT * FROM "PlannedActivity" WHERE "userId" = $1 ORDER BY id`, [userA.id])) === snapshot);

@@ -134,7 +134,7 @@ async function main() {
     return res.json();
   };
   const eligibility = async (planningLocalDate: string) => loadEligibleGoalDemand(createRealGoalDemandCandidatesDeps(), user.id, planningLocalDate, TZ);
-  const autoSuggestions = async (planningLocalDate: string, excludeIds: readonly string[] = []) => resolveAutomaticGoalDemand({ getSessionToken: () => 'tok', verifySession: () => ({ userId: user.id }), ...createRealGoalDemandCandidatesDeps() }, planningLocalDate, TZ, excludeIds);
+  const autoSuggestions = async (planningLocalDate: string, excludeIds: readonly string[] = []) => resolveAutomaticGoalDemand({ verifySession: () => ({ userId: user.id }), ...createRealGoalDemandCandidatesDeps() }, planningLocalDate, TZ, excludeIds);
   /**
    * The CANONICAL Rhythm eligibility arithmetic (computeGoalActivityRhythmEligibility,
    * A1's own pure engine), fed with REAL facts loaded straight from the DB --
@@ -312,7 +312,7 @@ async function main() {
     // advancing any clock.
     const elig17 = await loadEligibleGoalDemand(createRealGoalDemandCandidatesDeps(), user.id, NEXT_MON, TZ);
     check('17a. prior-week completions create no debt -- remainingThisWeek resets to the full target (3) next week', elig17.status === 'OK' && elig17.candidates.find((c) => c.goalActivityId === ga!.id)?.remainingThisWeek === 3);
-    const suggestions17 = await resolveAutomaticGoalDemand({ getSessionToken: () => 'tok', verifySession: () => ({ userId: user.id }), ...createRealGoalDemandCandidatesDeps() }, NEXT_MON, TZ, []);
+    const suggestions17 = await resolveAutomaticGoalDemand({ verifySession: () => ({ userId: user.id }), ...createRealGoalDemandCandidatesDeps() }, NEXT_MON, TZ, []);
     check('17b. automatic Goal-demand discovery can surface it again next week', suggestions17.status === 'OK' && suggestions17.suggestions.some((s) => s.goalActivityId === ga!.id));
     // The week boundary, immediately BEFORE / AT / AFTER (the AT case is 17a / 17b above: the next Monday): the Sunday of the same Monday-start week is still the exhausted
     // week; the Tuesday of the next week is a fresh week. The anchor guarantees these weekdays on every run date.
@@ -406,7 +406,7 @@ async function main() {
     console.log('=== PHASE 22: MANUAL GOAL REGRESSION ===');
     const gaManual = await addGoalActivity(user.id, goal.id, { title: 'Manually planned walk', activityId: null }); // Rhythm NONE -- finite, manual-only
     const manualHandoff = await resolveGoalActivityHandoff(
-      { getSessionToken: () => 'tok', verifySession: () => ({ userId: user.id }), listGoalActivities: (uid, gid) => listGoalActivitiesWithLinkedPlanStatus(uid, gid) },
+      { verifySession: () => ({ userId: user.id }), listGoalActivities: (uid, gid) => listGoalActivitiesWithLinkedPlanStatus(uid, gid) },
       goal.id,
       gaManual!.id
     );

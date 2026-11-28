@@ -56,3 +56,47 @@ export async function signOutDurably(
   }
   return 'failed';
 }
+
+/**
+ * AURA-AUTH-SESSION-01-I2-R1 (39246-05) -- fences authenticated client work
+ * around sign-out. Every refresh takes a ticket with `begin()` and applies its
+ * results only while `isCurrent(ticket)` holds:
+ *
+ * - while a sign-out is in flight, `begin()` returns null: no new
+ *   authenticated work starts (paused);
+ * - starting AND ending a sign-out each advance the epoch, so a refresh that
+ *   was in flight before or during the sign-out can never apply its result
+ *   afterwards -- it cannot restore the signed-in state after a confirmed
+ *   logout, nor overwrite state after a failed one;
+ * - after a sign-out ends (success, or failure with one retry already spent),
+ *   work resumes: a re-authentication or a re-check takes a fresh ticket.
+ *
+ * Framework-free; the Home page keeps one instance per mount.
+ */
+export interface AuthFence {
+  begin(): number | null;
+  isCurrent(ticket: number | null): boolean;
+  startSignOut(): void;
+  endSignOut(): void;
+  readonly signingOut: boolean;
+}
+
+export function createAuthFence(): AuthFence {
+  let epoch = 0;
+  let signingOut = false;
+  return {
+    begin: () => (signingOut ? null : epoch),
+    isCurrent: (ticket) => ticket !== null && ticket === epoch && !signingOut,
+    startSignOut: () => {
+      signingOut = true;
+      epoch++;
+    },
+    endSignOut: () => {
+      signingOut = false;
+      epoch++;
+    },
+    get signingOut() {
+      return signingOut;
+    },
+  };
+}

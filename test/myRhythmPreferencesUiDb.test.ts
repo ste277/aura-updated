@@ -144,7 +144,7 @@ async function main() {
     check('D15. proposing (and then cancelling) creates no plan', (await planRows()) === plansBefore);
 
     const today = getDatePartsInTimezone(IST, new Date()).dateStr;
-    const handoffDeps = { getSessionToken: () => tok, verifySession: (t: string) => verifyTestSessionToken(t), listGoalActivities: listGoalActivitiesWithLinkedPlanStatus, loadGoalActivityRhythmFacts };
+    const handoffDeps = { verifySession: () => verifyTestSessionToken(tok), listGoalActivities: listGoalActivitiesWithLinkedPlanStatus, loadGoalActivityRhythmFacts };
     const handoff = await resolveGoalActivityHandoff(handoffDeps as any, goal.id, strength.id, today, IST);
     check('D16. "Just today" / Plan with Aura handoff carries the 45-minute duration and Morning preference', handoff.length === 1 && handoff[0].preferences?.preferredDurationMinutes === 45 && handoff[0].preferences?.preferredTimeOfDay === 'MORNING');
 

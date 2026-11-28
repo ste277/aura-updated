@@ -98,11 +98,11 @@ function manualRow(activity: FakeActivity, planningDate: string, canonical: bool
   }
   {
     const { deps, calls } = candidateDeps({ u1: [A, FINITE, EXHAUSTED], u2: [] });
-    const auto: AutomaticGoalDemandBootstrapDeps = { getSessionToken: () => 'tok', verifySession: () => ({ userId: 'u1' }), ...deps };
+    const auto: AutomaticGoalDemandBootstrapDeps = { verifySession: () => ({ userId: 'u1' }), ...deps };
     const result = await resolveAutomaticGoalDemand(auto, '2026-10-07', 'UTC', ['ga-recurring', 'ga-finite', 'ga-exhausted', 'ga-not-mine']);
     check('resolveAutomaticGoalDemand reports which MANUAL ids the SAME single load recognizes as canonical demand (recurring yes; finite, exhausted and unknown no)', result.status === 'OK' && JSON.stringify(result.manualCanonicalGoalActivityIds) === JSON.stringify(['ga-recurring']));
     check('...with the manual id excluded from the automatic suggestions exactly as before, and ONE discovery + ONE facts load (no extra query for the marking)', result.status === 'OK' && result.suggestions.length === 0 && calls.discovery === 1 && calls.facts === 1);
-    const noSession = await resolveAutomaticGoalDemand({ ...auto, getSessionToken: () => undefined }, '2026-10-07', 'UTC', ['ga-recurring']);
+    const noSession = await resolveAutomaticGoalDemand({ ...auto, verifySession: () => null }, '2026-10-07', 'UTC', ['ga-recurring']);
     check('unauthenticated / missing context: nothing is marked and nothing is loaded', noSession.status === 'OK' && noSession.manualCanonicalGoalActivityIds.length === 0);
     const failing = await resolveAutomaticGoalDemand({ ...auto, loadCandidateGoalActivities: async () => { throw new Error('down'); } }, '2026-10-07', 'UTC', ['ga-recurring']);
     check('a failed load stays LOAD_FAILED (the page then marks nothing: legacy manual rows)', failing.status === 'LOAD_FAILED');

@@ -167,7 +167,7 @@ async function main() {
     console.log('=== MANUAL CANONICAL (P0a identity) -> ARCHIVE -> ACCEPT ===');
     const g2 = await goalOf(A.id, 'Goal two');
     const r2 = await recurring(A.id, g2.id, 'Cardio two');
-    const realBoot = { getSessionToken: () => 'tok', verifySession: () => ({ userId: A.id }) };
+    const realBoot = { verifySession: () => ({ userId: A.id }) };
     const handoff = await resolveGoalActivityHandoff({ ...realBoot, listGoalActivities: (uid, gid) => listGoalActivitiesWithLinkedPlanStatus(uid, gid), loadGoalActivityRhythmFacts: (uid, gaId, tz) => loadGoalActivityRhythmFacts(uid, gaId, tz) }, g2.id, r2.id, DATE, TZ);
     const demand = await resolveAutomaticGoalDemand({ ...realBoot, ...createRealGoalDemandCandidatesDeps() }, DATE, TZ, handoff.map((h) => h.id));
     const marked = markCanonicalGoalDemandHandoff(handoff, demand.status === 'OK' ? demand.manualCanonicalGoalActivityIds : []);
