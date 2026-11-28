@@ -1,0 +1,72 @@
+OK   fixture rel04-r14-head/offlineHabitQueue.ts.txt == 6c69d7d apps/web/lib/offlineHabitQueue.ts
+OK   fixture rel04-r14-head/activitySync.ts.txt == 6c69d7d apps/web/lib/activitySync.ts
+OK   fixture rel04-r14-head/habitLogSyncPolicy.ts.txt == 6c69d7d apps/web/lib/habitLogSyncPolicy.ts
+OK   fixture rel04-r14-head/signOut.ts.txt == 6c69d7d apps/web/lib/signOut.ts
+OK   fixture rel04-r14-head/pendingReplayReconciliation.ts.txt == 6c69d7d apps/web/lib/pendingReplayReconciliation.ts
+G1-direct {"R14":{"result":"confirmed","accepted":1,"copies":0,"rows":0,"again":"already-recorded","rowsAfter":0},"R15":{"result":"outcome-unknown","accepted":0,"copies":1,"rows":0,"again":"confirmed","rowsAfter":1}}
+OK   W G1 direct -- R14 (negative control) reproduces: HTML 200 -> confirmed + durable accepted marker + copy removed with ZERO server rows; resubmission -> already-recorded
+OK   W G1 direct -- R15: HTML 200 -> unresolved (outcome-unknown), no accepted receipt, the copy KEPT; the authentic same-id resubmission is confirmed with exactly 1 row
+G1-replay {"R14":{"result":{"confirmed":1,"removed":1,"unverified":0},"accepted":1,"copies":0,"rows":0,"again":"already-recorded","rowsAfter":0},"R15":{"result":{"confirmed":0,"removed":0,"unverified":1},"accepted":0,"copies":1,"rows":0,"again":"confirmed","rowsAfter":1}}
+OK   W G1 replay -- R14 (negative control) reproduces: HTML 200 -> confirmed=1 removed=1 + accepted marker with ZERO server rows; resubmission -> already-recorded
+OK   W G1 replay -- R15: HTML 200 -> unverified=1, nothing settled, the copy KEPT; the authentic same-id resubmission is confirmed with exactly 1 row
+G2-wrong-owner {"R14":{"result":"already-recorded","posts":0,"rowsA":0,"rowsB":0},"R15":{"result":"outcome-unknown","posts":0,"rowsA":0,"rowsB":0}}
+OK   W G2 wrong-owner -- R14 (negative control) reproduces: the marker key alone yields already-recorded, 0 POSTs, 0 rows for A or B
+OK   W G2 wrong-owner -- R15: no success authority -> unresolved (outcome-unknown), nothing sent automatically, 0 rows
+G2-missing-payload {"R14":{"result":"already-recorded","posts":0,"rowsA":0,"rowsB":0},"R15":{"result":"outcome-unknown","posts":0,"rowsA":0,"rowsB":0}}
+OK   W G2 missing-payload -- R14 (negative control) reproduces: the marker key alone yields already-recorded, 0 POSTs, 0 rows for A or B
+OK   W G2 missing-payload -- R15: no success authority -> unresolved (outcome-unknown), nothing sent automatically, 0 rows
+G2-wrong-request {"R14":{"result":"already-recorded","posts":0,"rowsA":0,"rowsB":0},"R15":{"result":"outcome-unknown","posts":0,"rowsA":0,"rowsB":0}}
+OK   W G2 wrong-request -- R14 (negative control) reproduces: the marker key alone yields already-recorded, 0 POSTs, 0 rows for A or B
+OK   W G2 wrong-request -- R15: no success authority -> unresolved (outcome-unknown), nothing sent automatically, 0 rows
+OK   B direct html200: no accepted receipt, no destructive settlement, no false success (outcome-unknown); copy kept, operation pending; the later authentic same-id replay -> 1 row with its validated receipt
+OK   B replay html200: no accepted receipt, no destructive settlement, no false success ({"c":0,"u":1}); copy kept, operation pending; the later authentic same-id replay -> 1 row with its validated receipt
+OK   B direct malformed-json: no accepted receipt, no destructive settlement, no false success (outcome-unknown); copy kept, operation pending; the later authentic same-id replay -> 1 row with its validated receipt
+OK   B replay malformed-json: no accepted receipt, no destructive settlement, no false success ({"c":0,"u":1}); copy kept, operation pending; the later authentic same-id replay -> 1 row with its validated receipt
+OK   B direct empty-json: no accepted receipt, no destructive settlement, no false success (outcome-unknown); copy kept, operation pending; the later authentic same-id replay -> 1 row with its validated receipt
+OK   B replay empty-json: no accepted receipt, no destructive settlement, no false success ({"c":0,"u":1}); copy kept, operation pending; the later authentic same-id replay -> 1 row with its validated receipt
+OK   B direct wrong-account: no accepted receipt, no destructive settlement, no false success (outcome-unknown); copy kept, operation pending; the later authentic same-id replay -> 1 row with its validated receipt
+OK   B replay wrong-account: no accepted receipt, no destructive settlement, no false success ({"c":0,"u":1}); copy kept, operation pending; the later authentic same-id replay -> 1 row with its validated receipt
+OK   B direct wrong-request: no accepted receipt, no destructive settlement, no false success (outcome-unknown); copy kept, operation pending; the later authentic same-id replay -> 1 row with its validated receipt
+OK   B replay wrong-request: no accepted receipt, no destructive settlement, no false success ({"c":0,"u":1}); copy kept, operation pending; the later authentic same-id replay -> 1 row with its validated receipt
+OK   B direct wrong-intent: no accepted receipt, no destructive settlement, no false success (outcome-unknown); copy kept, operation pending; the later authentic same-id replay -> 1 row with its validated receipt
+OK   B replay wrong-intent: no accepted receipt, no destructive settlement, no false success ({"c":0,"u":1}); copy kept, operation pending; the later authentic same-id replay -> 1 row with its validated receipt
+OK   B direct missing-record-id: no accepted receipt, no destructive settlement, no false success (outcome-unknown); copy kept, operation pending; the later authentic same-id replay -> 1 row with its validated receipt
+OK   B replay missing-record-id: no accepted receipt, no destructive settlement, no false success ({"c":0,"u":1}); copy kept, operation pending; the later authentic same-id replay -> 1 row with its validated receipt
+OK   B direct redirect: no accepted receipt, no destructive settlement, no false success (queued); copy kept, operation pending; the later authentic same-id replay -> 1 row with its validated receipt
+OK   B replay redirect: no accepted receipt, no destructive settlement, no false success ({"c":0,"u":0}); copy kept, operation pending; the later authentic same-id replay -> 1 row with its validated receipt
+OK   B a non-route 4xx (HTML 404) is NOT a definitive failure: unresolved, copy kept
+OK   B R16: the route's 400 "Unknown activity" is NOT definitive (unresolved; copy kept, no rejected receipt)
+OK   B R16: the route's 400 "logTimestamp must be a valid date." for a body whose timestamp IS invalid is the definitive failure, with a v2 rejected receipt naming its reason
+OK   C proofless legacy accepted marker (correct key, value and payload; no receipt) -> outcome-unknown; 0 POSTs, 0 rows; the copy beside it is preserved (no cleanup authority); operation unresolved
+OK   C receipt naming another server account -> outcome-unknown; 0 POSTs, 0 rows; the copy beside it is preserved (no cleanup authority); operation unresolved
+OK   C receipt bound to another payload -> outcome-unknown; 0 POSTs, 0 rows; the copy beside it is preserved (no cleanup authority); operation unresolved
+OK   C rejection after a possible earlier send -> outcome-unknown; 0 POSTs, 0 rows; the copy beside it is preserved (no cleanup authority); operation unresolved
+OK   D VALID matching accepted receipt (D) -> already-recorded; 0 POSTs, 0 rows; the copy beside it is outside the operation; operation confirmed
+OK   C valid discard fence with a DAMAGED (null) payload -> not-stored:discarded; 0 POSTs, 0 rows; the copy beside it is preserved (no cleanup authority); operation discarded
+OK   C Check again on a proofless marker with NO server row -> still unresolved (absence is not evidence); the user's same-operation Retry sends the same id once -> confirmed, 1 row; the marker is upgraded to a valid receipt
+OK   C a marker that proves nothing is NEVER sent automatically (replay pauses it; only explicit Retry may)
+OK   E network-after: the route committed but the answer was lost -> queued (same id kept); Check again -> pending (queued); Retry/replay converge on ONE row (1->1); afterwards already-recorded
+OK   E process-then-500: the route committed but the answer was lost -> queued (same id kept); Check again -> pending (queued); Retry/replay converge on ONE row (1->1); afterwards already-recorded
+OK   F two explicit operations with IDENTICAL payloads (different ids) -> two confirmations, two rows, two ids (never deduplicated by payload)
+OK   G Check again with ONLY a same-title row of another operation on the server -> still unresolved (the title row is not evidence)
+OK   G the list merge KEEPS the unresolved operation's row although the queue is empty and a same-title row exists (R14 negative control drops it)
+OK   G (negative control) R14's title inference reports the same-title server row as "confirmed" for the unresolved operation -- the inference R15 no longer uses to release
+OK   H an unreadable store: nothing is sent (storage-unavailable), and the operations read reports UNKNOWN (null), never "none open"
+OK   I1 a copy replaced during dispatch is preserved (never removed by request id alone); the validated receipt is for the claimed payload only
+OK   I2 account switched before the answer arrived (account-changed): no stale-account settlement; the copy stays bound to A; nothing attributed to B
+OK   I3 durable discard during an outstanding send: reported as possibly sent ({"removed":1,"removedPossiblySent":1}); the late answer never turns the discard into a success
+OK   J F2 preserved: opaque v2 storage -> discardedUnverified=1 (never removed), unidentified=1, bytes preserved
+OK   J F3 preserved: a stale cleanup error never overrides the clean final verification -> removed=1, cleanupErrors=1
+OK   N1 bypassing DIRECT response validation is detected (the B/G1-direct check fails: confirmed, accepted markers 0, rows 0)
+OK   N2 bypassing REPLAY response validation is detected (the B/G1-replay check fails: confirmed 1, removed 0, rows 0)
+OK   N3 trusting only the settlement marker KEY is detected (the C/G2 check fails: already-recorded with 0 rows)
+OK   N4 removing a stored copy by request id ALONE is detected (the I1 replacement check fails: the replacement is deleted)
+OK   N5 generating a FRESH id for an unresolved operation is detected by the one-row assertion (2 rows, confirmed); the same-operation Retry keeps it at one
+OK   N6 releasing an unresolved operation from list absence is detected (without the operation projection the merge drops its row)
+OK   N7 treating opaque storage as verified absence is detected (the J F2 check fails: removed=1)
+OK   N8 removing the authoritative final cleanup verification is detected (the J F2 check fails: removed=1)
+HOME-RETRY {"started":true,"unresolvedShown":true,"startHidden":true,"retried":true,"logged":true,"rows":1,"ids":1}
+OK   HR real Home: an unverified answer shows "Couldn't verify whether this activity was saved." with Retry (Start now withheld); Retry reuses the ORIGINAL id -> Logged, exactly 1 row and 1 id
+OK   HB real Home: an unreadable operations store blocks NEW logging (banner true; no id, no record, no POST); Check again re-reads and lifts the block (true)
+
+64 passed, 0 failed

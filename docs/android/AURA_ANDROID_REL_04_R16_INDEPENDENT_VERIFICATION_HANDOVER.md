@@ -2,7 +2,7 @@
 
 **Ticket:** 39259. **Responds to:** independent verification 39258 (NO-GO: G4–G6). **Target:** 39260.
 
-**Status:** **ANDROID REL-04 R16 IMPLEMENTATION COMPLETE — BLOCKED BY AN INTEGRATION CONFLICT WITH `main` (#400). NOT yet ready for independent verification.** The cause and the owner decision required are in §6.
+**Status:** **ANDROID REL-04 R16 READY FOR INDEPENDENT VERIFICATION (39260).** The integration conflict with main is resolved, and all nine hosted jobs and every PR check pass (§6.3).
 
 **Controls:**
 - PR #392 is open; nothing is merged, deployed or activated.
@@ -17,7 +17,9 @@ R16 keeps the R15 shared client architecture (39256 Option B). It corrects three
 | Item | Value |
 |---|---|
 | Reviewed R15 | Implementation `e6a6a6678bf6300362e15cf398343a246807a7e2`; handover `08a13fee8d01f8991bb0ac24ecffd3f0c4f5c976` |
-| **R16 implementation** | `3c906f9c…` (tree `10d03e64340ed706561b5d8e625ed031afc85e0e`) |
+| **R16 implementation** | `3c906f9c8485f51e0713c31d8a8517050a98d6c5` (tree `10d03e64340ed706561b5d8e625ed031afc85e0e`). Its runtime files are byte-identical at the final head. |
+| **Final branch head (code)** | `4dce038688f2dab71c1541b66f6bb21978b18808` (tree `a688eed0691a54d751c188533c1df83be9919b75`) |
+| **Final integration (hosted)** | `fbb8d34`: `4dce038` merged into main `fd8b8f5b0596cba460f50926f7cc766570a40ad8` |
 | Handover commit | The commit that adds this file (documentation and evidence only) |
 | `main` at R16 | `aab56029bb6804ff36c837f3b06ce076dc4d9bbf` (#400 My People; advanced from `73cea7d`). The branch was not synchronized; hosted CI tests the automatic merge with this base. |
 
@@ -163,3 +165,46 @@ DATABASE_URL=postgresql://… npx ts-node test/rel04R16HomeChromiumDb.test.ts   
 To reproduce the witnesses, copy the four 39258 `review-39258-r15-*.local.ts.txt` probes into `test/` and drop the `.txt` suffix, as the 39258 README describes.
 
 Checksums are in `docs/android/evidence/rel04-r16/SHA256SUMS`.
+
+
+### 6.3 Integration correction and final hosted CI (owner-authorised under 39259)
+
+**Commits on top of the R16 implementation:**
+
+| Commit | Content |
+|---|---|
+| `a653391` | Merge of main `e6c27cc` (#400 My People, #403 Palmistry) |
+| `225b65b` | `test/myPeopleDb.test.ts`: its two `/api/plans` requests state the session's own account via `rel04BoundTestHeaders` (REL-04 R3 pattern). D6 is still refused for B, D7 is still created for A. |
+| `d242f87` | The same fix for `test/myPeopleSwitchRollbackDb.test.ts` 2.18 |
+| `84cc375` | `test/rel04PinnedClock.ts` pins the R14 H1 and R15 HR real-Home jsdom sections to 12:05 IST, with time still advancing and the clock restored afterwards. Verified at 04:51Z, 10:00Z, 18:30Z, 23:30Z and 00:30Z: R14 28/28 and contract 64/64 at every time. The R13 negative control now fails only for the intended defect (Start now found, then 2 rows and 2 IDs). |
+| `4dce038` | Merge of main `fd8b8f5` (#401 AUTH-SESSION I1: dormant modules plus migration 0055; #405 Palmistry). One additive `ci.yml` conflict: both sides appended math-core steps, and both sets are kept (0 steps lost from either parent). |
+
+**What none of these touch:**
+- The R16 runtime files.
+- `api/plans` (`refuseUnboundWrite` is retained), `api/habit-logs`, `session.ts`, `expectedAccount.ts` and `middleware.ts`.
+- The production account-header requirement.
+
+**Audit:** only the two My People suites from main called a bound write route without the header. No other suite introduced by main does.
+
+**Local checks on `4dce038` (clean tree, fresh PostgreSQL 16, 56 migrations):**
+- Day Constructor DB: **85/85**, every My People suite passing.
+- math-core: **270/270**.
+- Typechecks are clean.
+
+**Hosted run 46112586858** on `4dce038`, integration `fbb8d34` (all 9 checkouts verified): **9/9 jobs, 497/497 steps, attempt 1.**
+- Every My People suite, Weekly Plan Review and HabitLog idempotency pass.
+- R16 correction 51/51 (5 provenance skips on the shallow clone).
+- R15 contract 59/59, including HR.
+- R14 25/25, including H1 with its negative control.
+- Both production Chromium suites 15/15; Chromium 30/30.
+- **PR checks: 11/11**; merge state CLEAN.
+- Vercel: a Preview deployment only (`dpl_kMyqh…`, target null). Production is still REL-05 `dpl_x9NB8` (`a39f398`).
+
+**Earlier failed runs, all preserved with checksums in `~/Desktop/Claude/AuraEvidence/REL-04-R16-CI-*` and none rerun:**
+
+| Run | Result | Cause |
+|---|---|---|
+| 46048936628 | 8/9 | MP-1 D6, D7, E5 |
+| 46052425786 | 8/9 | MP-1 D6, D7, E5 |
+| 46054358960 | 8/9 | MP-1 switch rollback 2.18 |
+| 46108171358 | 8/9 | R14 H1 wall clock |

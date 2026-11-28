@@ -1,0 +1,18 @@
+$ npx ts-node --project tsconfig.jsdom-tests.json test/peopleViewNullChartJsdom.test.ts
+# job=math-core-tests step=Run AURA-MP-1 People screen null-chart (jsdom) test env={}
+OK   personHasChartDetails: false for a name-only person, true for a chart person
+OK   My People relationship types are always labelled (render safely with the switch off)
+OK   list renders both people, including the name-only one with its label
+OK   detail of a name-only person renders (no crash) and says "No birth details saved"
+OK   delete confirmation copy states what is deleted and that plans stay
+OK   edit form: birth date and time are NOT required for a person saved without them
+OK   edit form: the person's own My People type (Sibling) is offered so it is not silently changed; other My People types are not offered while off
+OK   saving a name change sends PATCH with name + relationship and NO chart keys
+OK   a birth date without a birth time is refused before any request
+OK   edit form for a chart person: birth date and time stay required, prefilled
+OK   R2 F1: saving a chart person WITHOUT changes sends no request at all
+OK   saving an explicit birth-time edit sends the full chart, with the ORIGINAL timezone, city and coordinates
+
+ALL PEOPLE VIEW NULL-CHART CHECKS PASSED
+
+# exit=0 signal=

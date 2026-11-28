@@ -1,0 +1,19 @@
+$ npx ts-node test/shadowRolloutR3PreviewReviewDb.test.ts
+# job=day-constructor-acceptance-db-tests step=Run shadow rollout R3 preview review DB test env={}
+     directed family trace (combo:http:ACCEPTs): 5-6-60-240:200:1
+OK   A DETERMINISTIC REAL ACCEPT REACHING PASS: found one after 1 of 220 combinations
+=== Preview-eligible + SHADOW: review payload present, zero extra writes, identical SQL to plain ===
+OK   the evidence reaches APPLY / MATERIALIZABLE / READY / PASS on this real run
+OK   the review payload EXISTS and describes a real PROMOTED + MOVED delta
+OK   BASELINE UNCHANGED: the response body equals the plain preview body byte for byte, aside from the shadowReview sibling field
+OK   IDENTICAL SQL SEQUENCE and ZERO additional writes: no Plan / GoalActivityOccurrence row changed by generating the review
+=== Production (reviewEligible=false) with the SAME SHADOW run: no shadowReview at all ===
+OK   Production: HTTP 200, no shadowReview key, while the aggregate evidence still reaches PASS internally
+=== the review alternative is rejected by the REAL route-level gate (this run's own user/window) ===
+OK   the review alternative has no acceptanceToken -> rejected before any write (the real accept route's own first gate)
+=== normal baseline acceptance still SAVES, unaffected by R3 ===
+OK   SIGNING UNCHANGED: the real baseline owner item still carries a valid token
+OK   REAL ACCEPTANCE PERSISTENCE of the normal baseline item still SAVES exactly as before R3
+ALL SHADOW ROLLOUT R3 PREVIEW REVIEW DB CHECKS PASSED
+
+# exit=0 signal=

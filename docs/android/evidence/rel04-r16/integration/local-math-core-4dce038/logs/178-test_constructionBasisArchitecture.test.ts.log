@@ -1,0 +1,54 @@
+$ npx ts-node test/constructionBasisArchitecture.test.ts
+# job=math-core-tests step=Run construction basis architecture test env={}
+=== the real tree conforms ===
+OK   THE REAL PRODUCTION TREE HAS ZERO CONSTRUCTION-BASIS ARCHITECTURE VIOLATIONS (584 production files scanned)
+=== confinement, producer and zero consumers ===
+OK   THE BASIS VOCABULARY EXISTS IN EXACTLY TWELVE PRODUCTION FILES (O5 SHADOW EVIDENCE: plus the pure evidence derivation, which only passes the authority own basis to the materializer, never reading it; O5 P4b3: plus the pure acceptance predicate, TYPES only; O5 P4b4: plus the same-run shadow composition, which imports nothing from the module): the pure module, the orchestrator that produces it, (TYPES only) the baseline placements module, the promotion contention authority, the scheduling attempt authority and the local counterfactual generator that consume it, and the internal promotion boundary that passes the same-run outcome through
+OK   PRODUCER: the basis is produced only INSIDE the orchestration run -- one T1 capture and one T4 assembly, both through the private hand-off that only a diagnostics caller creates; the normal `orchestrateConstructDay` and the trace entry never name it, so the preview path does no basis work
+OK   NO CALLER CAN MANUFACTURE A BASIS: the hand-off is a module-private interface, the only constructors are the orchestrator's own calls, and `orchestrateConstructDayWithDiagnostics` takes only (request, deps) -- there is no parameter that could carry a basis in
+OK   ZERO CONSUMERS: nothing reads the produced outcome -- the orchestrator only writes `evidenceOut.constructionBasis` and returns `handOff.constructionBasis`; the shadow boundary never mentions it, and the promotion boundary only PASSES the same-run outcome to the contention authority (fixed `diagnostics.constructionBasis` arguments and one run-level pass-through, never read); no other production file names it
+OK   NO PUBLIC / SIGNED / PERSISTED EXPOSURE: the Constructor, comparator, capacity, preview request / client / integrity, acceptance, persistence, Recomposition, Move, every route, db.ts and every Decision Intelligence module are free of the basis vocabulary
+OK   NO PERSISTENCE, NO SCHEMA: the Prisma schema and every migration directory's own contents mention no construction basis; no migration was added (count-independent)
+OK   THE CONSTRUCTOR IS UNTOUCHED AND UNREAD: dayConstructor.ts (hash-pinned by the P0c guard) and the comparator file name no basis; the capture lives entirely at the orchestration boundary
+=== the orchestrator change: two fixed points, nothing added to construction ===
+OK   T1 -- the initial lists are captured AFTER the original per-intent timing searches and BEFORE evidence preparation, the first Constructor pass and every replenishment (so replenishment cannot have overwritten them); no search is repeated to recover them
+OK   T3 / T4 -- the basis is assembled AFTER the replenishment loop and the last Constructor pass, from the orchestrator's own terminal candidate map, and BEFORE the READY return; every argument is the baseline run's own value (the request's target date, the resolved window, the blockers it built, the fixed constraints it built) -- no clock, no re-resolution
+OK   NOTHING ELSE CHANGED IN CONSTRUCTION: still exactly two `constructDay({` call sites, two `deps.searchTiming(` call sites (the initial search and the replenishment search), the same five `new Date(` allocations (no clock was added), and the replenishment loop is intact
+OK   OPTIONAL BY CONSTRUCTION: both basis calls run inside `optionalBasisStep`, whose catch swallows everything, so a failure can never fail the baseline; the assembly result falls back to UNAVAILABLE / ASSEMBLY_FAILED, never a partial basis
+OK   the diagnostics entry reports a basis for every run: the produced outcome, or UNAVAILABLE / RUN_NOT_READY when the run ended before T4
+=== the module: pure, neutral, copying, frozen, fail-closed ===
+OK   IMPORTS: exactly three TYPE imports (DayIntent / ConstructionWindow, the placement types, the blocker types) -- no value import of anything, so no database, search, Constructor, clock, evidence, facts, pressure or promotion module can be reached
+OK   NO POLICY, NO EVIDENCE, NO FACTS, NO FLAG, NO SOURCE: the module names no DecisionPressure, PromotionInput / Owner, DecisionFacts, DecisionEvidence, GoalDecisionFacts, shadow result, contention trace, recurrence / opportunity field, feature flag or environment, and no Goal / manual / automatic / provenance concept
+OK   NO DB, NO CLOCK, NO SEARCH, NO CONSTRUCTION, NO I/O: no database, `Date.now`, `new Date()`, timing search, replenishment, Constructor / orchestrator / ordering call, async, await, Promise, timer, logging, telemetry or network
+OK   COPYING IS EXPLICIT AND DOMAIN-SPECIFIC: no `any`, no JSON round-trip, no structuredClone, no Object.assign, no generic deepFreeze; the ONLY Date allocation is `new Date(source.getTime())` inside `ownDate`, which freezes it (an invalid source stays invalid; a non-Date throws and makes the basis unavailable)
+OK   NO MUTABLE COLLECTION AND NO STATE: no Map / WeakMap / WeakSet; the single `Set` is the local duplicate-id check; no module-level variable can retain a source object
+OK   EVERYTHING IS FROZEN: every constructed object, array, candidate, interval, intent and Date is passed through `Object.freeze` at creation (>= 14 freeze sites) -- freezing is NOT claimed to protect a Date's time value, which rests on ownership plus the #208 guard
+OK   INITIAL AND FINAL ARE SEPARATE COPIES: the initial lists are re-copied from the T1 capture and the final lists are copied from the orchestrator's terminal map -- two independent copies, so no object is shared between them or with the source
+OK   ALL-OR-NOTHING AND NEVER THROWING: capture returns undefined, assembly returns UNAVAILABLE / ASSEMBLY_FAILED on any failure; duplicate intent ids and a missing T1 capture are explicit UNAVAILABLE gates; there is no partially filled outcome
+OK   THE MINIMUM CONTRACT (derived from ConstructDayInput): the basis has exactly planningDate, window, intents, blockedIntervals, initialCandidates, finalCandidates, fixedConstraints; an intent has exactly id, title, activityId?, importance, deadline?, estimatedDurationMinutes?, flexibility, originalOrder -- no facts, family, DayIntent source or `now`
+OK   the module exports exactly its contract types and the two functions -- nothing else is reachable
+=== MUTATIONS OF THE GUARD: each violation class, injected into the real tree, is detected ===
+OK   MUTATION: a pressure / promotion-input / owner / facts / evidence / shadow / feature-flag field or import enters the basis module -> detected
+OK   MUTATION: a source-specific field (Goal / manual / automatic / provenance) enters the module -> detected
+OK   MUTATION: a clock read, a database import / query, a timing search, a second Constructor call, an async boundary -> detected
+OK   MUTATION: shared Date (the copy returns the source), JSON clone, `any`, a Map, module-level state -> detected
+OK   MUTATION: unfrozen outer / nested output (the freeze removed everywhere, or from the outer basis and Dates only) -> detected
+OK   MUTATION: initial == final (one copy used for both) or the initial list dropped -> detected
+OK   MUTATION: the basis fails open on duplicate ids (last-write-wins) or builds without its T1 capture -> detected
+OK   MUTATION: assembly or capture can throw out of the module (the try / catch removed) -> detected
+OK   MUTATION: a policy / pressure / promotion / contract field is added to the basis, or an intent gains a facts / family field -> detected
+OK   MUTATION: a SECOND timing search (re-search to recover the initial lists), a second Constructor pass, or a clock read is added to the orchestrator -> detected
+OK   MUTATION: the capture moves after replenishment (initial authority lost), runs unguarded (normal path pays), or runs outside `optionalBasisStep` -> detected
+OK   MUTATION: the orchestrator READS the basis (a decision branch on it), or the normal entry point is changed to produce it -> detected
+OK   MUTATION: a consumer appears (a shadow / promotion boundary reads the basis, a new module imports it, a new caller of the diagnostics entry point) -> detected
+OK   MUTATION: PUBLIC / SIGNED / PERSISTED EXPOSURE -- the basis named by the preview request, signing, acceptance, persistence, a route, db.ts, the Constructor or the comparator -> detected
+OK   the mutations were applied to in-memory copies only: the real tree still has zero violations afterwards
+=== wiring and honest scope ===
+OK   both construction-basis suites (behavior and architecture) run in the required PURE job
+OK   THE #208 DATE-MUTATOR GUARD COVERS THE NEW MODULE DELIBERATELY: constructionBasis.ts is on its explicit protected list (its scope and its single timezone exception were not widened)
+OK   the behavior suite asserts invariants only: no sleeps, timers, randomness, heap layout or query-plan mechanics (its only clock touch is counting Date.now calls to prove there are none)
+OK   no assertion label claims pressure is active, that a counterfactual exists, or that freezing alone protects a Date
+OK   SCOPE STATEMENT: this guard does not claim a future P4b2 consumer's own working copies are safe
+ALL CONSTRUCTION BASIS ARCHITECTURE CHECKS PASSED
+
+# exit=0 signal=

@@ -1,0 +1,45 @@
+$ npx ts-node test/reminderReliabilityDb.test.ts
+# job=day-constructor-acceptance-db-tests step=Run REM-01 reminder reliability DB test env={}
+OK   1a. No push before the reminder time (start +40, lead 15, now +20)
+OK   1b. Push sent once the reminder time is reached
+OK   1c. Title states the real time left ("starts in 15 min")
+OK   1d. Later scheduler runs never resend the same reminder
+OK   1e. One delivery row, SENT, one attempt
+OK   2. A run 9 minutes late says "starts in 6 min", not "15 min"
+OK   3a. No push after the activity started
+OK   3b. Delivery recorded as SKIPPED too_late_activity_started
+OK   4a. Six simultaneous scheduler runs send exactly one push
+OK   4b. Still exactly one delivery row, SENT
+OK   5a. No push for the original time after the plan was moved
+OK   5b. The original occurrence is never sent (row left unsent)
+OK   5c. Push sent at the new reminder time (new start -15 min)
+OK   5d. The new time has its own SENT delivery
+OK   6a. Edited time: no push for the old reminder time
+OK   6b. Edited time: push at the new reminder time
+OK   7a. Cancelled after a pending delivery existed: no push
+OK   7b. Completed (logged) early: no push
+OK   8. Reminders off: no push
+OK   9a. Temporary provider failure: delivery back to PENDING for retry
+OK   9b. Dispatch reports the retry
+OK   9c. Next run retries and sends
+OK   9d. Persistent failure: exactly 3 attempts, then FAILED
+OK   10a. Expired endpoint is disabled
+OK   10b. Delivery FAILED, not retried, when every endpoint is gone
+OK   10c. No further sends to a disabled endpoint
+OK   10d. No delivery row is created while the user has no active subscription
+OK   11a. No subscription: no row written (was SKIPPED before REM-01)
+OK   11b. Subscribed two minutes later: that reminder is still delivered
+OK   12a. A PROCESSING row claimed moments ago is not taken over
+OK   12b. A PROCESSING row abandoned for 10 minutes is reclaimed and sent once
+OK   13a. 00:05 IST activity reminded at 23:52 IST the previous evening
+OK   13b. reminderAt is 23:50 IST (start - 15 min, absolute)
+OK   14a. Without VAPID keys: configured=false, nothing sent
+OK   14b. Without VAPID keys: no delivery row is consumed
+OK   14c. Heartbeat records an unconfigured run
+OK   14d. An unconfigured run never counts as background delivery AVAILABLE
+OK   14e. Once configured, the same reminder is delivered
+OK   14f. Configured run: heartbeat makes background delivery AVAILABLE
+
+ALL REMINDER RELIABILITY DB CHECKS PASSED
+
+# exit=0 signal=

@@ -1,0 +1,29 @@
+$ npx ts-node test/homeMoveDb.test.ts
+# job=day-constructor-acceptance-db-tests step=Run Home Move DB test env={}
+OK   precondition: the active plan is ACTIVE_PLAN and movable from Home
+OK   3/10. Home Move -> existing API: A MOVED, a NEW UPCOMING successor B at exactly the requested instant with the original duration; only the move route was called
+OK   40. Home Move creates zero HabitLogs and never touches the log route
+OK   21. with the confirmed fact, A can no longer be Right Now and is hidden from the live Timeline
+OK   47. stale authoritative data (A still UPCOMING/active) + the confirmed Move: A resolved, no A Right Now, A hidden
+OK   39/46. Capture-linked plan moved from Home: A MOVED, B UPCOMING, Capture -> B and still PLANNED (completedAt null)
+OK   39/46. GoalActivity-linked plan moved from Home: GoalActivity -> B and still PLANNED
+OK   40. neither source move created a HabitLog
+OK   13/49. destination overlapping another plan -> CONFLICT: A still UPCOMING, no successor, nothing confirmed
+OK   38. a destination that starts exactly when another plan ends is accepted by the server ([start, end) semantics) and Home does not pre-reject it
+OK   14. active linked AuraMoment -> HAS_LINKED_MOMENT: A unchanged, no fallback mechanism, Moment untouched
+OK   27. the Move POST itself returns 401: FAILED, no confirmed fact, A unchanged and still actionable
+OK   server COMMITTED the Move but the client never saw it: FAILED locally (nothing confirmed, A still looks actionable)
+OK   the retry of the same request returns the SAME successor (idempotent), one successor exists, and Home can now confirm it
+OK   50. another client already moved A: this Move returns ALREADY_MOVED, Home fabricates no successor (it reconciles), and there is still exactly one successor
+OK   17. Move then Done from one Home session: one request (the Move) is issued for that plan; Done is BUSY; A MOVED, zero HabitLogs from it
+OK   two Home sessions racing Move vs Done: exactly one terminal outcome wins on the server (never a hybrid)
+OK   18. SPRING 2027-03-14: picker "Tomorrow 09:00" (Los Angeles) resolves to an instant whose confirm label is "Move to 9:00 AM"
+OK   27. SPRING 2027-03-14: the server-created B starts at exactly the requested instant (2027-03-14T16:00:00.000Z) and rendering B in Los Angeles gives exactly 2027-03-14 09:00 (end 10:00 = the original 60-minute duration)
+OK   22. SPRING 2027-03-14: selected wall time, confirm label, request payload, stored B and rendered B all agree (09:00 / "9:00 AM" / 2027-03-14T16:00:00.000Z)
+OK   18. FALL 2027-11-07: picker "Tomorrow 09:00" (Los Angeles) resolves to an instant whose confirm label is "Move to 9:00 AM"
+OK   27. FALL 2027-11-07: the server-created B starts at exactly the requested instant (2027-11-07T17:00:00.000Z) and rendering B in Los Angeles gives exactly 2027-11-07 09:00 (end 10:00 = the original 60-minute duration)
+OK   22. FALL 2027-11-07: selected wall time, confirm label, request payload, stored B and rendered B all agree (09:00 / "9:00 AM" / 2027-11-07T17:00:00.000Z)
+OK   7/15. a wall time that does not exist on the spring-forward day (02:30) is refused before any request: no Move POST, A untouched, no successor
+ALL HOME MOVE DB CHECKS PASSED
+
+# exit=0 signal=

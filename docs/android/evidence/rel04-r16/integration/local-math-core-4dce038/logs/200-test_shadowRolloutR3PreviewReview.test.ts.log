@@ -1,0 +1,42 @@
+$ npx ts-node test/shadowRolloutR3PreviewReview.test.ts
+# job=math-core-tests step=Run shadow rollout R3 preview review test env={}
+=== Part 1: the environment guard ===
+OK   isPreviewReviewEligibleEnvironment: exactly "production" is excluded; Preview, Development and unset are all potentially eligible (documented, deliberate)
+OK   createServerShadowPolicyExecution: VERCEL_ENV=production -> reviewEligible is false
+OK   createServerShadowPolicyExecution: VERCEL_ENV=preview -> reviewEligible is true
+OK   createServerShadowPolicyExecution: VERCEL_ENV unset (plain local dev) -> reviewEligible is true (deliberate, documented)
+=== Part 2: Production negative (SHADOW on, directed ACCEPT reaches PASS, but reviewEligible=false) ===
+OK   Production: HTTP 200, READY, and the body has NO shadowReview key at all (not an empty one)
+OK   Production: the AGGREGATE evidence line still reaches PASS internally (telemetry is env-independent) -- only the review payload is withheld
+OK   Preview with the SAME scenario DOES carry shadowReview -- the only difference is reviewEligible
+=== Part 3: Preview + OFF ===
+OK   OFF: no shadowReview field, no evidence line at all
+=== Part 4: Preview + SHADOW + every non-eligible evidence outcome ===
+OK   NO_ACCEPT: baseline response, no review payload
+OK   MULTIPLE_ACCEPTS: baseline response, no review payload
+OK   a real P4b3 REJECT (owner-loss): baseline response, no review payload
+OK   gate unavailable (DEFERRED_DIAGNOSTIC_UNRESOLVED): baseline response, no review payload
+OK   typed generation unavailable: baseline response, no review payload
+OK   materializer unavailable (BASELINE_PROVENANCE_MISMATCH): baseline response, no review payload, counted distinctly
+OK   READY but invariant != PASS: baseline response, no review payload
+=== Part 5: the directed real ACCEPT ===
+OK   APPLY / MATERIALIZABLE / READY / PASS reached on this run
+OK   BASELINE REMAINS AUTHORITATIVE: the returned body's Proposed/Deferred sets equal the plain preview's own
+OK   the baseline proposedItems are unchanged: only the owner O is Proposed, at its original 10:00 slot
+OK   the review payload EXISTS and describes the actual materialized delta: P promoted to 10:30, O moved to 15:00
+OK   the review items carry no acceptanceToken and no internal authority shape
+=== Part 6: cross-run provenance negative ===
+OK   A's authority with B's (structurally identical, foreign) baseline -> BASELINE_PROVENANCE_MISMATCH, no review payload, the baseline is returned
+=== Part 7: signing, accept-path negative, normal acceptance unaffected ===
+OK   SIGNING UNCHANGED: every baseline proposedItem carries its own acceptanceToken, exactly as before R3
+OK   normal baseline acceptance verification still succeeds unchanged
+OK   the review alternative has NO token at all -> verification fails immediately (INVALID_REQUEST at the accept route, before any write)
+OK   even a real token from a DIFFERENT item cannot authorize the review alternative (bound to its own exact facts)
+=== Part 8: logging never carries review data ===
+OK   exactly ONE aggregate log line, and it contains no activity label, no review delta, no request/user id
+OK   the aggregate line schema is unchanged by R3 (still the same closed key set)
+=== Part 9: performance -- the materializer runs at most once even with the review hand-off ===
+OK   exactly ONE materializer call for the whole request (evidence + review share it; no second policy evaluation)
+ALL SHADOW ROLLOUT R3 PREVIEW REVIEW CHECKS PASSED
+
+# exit=0 signal=

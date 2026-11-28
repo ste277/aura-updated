@@ -1,0 +1,38 @@
+$ npx ts-node --project tsconfig.jsdom-tests.json test/myRhythmPreferencesEditorJsdom.test.ts
+# job=math-core-tests step=Run MR3 My Rhythm preferences editor (jsdom) test env={}
+OK   J1. collapsed: shows the saved summary, "Edit rhythm" and "Pause rhythm"
+OK   J2. collapsed: no editor controls rendered yet
+OK   J3. a one-off activity offers "Set weekly frequency" and no Pause
+OK   J4. plain rhythm: preferences start hidden behind "Add days, time or length (optional)"
+OK   J5. untouched editor: Save changes is disabled (nothing to save)
+OK   J6. disclosure reveals 7 weekday chips (Mon..Sun), 5 time options and length chips
+OK   J7. chosen days are pressed
+OK   J8. the time hint explains the window and the fallback
+OK   J9. Save sends ONE PATCH to the rhythm endpoint with exactly the three preferences
+OK   J10. on success the editor closes and onSaved fires once
+OK   J11. a configured rhythm opens with its preferences visible and selected
+OK   J12. Cancel sends nothing and closes
+OK   J13. re-opening after Cancel shows the SAVED values, not the abandoned edit
+OK   J14. 3x/week with 2 days: explained, and Save disabled
+OK   J15. a 5-minute custom length is explained and blocks Save
+OK   J16. a valid custom length (40) re-enables Save
+OK   J17. nothing was sent while invalid
+OK   J18. a server rejection shows the server's reason and keeps the editor open with the edit intact
+OK   J19. a network failure shows a connection message (draft still intact)
+OK   J20. retry succeeds with the same minimal body; onSaved once
+OK   J21. two rapid clicks on Save send ONE request
+OK   J22. while saving, Cancel is disabled and the save button shows progress
+OK   J23. after it completes, onSaved fired exactly once
+OK   J24. Edit and Pause sit side by side; no pause explanation until asked
+OK   J24a. Pause asks first: explains the effect, sends nothing yet
+OK   J24b. "Keep active" backs out with no request
+OK   J25. confirming sends exactly { paused: true } (never preferences) and refreshes
+OK   J26. a paused rhythm offers Resume (not Pause) and still shows its saved preferences
+OK   J27. a failed Resume shows an error and does not report success
+OK   J28. retrying Resume sends exactly { paused: false }
+OK   J29. choosing Once warns that preferences will be cleared and hides them
+OK   J30. ...and sends only { rhythm: NONE }
+
+32 passed, 0 failed
+
+# exit=0 signal=

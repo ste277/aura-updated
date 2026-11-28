@@ -1,0 +1,95 @@
+$ npx ts-node test/myPeopleRequest.test.ts
+# job=math-core-tests step=Run AURA-MP-1 My People request validation test env={}
+OK   server switch: unset -> OFF (fail-closed, in every environment)
+OK   server switch: "true"/"yes"/"0"/"" -> OFF (only "1" enables)
+OK   server switch: "1" -> ON
+OK   server switch ignores the public flag entirely (NEXT_PUBLIC=1 never enables the server)
+OK   presentation flag: only "1" presents
+OK   client effective = presentation AND server header "enabled"; a public flag can never override server disablement
+OK   the server flag is NOT a NEXT_PUBLIC_ variable (never inlined into a client bundle)
+OK   every My People server route uses isMyPeopleServerEnabled() and never the public flag
+OK   OFF: name-only create is rejected exactly as today (birthDate error)
+OK   OFF: a full legacy body is accepted unchanged
+OK   OFF: buildSavedPersonInput (the original validator) == the legacy contract
+OK   OFF: a My People relationship type (PARENT) is rejected
+OK   OFF: My People-only key "notes" is rejected with 400
+OK   OFF: My People-only key "interests" is rejected with 400
+OK   OFF: My People-only key "relationshipLabel" is rejected with 400
+OK   OFF: My People-only key "locationName" is rejected with 400
+OK   OFF: My People-only key "timezone" is rejected with 400
+OK   OFF: My People-only key "chart" is rejected with 400
+OK   ON: name-only create is accepted, name trimmed, relationship defaults to OTHER, no chart
+OK   ON: empty name rejected
+OK   ON: 81-char name rejected
+OK   ON: every optional field accepted; strings trimmed; interests de-duplicated case-insensitively and blanks dropped
+OK   ON: CHILD and SIBLING accepted
+OK   ON: an unknown relationship type is still rejected
+OK   ON: invalid timezone rejected ("UTC+5:30", "Mars/Base")
+OK   ON: 11 interests rejected; a 41-char interest rejected; a non-array rejected
+OK   ON: notes over 1000 chars rejected; 1000 accepted
+OK   ON: a PARTIAL flat chart (birthDate only) is rejected -- never half-written
+OK   ON: a partial chart object is rejected
+OK   ON: chart object AND flat fields together are rejected
+OK   OFF: PATCH {name} -> update has ONLY name (chart and every other field untouched)
+OK   OFF: a legacy full body replaces the chart whole (exactly today's edit)
+OK   OFF: a partial flat chart in PATCH is a 400 (cannot clear or half-write a chart)
+OK   OFF: an empty PATCH is a valid no-op
+OK   ON: PATCH {name} -> update has ONLY name (chart and every other field untouched)
+OK   ON: a legacy full body replaces the chart whole (exactly today's edit)
+OK   ON: a partial flat chart in PATCH is a 400 (cannot clear or half-write a chart)
+OK   ON: an empty PATCH is a valid no-op
+OK   OFF: PATCH with a My People key (notes) is rejected, so the legacy screen can never write them
+OK   OFF: PATCH chart:null is rejected (the legacy screen cannot clear a chart)
+OK   ON: PATCH chart:null clears the chart (explicit only)
+OK   ON: notes:null / interests:null / empty label clear those fields
+OK   special day: birthday with no year accepted; default lead time 7 days
+OK   special day: 29 Feb with no year accepted
+OK   special day: 29 Feb 1992 (leap) accepted; 29 Feb 1991 rejected
+OK   special day: 31 Apr rejected; 30 Feb rejected; 31 Dec accepted
+OK   special day: month 0 / 13 rejected; day 0 rejected; non-integers rejected
+OK   special day: year 1899 and next year rejected; 1900 and this year accepted
+OK   special day: OTHER requires a label
+OK   special day: remindDaysBefore null (never ahead), 0 (on the day) and 30 accepted; -1 and 31 rejected
+OK   special day: kind, month and day are required on create; unknown kind rejected
+OK   special day: an unknown key (e.g. calendar, personId) is rejected -- calendar types are not client-writable yet
+OK   special day: merged-update validation catches a year that makes an existing 29 Feb invalid
+OK   R1 F1 OFF: resubmitting the unchanged PARENT is accepted and NOT written (no-op)
+OK   R1 F1 OFF: resubmitting the unchanged CHILD is accepted and NOT written (no-op)
+OK   R1 F1 OFF: resubmitting the unchanged SIBLING is accepted and NOT written (no-op)
+OK   R1 F1 OFF: CHANGING to a My People type is still refused
+OK   R1 F1 OFF: changing a PARENT to a legacy type (FAMILY) is allowed
+OK   R1 F1 ON: an unchanged My People type is written normally
+OK   R1 F3 OFF: impossible dates (2023-02-30, 2021-04-31, 1990-00-10, 1990-13-01) -> 400
+OK   R1 F3 OFF: real leap day 2024-02-29 accepted; 2023-02-29 rejected
+OK   R1 F3 OFF: coordinates null latitude -> 400 (never coerced)
+OK   R1 F3 OFF: coordinates null longitude -> 400 (never coerced)
+OK   R1 F3 OFF: coordinates both null -> 400 (never coerced)
+OK   R1 F3 OFF: coordinates missing longitude -> 400 (never coerced)
+OK   R1 F3 OFF: coordinates empty string -> 400 (never coerced)
+OK   R1 F3 OFF: coordinates numeric string -> 400 (never coerced)
+OK   R1 F3 OFF: coordinates NaN -> 400 (never coerced)
+OK   R1 F3 OFF: coordinates Infinity -> 400 (never coerced)
+OK   R1 F3 OFF: coordinates latitude 91 -> 400 (never coerced)
+OK   R1 F3 OFF: coordinates longitude -181 -> 400 (never coerced)
+OK   R1 F3 OFF: valid coordinates kept exactly; omitted coordinates stay absent
+OK   R1 F3 ON: impossible dates (2023-02-30, 2021-04-31, 1990-00-10, 1990-13-01) -> 400
+OK   R1 F3 ON: real leap day 2024-02-29 accepted; 2023-02-29 rejected
+OK   R1 F3 ON: coordinates null latitude -> 400 (never coerced)
+OK   R1 F3 ON: coordinates null longitude -> 400 (never coerced)
+OK   R1 F3 ON: coordinates both null -> 400 (never coerced)
+OK   R1 F3 ON: coordinates missing longitude -> 400 (never coerced)
+OK   R1 F3 ON: coordinates empty string -> 400 (never coerced)
+OK   R1 F3 ON: coordinates numeric string -> 400 (never coerced)
+OK   R1 F3 ON: coordinates NaN -> 400 (never coerced)
+OK   R1 F3 ON: coordinates Infinity -> 400 (never coerced)
+OK   R1 F3 ON: coordinates latitude 91 -> 400 (never coerced)
+OK   R1 F3 ON: coordinates longitude -181 -> 400 (never coerced)
+OK   R1 F3 ON: valid coordinates kept exactly; omitted coordinates stay absent
+OK   R1 F3 ON: chart object with an impossible date -> 400; chart:null still clears
+OK   R1 F3: all-or-none kept -- a partial chart is still a 400
+OK   R1 F5: POST with `occasions` -> 400 in both contracts (never silently discarded)
+OK   every My People route is force-dynamic (never prerendered with a build-time switch state)
+
+ALL MY PEOPLE REQUEST CHECKS PASSED
+
+# exit=0 signal=

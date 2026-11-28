@@ -1,0 +1,73 @@
+$ npx ts-node test/promotionInputArchitecture.test.ts
+# job=math-core-tests step=Run promotion input architecture test env={}
+=== the real tree conforms ===
+OK   THE REAL PRODUCTION TREE HAS ZERO PROMOTION-INPUT ARCHITECTURE VIOLATIONS (584 production files scanned)
+=== allowlists: producers, consumers, reachability ===
+OK   THE PROMOTION VOCABULARY EXISTS IN EXACTLY SIX PRODUCTION FILES: the pure assembler, its internal preparation boundary and the four consumers (O5 P4b2a the pure promotion contention authority, O5 P4b2 the pure local counterfactual generator, O5 P4b3 the pure counterfactual acceptance predicate, O5 P4b4 the same-run shadow policy composition)
+OK   NO ACTIVE CONSUMERS (no promotion is applied): the preparation boundary is imported and called only by the inert O5 P4b4 shadow policy composition (which nothing consumes); the assembler is imported and called only by the boundary
+OK   the orchestrator's diagnostics entry point is called by exactly the shadow boundary and the promotion boundary (each read-only, after construction)
+OK   THE ONLY NEW TYPED BOUNDARY FOR PRESSURE PROMOTION ELIGIBILITY: the above-pressure helper is imported by the P3b stage, by the two P4a modules and (O5 P4b3, to RE-CHECK the tie through the same primitive) by the pure acceptance predicate, and nowhere else; the P3b stage never names promotion and P4a never imports the P3b stage
+OK   NOT A POLICY CONSUMER: no Constructor, comparator, placement, capacity, replenishment, preview, signing, acceptance, persistence, Recomposition, Move, route, scheduling context, P2 evidence / pressure code or P3 stage mentions a promotion input
+OK   NO PERSISTENCE, NO SCHEMA: the Prisma schema and every migration directory's own contents mention no promotion input; no migration was added (count-independent)
+OK   NO PUBLIC CONTRACT: the preview request / client / integrity modules, the acceptance modules and every route carry no promotion vocabulary (no preview field, no signed token member, no client-supplied input)
+OK   NO P4b / P5 CONCEPT: no production identifier for a promotion decision, policy, counterfactual, second pass, owner replacement or "would / should win" exists; the Constructor / comparator / placement code is untouched and unread
+=== the assembler: reviewed typed authorities only, one comparator primitive, pure ===
+OK   IMPORTS: exactly four -- the Constructor result type, the P3a trace type, the pressure type, and the shared above-pressure primitive; no database, no evidence, no facts, no context, no P3b stage, no Constructor value
+OK   PRESSURE AUTHORITY: it accepts ALREADY-DERIVED pressure (`pressureByIntentId: ReadonlyMap<string, DecisionPressure>`); it never derives pressure and names no DecisionFacts, DecisionEvidence or raw recurrence / opportunity field
+OK   CONTENTION AUTHORITY: contention and owners come only from the P3a trace events (loser and owner ids); there is no overlap algorithm, no interval, no round, no event count and no Deferred-reason inference
+OK   FINAL-STATE AUTHORITY: only which intents are finally Proposed or Deferred is read (`proposedItems` / `deferredItems` intent ids)
+OK   PRECEDENCE: eligibility against an owner is `compareAbovePressure(...) === 'TIE'` through the ONE shared primitive (exactly one call, no copy of importance / deadline logic, no direction handling), required of EVERY final owner (`.every`)
+OK   originalOrder, timing fit, capacity, durations, the Deferred reason, rounds, intervals and counts are NEVER eligibility dimensions: the assembler names none of them (originalOrder is neutralised inside the shared primitive and is therefore not a blocking dimension)
+OK   DOES NOT USE THE P3b AGGREGATE: no import of the shadow stage and no classification enum, `.classification` read or shadow vocabulary -- P3b stays the diagnostic semantic proof and the exhaustive equivalence suite proves the two agree
+OK   GATES: pressure must be exactly LAST_KNOWN_OPPORTUNITY; the candidate must be finally Deferred; duplicate ids (candidate or any historical owner) fail closed; owners are the DISTINCT historical owners of the candidate's OWN trace events filtered to final Proposed; at least one must remain; precedence facts must exist for the candidate and every final owner
+OK   OWNERS ARE 1..N AND NEVER COLLAPSED OR GLOBALLY DEDUPLICATED: the owner list is built per candidate from its own events; there is no cross-candidate owner set, no `.find` / `[0]` winner selection
+OK   PURE: no async, await, Promise, timer, database, clock, Date, randomness, environment, console, logging or telemetry
+OK   SOURCE-NEUTRAL: no Goal, GoalActivity, manual, automatic, provenance, hand-off, UI, title or activity concept
+OK   NO CONSTRUCTION, NO COUNTERFACTUAL, NO SECOND PASS, NO POLICY: no Constructor / orchestrator call, no schedule built, nothing promoted / replaced / ranked, no score and no "would / should win" vocabulary
+OK   NO SCHEDULING CONTEXT, NO SNAPSHOT, NO DATABASE: the assembler never names the P2d context, a snapshot or a query; it reuses P2d authority only through the already-derived pressure it is handed (P4a opens no transaction and acquires no snapshot)
+=== the contract: the smallest sufficient immutable record ===
+OK   SHAPE: `PromotionInput` has exactly `candidateIntentId: string` and `owners: readonly PromotionOwner[]`; `PromotionOwner` has exactly `intentId: string` and the owner's OWN `pressure: DecisionPressure` (categorical) -- no candidate pressure copy, no precedence value, no originalOrder, round, interval, count, reason, title, source or Date
+OK   NO MUTABLE OUTPUT TYPE: every member is `readonly`; no Map, Set, Date, function, callback, observer or executor appears in either record
+OK   OUTPUT IS DETACHED AND FROZEN: each owner, each owner list, each input and the collection are `Object.freeze`d at creation and built from fresh strings; no input object is returned or referenced
+OK   the module exports exactly the assembler and the four contract types (PromotionOwner, PromotionInput, PromotionInputAuthority) -- nothing else is reachable
+=== the preparation boundary: derive after construction, fail closed, nothing back into construction ===
+OK   IT DERIVES PRESSURE IN EXACTLY ONE PLACE, over the immutable evidence handed out by THIS run's orchestration, strictly AFTER the Constructor result exists (the only `await` is the orchestration; derivation, projection and assembly follow it)
+OK   NO CALLER-INJECTED AUTHORITY (coherence provenance): the boundary's signature is exactly `(request, deps)` -- the orchestrator's own types; there is no parameter that could carry pressure, a PromotionInput, owner ids or an eligibility flag, and pressure is derived from `diagnostics.evidenceByIntentId` produced by the same run (which, with the production preview binding, was built from the single P2d context)
+OK   FAIL CLOSED: the derivation, projection and assembly run inside a try whose catch returns the SAME Constructor result with outcome `UNAVAILABLE / PREPARATION_FAILED` and no inputs; a not-READY run returns `UNAVAILABLE / RUN_NOT_READY`; nothing is logged or rethrown (the single `throw` is the duplicate-id fail-closed guard INSIDE the try, caught by it)
+OK   NO NEW QUERY, NO WRITE, NO SNAPSHOT, NO TELEMETRY, NO CLOCK: the boundary imports no database module, opens no transaction, writes nothing, logs nothing and reads no clock (real shadow / promotion incidence therefore remains UNKNOWN)
+OK   ONE RUN, NO SECOND CONSTRUCTION: exactly one orchestration call and no direct Constructor / orchestrator call; the returned result is the orchestration's own result object, untouched
+OK   the preview boundary makes its ONE orchestration through the O5 P4b5 shadow execution boundary (OFF = the plain `orchestrateConstructDay` call), never a diagnostics entry point or a promotion function; the orchestrator names neither pressure nor promotion
+=== MUTATIONS OF THE GUARD: each violation class, injected into the real tree, is detected ===
+OK   MUTATION: the assembler trusts the P3b aggregate (imports the shadow evaluator / branches on a classification) -> detected
+OK   MUTATION: the assembler accepts NONE / drops the pressure gate -> detected
+OK   MUTATION: the assembler stops requiring a final Deferred state / infers contention from the Deferred state instead of the trace -> detected
+OK   MUTATION: the all-owner rule is weakened to `.some` -> detected; owners collapsed to a single winner -> detected
+OK   MUTATION: a stronger / weaker owner stops blocking (eligibility no longer tie-only) -> detected
+OK   MUTATION: originalOrder / timingFit / capacity / duration blocks -> detected
+OK   MUTATION: raw recurrence / opportunity fields, DecisionFacts or DecisionEvidence are read -> detected
+OK   MUTATION: a Goal / manual / automatic source branch -> detected
+OK   MUTATION: a database query / second snapshot / clock / async in the assembler or the boundary -> detected
+OK   MUTATION: the output becomes mutable (no freeze), exposes a Map / Set / Date / callback, or gains a Date field -> detected
+OK   MUTATION: the owner object is shared with the Constructor / trace (a shared reference instead of a fresh frozen record) -> detected
+OK   MUTATION: a Date / interval / round / event count / reason is added to the contract or read -> detected
+OK   MUTATION: a CANDIDATE pressure copy / precedence value / importance is added to the contract -> detected
+OK   MUTATION: the public preview / signing / acceptance / persistence / route / schema surfaces name a promotion input -> detected
+OK   MUTATION: an active comparator / Constructor / placement / capacity / replenishment reads a promotion input -> detected
+OK   MUTATION: a second construction in the boundary -> detected; a production consumer of the boundary appears -> detected
+OK   MUTATION: the boundary accepts caller-supplied pressure / a PromotionInput, or derives pressure a second time -> detected
+OK   MUTATION: the boundary loses fail-closed handling (no catch) or assembles before construction -> detected
+OK   MUTATION: the P3b shadow stage starts naming promotion, or P4a imports the shadow stage -> detected
+OK   MUTATION: a P4b / P5 concept (a promotion decision, counterfactual, second pass, owner replacement, "would win") appears anywhere -> detected
+OK   MUTATION: the scheduling context is exposed to / named by the contract -> detected
+OK   MUTATION (P4a2): the owner pressure is dropped from the owner record / the owner record loses its pressure field -> detected
+OK   MUTATION (P4a2): the owner pressure is hard-coded, or taken from the CANDIDATE's pressure, instead of read per owner from the one authority -> detected
+OK   MUTATION (P4a2): owner pressure is aggregated (a summary field / helper), owners are reordered by pressure, or a pressured owner suppresses the input (an active-policy rule belongs to P4b) -> detected
+OK   MUTATION (P4a2): a missing owner pressure is allowed (the completeness gate removed), or a second pressure read / raw evidence / live read appears -> detected
+OK   the mutations were applied to in-memory copies only: the real tree still has zero violations afterwards
+=== wiring and honest scope ===
+OK   both P4a suites (behavior and architecture) run in the required PURE job
+OK   the behavior suite asserts invariants only: no sleeps, timers, randomness, wall-clock reads, heap layout or query-plan mechanics
+OK   no assertion label claims pressure is active, that P4b is ready, or that this slice promotes or schedules anything
+ALL PROMOTION INPUT ARCHITECTURE CHECKS PASSED
+
+# exit=0 signal=

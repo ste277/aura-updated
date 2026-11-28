@@ -1,0 +1,24 @@
+$ npx ts-node --project tsconfig.jsdom-tests.json test/peopleViewLegacyEditorDb.test.ts
+# job=day-constructor-acceptance-db-tests step=Run AURA-MP-1 R1 legacy People editor DB test env={}
+OK   F2 server off + public on: PARENT editor offers legacy types + the person's own PARENT only
+OK   F1 OFF: the editor's actual PATCH for PARENT omits the unchanged relationshipType
+OK   F1 OFF: the real API accepted the PARENT edit (200)
+OK   F1 OFF: PARENT kept; notes, interests, label and special days untouched
+OK   F2 server off + public on: CHILD editor offers legacy types + the person's own CHILD only
+OK   F1 OFF: the editor's actual PATCH for CHILD omits the unchanged relationshipType
+OK   F1 OFF: the real API accepted the CHILD edit (200)
+OK   F1 OFF: CHILD kept; notes, interests, label and special days untouched
+OK   F2 server off + public on: SIBLING editor offers legacy types + the person's own SIBLING only
+OK   F1 OFF: the editor's actual PATCH for SIBLING omits the unchanged relationshipType
+OK   F1 OFF: the real API accepted the SIBLING edit (200)
+OK   F1 OFF: SIBLING kept; notes, interests, label and special days untouched
+OK   F1 OFF: an actual change (SIBLING -> FAMILY) is submitted and accepted
+OK   F1 re-enable: PARENT relationship, notes, interests, label and special day preserved
+OK   F1 re-enable: CHILD relationship, notes, interests, label and special day preserved
+OK   F2 server on + public on: My People types offered
+OK   F2 server on: changing PARENT -> CHILD through the editor is accepted
+OK   F2 server on + public off: presentation hides other My People types (own type kept)
+
+ALL LEGACY EDITOR DB CHECKS PASSED
+
+# exit=0 signal=

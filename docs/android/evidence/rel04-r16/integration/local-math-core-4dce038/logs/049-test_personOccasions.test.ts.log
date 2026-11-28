@@ -1,0 +1,29 @@
+$ npx ts-node test/personOccasions.test.ts
+# job=math-core-tests step=Run AURA-MP-1 special-day date logic test env={}
+OK   unknown year: next occurrence found, 8 days away, no age
+OK   known year: turning = occurrence year - year (40)
+OK   known year in the next calendar year: 11th anniversary on 2027-01-10
+OK   today: daysUntil 0
+OK   yesterday: rolls to next year (364 days)
+OK   Dec 30 -> Jan 3 next year: 4 days
+OK   29 Feb in a non-leap year is observed on 28 Feb (D4) and flagged
+OK   29 Feb in a leap year is 29 Feb, not flagged
+OK   after the observed 28 Feb, the next is the real 29 Feb 2028
+OK   29 Feb 2000 birthday: turning 27 on 28 Feb 2027
+OK   isValidMonthDay: 29 Feb valid, 30 Feb / 31 Apr / 0 Jan invalid
+OK   incomplete fields -> null
+OK   an unknown calendar type -> null (a future type needs its own branch)
+OK   the same instant is 27 Nov in Kolkata and 26 Nov in Los Angeles
+OK   a 27 Nov birthday is TODAY for the Kolkata user and 1 day away for the LA user
+OK   across a DST change the day count is exact (8 Mar -> 15 Mar = 7)
+OK   surfaced within the lead window (7 days: 0..7)
+OK   remindDaysBefore 0 = on the day only; null = never surfaced ahead
+OK   upcoming: within 30 days only (o5 excluded), unknown person skipped (o4)
+OK   upcoming: ties on the same day are ordered by person name (Amma before Ravi)
+OK   upcoming: surfaced flags follow each special day's own lead time
+OK   upcoming: 5 Dec is surfaced from 28 Nov onward (5 days away on 30 Nov)
+OK   upcoming: anniversary turning number carried through (36th on 2026-12-21)
+
+ALL PERSON OCCASION CHECKS PASSED
+
+# exit=0 signal=

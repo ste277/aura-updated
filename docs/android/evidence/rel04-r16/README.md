@@ -9,3 +9,6 @@
 | `ci-46048936628/` | Hosted run on `3c906f9`, integration `ffc8c5c` (base `aab5602`): 8/9. `run.json` and the failing Day Constructor job log (MP-1 / `/api/plans` binding interaction). |
 
 The preserved 39258 evidence is in `../rel04-r15-independent-39258/` (32/32 verified). The disposition is in `../AURA_ANDROID_REL_04_R15_INDEPENDENT_DISPOSITION_39258.md`.
+| `integration/` | Local DB (85/85) and math-core (270/270) sweeps on `4dce038`, plus the clock matrix: R14 and R15 at five simulated times. |
+| `ci-46052425786/`, `ci-46054358960/`, `ci-46108171358/` | The three later failed runs: `run.json` plus checksums of the off-repo job logs. |
+| `ci-46112586858/` | The final run, **9/9**: `run.json` plus checksums of the off-repo job logs. |

@@ -1,0 +1,141 @@
+$ npx ts-node test/dbIdentityGuard.test.ts
+# job=math-core-tests step=Run database identity guard test env={}
+OK   A1. both URLs match the approved staging DB -> PASS
+OK   A2. only DATABASE_URL configured and valid -> PASS (runtime falls back to it)
+OK   A3. only AURA_DATABASE_URL configured -> FAIL (migrations require DATABASE_URL)
+OK   A4. runtime URL points to Production -> FAIL
+OK   A4b. ... also via Production's pooled endpoint (normalised before hashing)
+OK   A5. migration URL points to Production -> FAIL
+OK   A5b. ... also via Production's pooled endpoint
+OK   A6. runtime and migration identities differ (other host) -> FAIL
+OK   A6b. ... (same host, other database) -> FAIL
+OK   A6c. ... (same host and database, other port) -> FAIL
+OK   A7. pooled migration URL + direct runtime URL for the same staging DB -> PASS
+OK   A7b. pooled expected host + direct URLs -> PASS (expected host is normalised too)
+OK   A7c. pooler folding applies to Neon hosts only (db-pooler.example.com != db.example.com)
+OK   A7d. host comparison ignores case and a trailing dot
+OK   A8. malformed migration URL (not a url) -> FAIL
+OK   A8. malformed runtime URL (not a url) -> FAIL
+OK   A8. malformed migration URL (wrong scheme) -> FAIL
+OK   A8. malformed runtime URL (wrong scheme) -> FAIL
+OK   A8. malformed migration URL (no database path) -> FAIL
+OK   A8. malformed runtime URL (no database path) -> FAIL
+OK   A8. malformed migration URL (nested path) -> FAIL
+OK   A8. malformed runtime URL (nested path) -> FAIL
+OK   A8. malformed migration URL (multi-host authority) -> FAIL
+OK   A8. malformed runtime URL (multi-host authority) -> FAIL
+OK   A8. malformed migration URL (?host= redirect) -> FAIL
+OK   A8. malformed runtime URL (?host= redirect) -> FAIL
+OK   A8. malformed migration URL (?hostaddr= redirect) -> FAIL
+OK   A8. malformed runtime URL (?hostaddr= redirect) -> FAIL
+OK   A8. malformed migration URL (?dbname= redirect) -> FAIL
+OK   A8. malformed runtime URL (?dbname= redirect) -> FAIL
+OK   A8. malformed migration URL (?user= override) -> FAIL
+OK   A8. malformed runtime URL (?user= override) -> FAIL
+OK   A8. malformed migration URL (?options= injection) -> FAIL
+OK   A8. malformed runtime URL (?options= injection) -> FAIL
+OK   A8. malformed migration URL (surrounding whitespace) -> FAIL
+OK   A8. malformed runtime URL (surrounding whitespace) -> FAIL
+OK   A8. malformed migration URL (fragment) -> FAIL
+OK   A8. malformed runtime URL (fragment) -> FAIL
+OK   A8. malformed migration URL (bad port) -> FAIL
+OK   A8. malformed runtime URL (bad port) -> FAIL
+OK   A8b. whitespace-only AURA_DATABASE_URL (truthy in lib/db.ts) -> FAIL
+OK   A8c. empty AURA_DATABASE_URL falls back to DATABASE_URL (as lib/db.ts does) -> PASS
+OK   A9. missing AURA_STAGING_EXPECTED_DB_HOST -> FAIL
+OK   A9. blank AURA_STAGING_EXPECTED_DB_HOST -> FAIL
+OK   A9. missing AURA_STAGING_EXPECTED_DB_NAME -> FAIL
+OK   A9. blank AURA_STAGING_EXPECTED_DB_NAME -> FAIL
+OK   A9. missing AURA_STAGING_EXPECTED_DB_USER -> FAIL
+OK   A9. blank AURA_STAGING_EXPECTED_DB_USER -> FAIL
+OK   A9. missing AURA_STAGING_FORBIDDEN_DB_HOSTS -> FAIL
+OK   A9. blank AURA_STAGING_FORBIDDEN_DB_HOSTS -> FAIL
+OK   A9b. forbidden list of only separators -> FAIL
+OK   A9c. expected staging host is itself forbidden -> FAIL
+OK   A9d. plaintext forbidden entries are also honoured
+OK   A10. migration URL without password -> FAIL
+OK   A10. migration URL without user -> FAIL
+OK   A10. runtime URL without password -> FAIL
+OK   A10b. migration role differs from the expected role -> FAIL
+OK   A10c. runtime role differs -> FAIL
+OK   A10d. runtime role allowed when AURA_STAGING_EXPECTED_RUNTIME_DB_USER names it -> PASS
+OK   A10e. percent-encoded database name compares by decoded value
+OK   A11. Production project with no staging configuration -> allowed (behaviour unchanged)
+OK   A11b. Production project is never subjected to staging identity rules (even with AURA_DATABASE_URL set elsewhere)
+OK   A11c. Production project without DATABASE_URL is not newly blocked by the guard (Prisma reports it, as before)
+OK   A12. VERCEL_PROJECT_ID missing in a migrating build -> FAIL
+OK   A12b. VERCEL_PROJECT_ID blank -> FAIL
+OK   A13. perfectly configured but UNPINNED staging project -> FAIL
+OK   A13b. the committed staging allowlist is exactly the aura-staging project (see section E)
+OK   A13c. with the committed allowlist, any other (synthetic) staging project is still refused
+OK   A13d. committed Production project ID is the aura-updated project
+OK   A14. Preview build -> not guarded (no migration runs)
+OK   A14b. unset VERCEL_ENV -> not guarded
+OK   A15. normalizeHost folds the Neon pooler label only
+OK   B1. CLI (production project) exits 0
+OK   B2. CLI (production project) prints exactly one line, with no URL, host, role, database or password
+OK   B1. CLI (project id missing) exits 1
+OK   B2. CLI (project id missing) prints exactly one line, with no URL, host, role, database or password
+OK   B1. CLI (unpinned staging, migration -> prod) exits 1
+OK   B2. CLI (unpinned staging, migration -> prod) prints exactly one line, with no URL, host, role, database or password
+OK   B1. CLI (unpinned staging, runtime -> prod) exits 1
+OK   B2. CLI (unpinned staging, runtime -> prod) prints exactly one line, with no URL, host, role, database or password
+OK   B1. CLI (unpinned staging, malformed) exits 1
+OK   B2. CLI (unpinned staging, malformed) prints exactly one line, with no URL, host, role, database or password
+OK   B1. CLI (preview) exits 0
+OK   B2. CLI (preview) prints exactly one line, with no URL, host, role, database or password
+OK   B3. a refusal names a reason code
+OK   B4. reason codes are fixed identifiers (never derived from input)
+OK   B5. guard source never prints env values (console output uses only fixed strings and result.code)
+OK   C1. Production project: build exits 0
+OK   C2. ... migration, then next build, then the E1 and guide scanners (migration still first)
+OK   C3. ... and the guard reported a pass without disclosing anything
+OK   C4. migrating build without VERCEL_PROJECT_ID: build FAILS
+OK   C5. ... before any migration or build ran
+OK   C6. non-Production project pointing at Production: build FAILS before `prisma migrate deploy`
+OK   C7. ... output discloses no credential
+OK   C8. correctly configured but UNPINNED project is refused (no migration, no build)
+OK   C9. Preview without any DB credentials: build exits 0, no guard, no migration (unchanged)
+OK   E1. the real aura-staging project ID is recognized (pinned DB, direct migration + pooled runtime) -> PASS
+OK   E1b. ... and is never treated as Production
+OK   E2. the Production project ID is still recognized with the committed constants
+OK   E2b. ... and with the staging DB pinned, a Production DB that is not staging still passes (direct and pooled)
+OK   E3. unknown project ID is rejected even with perfect staging configuration
+OK   E3b. a project ID differing only in case is rejected
+OK   E4. aura-staging migrating against the Production DB -> FAIL
+OK   E4b. aura-staging running against the Production DB (pooled) -> FAIL
+OK   E4c. aura-staging whose EXPECTED host was switched to an unpinned DB -> FAIL (env alone cannot re-point staging)
+OK   E4d. with the committed DB pin, aura-staging targeting any other (synthetic) host is refused before migrating
+OK   E4e. a pooled expected host matches a pin computed from the direct host
+OK   E5. Production migrating against the staging DB (direct) -> FAIL
+OK   E5b. Production migrating against the staging DB (pooled) -> FAIL
+OK   E5c. Production runtime (AURA_DATABASE_URL) against the staging DB -> FAIL
+OK   E5d. Production with an unparsable URL while the staging DB is pinned -> FAIL (unverifiable)
+OK   E6. aura-staging missing AURA_STAGING_EXPECTED_DB_HOST -> FAIL
+OK   E6. aura-staging missing AURA_STAGING_EXPECTED_DB_NAME -> FAIL
+OK   E6. aura-staging missing AURA_STAGING_EXPECTED_DB_USER -> FAIL
+OK   E6. aura-staging missing AURA_STAGING_FORBIDDEN_DB_HOSTS -> FAIL
+OK   E6b. aura-staging missing DATABASE_URL -> FAIL
+OK   E6c. aura-staging missing VERCEL_PROJECT_ID -> FAIL
+OK   E7. with the committed pin, Production on a non-staging DB still passes (direct + pooled runtime)
+OK   E7b. a Production build without DATABASE_URL is still left to Prisma, pinned or not
+OK   E8. a staging allowlist containing the Production ID refuses every migrating build
+OK   E8b. committed constants are frozen; the DB pin list holds only SHA-256 hex
+OK   E9. --hash-host prints exactly SHA-256(normalised host), and pooled/uppercase hosts give the same digest
+OK   E9b. --hash-host never echoes the host
+OK   E9c. --hash-host refuses a full connection URL (exit 1) without echoing it
+OK   E10. the real vercel-build.sh refuses aura-staging before any migration while its DB is unpinned
+OK   F1. STAGING_DB_HOST_SHA256 is exactly the verified aura-staging digest
+OK   F2. the only SHA-256 digest committed in the guard is the staging one (the Production digest is never committed)
+OK   F3. no Neon hostname is committed in the guard (only digests)
+SKIP F4-F7 (set AURA_TEST_STAGING_DB_HOST locally to run the real-host checks; never commit the host)
+OK   D1. the guard runs immediately before `prisma migrate deploy`
+OK   D2. SCRIPT_DIR is defined before the guard uses it
+OK   D3. the guard call is not exit-code-swallowed
+OK   D4. vercel-build.sh still never references a database URL itself
+OK   D5. this test is wired into CI
+
+133 passed, 0 failed
+ALL DB IDENTITY GUARD CHECKS PASSED
+
+# exit=0 signal=

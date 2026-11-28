@@ -1,0 +1,14 @@
+$ npx ts-node test/availabilityPreferencesPref01Db.test.ts
+# job=day-constructor-acceptance-db-tests step=Run PREF-01 availability preferences DB test env={}
+OK   D1. A newly registered user has no work hours and no work days
+OK   D2. A newly registered user has no availability configured
+OK   D3. Setting work hours leaves confirmed plans untouched
+OK   D4. Custom work hours and days are stored as given
+OK   D5. Changing to a non-Monday-Friday schedule leaves confirmed plans untouched
+OK   D6. Setting availability that excludes a planned time leaves confirmed plans untouched
+OK   D7. Clearing both preferences leaves confirmed plans untouched
+OK   D8. Clearing returns the user to the unconfigured default (skip is always possible)
+
+ALL PREF-01 DB CHECKS PASSED
+
+# exit=0 signal=

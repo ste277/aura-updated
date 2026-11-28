@@ -1,0 +1,45 @@
+$ npx ts-node test/goalActivityExecutionCompletionDb.test.ts
+# job=day-constructor-acceptance-db-tests step=Run Goal activity execution completion DB test env={}
+OK   28. non-Goal plan: Done behaves exactly as before (LOGGED, HabitLog created)
+OK   28. non-Goal plan: no GoalActivityExecution row created
+OK   29. DONE: plan becomes LOGGED
+OK   29. DONE: execution created
+OK   29. DONE: snapshot = DONE/null/null, currentValue = null
+OK   29. GoalActivity derived state = COMPLETED (unchanged lifecycle truth)
+OK   30. DURATION default: snapshot target = 30 (from CompletionRequirement, not scheduling duration)
+OK   30. DURATION default: currentValue = 30 (defaults to target on plain Done)
+OK   31. DURATION override: plan still LOGGED
+OK   31. DURATION override: currentValue = 18
+OK   31. DURATION override: snapshot target remains 30
+OK   32. MEASURED default: snapshot = 20/pages
+OK   32. MEASURED default: currentValue = 20
+OK   33. MEASURED override: currentValue = 12
+OK   33. MEASURED override: plan = LOGGED
+OK   33. MEASURED override: target snapshot = 20
+OK   34. exceeds target: currentValue = 25, no clamp, no validation failure
+OK   35. zero: valid, plan still LOGGED (explicit Done remains completion truth)
+OK   35. zero: currentValue = 0 persisted exactly (not coerced to target or null)
+OK   36. actualValue=-1 rejected (transaction threw)
+OK   36. actualValue=-1: plan remains UPCOMING, not LOGGED
+OK   36. actualValue=-1: no GoalActivityExecution created
+OK   36. actualValue=NaN rejected (transaction threw)
+OK   36. actualValue=NaN: plan remains UPCOMING, not LOGGED
+OK   36. actualValue=NaN: no GoalActivityExecution created
+OK   36. actualValue=Infinity rejected (transaction threw)
+OK   36. actualValue=Infinity: plan remains UPCOMING, not LOGGED
+OK   36. actualValue=Infinity: no GoalActivityExecution created
+OK   37. DONE + actualValue rejected
+OK   37. DONE + actualValue: no partial transaction effects (plan still UPCOMING)
+OK   37. DONE + actualValue: no execution created
+OK   38. existing execution: snapshot target remains 20, NOT rewritten to the live 30
+OK   38. existing execution: no actualValue supplied defaults from the EXISTING SNAPSHOT target (20), not the live GoalActivity target (30)
+OK   38. exactly one execution row exists for this plan (updated in place, not duplicated)
+OK   39. retry: second call returns the SAME habitLog id (existing idempotent-retry behavior preserved)
+OK   39. retry: exactly one GoalActivityExecution row exists (no duplicate)
+OK   40. rollback: transaction threw
+OK   40. rollback: PlannedActivity remains UPCOMING, loggedAt/habitLogId still null
+OK   40. rollback: no HabitLog row was left behind (not even partially)
+OK   40. rollback: no GoalActivityExecution row was left behind
+ALL GOAL ACTIVITY EXECUTION COMPLETION CHECKS PASSED
+
+# exit=0 signal=
