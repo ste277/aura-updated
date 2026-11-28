@@ -136,12 +136,12 @@ window.__privacy = [];
   ['log', 'info', 'debug', 'warn', 'error'].forEach(function (m) { var o = console[m].bind(console); console[m] = function () { window.__privacy.push('console.' + m + ':' + String(arguments[0]).slice(0, 120)); return o.apply(null, arguments); }; });
 })();`;
 
-function page(mutation: Mutation, w: number, h: number, extra: Record<string, unknown> = {}): string {
-  const app = bundle(path.join(ROOT, 'test/palm04I2Harness.tsx'), mutation);
+function page(mutation: Mutation, w: number, h: number, extra: Record<string, unknown> = {}, entry = 'test/palm04I2Harness.tsx'): string {
+  const app = bundle(path.join(ROOT, entry), mutation);
   const esc = (s: string) => s.replace(/<\/script/gi, '<\\/script');
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <style>html,body{margin:0;background:#0b1020;color:#f8fafc;font-family:system-ui,sans-serif}</style>
-<script>${esc(SPIES)}</script><script>window.process = { env: { NODE_ENV: 'development' } };window.__PALM_HARNESS_SIZE=${JSON.stringify({ w, h })};${Object.entries(extra).map(([k, v]) => `window.${k}=${JSON.stringify(v)};`).join('')}</script>
+<script>${esc(SPIES)}</script><script>window.process = { env: { NODE_ENV: 'development', NEXT_PUBLIC_AURA_PALM_IMAGE_INPUT: 'g5-i1-dev' } };window.__PALM_HARNESS_SIZE=${JSON.stringify({ w, h })};${Object.entries(extra).map(([k, v]) => `window.${k}=${JSON.stringify(v)};`).join('')}</script>
 <script>${esc(reactUmd)}</script><script>${esc(reactDomUmd)}</script></head><body><div id="root"></div><script>${esc(app)}</script></body></html>`;
 }
 
@@ -803,8 +803,11 @@ async function boundarySuite(browser: any, mutation: Mutation, verbose: boolean)
         const before = await trace('heart');
         // "On the boundary": 0.01 CSS px inside the edge -- browsers carry pointer coordinates in reduced precision,
         // so the exact edge position can land a hair outside (and is then, correctly, off the photo).
-        // Touch positions arrive rounded to about a whole CSS pixel, so touch uses the edge pixel (0.6 px inside).
-        const inset = kind === 'touch' ? 0.6 : 0.01;
+        // "On the boundary" = the photo's edge pixel, 0.6 CSS px inside the edge, for every pointer kind: touch positions
+        // arrive rounded to about a whole CSS pixel, and browsers hit-test a box with a fractional edge (e.g. a bottom at
+        // 648.42 px) against its pixel-snapped painted rectangle, so a pointer in the sub-pixel band never reaches the stage
+        // at all (P4-I4: the new progress steps moved the stage onto such a fractional position).
+        const inset = 0.6;
         const nudge = (v: number, size: number) => (v === 0 ? inset / size : v === 1 ? 1 - inset / size : v);
         const onP = at(c, nudge(e.on[0], c.width), nudge(e.on[1], c.height));
         await gesture(kind, onP, onP);
@@ -818,7 +821,7 @@ async function boundarySuite(browser: any, mutation: Mutation, verbose: boolean)
         const between = await trace('heart');
         await gesture(kind, inside, offP);
         const t2 = await trace('heart');
-        check(`B4 ${T} ${kind} ${e.name}: a stationary tap on the boundary (${inset} CSS px inside) is kept (${last ? `${last.x.toFixed(6)},${last.y.toFixed(6)}` : 'none'}); a short release just off the photo is refused and leaves the draft unchanged`, okOn && JSON.stringify(t2) === JSON.stringify(between), { okOn, last, n2: t2.length, n1: between.length });
+        check(`B4 ${T} ${kind} ${e.name}: a stationary tap on the boundary pixel (${inset} CSS px inside) is kept (${last ? `${last.x.toFixed(6)},${last.y.toFixed(6)}` : 'none'}); a short release just off the photo is refused and leaves the draft unchanged`, okOn && JSON.stringify(t2) === JSON.stringify(between), { okOn, last, n2: t2.length, n1: between.length });
         // keep the draft short: remove the boundary point again (only if one was added)
         if (added) { await pg.focus('[data-testid="palm-tracing-undo"]'); await pg.keyboard.press('Enter'); await settle(); }
       }
