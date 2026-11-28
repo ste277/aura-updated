@@ -1033,6 +1033,16 @@ jobs:
         run: npx ts-node test/palm04I4JourneyBrowser.test.ts
       - name: Run synthetic feature-to-reading journey through the standalone E1 preview harness (PALM-04-I4)
         run: npx ts-node test/palm04I4FeatureToReading.test.ts
+      # PALM-04-I5: camera capture. Mocked streams (canvas.captureStream of a drawn synthetic palm) and Chrome's
+      # built-in fake camera device only -- no real camera, no photograph, no network.
+      - name: Run camera adapter tests (PALM-04-I5, mocked streams)
+        run: npx ts-node test/palm04I5CameraAdapter.test.ts
+      - name: Run camera component tests (PALM-04-I5, jsdom, mocked camera)
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/palm04I5CameraJsdom.test.ts
+      - name: Run camera journey browser tests (PALM-04-I5, runner's installed Google Chrome, mocked streams and fake device, no network)
+        env:
+          PALM_BROWSER_CHANNEL: chrome
+        run: npx ts-node test/palm04I5CameraBrowser.test.ts
       # PALM-03-E1: development-only personalised interpretation engine (synthetic
       # observations only; unreviewed content). The package suite compares the engine
       # with the unmodified C1 reference oracle (python3, preinstalled on the runner):

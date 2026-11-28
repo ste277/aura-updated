@@ -26,6 +26,8 @@ const LIB_DIR = 'apps/web/lib/palm-analysis';
 const UI_DIR = 'apps/web/components/palm-scan';
 const listTs = (rel: string) => fs.readdirSync(path.join(ROOT, rel)).filter((f) => /\.(ts|tsx)$/.test(f)).map((f) => `${rel}/${f}`);
 const FEATURE_FILES = [...listTs(LIB_DIR), ...listTs(UI_DIR)];
+// AURA-PALM-04-I5: the one camera adapter (see A4c)
+const CAMERA_ADAPTER = `${LIB_DIR}/camera.ts`;
 
 // ============================================================ A. no network / storage / logging / camera
 check('A0. the feature has the expected modules', FEATURE_FILES.length >= 10 && FEATURE_FILES.includes(`${UI_DIR}/PalmImageInput.tsx`) && FEATURE_FILES.includes(`${LIB_DIR}/session.ts`));
@@ -34,7 +36,17 @@ for (const file of FEATURE_FILES) {
   check(`A1. ${file}: no fetch() call / XHR / sendBeacon / WebSocket / EventSource`, !/\bfetch\s*\(|XMLHttpRequest|sendBeacon|WebSocket|EventSource|navigator\.share/.test(src));
   check(`A2. ${file}: no persistent storage (local/session storage, IndexedDB, cookies, Cache API, OPFS)`, !/localStorage|sessionStorage|indexedDB|document\.cookie|caches\.|getDirectory\(|serviceWorker/.test(src));
   check(`A3. ${file}: no console output (no image or landmark logging)`, !/console\.(log|info|debug|warn|error|trace|table|dir)/.test(src));
-  check(`A4. ${file}: no camera / media capture`, !/getUserMedia|mediaDevices|capture=|\bcapture:|@capacitor\/camera|ImageCapture/.test(src));
+  if (file === CAMERA_ADAPTER) {
+    // AURA-PALM-04-I5 (owner ticket 50361, plan G-8 / D2) -- SUPERSEDES A4 FOR THIS ONE FILE ONLY. A4 was written for
+    // G5-I1, before the planned camera adapter; every other feature file is still held to A4 unchanged. The camera
+    // adapter is instead held to the stricter, camera-specific A4c checks below.
+    check(`A4c-1. ${file}: the browser camera API is reached in exactly one place (navigator.mediaDevices.getUserMedia)`, (src.match(/\.mediaDevices\b/g) ?? []).length === 1 && (src.match(/getUserMedia!?\(/g) ?? []).length === 2 && /env\.getUserMedia!\(PALM_CAMERA_CONSTRAINTS\)/.test(src));
+    check(`A4c-2. ${file}: video only -- the constraints set audio: false and nothing requests audio`, /audio:\s*false as const/.test(src) && (src.match(/audio\s*:/g) ?? []).length === 1);
+    check(`A4c-3. ${file}: no recording, still-image grabbing, screen sharing, device listing or device identity`, !/MediaRecorder|ImageCapture|takePhoto|grabFrame|getDisplayMedia|enumerateDevices|deviceId|groupId|\.label\b|getSettings|getCapabilities|captureStream|requestVideoFrameCallback|@capacitor\/camera|capture=|\bcapture:/.test(src));
+    check(`A4c-4. ${file}: a stream that carries any non-video track is stopped and refused (fail closed)`, /tracks\.some\(\(t\) => t\.kind !== 'video'\)/.test(src));
+  } else {
+    check(`A4. ${file}: no camera / media capture`, !/getUserMedia|mediaDevices|capture=|\bcapture:|@capacitor\/camera|ImageCapture/.test(src));
+  }
   check(`A5. ${file}: no external URL (no CDN / third-party endpoint)`, !/https?:\/\//.test(src));
   check(`A6. ${file}: no analytics / tracker / API / database access`, !/trackEvent|productEvents|['"`]\/api\/|lib\/db|prisma|getSession/.test(src));
   check(`A7. ${file}: no image encoding for transport (toDataURL / toBlob / FileReader / FormData)`, !/toDataURL|toBlob|convertToBlob|FileReader|FormData|btoa\(/.test(src));

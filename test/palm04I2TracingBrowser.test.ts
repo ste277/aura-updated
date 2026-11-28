@@ -28,7 +28,7 @@ const argShots = process.argv.indexOf('--shots');
 const SHOTS = argShots > 0 ? process.argv[argShots + 1] : null;
 
 // ---------------------------------------------------------------- in-memory bundle
-type Mutation = 'none' | 'stretch' | 'container' | 'bypass' | 'original' | 'stale-gesture' | 'ignore-release' | 'retain-revoked' | 'unhandled-limit' | 'r1-head' | 'tap-boundary-bypass' | 'r2-head' | 'filter-before-validate' | 'ignore-coalesced' | 'r3-head' | 'skip-unmappable' | 'stale-confirmation' | 'silent-missing';
+type Mutation = 'none' | 'stretch' | 'container' | 'bypass' | 'original' | 'stale-gesture' | 'ignore-release' | 'retain-revoked' | 'unhandled-limit' | 'r1-head' | 'tap-boundary-bypass' | 'r2-head' | 'filter-before-validate' | 'ignore-coalesced' | 'r3-head' | 'skip-unmappable' | 'stale-confirmation' | 'silent-missing' | 'camera-keep-on' | 'camera-late-grant' | 'camera-ignore-hidden' | 'camera-audio' | 'poll-only';
 /** The R3 head reviewed by the R3 focused review (9463431): the R4 geometry-loss witness must fail on it. */
 const R3_HEAD = '94634312f4249e5edb72e008795fceabb2cca86c';
 /** The R2 head reviewed by 50351 (6ddaa65): the R3 sample-pipeline witness must fail on it. */
@@ -72,6 +72,12 @@ const MUTATIONS: Record<Exclude<Mutation, 'none' | 'original' | 'r1-head' | 'r2-
   'ignore-coalesced': [{ file: 'apps/web/components/palm-scan/PalmImageInput.tsx', from: 'const samples: Array<{ clientX: number; clientY: number }> = coalesced.length ? coalesced : [native];', to: 'const samples: Array<{ clientX: number; clientY: number }> = [native]; void coalesced;' }],
   'tap-boundary-bypass': [{ file: 'apps/web/components/palm-scan/PalmImageInput.tsx', from: 'if (g.invalid) { setMessage(', to: 'if (g.moved && g.invalid) { setMessage(' }],
   'unhandled-limit': [{ file: 'apps/web/components/palm-scan/PalmImageInput.tsx', from: "if (e instanceof TracingError) { setMessage(e.code === 'too-many-points'", to: "if (false) { setMessage(e.code === 'too-many-points'" }],
+  // P4-I5 negative controls (used by test/palm04I5CameraBrowser.test.ts): each removes one camera or lifecycle safeguard
+  'camera-keep-on': [{ file: 'apps/web/components/palm-scan/PalmImageInput.tsx', from: "    cam.stop('done');\n    setCameraNote('');", to: "    setCameraNote('');" }],
+  'camera-late-grant': [{ file: 'apps/web/lib/palm-analysis/camera.ts', from: 'if (disposed || state.epoch !== epoch) { stopTracks(s); return; } // a late grant is stopped at once, never shown', to: '' }],
+  'camera-ignore-hidden': [{ file: 'apps/web/components/palm-scan/PalmImageInput.tsx', from: "      cam.stop('hidden');", to: '' }],
+  'camera-audio': [{ file: 'apps/web/lib/palm-analysis/camera.ts', from: 'audio: false as const,', to: 'audio: true as unknown as false,' }],
+  'poll-only': [{ file: 'apps/web/components/palm-scan/PalmImageInput.tsx', from: "    document.addEventListener('visibilitychange', onLifecycle);\n    document.addEventListener('freeze', onLeave);\n    document.addEventListener('resume', onLifecycle);\n    window.addEventListener('pagehide', onLeave);\n    window.addEventListener('pageshow', onLifecycle);\n    window.addEventListener('focus', onLifecycle);", to: '' }],
 };
 
 function bundle(entry: string, mutation: Mutation): string {
