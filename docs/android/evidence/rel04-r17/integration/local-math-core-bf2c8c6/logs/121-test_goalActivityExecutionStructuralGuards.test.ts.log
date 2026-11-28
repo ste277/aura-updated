@@ -1,0 +1,36 @@
+$ npx ts-node test/goalActivityExecutionStructuralGuards.test.ts
+# job=math-core-tests step=Run Goal activity execution structural guards test env={}
+OK   GoalActivityExecution model exists in schema.prisma
+OK   GoalActivityExecution references GoalActivity via goalActivityId
+OK   GoalActivityExecution does not introduce a day-bucket field (localDate/executionDate/dayBucket/dailyTarget)
+OK   GoalActivityExecution does not introduce a recurrence/frequency field
+OK   GoalActivityExecution does not introduce a competing completion-status field (status/completed/isComplete/completedAt)
+OK   GoalActivityExecution does not introduce a progress-event/child table field
+OK   GoalActivityExecution does not introduce connector-specific source values (Apple Health / Health Connect / external observation)
+OK   GoalActivityExecution has exactly createdAt/updatedAt as its only timestamps (no startedAt/observedAt/syncedAt)
+OK   GoalActivityExecution.plannedActivityId is unique (one live plan cannot be claimed by two execution records)
+OK   PlannedActivity receives no progress columns (currentValue/completionKindSnapshot/etc.)
+OK   Goal receives no progress columns
+OK   GoalActivity itself (the G2.1 definition layer) receives no new progress columns from G2.2.1
+OK   goalActivityExecution.ts imports CompletionRequirement/validateCompletionRequirement from goalCompletion.ts rather than redefining the taxonomy
+OK   goalActivityExecution.ts never defines a second, competing CompletionKind union
+OK   G2.2.2: db.ts logPlannedActivity DOES reference GoalActivityExecution -- the intended completion-time write
+OK   G2.2.2: logPlannedActivity resolves GoalActivity linkage server-side (queries WHERE "plannedActivityId" = ...), never trusts a client-supplied goalActivityId
+OK   G2.2.2: logPlannedActivity never re-snapshots from a live GoalActivity when an execution already exists (uses fromPersistedGoalActivityExecutionSnapshot on the existing row, not normalizeGoalActivityCompletionRequirement, in that branch)
+OK   G2.2.3: applyMoveWrites DOES reference GoalActivityExecution -- the intended continuity repoint
+OK   G2.2.3: the GoalActivityExecution statement in applyMoveWrites is a pure pointer UPDATE (plannedActivityId only) -- it never references completionKind/completionTargetValue/completionUnit (would mean re-snapshotting from a live GoalActivity)
+OK   G2.2.3: applyMoveWrites never references currentValue -- Move must not reset/default/clamp/recalculate it
+OK   G2.2.3: applyMoveWrites never references source -- moving a plan is not a progress observation
+OK   G2.2.3: applyMoveWrites contains no INSERT INTO "GoalActivityExecution" -- Move never creates an execution row
+OK   G2.2.3: applyMoveWrites contains no DELETE FROM "GoalActivityExecution" -- Move never deletes an execution row
+OK   G2.2.3: movePlannedActivity's public input shape (MovePlanInput) still carries only newStartAt -- no new client-supplied executionId/goalActivityId/currentValue/completionRequirement field
+OK   homeCompletion.ts (Home/Right Now) does not reference GoalActivityExecution -- no UX change in G2.2.2/G2.2.3
+OK   dailyAgenda.ts does not reference GoalActivityExecution
+OK   goals.ts computeGoalProgress does not reference GoalActivityExecution -- Goal progress stays activity-count-derived, unaffected by currentValue
+OK   goalsPresentation.ts does not reference GoalActivityExecution (no read-model exposure yet)
+OK   app/api/goals/[goalId]/route.ts does not reference GoalActivityExecution
+OK   dayConstructorOrchestrator.ts does not reference GoalActivityExecution
+OK   dayConstructorAcceptancePersistence.ts does not reference GoalActivityExecution
+ALL GOAL ACTIVITY EXECUTION STRUCTURAL GUARD CHECKS PASSED
+
+# exit=0 signal=

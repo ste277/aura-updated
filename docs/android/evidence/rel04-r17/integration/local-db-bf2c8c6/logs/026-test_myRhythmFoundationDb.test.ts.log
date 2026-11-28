@@ -1,0 +1,87 @@
+$ npx ts-node test/myRhythmFoundationDb.test.ts
+# job=day-constructor-acceptance-db-tests step=Run My Rhythm foundation DB test env={}
+OK   A1. a pre-0053-shaped insert gets rhythmPausedAt NULL, weekdays {}, time NULL, duration NULL
+OK   A2. its weekly policy is preserved exactly (N_PER_WEEK, 3)
+OK   A3. GET goal detail exposes it as active with no preferences
+OK   A4. its rhythm view (weekly progress) is unchanged: 3 remaining
+OK   A5. it is still offered as Goal demand (recommendations unchanged when preferences are unset)
+OK   A6. a NONE activity reads as not paused, no preferences
+OK   A7. the R5 request shape { rhythm } alone still works unchanged (200, target updated)
+OK   B1. setting all three preferences -> 200
+OK   B2. response carries normalized preferences (weekdays sorted)
+OK   B3. persisted columns match
+OK   B4. the weekly target is untouched by a preferences-only update
+OK   B5. a partial update changes only the provided field
+OK   B6. GET goal detail returns the persisted preferences
+OK   B7. clearing one preference (null) leaves the others
+OK   B8. clearing every preference restores the defaults ({} / NULL / NULL)
+OK   B9. [] also clears weekdays
+OK   C. rejects weekday 7 with 400 and an error message
+OK   C. rejects weekday -1 with 400 and an error message
+OK   C. rejects fractional weekday with 400 and an error message
+OK   C. rejects string weekday with 400 and an error message
+OK   C. rejects duplicate weekday with 400 and an error message
+OK   C. rejects weekdays not an array with 400 and an error message
+OK   C. rejects time ANY with 400 and an error message
+OK   C. rejects lowercase time with 400 and an error message
+OK   C. rejects unknown time with 400 and an error message
+OK   C. rejects duration 0 with 400 and an error message
+OK   C. rejects negative duration with 400 and an error message
+OK   C. rejects duration below engine minimum with 400 and an error message
+OK   C. rejects duration above engine maximum with 400 and an error message
+OK   C. rejects fractional duration with 400 and an error message
+OK   C. rejects string duration with 400 and an error message
+OK   C. rejects unknown preference key with 400 and an error message
+OK   C. rejects preferences not an object with 400 and an error message
+OK   C. rejects paused not boolean with 400 and an error message
+OK   C. rejects rhythm null with 400 and an error message
+OK   C. rejects invalid rhythm target with 400 and an error message
+OK   C. rejects empty body with 400 and an error message
+OK   C. rejects valid preferences + invalid paused (whole request rejected) with 400 and an error message
+OK   C. the row is byte-identical after every rejected request
+OK   D1. 2x a week with only one preferred day -> 400 (unsatisfiable under once-per-day)
+OK   D2. raising the target above the preferred day count -> 400 (merged state validated)
+OK   D3. both rejected requests left the row unchanged
+OK   D4. preferences on a NONE (finite) activity -> 400
+OK   D5. pausing a NONE (finite) activity -> 400
+OK   D6. switching to NONE while setting a preference -> 400
+OK   E1. another user cannot pause this rhythm (404)
+OK   E2. another user cannot change its preferences (404)
+OK   E3. the activity under a different Goal id is not found (404)
+OK   E4. unauthenticated -> 401
+OK   E5. another user cannot read the persisted preferences (GET 404)
+OK   E6. none of the refused requests changed the row
+OK   F0. setup: a confirmed rhythm session exists (200)
+OK   F0. setup: exactly one occurrence linked to it
+OK   F0. setup: before pausing it is offered as demand with 1 remaining
+OK   F1. pause -> 200, rhythmPaused true, rhythmPausedAt set
+OK   F2. pause preserves the weekly target and every preference
+OK   F3. the confirmed plan is byte-identical and still UPCOMING (not cancelled, skipped or completed)
+OK   F4. its occurrence row is unchanged
+OK   F5. no execution/completion record was created by pausing
+OK   F6. a paused rhythm is no longer offered as Goal demand (Home / Plan My Day / weekly proposal source)
+OK   F7. other, unpaused rhythms are still offered (pause is per activity)
+OK   F8. a new Goal-linked session while paused is refused (400 GOAL_ACTIVITY_NOT_AVAILABLE)
+OK   F9. ...and no plan was created (no orphan, no fallback finite link)
+OK   F10. ...and no occurrence was created
+OK   F11. ...and GoalActivity.plannedActivityId still points at the confirmed session
+OK   F12. pausing again is idempotent: 200 and the ORIGINAL pause instant is kept
+OK   F13. editing preferences while paused keeps it paused
+OK   F14. GET goal detail shows paused, preferences, and the unchanged weekly progress (1 committed)
+OK   G1. resume -> 200, rhythmPausedAt cleared, target and preferences intact
+OK   G2. offered as demand again with remaining = target 2 - 1 confirmed = 1 (existing weekly-count rule)
+OK   G3. resuming created no plan and no occurrence by itself (no automatic scheduling)
+OK   G4. a second session on the SAME day is refused (once-per-day rule unchanged)
+OK   G5. after resume, the second weekly session can be confirmed (200)
+OK   G6. a third session beyond the weekly target is refused (409 CAPACITY_EXCEEDED) -- no duplicate plan
+OK   G7. exactly two occurrences and two live Walk plans exist
+OK   G8. with the target met, it is no longer offered as demand
+OK   H1. { rhythm: NONE } -> 200 and clears preferences and pause
+OK   H2. ...and leaves the confirmed sessions in place
+OK   H3. a finite (NONE) activity still links through the unchanged legacy path (200, linked)
+OK   I0. setup: legacy rhythm is weekly (4x) and active
+OK   I1. two concurrent PATCHes both succeed and both effects persist
+
+All checks passed.
+
+# exit=0 signal=

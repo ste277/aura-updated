@@ -1,0 +1,25 @@
+$ npx ts-node test/myPeopleMp3Ui.test.ts
+# job=math-core-tests step=Run AURA-MP-3 My People Home and plan hand-off rules test env={}
+OK   year key is the occurrence date at 00:00Z (design: reminderAt = occurrence date)
+OK   ahead key is distinct and deterministic (day before, 12:00Z)
+OK   keys roll over month and year boundaries
+OK   ahead: "Not now" writes the ahead key; "Not this year" writes the year key
+OK   on the day: either choice ends it for this occurrence (year key)
+OK   "Not now" hides ahead of the day only -- the day itself shows once more
+OK   "Not this year" hides ahead and on the day
+OK   a dismissal never carries into next year (different occurrence key)
+OK   29 Feb observed on 28 Feb: keyed by the observed date
+OK   no card when nothing is surfaced
+OK   no card for a dismissed day
+OK   ONE card: the soonest surfaced, not-dismissed day; others counted as "+N more"
+OK   headlines: "Ravi's birthday is today" / "Amma's anniversary is tomorrow" / "Ravi · Graduation is in 5 days"
+OK   headlines never use guilt or scoring words
+OK   person -> catch-up, no dates (Plan's normal horizon)
+OK   birthday 5 days away -> birthday-party, the day either side
+OK   anniversary tomorrow -> anniversary-dinner, window never starts before today
+OK   other day today -> celebration-dinner, today to tomorrow
+OK   29 Feb observed on 28 Feb (non-leap) -> window around the observed day
+
+ALL MY PEOPLE MP-3 UI CHECKS PASSED (19)
+
+# exit=0 signal=

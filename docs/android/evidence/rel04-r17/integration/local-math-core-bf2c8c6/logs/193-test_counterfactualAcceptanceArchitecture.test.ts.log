@@ -1,0 +1,37 @@
+$ npx ts-node test/counterfactualAcceptanceArchitecture.test.ts
+# job=math-core-tests step=Run counterfactual acceptance architecture test env={}
+=== the real tree conforms ===
+OK   THE REAL PRODUCTION TREE HAS ZERO ACCEPTANCE-PREDICATE ARCHITECTURE VIOLATIONS (589 production files scanned)
+=== ownership, zero consumers, untouched scheduling code ===
+OK   NO ACTIVE CONSUMERS: the predicate vocabulary exists in exactly THREE production files (itself, the O5 P4c3 typed accepted-counterfactual authority -- its only VALUE importer and CALLER -- and the inert O5 P4b4 same-run shadow composition, which imports only its TYPES); nothing else imports or calls it, and nothing consumes the composition -- no active, UI, API or persistence wiring
+OK   VOCABULARY OWNERSHIP: P4b3 is the FIRST and ONLY module that owns OWNER_WOULD_BE_UNPLACED, OWNER_TIMING_DEGRADED, FIXED_PLACEMENT_CHANGED, NON_OWNER_CHANGED, UNNECESSARY_OWNER_CHANGE, PRECEDENCE_NOT_TIE, NET_PROPOSED_LOSS and its unavailable reasons; none leaked backward into the generator, the promotion modules, the trace, P3 or any surface
+OK   NOT PUBLIC / SIGNED / PERSISTED / ACCEPTED: no preview, signing, acceptance, persistence, Recomposition, Move, presentation, route, scheduling-context, trace, basis, placements, input, contention, attempts, generator, preparation or orchestration module names the predicate
+OK   NO PERSISTENCE, NO SCHEMA: the Prisma schema and every migration directory's own contents mention no counterfactual acceptance; no migration was added (count-independent)
+OK   THE GENERATOR AND THE CONSTRUCTOR ARE UNTOUCHED: the generator never names the predicate and dayConstructor.ts still exports exactly the comparator, `constructDay` and `constructDayWithTrace`
+OK   #208 SCOPE: the predicate (which READS Dates and emits none) is on the protected Date-mutator list with zero exceptions; the regex-literal scanner debt is carried unchanged
+OK   REQUIRED CI: the behavior and architecture suites are mandatory steps in the pure job
+=== the predicate JUDGES; it cannot regenerate, re-rank, search or read pressure ===
+OK   IMPORTS: exactly six -- the Constructor's timing comparator and the established above-pressure tie primitive as values, the PromotionInput / basis / baseline / LocalCounterfactual contracts as TYPES (the generator is imported as a TYPE only)
+OK   NO REGENERATION: no generator, Constructor, orchestrator, preparation, projection or precedence-comparator call; no timing search; no candidate list, scheduling attempt, contention authority or raw trace -- it judges P4b2's OUTPUT, never the historical search evidence
+OK   NO DATABASE, SNAPSHOT, CLOCK, ASYNC, LOGGING, ENVIRONMENT, FLAG, GENERIC CLONE, `any` or facts / evidence
+OK   NONE IS NEVER "SAFE": the module reads no pressure value, names no DecisionPressure / NONE / LAST_KNOWN / SAFE_TO_DEFER / isUnpressured notion, and reads owners by id only -- the unplaced-owner rule is unconditional, so no renaming of NONE can license an owner loss
+OK   NO VALUE, NO GLOBAL COMPARATOR: no score, utility, weight, "better schedule", importance / deadline / originalOrder read or goal term; the tie is the ESTABLISHED `compareAbovePressure` over `projectAbovePressureFacts` required for EVERY displaced owner, and the timing floor is the Constructor's own comparator
+OK   THE V1 POLICY AND ITS PRECEDENCE ARE PINNED: seven reject sites in the order FIXED, NON_OWNER, UNNECESSARY_OWNER_CHANGE, PRECEDENCE, UNPLACED, TIMING, COUNT; every structural (UNAVAILABLE) check precedes every policy (REJECT) check; ACCEPT only at the very end; unknown baseline fit and silent changes are UNAVAILABLE
+OK   PURE, IMMUTABLE, NEVER THROWS: no mutation, reordering or module state; every decision is a frozen record of strings; `evaluateCounterfactualAcceptance` is wrapped (EVALUATION_FAILED); half-open overlap and non-positive blockers match the Constructor
+OK   CONTRACT: input is exactly { constructionBasis, baselinePlacements, promotionInput, counterfactual }; the decision is ACCEPT | REJECT { reason } | UNAVAILABLE { reason }; the seven rejection and six unavailable reasons are exactly the reviewed ones; exports are the five reviewed names
+=== MUTATIONS: each violation, injected into an in-memory copy, is detected ===
+OK   MUTATION: NONE is renamed into "safe to drop" (a pressure read, an `isUnpressured` / SAFE_TO_DEFER helper, an owner loss conditional on NONE) -> detected
+OK   MUTATION: the unplaced-owner rule is removed or made conditional; the net COUNT replaces owner safety -> detected
+OK   MUTATION: a WORSE timing fit is allowed (the floor removed, reversed or ranked by a local table) -> detected
+OK   MUTATION: originalOrder / importance / deadline enters the tie, the global comparator is used, pressure becomes a precedence dimension, the tie is required for only ONE direction or ONE owner -> detected
+OK   MUTATION: a NON-OWNER may be moved, a FIXED placement may change, an undisturbed authorized owner may be moved -> detected
+OK   MUTATION: REGENERATION (a call or import of the generator, the Constructor, a timing search, a candidate list, a contention authority) -> detected
+OK   MUTATION: a database query, a clock read, async, logging, an environment / flag read -> detected
+OK   MUTATION: an input is MUTATED, a decision is UNFROZEN, the reasons are re-ordered, a second ACCEPT site appears -> detected
+OK   MUTATION: a policy check runs BEFORE the structural checks, a silent change / unknown baseline fit stops being UNAVAILABLE -> detected
+OK   MUTATION: acceptance vocabulary leaks backward (the generator, the promotion modules or the trace name a reason), or a production consumer / public wiring appears -> detected
+OK   MUTATION: the contract changes (an extra input authority, an extra decision field, a new rejection reason such as OWNER_PRESSURED) -> detected
+OK   the mutations were applied to in-memory copies only: the real tree still has zero violations afterwards
+ALL ACCEPTANCE PREDICATE ARCHITECTURE CHECKS PASSED
+
+# exit=0 signal=

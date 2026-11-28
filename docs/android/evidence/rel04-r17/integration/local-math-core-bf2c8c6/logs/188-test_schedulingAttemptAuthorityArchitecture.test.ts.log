@@ -1,0 +1,50 @@
+$ npx ts-node test/schedulingAttemptAuthorityArchitecture.test.ts
+# job=math-core-tests step=Run scheduling attempt authority architecture test env={}
+=== the real tree conforms ===
+OK   THE REAL PRODUCTION TREE HAS ZERO SCHEDULING-ATTEMPT-AUTHORITY ARCHITECTURE VIOLATIONS (589 production files scanned)
+=== confinement, producer, consumers ===
+OK   THE ATTEMPT VOCABULARY EXISTS IN EXACTLY FIVE PRODUCTION FILES: the pure module, the promotion contention view (which imports the shared normalization), the internal promotion boundary and (O5 P4b2, TYPE only) the pure local counterfactual generator and (O5 P4b4, the field NAME only, no import) the same-run shadow policy composition; only those import it; the run-level projection is called only by the boundary, the normalization only by the module and the view
+OK   NOT A SCHEDULING CONSUMER: no Constructor, comparator, capacity, trace, basis, placements, assembler, orchestrator, search, preview, signing, acceptance, persistence, Recomposition, Move, route or scheduling-context module mentions the attempt authority
+OK   NO PERSISTENCE, NO SCHEMA: the Prisma schema and every migration directory's own contents mention no scheduling attempt; no migration was added (count-independent)
+OK   RAW TRACE BOUNDARY: the module is a reader of the raw trace (types only) and nothing downstream of it is: the output contract names no trace type, and the contention view reads no event itself
+OK   ORDER IS DISCOVERY, NEVER RANKING: no production file consumes an attempt by position (`attempts[0]`, `.find`, `.at(0)`, `.shift`, `.slice(0`) -- a future generator must rank through `compareCandidatesForPlacement` over the carried fit
+=== the module is a minimal, pure, neutral normalization ===
+OK   IMPORTS: exactly three TYPE imports (the existing timing-fit type, the trace, the basis outcome) -- no value import, hence no Constructor, search, database, clock or orchestrator can be reached
+OK   MINIMUM CONTRACT: an attempt is exactly { intentId, start, end, timingFit?, conflictingOwnerIds }; the authority exactly { attempts }; reasons are the three infrastructural ones; exports are the six reviewed names; no round, winner interval, pressure, precedence, candidate order or candidate list
+OK   NO POLICY, NO PRESSURE, NO RANKING, NO HISTORY: the module names no pressure, importance, deadline, order, candidate order, round, winner interval, candidate list, label, acceptance, safety or counterfactual term, and contains no sort
+OK   NO DATABASE, SNAPSHOT, CLOCK, SEARCH, CONSTRUCTOR, RANKING / FIT RECOMPUTATION, ASYNC, LOG OR GENERIC CLONE
+OK   FRESH DATES: exactly two `new Date(` allocations, each from a trace attempted-interval string, each frozen; no alias to any trace, basis or placement object is possible (the trace carries strings)
+OK   FAIL CLOSED: a malformed timing fit or interval throws inside the wrapped normalization; the projection requires a READY basis, validates every id against it and never throws
+OK   SLOT IDENTITY AND SOURCES: identity is (intent, start, end, timingFit); slots and owners come only from real events, in order of discovery
+=== the P3a payload is the candidate's own descriptive fit ===
+OK   DIRECT SOURCE: the FLEXIBLE contention call passes `candidate.timingFit` (the candidate that attempted the interval), the FIXED call passes none, the observer type adds only the optional fit, and the collector copies it as a plain string -- nothing is recomputed, inferred from the interval or joined from a list
+OK   EMISSION UNCHANGED BY CONSTRUCTION: the event identity still excludes the fit (so event counts and dedup are exactly the old ones) and the trace module ranks and recomputes nothing
+OK   THE CONSTRUCTOR HASH REGIONS ARE UNTOUCHED: the placement-ranking and precedence code (pinned by the P0c guard) are not edited -- only the observer type, the flexible call argument and the collector push changed
+=== the boundary: typed pairs, run-level artifacts once, same run, isolated ===
+OK   TYPED PAIRS, NO PARALLEL ARRAYS: each promotion is `{ input, contention }` built in ONE expression from its input; there is no parallel contention array; the basis and placements are NOT duplicated into pairs
+OK   RUN-LEVEL SHAPE AND SAME RUN: `run` is exactly { constructionBasis, baselinePlacements, schedulingAttempts, promotions } plus (O5 SHADOW EVIDENCE) the numbers-only `funnel` from the SAME diagnostics (one orchestration), the attempts hand-over is the one reviewed call with an isolated wrapper, and the signature is still (request, deps)
+OK   NORMAL PATH UNTOUCHED: the orchestrator and the normal `orchestrateConstructDay` entry point do not name the attempt authority
+=== event authority, NOT search history ===
+OK   NO CANDIDATE HISTORY: the ConstructionBasis still holds exactly its seven fields; the orchestrator still has exactly one T1 capture and two candidate-map writes; the search limit, search sites and construction sites are unchanged
+OK   #208 SCOPE: the module is on the protected Date-mutator list (zero exceptions); the regex-literal scanner debt is carried unchanged
+=== MUTATIONS: each violation, injected into an in-memory copy, is detected ===
+OK   MUTATION: the timing fit is DROPPED (the trace stops copying it; the collector stops passing it) -> detected
+OK   MUTATION: the WRONG timing fit (a literal, another candidate's, or a fit on the FIXED call) -> detected
+OK   MUTATION: the fit is RECOMPUTED (from a label, a score, the interval or a ranking helper) in the trace, the module or the Constructor call -> detected
+OK   MUTATION: the event identity starts including the fit (so counts could change) -> detected
+OK   MUTATION: TRACE-ORDER RANKING (a consumer takes `attempts[0]`, `.find`, `.at(0)`, `.shift`) -> detected
+OK   MUTATION: an OWNER ATTEMPT is dropped (owners no longer unioned) or an attempt is INVENTED (an extra slot, an owner not from an event) -> detected
+OK   MUTATION: candidate-list history is captured for every replenishment round (a second capture, a per-round collection in the basis or the orchestrator, a history field in the module) -> detected
+OK   MUTATION: a SECOND timing search / SECOND Constructor / SECOND orchestration / database / clock in the module or the boundary -> detected
+OK   MUTATION: PRESSURE / precedence / policy / round reaches the attempts (a pressure field, an importance read, a round carried, a candidate order) -> detected
+OK   MUTATION: PAIR MISALIGNMENT (parallel array back, pairing by position, one pair shortened, authority built from another input) -> detected
+OK   MUTATION: the run-level basis is DUPLICATED into every pair, or the run-level pass-through is changed -> detected
+OK   MUTATION: the public preview / signing / acceptance / persistence / route / schema surfaces, the Constructor logic, the basis, the placements or the orchestrator name the attempt authority -> detected
+OK   MUTATION: a shared (aliased) or non-frozen Date / an unfrozen output -> detected
+OK   MUTATION: a production consumer of the attempt authority appears (a module importing it, a second projection or normalization call) -> detected
+OK   MUTATION: the module loses fail-closed handling (a malformed fit accepted, a value import, a throwing projection, the basis unchecked) -> detected
+OK   MUTATION: the search limit changes -> detected
+OK   the mutations were applied to in-memory copies only: the real tree still has zero violations afterwards
+ALL SCHEDULING ATTEMPT AUTHORITY ARCHITECTURE CHECKS PASSED
+
+# exit=0 signal=

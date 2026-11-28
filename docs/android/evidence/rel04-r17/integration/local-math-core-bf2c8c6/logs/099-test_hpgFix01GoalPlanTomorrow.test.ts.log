@@ -1,0 +1,20 @@
+$ npx ts-node test/hpgFix01GoalPlanTomorrow.test.ts
+# job=math-core-tests step=Run HPG-FIX-01 Goal -> Plan -> Tomorrow (V1-02) test env={}
+OK   0. fixture: handoff row is a canonical goal-demand row for today
+OK   1. REPRO: today-keyed goal row accepted for tomorrow is rejected
+OK   1. REPRO: rejection detail is AUTOMATIC_GOAL_PLANNING_DATE_MISMATCH
+OK   2. goal row re-keyed to tomorrow
+OK   2. goal row keeps title / goalActivityId / every other field
+OK   2. non goal-demand rows untouched (same object)
+OK   2. FIXED: re-keyed row passes authorization for tomorrow
+OK   2. switching back to Today re-keys back (still authorizable for today)
+OK   2. no change -> the same array instance (no needless re-render)
+OK   2. server provenance check still rejects a mismatched link
+OK   3. same activity for both days collapses to one intent id (never two identical ids)
+OK   4. PlanDayClient re-keys rows whenever planningDate changes
+OK   4. id helper: non goal-demand ids and same-date ids are unchanged
+OK   4. id helper: malformed goal-demand ids are never rewritten (server rejects them)
+
+hpgFix01GoalPlanTomorrow: all checks passed
+
+# exit=0 signal=

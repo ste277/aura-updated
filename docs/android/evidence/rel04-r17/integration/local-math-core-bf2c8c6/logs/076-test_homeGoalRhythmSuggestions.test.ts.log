@@ -1,0 +1,20 @@
+$ npx ts-node test/homeGoalRhythmSuggestions.test.ts
+# job=math-core-tests step=Run Home Goal Rhythm suggestions test env={}
+OK   1. an eligible 3x/week GoalActivity appears in Home's mapped suggestions
+OK   2. a 2/week target already fully completed does NOT appear as unmet Home demand
+OK   3. a GoalActivity absent from discovery (e.g. an archived Goal, excluded server-side) never appears on Home
+OK   4. a 1/week target with one already-UPCOMING occurrence is exhausted -- no duplicate Home demand
+OK   5. 1 completed of 3/week -> remainingThisWeek 2, correctly counted
+OK   5b. progress label reflects the exact real count, never invented
+OK   6a. a Sunday completion exhausts that same week's Home demand
+OK   6b. crossing into the next Monday-start week, the prior Sunday completion does not carry over
+OK   7. Home and Plan My Day agree exactly on this GoalActivity's eligibility (both delegate to the same loadEligibleGoalDemand call)
+OK   8. this PR's new Home-integration files introduce no second Daily Rhythm filter (timing/filtering stays exclusively Plan My Day's, unchanged)
+OK   9. the pre-existing Home guidance fetch (Best For You / astrology-ranked recommendations) is untouched by this PR's addition
+OK   10a. the mapped suggestion carries the exact source goalId/goalActivityId into its planHandoff
+OK   10b. feeding the suggestion's own planHandoff into the real Plan My Day handoff resolver resolves back to the SAME GoalActivity id
+OK   11a. exactly one discovery read and one facts read occur per Home load -- no repeats, no extra calls
+OK   11b. the new Home route contains no write-shaped call (create/update/delete/insert) anywhere in its source
+ALL HOME GOAL RHYTHM SUGGESTIONS CHECKS PASSED
+
+# exit=0 signal=

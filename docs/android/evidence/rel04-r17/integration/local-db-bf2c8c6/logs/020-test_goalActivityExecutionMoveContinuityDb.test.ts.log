@@ -1,0 +1,34 @@
+$ npx ts-node test/goalActivityExecutionMoveContinuityDb.test.ts
+# job=day-constructor-acceptance-db-tests step=Run Goal activity execution Move continuity DB test env={}
+OK   15. non-Goal Move: A MOVED, B UPCOMING, exactly as before
+OK   15. non-Goal Move: no GoalActivityExecution created for either A or B
+OK   16. Move succeeds, GoalActivity repoints to B
+OK   16. zero execution records exist for either A or B -- nothing fabricated by Move
+OK   17. A remains MOVED, B is the live successor
+OK   17. GoalActivity.plannedActivityId = B
+OK   17. execution.id unchanged (same row, not recreated)
+OK   17. execution.goalActivityId unchanged
+OK   17. execution.plannedActivityId = B
+OK   17. execution.currentValue unchanged (12)
+OK   17. execution snapshot unchanged (20/pages)
+OK   18. live GoalActivity target really did change to 30
+OK   18. execution snapshot remains 20 -- Move never re-snapshots from the live GoalActivity
+OK   18. execution currentValue remains 12
+OK   18. execution plannedActivityId = B
+OK   19. currentValue = 0 is preserved exactly (no falsy-value bug coercing it to null/target)
+OK   20. currentValue = 25 (above target 20) preserved exactly, no clamp
+OK   21. currentValue = null is preserved as null -- Move never interprets null as "initialize progress"
+OK   22. DONE-kind snapshot (kind/null/null) preserved exactly across Move
+OK   23. source (AURA_PLANNED) unchanged after Move
+OK   23. a non-default source (MANUAL) is also left untouched by Move
+OK   24. after A->B: execution follows to B, same id/goalActivityId/snapshot/currentValue
+OK   24. after B->C: execution follows to C, still the SAME row
+OK   24. A = MOVED, B = MOVED (superseded by the second Move), C = live UPCOMING successor
+OK   24. exactly ONE execution row exists for this GoalActivity -- no E2/E3 created across two Moves
+OK   25. repointing execution A onto an ALREADY-CLAIMED plannedActivityId fails (unique_violation), never silently overwrites/merges
+OK   25. execution A is untouched (still points at planA, not corrupted by the failed attempt)
+OK   25. execution B (the pre-existing conflicting claim) is untouched
+OK   26. Capture continuity unaffected by the G2.2.3 addition: Capture still follows A -> B
+ALL GOAL ACTIVITY EXECUTION MOVE CONTINUITY CHECKS PASSED
+
+# exit=0 signal=

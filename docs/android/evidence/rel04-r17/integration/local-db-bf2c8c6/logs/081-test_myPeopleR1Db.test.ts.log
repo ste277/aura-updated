@@ -1,0 +1,49 @@
+$ npx ts-node test/myPeopleR1Db.test.ts
+# job=day-constructor-acceptance-db-tests step=Run AURA-MP-1 R1 corrections DB test env={}
+OK   F2 server flag unset + public flag "1" -> server disabled (404)
+OK   F2 disabled list response says x-aura-my-people: disabled
+OK   F2 server flag "true" (not "1") -> still disabled
+OK   F2 server flag "1" -> enabled; list says x-aura-my-people: enabled
+OK   F1 OFF: legacy edit resubmitting unchanged PARENT -> 200; type, notes and interests kept
+OK   F1 OFF: edit without relationshipType -> 200, PARENT kept
+OK   F1 OFF: legacy edit resubmitting unchanged CHILD -> 200; type, notes and interests kept
+OK   F1 OFF: edit without relationshipType -> 200, CHILD kept
+OK   F1 OFF: legacy edit resubmitting unchanged SIBLING -> 200; type, notes and interests kept
+OK   F1 OFF: edit without relationshipType -> 200, SIBLING kept
+OK   F1 OFF: CHANGING PARENT -> CHILD is refused (400) and nothing changes
+OK   F1 OFF: changing SIBLING -> FAMILY (a legacy type) is allowed
+OK   F1 enable -> disable -> enable: CHILD, notes and interests preserved
+OK   F3 OFF: POST 2023-02-30 -> controlled 400 (no throw, no 500)
+OK   F3 OFF: POST 2021-04-31 -> controlled 400 (no throw, no 500)
+OK   F3 OFF: POST null latitude -> controlled 400 (no throw, no 500)
+OK   F3 OFF: POST string latitude -> controlled 400 (no throw, no 500)
+OK   F3 OFF: POST latitude 95 -> controlled 400 (no throw, no 500)
+OK   F3 OFF: PATCH impossible date -> 400
+OK   F3 ON: POST 2023-02-30 -> controlled 400 (no throw, no 500)
+OK   F3 ON: POST 2021-04-31 -> controlled 400 (no throw, no 500)
+OK   F3 ON: POST null latitude -> controlled 400 (no throw, no 500)
+OK   F3 ON: POST string latitude -> controlled 400 (no throw, no 500)
+OK   F3 ON: POST latitude 95 -> controlled 400 (no throw, no 500)
+OK   F3 ON: PATCH impossible date -> 400
+OK   F3 no coordinate was ever coerced to 0
+OK   F4 race order 1: first wins (29 Feb 2024), second is validated against it and refused (400); final record valid
+OK   F4 race order 2: both apply in sequence; final 29 Feb 2024 (valid)
+OK   F4 race order 3: {year:null} then {day:29} -> 29 Feb with unknown year (valid, leap-day semantics kept)
+OK   F4 DB CHECK refuses 31 April
+OK   F4 DB CHECK refuses 30 February
+OK   F4 DB CHECK refuses 29 Feb 2023 (known non-leap year)
+OK   F4 DB CHECK accepts 29 Feb 2000 and 29 Feb with unknown year
+OK   F4 DB CHECK refuses 29 Feb 1900 (century, non-leap)
+OK   F4 DB CHECK refuses year 1899 and an OTHER without a label
+OK   F4 DB CHECK refuses an UPDATE that makes a stored 29 Feb (unknown year) contradictory
+OK   F4 special-day limit: 5 concurrent creates at 9 -> exactly one 201, four 409, total 10
+OK   F4 person limit: 4 concurrent creates at 199 -> exactly one 201, three 409, total 200
+OK   F5 enabled list keys are exactly the design 4.1 item
+OK   F5 disabled list keeps the legacy shape for existing consumers (no My People fields)
+OK   F5 ON: POST with occasions -> 400, nothing created
+OK   F5 OFF: POST with occasions -> 400, nothing created
+OK   Export: ownerUserId omitted at every level (person and nested special days); special days present
+
+ALL MY PEOPLE R1 DB CHECKS PASSED
+
+# exit=0 signal=

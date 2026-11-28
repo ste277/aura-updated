@@ -1,0 +1,63 @@
+$ npx ts-node test/goalActivityRhythm.test.ts
+# job=math-core-tests step=Run Goal activity rhythm test env={}
+OK   6. NONE validates with no targetPerWeek
+OK   6. NONE rejects a supplied targetPerWeek
+OK   6. N_PER_WEEK(3) validates
+OK   6. N_PER_WEEK rejects 0
+OK   6. N_PER_WEEK rejects negative
+OK   6. N_PER_WEEK rejects fractional
+OK   6. N_PER_WEEK rejects missing targetPerWeek
+OK   6. N_PER_WEEK rejects NaN
+OK   6. N_PER_WEEK rejects Infinity
+OK   6. unknown kind rejected
+OK   6. no arbitrary maximum imposed (e.g. 7/week accepted)
+OK   7. null rhythmKind normalizes to NONE
+OK   7. valid persisted N_PER_WEEK(5) normalizes exactly
+OK   7. corrupt/unknown persisted kind normalizes to NONE, never thrown
+OK   7. N_PER_WEEK persisted with an invalid target (0) normalizes to NONE, never silently becomes recurrent with a bad number
+OK   7. N_PER_WEEK persisted with a null target normalizes to NONE
+OK   toPersisted: NONE -> both columns null
+OK   toPersisted: N_PER_WEEK(2) -> exact columns
+OK   round-trip: toPersisted then normalize returns the identical rhythm
+OK   10. a Monday is its own week start
+OK   10. a Tuesday belongs to the preceding Monday
+OK   10. a Sunday belongs to the PRECEDING Monday, not the next one
+OK   10. the following Monday starts a NEW week
+OK   10. week-start is idempotent (week-start of a week-start is itself)
+OK   14. LOGGED -> COMPLETED
+OK   14. UPCOMING -> COMMITTED
+OK   16. SKIPPED -> NONE (does not consume capacity)
+OK   17. CANCELLED -> NONE (same treatment as SKIPPED, documented decision)
+OK   15. MOVED -> NONE (fails safe; a correct caller never reads a fact off a MOVED row at all)
+OK   12. NONE -> never Rhythm-eligible, remaining 0, regardless of any facts
+OK   1/week, 0 completed 0 committed -> remaining 1, eligible
+OK   1/week, 1 completed -> remaining 0, not eligible
+OK   1/week, 1 committed -> remaining 0, not eligible (this ticket's own section 13 correction)
+OK   3/week, 0/0 -> remaining 3
+OK   3/week, 1 completed/0 committed -> remaining 2
+OK   3/week, 0 completed/1 committed -> remaining 2
+OK   3/week, 1 completed/1 committed -> remaining 1
+OK   3/week, 2 completed/1 committed -> remaining 0 (the ticket's own worked example)
+OK   3/week, 3 completed -> remaining 0
+OK   3/week, 4 completed (over target) -> remaining clamped to 0, never negative
+OK   16. a SKIPPED fact does not consume capacity (3/week, 1 completed + 1 skipped -> remaining 2, not 1)
+OK   17. a CANCELLED fact does not consume capacity (same as SKIPPED -- both map to NONE contribution)
+OK   15. a stale MOVED-mapped fact never contributes, even if a caller mistakenly included one alongside its successor's UPCOMING fact
+OK   19. a PRIOR week's completions do not reduce the CURRENT week's remaining capacity
+OK   19. a PRIOR week's skip is irrelevant either way (it never consumed anything to begin with)
+OK   19. a PRIOR week's commitment (now necessarily resolved/expired) does not reduce current remaining
+OK   20. planning for Sunday (end of one week) only counts THAT week's facts
+OK   20. planning for the VERY NEXT DAY (Monday, a new week) ignores the prior week's completion entirely -- "Sunday planning Monday" belongs to the new week
+OK   36. the SAME instant resolves to different local dates across timezones (not relying on machine/UTC time)
+OK   36. UTC: this instant is still in the OLD week (week start 2026-09-21)
+OK   36. Asia/Kolkata: the SAME instant is already in the NEW week (week start 2026-09-28) -- a local-week boundary crossed purely by timezone, not by time passing
+OK   36. America/New_York: still the old week, same as UTC for this particular instant
+OK   36. a completion whose own local date falls in the OLD week does not satisfy a NEW week's target for a Kolkata user planning the new week
+OK   37. a fully-populated snapshot (both fields set) is preferred verbatim, even when it disagrees with what live derivation would produce
+OK   38. a fully-NULL snapshot (both fields null) falls back to exact live derivation under the CALLER-supplied (current) timezone
+OK   39. a partial snapshot (scheduledWeekStart set, scheduledWeekTimezone null) is refused -- throws, never silently falls back or blends
+OK   39. the OTHER partial direction (scheduledWeekTimezone set, scheduledWeekStart null) is refused identically
+OK   40. a snapshot's own scheduledWeekStart, fed back through localCalendarWeekStart (exactly what computeGoalActivityRhythmEligibility does to every fact's localDate), is idempotent -- an already-Monday date reduces to itself
+ALL GOAL ACTIVITY RHYTHM CHECKS PASSED
+
+# exit=0 signal=

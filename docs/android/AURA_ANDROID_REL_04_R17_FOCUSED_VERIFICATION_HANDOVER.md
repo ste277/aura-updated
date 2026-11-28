@@ -88,6 +88,16 @@ Local on `aff9259` (clean tree): math-core and DB sweeps — see `docs/android/e
 
 `REL-04 Chromium multi-tab tests` failed before its first case: `test/rel04Chromium.test.ts` bundles a fixed list of lib modules for its standalone page, and R17's new import (`offlineHabitQueue` → `pendingReplayReconciliation`) was missing from that list, so the page never set `auraReady` (`signIn` timeout, line 160). Test-harness omission introduced by R17, deterministic; not a product defect (the Next.js build bundles the module; both production Chromium suites passed in the same run). Correction (test-only, one line): add `pendingReplayReconciliation` to `MODULES`. Local after the fix: 30/30 (`local-r17/rel04Chromium.log`). The other eight jobs passed on attempt 1. Logs and checksums: `~/Desktop/Claude/AuraEvidence/REL-04-R17-CI-46143039406/`.
 
+### 6.2 Integration of main `5119d02` (MP-3 #409, PALM-04-I5 #410)
+
+Main advanced after `b447006` (the PR became DIRTY; no CI ran on `b447006`). Merge `bf2c8c6`: the only conflict was adjacent imports in `app/page.tsx` (both kept); the R17 lib files and the Past Activity modal are unchanged by the merge; main's delta touches no REL-04 route, middleware, session, queue, schema or worker file.
+
+Test-only corrections (the established REL-04 R2/R3 patterns already applied to MP-1; assertions unchanged):
+- `myPeopleMp3Db` and `myPeopleMp3R1ConcurrencyDb` called the account-bound `POST /api/plans` without `X-Aura-Expected-Account` (503 `client_upgrade_required`); their plan POSTs now state the request's own session account (`rel04BoundTestHeaders`). 33/33, 25/25; `myPeopleMp3R2IsolationDb` 10/10 unchanged.
+- `myPeopleMp3PlanJsdom` saves through the account-bound client helper and needs a verified account, as `findATimeConflictJsdom` does (`setVerifiedAccount('synthetic-test-user')`). 18/18.
+
+Local on `bf2c8c6`: DB 89/89, Chromium multi-tab 30/30, math-core 274/275 with the one failure being `myPeopleMp3PlanJsdom` before its fix (18/18 after: `integration/myPeopleMp3PlanJsdom-after-fix.log`).
+
 ## 7. Limitations and release conditions
 
 - The activity match only decides when to ask; an open operation for an activity withholds a NEW identical-activity entry until it is recovered or the user chooses "separate". An unresolved operation whose evidence names no payload and no title (e.g. a null-payload marker with no copy) cannot be matched and is shown with Check again only.

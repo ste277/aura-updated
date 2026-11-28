@@ -1,0 +1,26 @@
+$ npx ts-node test/birthDateWritersDb.test.ts
+# job=day-constructor-acceptance-db-tests step=Run birth date writers DB test env={}
+     cell utc-utc: database TimeZone UTC, process TZ UTC
+     cell kolkata-utc: database TimeZone Asia/Kolkata, process TZ UTC
+     cell auckland-utc: database TimeZone Pacific/Auckland, process TZ UTC
+     cell la-utc: database TimeZone America/Los_Angeles, process TZ UTC
+     cell newyork-utc: database TimeZone America/New_York, process TZ UTC
+     cell kolkata-kolkata: database TimeZone Asia/Kolkata, process TZ Asia/Calcutta
+     cell kolkata-la: database TimeZone Asia/Kolkata, process TZ America/Los_Angeles
+     cell utc-kolkata: database TimeZone UTC, process TZ Asia/Calcutta
+OK   THE MATRIX IS REAL: every cell ran in its own process with the requested database session TimeZone and process TZ (the writers really executed under 5 database timezones and 3 process timezones)
+OK   STORAGE: for EVERY database timezone and process TZ, updateBirthProfile, createSavedPerson and updateSavedPerson store exactly the UTC-midnight surrogate of the civil date (1990-06-15 -> 1990-06-15T00:00:00.000Z), including the update to a different date
+OK   USER round trip: write the civil date, read the profile, the same YYYY-MM-DD, in every cell
+OK   SAVED PERSON round trip: createSavedPerson AND updateSavedPerson read back exactly the civil date written, in every cell
+OK   NATAL INVARIANT: the real natal context read back from the stored profile equals the context derived straight from the civil facts, in every cell, and the derived astronomical birth instant is the same
+OK   NATAL ACROSS CELLS: changing only the database timezone (or the process TZ) yields byte-identical Nakshatra / Rashi / natal index for all 5 synthetic profiles
+OK   TIMING SEARCH / CONSTRUCTOR INVARIANT: the real orchestrator with the real timing search builds the IDENTICAL day in every cell (5 placed, deferred []: candidate order, start, timing fit and the deferred set all equal)
+OK   UTC PARITY: on a UTC session the canonical surrogate equals the LEGACY bare-string value for ALL 73414 dates 1900-2100 (correctly written UTC data is semantically unchanged by B2)
+OK   THE DEFECT, in SQL: the legacy bare-string value differed from the canonical surrogate for every one of the 73414 dates on an Asia/Kolkata session (73414 differ) and on Pacific/Auckland (73414 differ)
+OK   DIAGNOSTIC SHAPE: exactly one row per table with exactly the columns table_name, rows_with_birth_date, non_midnight_utc_rows (counts only: no id, name, date, time or coordinate column exists in the result)
+OK   DIAGNOSTIC COUNTS: a User surrogate at 18:30Z and four SavedPerson surrogates off UTC midnight (18:30Z, 12:00Z, 07:00Z and 00:00:00.001Z) are counted; the UTC-midnight row is not
+OK   DIAGNOSTIC IS SESSION-TIMEZONE INDEPENDENT: the same counts under UTC, Asia/Kolkata and America/Los_Angeles sessions (the time-of-day is taken with AT TIME ZONE 'UTC')
+OK   THE DIAGNOSTIC WRITES NOTHING: it ran inside a READ ONLY transaction and the row counts are unchanged
+ALL BIRTH DATE WRITERS DB CHECKS PASSED
+
+# exit=0 signal=
