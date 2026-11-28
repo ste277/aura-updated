@@ -26,6 +26,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { execFileSync } from 'child_process';
 import { React, mount, flush, act, click } from './jsdomReactHarness';
+import { pinClock } from './rel04PinnedClock';
 import { Device, WEB, addUser, check, clearQueueDb, closeAllTabs, finish, idbFault, logsOf, openTab, payload, queueDump, resetStore, storage, store } from './rel04AccountIsolationHarness';
 
 const ts = require(require.resolve('typescript', { paths: [WEB] }));
@@ -68,7 +69,7 @@ const body = (id: string, title = 'reviewed activity') => payload(title, id);
 const item = (id: string, owner = A, title?: string) => ({ ...body(id, title), ownerUserId: owner, tempId: 'tmp' });
 const row = (recordId: string, id: string, owner = A, title?: string) => ({ recordId, ownerUserId: owner, clientRequestId: id, item: item(id, owner, title), fmt: 'r8', queuedAt: 1 });
 const rows = (owner: string, crid?: string) => logsOf(owner).filter((l: any) => crid === undefined || l.clientRequestId === crid);
-const realNow = Date.now;
+let realNow = Date.now; // R16 stabilization: follows the pinned clock inside the real-Home section
 const afterClaimExpiry = () => { const t0 = realNow(); Date.now = () => t0 + 61_000; };
 async function fresh() { Date.now = realNow; resetStore(); storage.clear(); storage.fail = { get: false, set: false, remove: false }; idbFault.open = false; idbFault.read = false; idbFault.write = false; closeAllTabs(); await clearQueueDb(); }
 
@@ -453,6 +454,10 @@ async function main() {
   }
 
   // ================================================================ Home (jsdom): Retry keeps the identity; blocked when unreadable
+  // R16 test stabilization: deterministic 12:05 IST instant (time still advances); restored after the section.
+  const homeClock = pinClock();
+  const originalNow = realNow;
+  realNow = homeClock.now;
   (global as any).fetch = dev.fetch; (window as any).fetch = dev.fetch;
   (global as any).requestAnimationFrame = (f: any) => setTimeout(f, 0); (global as any).cancelAnimationFrame = (id: any) => clearTimeout(id);
   (window as any).confirm = () => true; (window as any).alert = () => {};
@@ -511,6 +516,7 @@ async function main() {
     await h.unmount();
     check(`HB real Home: an unreadable operations store blocks NEW logging (banner ${banner}; no id, no record, no POST); Check again re-reads and lifts the block (${bannerGone})`, banner && blocked && Boolean(again) && bannerGone);
   }
+  realNow = originalNow; homeClock.restore(); Date.now = originalNow;
   finish();
 }
 main().catch((e) => { console.error(e); process.exit(1); });

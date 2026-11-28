@@ -14,6 +14,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { execFileSync } from 'child_process';
 import { React, mount, flush, act, click } from './jsdomReactHarness';
+import { pinClock } from './rel04PinnedClock';
 import { Device, WEB, addUser, check, clearQueueDb, closeAllTabs, finish, idbFault, logsOf, openTab, payload, queueDump, resetStore, storage, store } from './rel04AccountIsolationHarness';
 
 const ts = require(require.resolve('typescript', { paths: [WEB] }));
@@ -52,7 +53,7 @@ const body = (id: string, title = 'reviewed activity') => payload(title, id);
 const item = (id: string, owner = A, title?: string) => ({ ...body(id, title), ownerUserId: owner, tempId: 'tmp' });
 const row = (recordId: string, id: string, owner = A, title?: string) => ({ recordId, ownerUserId: owner, clientRequestId: id, item: item(id, owner, title), fmt: 'r8', queuedAt: 1 });
 const rows = (owner: string, crid?: string) => logsOf(owner).filter((l: any) => crid === undefined || l.clientRequestId === crid);
-const realNow = Date.now;
+let realNow = Date.now; // R16 stabilization: follows the pinned clock inside the real-Home section
 const afterClaimExpiry = () => { const t0 = realNow(); Date.now = () => t0 + 61_000; };
 async function fresh() { Date.now = realNow; resetStore(); storage.clear(); storage.fail = { get: false, set: false, remove: false }; idbFault.open = false; idbFault.read = false; idbFault.write = false; closeAllTabs(); await clearQueueDb(); }
 type Stack = { q: any; sync: any; acct: any; so: any };
@@ -174,6 +175,12 @@ async function main() {
   }
 
   // ================================================================ Home: the real "Start now" interaction
+  // R16 test stabilization: the real-Home section runs on the deterministic 12:05 IST instant (time still advances),
+  // so "Start now" is offered whatever the execution time; the R13 negative control then fails for the intended
+  // reconciliation defect only. The original clock is restored after the section.
+  const homeClock = pinClock();
+  const originalNow = realNow;
+  realNow = homeClock.now;
   // NEGATIVE CONTROL first: Home driven by R13's submission (ignores the settlement) shows "Couldn't log. Try again."
   // and its retry click creates a fresh-id duplicate. Then the current code: success, no retry, one row.
   (global as any).fetch = dev.fetch; (window as any).fetch = dev.fetch;
@@ -230,6 +237,7 @@ async function main() {
     check('H1 CORRECTED (current code, real Home): no error and no retry is offered; exactly 1 row under the original request id', !cur.errorShown && !cur.retried && cur.rowsA === 1 && cur.distinctIds === 1);
   }
 
+  realNow = originalNow; homeClock.restore(); Date.now = originalNow;
   // ================================================================ cleanup matrix (F2, F3 and the physical-state rules)
   async function discardCase(impl: Impl, setup: (s: Stack) => Promise<void> | void, during?: { removeThrowsOnce?: string; finalReadFails?: boolean; writeDuringFinalScan?: () => void }) {
     await fresh();
