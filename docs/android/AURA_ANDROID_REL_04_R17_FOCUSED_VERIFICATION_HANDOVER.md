@@ -84,6 +84,10 @@ Unchanged. The historical R5 worker fixture and both CH15 assertions are untouch
 
 Local on `aff9259` (clean tree): math-core and DB sweeps — see `docs/android/evidence/rel04-r17/local-*-aff9259/manifest.json`. Hosted CI: see §6.1 (added after the run).
 
+### 6.1 Hosted run 46143039406 (head `6fc2c0f`) — 8/9, preserved, not rerun
+
+`REL-04 Chromium multi-tab tests` failed before its first case: `test/rel04Chromium.test.ts` bundles a fixed list of lib modules for its standalone page, and R17's new import (`offlineHabitQueue` → `pendingReplayReconciliation`) was missing from that list, so the page never set `auraReady` (`signIn` timeout, line 160). Test-harness omission introduced by R17, deterministic; not a product defect (the Next.js build bundles the module; both production Chromium suites passed in the same run). Correction (test-only, one line): add `pendingReplayReconciliation` to `MODULES`. Local after the fix: 30/30 (`local-r17/rel04Chromium.log`). The other eight jobs passed on attempt 1. Logs and checksums: `~/Desktop/Claude/AuraEvidence/REL-04-R17-CI-46143039406/`.
+
 ## 7. Limitations and release conditions
 
 - The activity match only decides when to ask; an open operation for an activity withholds a NEW identical-activity entry until it is recovered or the user chooses "separate". An unresolved operation whose evidence names no payload and no title (e.g. a null-payload marker with no copy) cannot be matched and is shown with Check again only.

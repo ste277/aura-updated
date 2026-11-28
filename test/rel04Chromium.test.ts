@@ -35,7 +35,7 @@ addUser(B, 'bobsynth@example.invalid');
 const EMAIL: Record<string, string> = { 'alicesynth@example.invalid': A, 'bobsynth@example.invalid': B };
 
 // ---------------------------------------------------------------- bundle of the real client modules
-const MODULES = ['serviceWorkerBridge', 'accountRoutePolicy', 'accountSession', 'offlineHabitQueue', 'habitLogSyncPolicy', 'activitySync', 'signOut', 'signInCode', 'accountBoundFetch'];
+const MODULES = ['serviceWorkerBridge', 'accountRoutePolicy', 'accountSession', 'pendingReplayReconciliation', 'offlineHabitQueue', 'habitLogSyncPolicy', 'activitySync', 'signOut', 'signInCode', 'accountBoundFetch'];
 const OLD = path.join(__dirname, 'fixtures', 'rel04-reviewed-head');
 function bundle(): string {
   const defs = MODULES.map((n) => {

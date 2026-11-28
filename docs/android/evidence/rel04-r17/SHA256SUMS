@@ -365,6 +365,7 @@ e6cd41e84a1149822fe6ed575346f59fdf0bca143d036b906ad09f9e8660f095  ./local-math-c
 0c31c42da394c47b02f9a8ae9a8a7beffe8ef12eeb7e26808fe919a3aedb3cbf  ./local-math-core-aff9259/manifest.json
 6bf7879f6e22b14f425a030af543b58694e87181872ccbbd597df96e9650a6b1  ./local-r17/negative-control-page-fence-removed.log
 2ecbc1d0b4989f43d52a6ffcf2627aacbf0452262b81264cf4f9c4aa47c8dd88  ./local-r17/rel04ActivityOperationHomeChromiumDb.log
+aed2c2b480a1497e976cfef1cae8459239496360b1191162714a3b472ae1b868  ./local-r17/rel04Chromium.log
 78dc7156d4d743ecff45f7c8f6a55b5b7fa294fe14115d8952ea69ab0ab5f1a8  ./local-r17/rel04R16HomeChromiumDb.log
 8ca9c927b0435fc916c4ea5e95856f9b2554e240cbf2d5b4d51d67211fe4bc56  ./local-r17/rel04R17RecoveryChromiumDb.log
 534a44a92c69eae33967958664e4583778a6963f664a0d96ec662dfbf47a3a4a  ./local-r17/rel04R17RecoveryDecision.log
