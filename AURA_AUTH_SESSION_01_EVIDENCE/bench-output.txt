@@ -1,0 +1,22 @@
+A getUserById only (today)                       p50 0.116 ms  p95 0.353 ms  p99 0.869 ms
+B session lookup only                            p50 0.082 ms  p95 0.237 ms  p99 0.389 ms
+C session lookup + getUserById (2 round trips)   p50 0.147 ms  p95 0.338 ms  p99 0.614 ms
+D joined session+user (1 round trip)             p50 0.113 ms  p95 0.154 ms  p99 0.240 ms
+
+PLAN B:
+  Index Scan using "AuthSession_pkey" on "AuthSession"  (cost=0.42..8.44 rows=1 width=37) (actual time=0.004..0.004 rows=1 loops=1)
+    Index Cond: ("idHash" = '<synthetic-bench-idHash-redacted>'::text)
+    Filter: (("revokedAt" IS NULL) AND ("userId" = '<synthetic-bench-userId-redacted>'::text) AND ("expiresAt" > now()))
+    Buffers: shared hit=4
+  Planning Time: 0.019 ms
+  Execution Time: 0.007 ms
+conc=10  today (1 query)    p50 0.259 ms  p95 0.542 ms  p99 1.127 ms  throughput 30704 req/s  waiting=0
+conc=10  naive (2 queries)  p50 0.450 ms  p95 0.722 ms  p99 0.930 ms  throughput 21194 req/s  waiting=0
+conc=10  joined (1 query)   p50 0.296 ms  p95 0.524 ms  p99 0.661 ms  throughput 31263 req/s  waiting=0
+conc=50  today (1 query)    p50 1.531 ms  p95 2.466 ms  p99 3.334 ms  throughput 30614 req/s  waiting=0
+conc=50  naive (2 queries)  p50 2.575 ms  p95 5.016 ms  p99 10.104 ms  throughput 17121 req/s  waiting=0
+conc=50  joined (1 query)   p50 1.771 ms  p95 2.343 ms  p99 2.518 ms  throughput 27828 req/s  waiting=0
+
+verify+parse+sha256 per token: 17.40 µs
+randomBytes(32): 1.21 µs
+cleanup batch: 5000 rows in 9.3 ms

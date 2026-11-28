@@ -1,0 +1,54 @@
+OK   1a. No preferences: Find a Time returns the engine result unchanged
+OK   1b. No preferences: no work-hours notes
+OK   1c. No preferences: useful results for a new user (one per day of the week)
+OK   2a. Baseline shows the old gap: the engine alone puts weekday workouts inside 09:00-18:00
+OK   2b. With work hours: every weekday suggestion is outside working hours
+OK   2c. Still one suggestion for each day of the week (soft, nothing dropped)
+OK   2d. Weekend suggestions are unaffected by work hours
+OK   2e. Each weekday suggestion carries the preferred note
+OK   3a. Suggestions are exactly the engine's own per-day best outside working hours (no re-scoring)
+OK   3b. Order follows the engine's own ranking key (best first)
+OK   3c. Panchang friction windows are still never suggested
+OK   4a. Tue-Sat 13:00-21:00: workday suggestions avoid 13:00-21:00
+OK   4b. Monday (a day off in this schedule) keeps the engine's own choice
+OK   4c. Saturday is treated as a workday when configured
+OK   5a. Deep Work on workdays: suggestions fall inside working hours
+OK   5b. Deep Work notes say it fits working hours
+OK   5c. Deep Work at the weekend is unaffected
+OK   5d. Flexible breaks are not steered (same times as the engine)
+OK   6a. Explicit "afternoon" on workdays is kept even though it is inside working hours
+OK   6b. ...and each is labelled as inside working hours, not hidden
+OK   6c. Checking a specific time inside work hours is evaluated, never moved (with an overlap note)
+OK   7a. Times blocked by plans/availability are never suggested, even as a fallback
+OK   7b. A workday with only work-hour time left falls back to it (soft, not excluded)
+OK   8a. Tomorrow, Deep Work: only candidates inside working hours are kept when some exist
+OK   8b. Deep Work now gets the wider candidate pool, like personal activities
+OK   8c. Tomorrow, Workout: unchanged DR2 rule -- outside working hours when possible
+OK   8d. No work hours: Plan My Day candidates unchanged
+OK   8e. Saturday (not a workday): Deep Work unchanged
+OK   8f. Work placements add no new Plan My Day warning code (preview contract unchanged)
+OK   9a. Across the US DST change, work hours stay 09:00-17:00 local on each workday
+OK   9b. Work activities: the steered-away time is the rest of the local day (midnight to 09:00, 18:00 to midnight)
+OK   9c. Empty workDays ("no work days") steers nothing
+OK   10a. Rhythm on Mon/Wed/Fri still gets one option on each preferred day
+OK   10b. ...and those options sit outside working hours
+OK   10c. A rhythm's preferred time of day is still honoured (evening stays evening)
+OK   11a. Hint when neither is set
+OK   11b. Hint for work hours only
+OK   11c. Hint for availability only
+OK   11d. No hint once both are set, or for guest/unknown responses
+OK   11e. Deep links resolve to the You settings cards
+OK   11f. preferenceSettingsHref stays on the existing You tab (no new route)
+OK   11g. A new user's availability draft has no periods on any day (no Mon-Fri assumption)
+OK   11h. You: cards have deep-link anchors; "Daily Rhythm" renamed "Work hours"
+OK   11i. Work-hours copy names every planning surface and says it is soft
+OK   11j. Availability copy explains its effect and that it is optional
+OK   11j2. Unsaved availability reads "Not set", never "Not available" (empty means whole day considered)
+OK   11j3. The clear action says "Clear work hours" (no leftover "daily rhythm" wording)
+OK   11k. Both settings say confirmed plans are never moved
+OK   11l. Plan My Day links straight to the Availability card and says today works without it
+OK   11m. Find a Time shows the hint only when results exist
+OK   11n. No mandatory onboarding step was added
+OK   11o. No new migration (re-baselined by AURA-AUTH-SESSION-01-I1: only its own additive, dormant 0055 is allowed)
+
+ALL PREF-01 AVAILABILITY PREFERENCE CHECKS PASSED

@@ -1,0 +1,35 @@
+AURA-AUTH-SESSION-01-I1 R1 -- CI failure record (UNCOMMITTED; not rerun, nothing modified)
+Recorded 2026-11-27 from read-only GitHub API data.
+
+Run 45998039990 (pull_request, attempt 1) on implementation head 84196311f41a53be3f4ef5ada4680aacf65a6131
+Integration commit 40f6cbaa7701bb225f0ceed05613146efe87e72d (refs/pull/401/merge), tree 0ec112e8d7937127d4ca06edf5adcad7f140f7c2
+  parents: main 38b7fa6f587fd7c1eac0687eb153ac11514ede1f + head 8419631; branch point 477723d (not synchronized)
+Failed job: Database migration validation (job 140502298446), checked out HEAD is now at 40f6cba
+Failed step: 11 "Run I2b-S2 staging-blocker DB test" (npx ts-node test/mcpOAuthStagingBlockersDb.test.ts)
+Failing check:
+FAIL I2b-1 post-send connection loss (attribution): every lost acknowledgement is resolved by the transaction evidence (committed, not admitted), stored == attributed per shard, no duplicate, within capacity -- {"attribution":{"ok":false,"reasons":["preauth-mcp:global:g480n16:1: stored 29 != 30 attributed contributions","preauth-mcp:global:g480n16:9: stored 27 != 28 attributed contributions","preauth-mcp:global:g480n16:13: stored 28 != 29 attributed contributions"],"tally":{"confirmed":405,"committed_ack_lost":55,"no_commit":1540},"unresolved":0},"injected":45,"outcomes":{"admitted":405,"unava
+Suite result: AURA-MCP-02-I2b-S2 staging-blocker DB FAILED (131 checks)
+Consequence: the job stopped at step 11, so its later steps -- incl. the I1 DB tests (authSessionStoreDb,
+authSessionR1Db) and the migration-ledger checks -- did NOT run in this job. Steps 1-10 (migrate deploy,
+migrate status, earlier MCP DB tests) are recorded in the log.
+
+Analysis (for review, not a verdict):
+- The failing check is in the MCP OAuth distributed rate limiter's fault-injected accounting
+  ("post-send connection loss (attribution)": stored 29 != 30 attributed contributions on 3 of the
+  preauth-mcp:global shards). It exercises MCP tables (migration 0052) only.
+- I1 R1 (864da6f..8419631) changes no MCP code, test, harness or migration (git diff over packages/,
+  apps/mcp, test/mcpOAuth*, apps/web/lib/mcp*, apps/web/pages and 0052 is empty). Its new CI steps run
+  AFTER this step in the same job.
+- The main-side delta since the previous green base (5551166 -> 38b7fa6, #402 PALM-04-I1) changes only
+  Palmistry files and scripts/check-palmistry-bundle.js.
+- The same step passed on this PR's runs 45987096338 (864da6f), 45980042902 (afb72e6) and 45973451075 (29bf09d).
+- Classified as NOT caused by I1 R1; most consistent with an intermittent failure of the MCP suite's
+  concurrency/fault-injection accounting. Not reproduced or investigated further here (MCP workstream).
+Other jobs at the time of recording:
+  MCP Server (Node 20 compatibility): completed success
+  Day Constructor acceptance DB tests: in_progress 
+  Next.js production build: completed success
+  Ephemeris / panchang tests: in_progress 
+  Database migration validation: completed failure
+  MCP Server: completed success
+  Palmistry upload pipeline tests (G5): completed success

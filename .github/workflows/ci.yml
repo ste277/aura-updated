@@ -1069,6 +1069,22 @@ jobs:
         env:
           TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
         run: npx ts-node --project tsconfig.jsdom-tests.json test/locationPickerRel04SearchRace.test.ts
+      # AURA-AUTH-SESSION-01-I1 -- dormant session store foundation (no auth
+      # behaviour change): v2 token, HKDF key, cookie helpers and SQL literal
+      # guards; plus the static guard that nothing in the app imports the I1
+      # modules yet, that they read no env and do no work at import, and that
+      # migration 0055 is additive only. No database.
+      - name: Run session token primitives test (AUTH-SESSION-01-I1)
+        run: npx ts-node test/authSessionToken.test.ts
+      - name: Run session store dormancy guard (AUTH-SESSION-01-I1)
+        run: npx ts-node test/authSessionDormancy.test.ts
+      # AURA-AUTH-SESSION-01-I1 R1 (39233) -- controlled-clock tests of the single
+      # absolute caller deadline / outcome classification / revoke retry, and the
+      # compile-time provisional-vs-committed result contract. No database.
+      - name: Run session deadline and retry controlled-clock test (AUTH-SESSION-01-I1 R1)
+        run: npx ts-node test/authSessionDeadline.test.ts
+      - name: Run session provisional/committed contract test (AUTH-SESSION-01-I1 R1)
+        run: npx ts-node test/authSessionContract.test.ts
   palm-g5-upload-tests:
     # AURA-PALM-G5-C2 -- dedicated job for the development-only Upload Photo
     # pipeline suites (G5-I1..R4.3), so a Palmistry failure stays visible on
@@ -1128,6 +1144,12 @@ jobs:
         env:
           PALM_BROWSER_CHANNEL: chrome
         run: npx ts-node test/palm04I2TracingBrowser.test.ts
+      - name: Run feature review and confirmation component tests (PALM-04-I3, jsdom)
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/palm04I3ReviewJsdom.test.ts
+      - name: Run feature review and confirmation browser tests (PALM-04-I3, runner's installed Google Chrome, synthetic harness, no network)
+        env:
+          PALM_BROWSER_CHANNEL: chrome
+        run: npx ts-node test/palm04I3ReviewBrowser.test.ts
       # PALM-03-E1: development-only personalised interpretation engine (synthetic
       # observations only; unreviewed content). The package suite compares the engine
       # with the unmodified C1 reference oracle (python3, preinstalled on the runner):
@@ -1472,6 +1494,28 @@ jobs:
       # the OAuth path and both MCP paths. Touches only the MCP tables.
       - name: Run I2b-S12 redirect integrity and audit cause DB test
         run: npx ts-node test/mcpOAuthS12Db.test.ts
+      # AURA-AUTH-SESSION-01-I1 -- the AuthSession allowlist (migration 0055)
+      # against this disposable database: lifecycle, DB-clock expiry, revoke-all,
+      # cascade, cleanup, privacy, B3 ordering, and the database-enforced bounds
+      # T1-T8 (lock / statement / client deadline / acquisition / recovery /
+      # burst), each asserted server-side via pg_stat_activity. Synthetic users
+      # only; touches only "User" (own rows) and "AuthSession". Not wired into
+      # the app.
+      - name: Run session store and bounds DB test (AUTH-SESSION-01-I1)
+        run: npx ts-node test/authSessionStoreDb.test.ts
+      # AURA-AUTH-SESSION-01-I1 R1 (39233) -- the same disposable database with an
+      # in-process loopback fault-injection proxy: one revoke deadline and safe
+      # retry (A), commit authorization -- session material only after an
+      # acknowledged caller COMMIT, never after a rolled-back or ambiguous one,
+      # whatever a read-back finds (B, R2 39235), and 720-hour expiry (C).
+      - name: Run session R1 deadline, durability and expiry DB test (AUTH-SESSION-01-I1 R1)
+        run: npx ts-node test/authSessionR1Db.test.ts
+      # AURA-AUTH-SESSION-01-I1 R3 (39237) -- transaction binding (an authorization only
+      # from the acknowledged COMMIT of the transaction whose INSERT created the
+      # session) and single-use release under overlapping calls, with exact
+      # raw-id release counts, deterministic barriers and the loopback fault proxy.
+      - name: Run session R3 transaction binding and single-use release DB test (AUTH-SESSION-01-I1 R3)
+        run: npx ts-node test/authSessionR3Db.test.ts
       - name: Verify every repository migration was recorded as applied
         run: |
           set -euo pipefail

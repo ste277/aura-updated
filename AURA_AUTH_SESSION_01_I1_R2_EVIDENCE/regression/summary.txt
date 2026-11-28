@@ -1,0 +1,17 @@
+authSessionToken exit=0 :: 68 passed, 0 failed
+authSessionContract exit=0 :: 18 passed, 0 failed
+authSessionDeadline exit=0 :: 27 passed, 0 failed
+authSessionDormancy exit=0 :: 33 passed, 0 failed
+authSessionStoreDb exit=0 :: 50 passed, 0 failed
+authSessionR1Db exit=0 :: 42 passed, 0 failed
+availabilityPreferencesPref01 exit=0 :: ALL PREF-01 AVAILABILITY PREFERENCE CHECKS PASSED
+myRhythmPreferencesUi exit=0 :: ALL MR3 UI CHECKS PASSED
+insightsAlignmentSafeguards exit=0 :: ALL INS-01 ALIGNMENT SAFEGUARD CHECKS PASSED
+dayConstructorAcceptanceFreshOverlapArchitecture exit=0 :: ALL ACCEPTANCE FRESH-OVERLAP ARCHITECTURE CHECKS PASSED
+scheduleWriteManualSerializationArchitecture exit=0 :: ALL MANUAL WRITER SERIALIZATION ARCHITECTURE CHECKS PASSED
+authRequestLinkQuotaDb exit=0 :: 
+authLogRedactionDb exit=0 :: 
+authMagicLinkLocalOnlyDb exit=0 :: 
+authRequestLinkQuotaDb :: 24 checks, all passed (FAIL lines: 0)
+authLogRedactionDb :: 47 checks, all passed (FAIL lines: 0)
+authMagicLinkLocalOnlyDb :: 136 checks, all passed (FAIL lines: 0)

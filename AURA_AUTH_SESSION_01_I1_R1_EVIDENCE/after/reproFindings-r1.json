@@ -1,0 +1,49 @@
+{
+  "01a_stalled_revoke": {
+    "ok": false,
+    "reason": "deadline",
+    "outcome": "uncertain",
+    "ms": 2000,
+    "attempts": 1,
+    "callerBudgetMs": 2000
+  },
+  "01b_locked_revoke": {
+    "ok": false,
+    "reason": "lock_timeout",
+    "outcome": "failed",
+    "ms": 1003,
+    "attempts": 1,
+    "dbRevoked": false
+  },
+  "02_provisional_after_rollback": {
+    "provisionalKeys": [
+      "expiresAt",
+      "idHash",
+      "state",
+      "userId"
+    ],
+    "committedKeys": [
+      "expiresAt",
+      "idHash",
+      "sid",
+      "state",
+      "userId"
+    ],
+    "sameShapeAsCommitted": false,
+    "exposesSid": false,
+    "exposesState": "provisional",
+    "rowExistsAfterRollback": false
+  },
+  "05_expiry": {
+    "ttlSqlEvaluated": "make_interval(hours => 720)",
+    "storedLifetimeHours": 720,
+    "elapsedHoursByZone": {
+      "UTC @ 2026-03-07 12:00:00": "720 h",
+      "America/New_York @ 2026-03-07 12:00:00": "720 h",
+      "America/New_York @ 2026-10-31 12:00:00": "720 h",
+      "Europe/London @ 2026-03-28 12:00:00": "720 h",
+      "Australia/Lord_Howe @ 2026-03-28 12:00:00": "720 h",
+      "Asia/Kolkata @ 2026-03-07 12:00:00": "720 h"
+    }
+  }
+}

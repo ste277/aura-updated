@@ -1,0 +1,31 @@
+SKIP 0 Install root deps (symlinked root deps)
+FAIL 17 rc=1 2s Run remote MCP transport test
+FAIL 18 rc=1 2s Run local OAuth -> MCP test
+FAIL 19 rc=1 1s Run OAuth security regression test
+FAIL 20 rc=1 1s Run I2b OAuth production-readiness test
+FAIL 21 rc=1 2s Run I2b-S2 staging-blocker offline test
+FAIL 22 rc=1 2s Run I2b-S8 offline security test
+FAIL 23 rc=1 2s Run I2b-S10 offline activation-readiness test
+FAIL 24 rc=1 2s Run I2b-S11 offline remediation test
+FAIL 25 rc=1 2s Run I2b-S12 offline residual test
+SKIP 64 Install web deps (restored npm ci install)
+FAIL 69 rc=1 2s Run Palmistry Explore + guide component test
+FAIL 77 rc=1 1s Run Home Ask Aura handoff component lifecycle test
+FAIL 86 rc=1 1s Run HPG-FIX-01 Home rhythm refresh (jsdom) test
+FAIL 87 rc=1 1s Run MR3 My Rhythm preferences editor (jsdom) test
+FAIL 88 rc=1 2s Run REM-01 notification settings (jsdom) test
+FAIL 206 rc=1 1s Run acceptance fresh-overlap architecture test
+FAIL 212 rc=1 2s Run manual writer serialization architecture test
+FAIL 216 rc=1 1s Run Find a Time conflict component test (HPG5-V2-I1)
+FAIL 217 rc=1 2s Run sign-in resend / change-email component test (AURA-READY-03-F2)
+FAIL 218 rc=1 1s Run landing guest-entry component test (AURA-READY-02-F3)
+FAIL 219 rc=1 3s Run guest activity discovery tests (AURA-DISC-01)
+FAIL 220 rc=1 1s Run Find a Time error-state component test (AURA-READY-02-F4)
+FAIL 222 rc=1 2s Run conflict panel and My Day save component test (HPG5-V2-I2)
+FAIL 223 rc=1 2s Run Home save conflict component test (HPG5-V2-I3)
+FAIL 239 rc=1 1s Run LocationPicker M2-D reliability test
+FAIL 240 rc=1 2s Run LocationPicker native timeout diagnostics test
+FAIL 241 rc=1 1s Run LocationPicker StrictMode lifecycle test
+FAIL 242 rc=1 2s Run LocationPicker REL-03 supersede test
+FAIL 243 rc=1 1s Run IOS-02 location errors and privacy test
+DONE pass=216 fail=28

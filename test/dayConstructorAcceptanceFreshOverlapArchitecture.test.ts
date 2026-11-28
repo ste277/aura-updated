@@ -96,7 +96,18 @@ check('NO S2: createPlannedActivity (db.ts) takes no lock', !/pg_advisory/.test(
 // unrelated lock elsewhere in the same directory using the same general-
 // purpose Postgres primitive for a different key/purpose.
 check('the schedule-write lock sites (sharing the "day-constructor-accept:" key) are exactly the three existing ones (acceptance, Move, Recomposition acceptance); no helper was extracted', allLib.filter((x) => /day-constructor-accept:/.test(x.src)).map((x) => x.f).sort().join() === 'dayConstructorAcceptancePersistence.ts,planMove.ts,remainingDayRecompositionAcceptance.ts' && !allLib.some((x) => /withUserScheduleLock|scheduleWriteLock|acquireScheduleLock/.test(x.src)));
-check('no lock timeout was introduced anywhere in production code', !allLib.some((x) => /lock_timeout/i.test(x.src)));
+// AURA-AUTH-SESSION-01-I1: the dormant session-store module lib/authSessionDb.ts
+// bounds ITS OWN session queries with SET LOCAL lock_timeout (fail closed). It
+// never touches the schedule-write lock, which is asserted here too, so this
+// stays a guard on the schedule-write lock's own semantics.
+const SESSION_STORE_TIMEOUT_MODULE = 'authSessionDb.ts';
+// lib/sessionErrors.ts only NAMES the 'statement_timeout' / 'lock_timeout'
+// failure reasons (diagnostic labels); it contains no SQL (asserted below).
+const SESSION_ERROR_LABELS_MODULE = 'sessionErrors.ts';
+const I1_TIMEOUT_EXEMPT = [SESSION_STORE_TIMEOUT_MODULE, SESSION_ERROR_LABELS_MODULE];
+check('no lock timeout was introduced anywhere in production code (re-baselined by AURA-AUTH-SESSION-01-I1: only lib/authSessionDb.ts may set one, for session queries; lib/sessionErrors.ts only names the reasons)', !allLib.some((x) => !I1_TIMEOUT_EXEMPT.includes(x.f) && /lock_timeout/i.test(x.src)));
+check('the session-store timeout module never touches the schedule-write lock (no advisory lock, no "day-constructor-accept:" key)', !allLib.some((x) => x.f === SESSION_STORE_TIMEOUT_MODULE && /pg_advisory|day-constructor-accept:/.test(x.src)));
+check('the session error-label module contains no SQL at all (it cannot set a timeout)', !allLib.some((x) => x.f === SESSION_ERROR_LABELS_MODULE && /SET\s+LOCAL|\.query\s*\(|SELECT\s|UPDATE\s|INSERT\s|DELETE\s/i.test(x.src)));
 check('Move and Recomposition acceptance are untouched in kind: they still use their own overlap-correct findBlockingPlanForRange', /findBlockingPlanForRange/.test(allLib.find((x) => x.f === 'planMove.ts')!.src) && /findBlockingPlanForRange/.test(allLib.find((x) => x.f === 'remainingDayRecompositionAcceptance.ts')!.src));
 check('no database exclusion constraint or schema change for plans: the schema has no exclusion/overlap construct', !/EXCLUDE USING|tstzrange|btree_gist/i.test(read('apps/web/prisma/schema.prisma')) && !fs.readdirSync(path.join(root, 'apps/web/prisma/migrations')).some((d) => d !== 'migration_lock.toml' && fs.existsSync(path.join(root, 'apps/web/prisma/migrations', d, 'migration.sql')) && /EXCLUDE USING|btree_gist/i.test(fs.readFileSync(path.join(root, 'apps/web/prisma/migrations', d, 'migration.sql'), 'utf8'))));
 // HPG3-A3a -- exactly one new, reviewed import added: the shared typed

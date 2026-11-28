@@ -382,6 +382,53 @@ export const POINT_LIMIT_TEXT = `This line has reached the point limit (${MAX_TR
 /** R3: any gesture (tap or drag) whose pointer left the photo at any delivered sample is refused; nothing changes. */
 export const GESTURE_OFF_PHOTO_TEXT = 'The pointer went outside the photo, so nothing was changed. Keep the whole trace on the photo.';
 /** R4: a gesture with any sample that could not be mapped to the photo (geometry unavailable, non-finite) is refused. */
+/**
+ * AURA-PALM-04-I3 -- feature review and confirmation (plan step 4, G-4/G-5). DEVELOPMENT ONLY, in this file so the
+ * production stub removes it with the rest. The review shows I1's own feature set (model.buildFeatureSet) for the
+ * user's explicit hand answers; nothing is read, stored or sent. A confirmation is bound to the photo (context
+ * generation), the exact line states and the hand answers, and is withdrawn by any later change.
+ */
+export const PALM_FEATURE_REVIEW_VERSION = 'palm-04-feature-review@0.1.0';
+export const REVIEW_SCOPE_NOTE = 'Confirming records these features for this photo only, in this browser tab. Nothing is stored or sent, and no reading is produced in this version.';
+export const REVIEW_PRIMARY_LINES: readonly PalmLineId[] = ['heart', 'head', 'life'];
+type ReviewHand = 'left' | 'right';
+type ReviewDominant = 'left' | 'right' | 'unknown';
+type FeatureSetResult = ReturnType<TracingModel['buildFeatureSet']>;
+type ConfirmedFeatures = { readonly key: string; readonly featureSet: unknown; readonly at: number };
+/** What a review is about: the photo, the exact line states and the hand answers. Any change makes a new key. */
+export const lineSignature = (views: readonly TracingLineView[]): string => JSON.stringify(views.map((v) => [v.line, v.status, v.skipReason, v.points]));
+const MEASUREMENT_LABELS: Record<string, string> = {
+  palmLength: 'Palm length', thumbLength: 'Thumb length', indexLength: 'Index finger length', middleLength: 'Middle finger length',
+  ringLength: 'Ring finger length', littleLength: 'Little finger length', handLength: 'Hand length',
+  middleToPalmRatio: 'Middle finger to palm ratio', indexToRingRatio: 'Index to ring finger ratio',
+};
+/** Everything that must be decided before features can be confirmed. Empty when ready. Nothing is ever defaulted. */
+export function reviewBlockers(views: readonly TracingLineView[], hand: ReviewHand | null, dominant: ReviewDominant | null, result: FeatureSetResult | null, uncertain: boolean, acknowledged: boolean): string[] {
+  const out: string[] = [];
+  if (!hand) out.push('Choose which hand is in the photo.');
+  if (!dominant) out.push('Choose your dominant hand, or Not sure.');
+  for (const v of views) {
+    const title = LINE_COPY[v.line].title;
+    if (v.status === 'tracing') out.push(`${title}: the trace is an unconfirmed draft. Confirm it, skip it or clear it.`);
+    else if (v.status === 'not-started' && REVIEW_PRIMARY_LINES.includes(v.line)) out.push(`${title}: not traced yet. Trace it, or choose Skip or I can’t see this line.`);
+  }
+  if (hand && dominant && result && !result.ok) out.push('The features could not be put together from these traces. Go back and check the lines.');
+  if (uncertain && !acknowledged) out.push('Tick the box to confirm that you have seen the uncertain items.');
+  return out;
+}
+/** True when the assembled features contain anything uncertain or unavailable (it stays marked so; confirming never upgrades it). */
+export function hasUncertainty(result: FeatureSetResult | null): boolean {
+  if (!result || !result.ok) return false;
+  const fs = result.featureSet;
+  return !fs.frame.available || fs.frame.qualityStatus !== 'accepted' || fs.measurements.status !== 'measured';
+}
+/** One-line summary of a confirmed feature set's lines (line:provenance/reason), for display and audit. */
+export const confirmedLineSummary = (featureSet: unknown): string => {
+  const lines = (featureSet as { lines?: Record<string, { provenance: string; reason?: string }> })?.lines ?? {};
+  return TRACING_LINES.map((id) => { const l = lines[id]; return l ? `${id}:${l.provenance}${l.reason ? `/${l.reason}` : ''}` : `${id}:missing`; }).join(';');
+};
+const deepFreeze = <T,>(o: T): T => { if (o && typeof o === 'object') { Object.values(o as object).forEach(deepFreeze); Object.freeze(o); } return o; };
+
 export const GESTURE_UNVERIFIABLE_TEXT = 'The photo position could not be checked during this gesture, so nothing was changed. Please trace again.';
 export const PLACEMENT_OK_TEXT = 'The shape and position of this trace can be used. Confirm it if it follows the line you see.';
 const placementText = (r: LineUnassessedReason) => PLACEMENT_TEXT[r] ?? 'This trace cannot be used yet.';
@@ -454,6 +501,12 @@ export function PalmTracingPanel({ context, imageSource, onClose }: PalmTracingP
   const gesture = useRef<Gesture | null>(null);
   const gestureEpoch = useRef(0);
   const stageRef = useRef<HTMLDivElement | null>(null);
+  // P4-I3 review state: explicit answers only (never defaulted), and a confirmation bound to what was reviewed.
+  const [mode, setMode] = useState<'trace' | 'review'>('trace');
+  const [hand, setHand] = useState<ReviewHand | null>(null);
+  const [dominant, setDominant] = useState<ReviewDominant | null>(null);
+  const [acknowledged, setAcknowledged] = useState<string | null>(null); // the review key the acknowledgement was given for
+  const [confirmed, setConfirmed] = useState<ConfirmedFeatures | null>(null);
 
   /** Invalidate any pending gesture (see the gesture contract): an explicit decision always wins over a held pointer. */
   const invalidateGesture = useCallback(() => {
@@ -469,6 +522,7 @@ export function PalmTracingPanel({ context, imageSource, onClose }: PalmTracingP
     invalidateGesture();
     setStep(0);
     setMessage('');
+    setMode('trace'); setHand(null); setDominant(null); setAcknowledged(null); setConfirmed(null);
     const v = readViews(model);
     setViews(v);
     try { setGuides(model ? model.guides() : null); } catch { setGuides(null); }
@@ -480,6 +534,7 @@ export function PalmTracingPanel({ context, imageSource, onClose }: PalmTracingP
     try { modelRef.current?.lines(); } catch { /* a revoked model discards its own traces on this call */ }
     setViews(null);
     setGuides(null);
+    setConfirmed(null); setAcknowledged(null); setMode('trace');
     setCleared(true);
     setMessage('This photo was replaced or removed, so its traces were cleared.');
   }, [invalidateGesture]);
@@ -664,6 +719,45 @@ export function PalmTracingPanel({ context, imageSource, onClose }: PalmTracingP
     setMessage('');
   };
 
+  // ---------------------------------------------------------------- P4-I3 review and confirmation
+  const signature = useMemo(() => (views ? lineSignature(views) : ''), [views]);
+  const reviewKey = `${context.generation}|${signature}|${hand ?? '-'}|${dominant ?? '-'}`;
+  const reviewResult = useMemo<FeatureSetResult | null>(() => {
+    if (mode !== 'review' || !hand || !dominant || !model || cleared) return null;
+    try { return model.buildFeatureSet({ hand, dominantHand: dominant }); } catch { return null; } // a revoked context is cleared by the watch
+    // signature: the features follow every change to the lines
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, hand, dominant, model, cleared, signature]);
+  const uncertain = hasUncertainty(reviewResult);
+  const blockers = views ? reviewBlockers(views, hand, dominant, reviewResult, uncertain, acknowledged === reviewKey) : ['The photo is no longer available.'];
+  const confirmedValid = !!confirmed && confirmed.key === reviewKey && !cleared;
+  // A confirmation never outlives what it confirmed: any change to the lines, the hand answers or the photo withdraws it.
+  useEffect(() => {
+    if (confirmed && !confirmedValid) {
+      setConfirmed(null);
+      setMessage('You changed something after confirming, so the confirmation was withdrawn. Review the features again.');
+    }
+  }, [confirmed, confirmedValid]);
+  const openReview = () => { invalidateGesture(); setMode('review'); setMessage(''); };
+  const backToTracing = (line?: PalmLineId) => { invalidateGesture(); setMode('trace'); if (line) setStep(TRACING_LINES.indexOf(line)); setMessage(''); };
+  const confirmFeatures = () => {
+    invalidateGesture();
+    const m = modelRef.current;
+    if (!m || cleared) return;
+    if (!m.isActive()) { markCleared(); return; }
+    let fresh: readonly TracingLineView[];
+    try { fresh = m.lines(); } catch (e) { if (isCleared(e)) { markCleared(); return; } throw e; }
+    // never confirm something other than what is on screen
+    if (lineSignature(fresh) !== signature) { setViews(fresh); setMessage('The lines changed while you were reviewing. Please review them again.'); return; }
+    if (blockers.length || !hand || !dominant) { setMessage(blockers[0] ?? 'Not ready to confirm yet.'); return; }
+    let r: FeatureSetResult;
+    try { r = m.buildFeatureSet({ hand, dominantHand: dominant }); } catch (e) { if (isCleared(e)) { markCleared(); return; } throw e; }
+    if (!r.ok) { setMessage('The features could not be put together. Nothing was confirmed.'); return; }
+    // keep only I1's feature set (no landmarks, no photo), frozen; in memory only
+    setConfirmed(Object.freeze({ key: reviewKey, featureSet: deepFreeze(JSON.parse(JSON.stringify(r.featureSet))), at: Date.now() }));
+    setMessage('Features confirmed for this photo.');
+  };
+
   // ---------------------------------------------------------------- render
   const scale = content && imgW ? content.width / imgW : 1;
   const px = (n: number) => n / (scale || 1); // CSS px -> image px (SVG user units)
@@ -676,6 +770,97 @@ export function PalmTracingPanel({ context, imageSource, onClose }: PalmTracingP
       <section data-testid="palm-tracing" data-state="cleared" data-version={PALM_TRACING_UI_VERSION} style={panelStyle}>
         <p role="status" aria-live="polite" style={{ ...typography.body, margin: 0 }}>{message || 'This photo is no longer available for tracing.'}</p>
         {onClose && <button type="button" onClick={onClose} style={secondaryButton} data-testid="palm-tracing-close">Close tracing</button>}
+      </section>
+    );
+  }
+
+  if (mode === 'review') {
+    const fs = reviewResult && reviewResult.ok ? reviewResult.featureSet : null;
+    const lineLabel = (v: TracingLineView) => v.status === 'confirmed' ? '✓ Confirmed trace'
+      : v.status === 'skipped' ? (v.skipReason === 'user-cannot-see' ? 'Can’t see it (not assessed)' : 'Skipped (not assessed)')
+      : v.status === 'tracing' ? '⚠ Unconfirmed draft (needs a decision)'
+      : REVIEW_PRIMARY_LINES.includes(v.line) ? '⚠ Not traced (needs a decision)' : 'Not requested (optional)';
+    const statusWord = (st: string) => (st === 'measured' ? 'Measured' : st === 'uncertain' ? '⚠ Uncertain' : '⚠ Unavailable');
+    const radio = (name: string, value: string, label: string, checked: boolean, onChange: () => void) => (
+      <label key={value} style={radioLabel}><input type="radio" name={name} value={value} checked={checked} onChange={onChange} data-testid={`palm-review-${name}-${value}`} style={{ width: 20, height: 20 }} /> {label}</label>
+    );
+    return (
+      <section data-testid="palm-review" data-version={PALM_FEATURE_REVIEW_VERSION} data-state={confirmedValid ? 'confirmed' : blockers.length ? 'blocked' : 'ready'} aria-labelledby={`${ids}-review-title`} style={panelStyle} className="aura-palm-tracing">
+        <style>{FOCUS_CSS}</style>
+        <div>
+          <p style={{ ...typography.caption, margin: 0 }} data-testid="palm-review-progress">Final step: review and confirm</p>
+          <h3 id={`${ids}-review-title`} style={{ ...typography.bodyStrong, margin: '2px 0 0' }}>Review your palm features</h3>
+          <p style={{ ...typography.body, margin: `${spacing.xs}px 0 0` }}>Check each line and the hand details. Edit anything that is wrong before you confirm.</p>
+        </div>
+
+        <fieldset style={fieldsetStyle} data-testid="palm-review-hand">
+          <legend style={legendStyle}>Which hand is in the photo?</legend>
+          <div style={actionsRow}>{radio('hand', 'left', 'Left hand', hand === 'left', () => setHand('left'))}{radio('hand', 'right', 'Right hand', hand === 'right', () => setHand('right'))}</div>
+        </fieldset>
+        <fieldset style={fieldsetStyle} data-testid="palm-review-dominant">
+          <legend style={legendStyle}>Which is your dominant hand?</legend>
+          <div style={actionsRow}>{radio('dominant', 'left', 'Left', dominant === 'left', () => setDominant('left'))}{radio('dominant', 'right', 'Right', dominant === 'right', () => setDominant('right'))}{radio('dominant', 'unknown', 'Not sure', dominant === 'unknown', () => setDominant('unknown'))}</div>
+        </fieldset>
+
+        <div>
+          <h4 style={subheading}>Lines (traced by you)</h4>
+          <ul style={listStyle} data-testid="palm-review-lines">
+            {views.map((v) => (
+              <li key={v.line} data-line={v.line} data-status={v.status} data-skip-reason={v.skipReason ?? undefined} style={rowStyle}>
+                <span><strong>{LINE_COPY[v.line].title}</strong><span style={{ ...typography.caption, display: 'block' }}>{lineLabel(v)}</span></span>
+                <button type="button" onClick={() => backToTracing(v.line)} data-testid={`palm-review-edit-${v.line}`} style={secondaryButton}>Edit</button>
+              </li>
+            ))}
+          </ul>
+        </div>
+
+        <div>
+          <h4 style={subheading}>Hand proportions (measured automatically from the photo)</h4>
+          {!fs && <p style={{ ...typography.caption, margin: 0 }} data-testid="palm-review-features-pending">Answer the hand questions to see the measured proportions.</p>}
+          {fs && (
+            <>
+              <p style={{ ...typography.caption, margin: 0 }} data-testid="palm-review-measurement-status" data-status={fs.measurements.status}>Overall: {statusWord(fs.measurements.status)}{fs.measurements.reasons.length ? ` (${fs.measurements.reasons.join(', ')})` : ''}</p>
+              <ul style={listStyle} data-testid="palm-review-measurements">
+                {Object.values(fs.measurements.measurements).map((mm) => (
+                  <li key={mm.id} data-measurement={mm.id} data-status={mm.status} style={rowStyle}>
+                    <span>{MEASUREMENT_LABELS[mm.id] ?? mm.id}</span>
+                    <span style={typography.caption}>{statusWord(mm.status)}{mm.value !== null ? ` · ${mm.value} ${mm.unit === 'ratio' ? '' : 'palm widths'}` : ''}</span>
+                  </li>
+                ))}
+              </ul>
+              <p style={{ ...typography.caption, margin: `${spacing.xs}px 0 0` }} data-testid="palm-review-quality" data-quality={fs.frame.qualityStatus}>Photo check: {fs.frame.qualityStatus === 'accepted' ? 'Accepted' : fs.frame.qualityStatus === 'needs-retake' ? `⚠ Needs a better photo (${fs.frame.qualityIssues.join(', ')})` : '⚠ Unknown'}{fs.frame.available ? '' : ' · palm area not measurable'}</p>
+              <p style={{ ...typography.caption, margin: 0 }}>Marks: not part of this version (not requested).</p>
+            </>
+          )}
+        </div>
+
+        {uncertain && !confirmedValid && (
+          <label style={radioLabel} data-testid="palm-review-ack-label">
+            <input type="checkbox" checked={acknowledged === reviewKey} onChange={(e) => setAcknowledged(e.target.checked ? reviewKey : null)} data-testid="palm-review-ack" style={{ width: 20, height: 20 }} />
+            I have seen the uncertain or unavailable items. They will stay marked that way.
+          </label>
+        )}
+
+        {!confirmedValid && blockers.length > 0 && (
+          <div role="status" aria-live="polite" data-testid="palm-review-blockers">
+            <p style={{ ...typography.bodyStrong, margin: 0 }}>Before you can confirm:</p>
+            <ul style={{ margin: 0, paddingLeft: spacing.lg }}>{blockers.map((b) => <li key={b} style={typography.body}>{b}</li>)}</ul>
+          </div>
+        )}
+        {confirmedValid && (
+          <div data-testid="palm-review-confirmed" data-lines={confirmed ? confirmedLineSummary(confirmed.featureSet) : ''} style={{ borderLeft: `3px solid ${colors.positive}`, paddingLeft: spacing.sm }}>
+            <p style={{ ...typography.bodyStrong, margin: 0 }}><span aria-hidden="true">✓ </span>Features confirmed for this photo.</p>
+            <p style={{ ...typography.caption, margin: 0 }}>Editing a line, changing a hand answer or changing the photo withdraws this confirmation.</p>
+          </div>
+        )}
+        <p role="status" aria-live="polite" data-testid="palm-tracing-status" style={{ ...typography.caption, margin: 0, minHeight: '1.2em' }}>{message}</p>
+
+        <div style={actionsRow}>
+          {!confirmedValid && <button type="button" onClick={confirmFeatures} disabled={blockers.length > 0} data-testid="palm-review-confirm" style={blockers.length ? disabledButton : primaryButton}>Confirm features</button>}
+          <button type="button" onClick={() => backToTracing()} data-testid="palm-review-back" style={secondaryButton}>Back to tracing</button>
+          {onClose && <button type="button" onClick={onClose} data-testid="palm-tracing-close" style={secondaryButton}>Close tracing</button>}
+        </div>
+        <p style={{ ...typography.caption, margin: 0 }} data-testid="palm-review-scope">{REVIEW_SCOPE_NOTE}</p>
       </section>
     );
   }
@@ -799,7 +984,11 @@ export function PalmTracingPanel({ context, imageSource, onClose }: PalmTracingP
         <button type="button" onClick={() => go(step + 1)} disabled={step === TRACING_LINES.length - 1} data-testid="palm-tracing-next" style={step === TRACING_LINES.length - 1 ? disabledButton : secondaryButton}>Next line</button>
       </div>
 
-      <p style={{ ...typography.caption, margin: 0 }} data-testid="palm-tracing-scope">{TRACING_SCOPE_NOTE} Reviewing all lines together comes in a later step.</p>
+      <div style={actionsRow}>
+        <button type="button" onClick={openReview} data-testid="palm-review-open" style={primaryButton}>Review all lines</button>
+      </div>
+      {confirmedValid && <p data-testid="palm-review-confirmed-banner" style={{ ...typography.caption, margin: 0 }}><span aria-hidden="true">✓ </span>Features confirmed for this photo. Any change withdraws the confirmation.</p>}
+      <p style={{ ...typography.caption, margin: 0 }} data-testid="palm-tracing-scope">{TRACING_SCOPE_NOTE}</p>
     </section>
   );
 }
@@ -824,6 +1013,12 @@ const primaryButton: React.CSSProperties = { ...tracingButtonBase, border: 'none
 const secondaryButton: React.CSSProperties = { ...tracingButtonBase, border: `1px solid ${colors.borderDefault}`, background: colors.surfaceSubtle, color: colors.textPrimary };
 const disabledButton: React.CSSProperties = { ...secondaryButton, opacity: 0.5, cursor: 'not-allowed' };
 const actionsRow: React.CSSProperties = { display: 'flex', flexWrap: 'wrap', gap: spacing.sm };
+const fieldsetStyle: React.CSSProperties = { border: `1px solid ${colors.borderDefault}`, borderRadius: radius.md, padding: spacing.sm, margin: 0 };
+const legendStyle: React.CSSProperties = { ...typography.bodyStrong, padding: `0 ${spacing.xs}px` };
+const radioLabel: React.CSSProperties = { ...typography.body, display: 'inline-flex', alignItems: 'center', gap: spacing.xs, minHeight: 48, cursor: 'pointer' };
+const subheading: React.CSSProperties = { ...typography.bodyStrong, margin: `0 0 ${spacing.xs}px` };
+const listStyle: React.CSSProperties = { listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: spacing.xs };
+const rowStyle: React.CSSProperties = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm, minHeight: 48, borderBottom: `1px solid ${colors.borderSubtle}` };
 const stepButton: React.CSSProperties = { ...secondaryButton, minHeight: 48, padding: `${spacing.xs}px ${spacing.sm}px`, textAlign: 'left', fontSize: 13 };
 const stepButtonCurrent: React.CSSProperties = { border: `2px solid ${colors.traditional}`, background: colors.traditionalSoft };
 

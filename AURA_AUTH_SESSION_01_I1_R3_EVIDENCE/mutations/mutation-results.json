@@ -1,0 +1,305 @@
+[
+  {
+    "mutation": "M1 remove server statement timeout",
+    "file": "apps/web/lib/authSessionDb.ts",
+    "caught": true,
+    "restored_sha256_identical": true,
+    "results": {
+      "authSessionR1Db": {
+        "exit": 1,
+        "summary": "41 passed, 1 failed",
+        "failing_checks": [
+          "FAIL  A8 write statement bound: confirmed statement_timeout at ~1500 ms, nothing left running -- {\"reason\":\"deadline\",\"outcome\":\"uncertain\",\"ms\":2000,"
+        ]
+      },
+      "authSessionStoreDb": {
+        "exit": 1,
+        "summary": "46 passed, 4 failed",
+        "failing_checks": [
+          "FAIL  T2 statement: PostgreSQL cancels at statement_timeout (~1 s), not the client -- {\"reason\":\"deadline\",\"ms\":3001}",
+          "FAIL  T2 statement: the backend is not still sleeping afterwards -- {\"total\":1,\"active\":1,\"waiting\":0,\"sleeping\":1}",
+          "FAIL  T3 deadline: the server statement ended within its own bound (< 2.5 s from start) -- still running",
+          "FAIL  T3 deadline: the discarded connection was closed on the server too (no orphan backend) -- {\"backends\":2,\"poolTotal\":1}"
+        ]
+      }
+    }
+  },
+  {
+    "mutation": "M2 unsafe connection reuse",
+    "file": "apps/web/lib/authSessionDb.ts",
+    "caught": true,
+    "restored_sha256_identical": true,
+    "results": {
+      "authSessionDeadline": {
+        "exit": 1,
+        "summary": "23 passed, 4 failed",
+        "failing_checks": [
+          "FAIL  5 uncertain: the uncertain connection is discarded, the retry gets a fresh one -- [\"ok\",\"ok\"]",
+          "FAIL  8 deadline exhaustion: uncertain at exactly 2000 ms, 1 attempt, connection discarded -- {\"settled\":true,\"error\":{\"name\":\"SessionVerificationUnav",
+          "FAIL  10 late completion (2100 ms): reported uncertain at 2000 ms, result ignored, connection discarded once -- {\"settled\":true,\"error\":{\"name\":\"Sessi",
+          "FAIL  11 recovery: a failed operation discards its connections; the next one succeeds normally -- {\"first\":\"uncertain\",\"second\":\"revoked\",\"released\":["
+        ]
+      },
+      "authSessionStoreDb": {
+        "exit": 1,
+        "summary": "19 passed, 1 failed",
+        "failing_checks": [
+          "FAIL  unexpected error SessionVerificationUnavailableError: Session verification is temporarily unavailable."
+        ]
+      }
+    }
+  },
+  {
+    "mutation": "M3 deadline reset on retry",
+    "file": "apps/web/lib/authSessionStore.ts",
+    "caught": true,
+    "restored_sha256_identical": true,
+    "results": {
+      "authSessionDeadline": {
+        "exit": 1,
+        "summary": "24 passed, 3 failed",
+        "failing_checks": [
+          "FAIL  6 retry limits = remaining budget (400 ms), not the maxima -- \"BEGIN; SET LOCAL statement_timeout = '1500ms'; SET LOCAL lock_timeout = '1000ms';",
+          "FAIL  9 retry hangs: still ends at the ORIGINAL deadline (2000 ms, not 1600 + 2000) -- {\"reason\":\"deadline\",\"elapsed\":3600,\"attempts\":2}",
+          "FAIL  9b retry acquisition waits only for the remaining 400 ms (not 500), ends at 2000 ms -- {\"elapsed\":2100,\"reason\":\"acquire\"}"
+        ]
+      },
+      "authSessionR1Db": {
+        "exit": 0,
+        "summary": "42 passed, 0 failed",
+        "failing_checks": []
+      }
+    }
+  },
+  {
+    "mutation": "M4 retry confirmed failures too",
+    "file": "apps/web/lib/authSessionStore.ts",
+    "caught": true,
+    "restored_sha256_identical": true,
+    "results": {
+      "authSessionDeadline": {
+        "exit": 1,
+        "summary": "22 passed, 5 failed",
+        "failing_checks": [
+          "FAIL  2 confirmed statement_timeout: failed, 1 attempt, no retry, 1500 ms -- {\"attempts\":2,\"elapsed\":1501}",
+          "FAIL  3 confirmed lock_timeout: failed, 1 attempt, no retry, 1000 ms",
+          "FAIL  3b confirmed constraint failure: failed, 1 attempt",
+          "FAIL  4 acquire (no connection): failed at exactly 500 ms, nothing sent, no retry -- {\"settled\":true,\"error\":{\"name\":\"SessionVerificationUnavailableEr",
+          "FAIL  4b acquire (pool timeout error): failed, nothing sent, no retry"
+        ]
+      },
+      "authSessionR1Db": {
+        "exit": 1,
+        "summary": "40 passed, 2 failed",
+        "failing_checks": [
+          "FAIL  A1 locked table: confirmed lock_timeout, 1 attempt, ~1000 ms, row NOT revoked -- {\"reason\":\"deadline\",\"outcome\":\"uncertain\",\"ms\":2001,\"events\":[",
+          "FAIL  A7 pool exhausted: confirmed acquire failure in ~500 ms, 1 attempt, row not revoked -- {\"reason\":\"acquire\",\"outcome\":\"failed\",\"ms\":1005,\"events\""
+        ]
+      }
+    }
+  },
+  {
+    "mutation": "M5 calendar-day expiry",
+    "file": "apps/web/lib/authSessionDb.ts",
+    "caught": true,
+    "restored_sha256_identical": true,
+    "results": {
+      "authSessionR1Db": {
+        "exit": 1,
+        "summary": "41 passed, 1 failed",
+        "failing_checks": [
+          "FAIL  C2 the production TTL expression (make_interval(days => 30)) is 720 h across every DST transition -- {\"America/New_York @ 2026-03-07 12:00:00\":7"
+        ]
+      }
+    }
+  },
+  {
+    "mutation": "M6 provisional exposes the raw sid",
+    "file": "apps/web/lib/authSessionStore.ts",
+    "caught": true,
+    "restored_sha256_identical": true,
+    "results": {
+      "authSessionR1Db": {
+        "exit": 1,
+        "summary": "41 passed, 1 failed",
+        "failing_checks": [
+          "FAIL  B1 provisional: state=provisional, keys exactly expiresAt/idHash/state/userId, no sid, no symbols, JSON carries no raw id"
+        ]
+      }
+    }
+  },
+  {
+    "mutation": "M7 ambiguous COMMIT treated as acknowledged",
+    "file": "apps/web/lib/authSessionStore.ts",
+    "caught": true,
+    "restored_sha256_identical": true,
+    "results": {
+      "authSessionContract": {
+        "exit": 1,
+        "summary": "18 passed, 3 failed",
+        "failing_checks": [
+          "FAIL  run: socket error, no SQLSTATE -> ambiguous, no authorization -- {\"outcome\":\"committed\",\"authorization\":{\"kind\":\"commit_authorization\",\"idHash\":",
+          "FAIL  run: connection exception 08006 -> ambiguous, no authorization -- {\"outcome\":\"committed\",\"authorization\":{\"kind\":\"commit_authorization\",\"idHash\"",
+          "FAIL  run: admin shutdown 57P01 -> ambiguous, no authorization -- {\"outcome\":\"committed\",\"authorization\":{\"kind\":\"commit_authorization\",\"idHash\":\"do5F"
+        ]
+      },
+      "authSessionR1Db": {
+        "exit": 1,
+        "summary": "25 passed, 1 failed",
+        "failing_checks": [
+          "FAIL  unexpected error TypeError: Only a provisional session whose commit was ambiguous can be classified."
+        ]
+      }
+    }
+  },
+  {
+    "mutation": "M8 ambiguous keeps the raw id and read-back releases it",
+    "file": "apps/web/lib/authSessionStore.ts",
+    "caught": true,
+    "restored_sha256_identical": true,
+    "results": {
+      "authSessionR1Db": {
+        "exit": 1,
+        "summary": "40 passed, 2 failed",
+        "failing_checks": [
+          "FAIL  B5 read-back classifies it as committed_undisclosed -- three times -- and never releases session material -- [{\"label\":\"committed_undisclosed\",\"",
+          "FAIL  B7 ambiguous COMMIT + unavailable read-back -> throws unavailable (no material); a later read-back still only labels -- {\"unavailable\":\"unavaila"
+        ]
+      }
+    }
+  },
+  {
+    "mutation": "M9 release ignores the read-back",
+    "file": "apps/web/lib/authSessionStore.ts",
+    "caught": true,
+    "restored_sha256_identical": true,
+    "results": {
+      "authSessionR1Db": {
+        "exit": 1,
+        "summary": "38 passed, 4 failed",
+        "failing_checks": [
+          "FAIL  B3 confirmed commit but missing row -> no session material (null) -- {\"outcome\":\"committed\",\"r\":\"RELEASED\"}",
+          "FAIL  B3 confirmed commit but expired row -> no session material (null) -- {\"outcome\":\"committed\",\"r\":\"RELEASED\"}",
+          "FAIL  B3 confirmed commit but revoked row -> no session material (null) -- {\"outcome\":\"committed\",\"r\":\"RELEASED\"}",
+          "FAIL  B3 confirmed commit but mismatched (row now belongs to another account) row -> no session material (null) -- {\"outcome\":\"committed\",\"r\":\"RELEASE"
+        ]
+      },
+      "authSessionR3Db": {
+        "exit": 1,
+        "summary": "21 passed, 3 failed",
+        "failing_checks": [
+          "FAIL  13 confirmed commit but revoked row -> 0 releases (null once, then refused) -- {\"releases\":1}",
+          "FAIL  13 confirmed commit but expired row -> 0 releases (null once, then refused) -- {\"releases\":1}",
+          "FAIL  13 confirmed commit but missing row -> 0 releases (null once, then refused) -- {\"releases\":1}"
+        ]
+      }
+    }
+  },
+  {
+    "mutation": "N1 authorization issued for a substituted transaction (binding loosened to 'any transaction')",
+    "file": "apps/web/lib/authSessionStore.ts",
+    "caught": true,
+    "restored_sha256_identical": true,
+    "results": {
+      "authSessionR3Db": {
+        "exit": 1,
+        "summary": "20 passed, 4 failed",
+        "failing_checks": [
+          "FAIL  2 transaction replaced before COMMIT -> rolled_back (transaction_mismatch); 0 releases; permanently dead -- {\"outcome\":\"committed\",\"authorizatio",
+          "FAIL  3 rollback then another transaction that re-inserts the same idHash (mismatched operation) -> transaction_mismatch; 0 releases -- {\"outcome\":\"co",
+          "FAIL  4b caller COMMIT/BEGIN/write queued before the helper -> transaction_mismatch; 0 releases -- {\"outcome\":\"committed\",\"authorization\":{\"kind\":\"com",
+          "FAIL  6 connection reuse (same backend pid, later transaction) -> transaction_mismatch; 0 releases -- {\"samePid\":true,\"d\":{\"outcome\":\"committed\",\"auth"
+        ]
+      }
+    }
+  },
+  {
+    "mutation": "N2 originating-transaction binding bypassed (check never raises)",
+    "file": "apps/web/lib/authSessionStore.ts",
+    "caught": true,
+    "restored_sha256_identical": true,
+    "results": {
+      "authSessionR3Db": {
+        "exit": 1,
+        "summary": "18 passed, 6 failed",
+        "failing_checks": [
+          "FAIL  2 transaction replaced before COMMIT -> rolled_back (transaction_mismatch); 0 releases; permanently dead -- {\"outcome\":\"committed\",\"authorizatio",
+          "FAIL  3 rollback then another transaction -> transaction_mismatch; 0 releases -- {\"outcome\":\"committed\",\"authorization\":{\"kind\":\"commit_authorization\"",
+          "FAIL  3 rollback then another transaction that re-inserts the same idHash (mismatched operation) -> transaction_mismatch; 0 releases -- {\"outcome\":\"co",
+          "FAIL  4b caller COMMIT/BEGIN/write queued before the helper -> transaction_mismatch; 0 releases -- {\"outcome\":\"committed\",\"authorization\":{\"kind\":\"com",
+          "FAIL  5 provisional P2 presented with another transaction -> transaction_mismatch (that transaction left aborted for its caller); 0 releases; P2 perma",
+          "FAIL  6 connection reuse (same backend pid, later transaction) -> transaction_mismatch; 0 releases -- {\"samePid\":true,\"d\":{\"outcome\":\"committed\",\"auth"
+        ]
+      },
+      "authSessionR1Db": {
+        "exit": 1,
+        "summary": "41 passed, 1 failed",
+        "failing_checks": [
+          "FAIL  B4 caller's own ROLLBACK, then the commit helper -> rolled_back (transaction_mismatch, R3), no authorization, no row; cannot be retried -- {\"out"
+        ]
+      }
+    }
+  },
+  {
+    "mutation": "N3 non-atomic authorization consumption (consumed after the read-back)",
+    "file": "apps/web/lib/authSessionStore.ts",
+    "caught": true,
+    "restored_sha256_identical": true,
+    "results": {
+      "authSessionR3Db": {
+        "exit": 1,
+        "summary": "16 passed, 8 failed",
+        "failing_checks": [
+          "FAIL  9 2 overlapping release calls -> exactly 1 release, 1 refused -- {\"releases\":2}",
+          "FAIL  10 25 overlapping release calls -> exactly 1 release, 24 refused -- {\"releases\":25}",
+          "FAIL  11 read-back held at a barrier: 5 overlapping calls are refused BEFORE it completes; only the reserving call releases (exactly 1) -- {\"refused\":",
+          "FAIL  12a read-back fails (confirmed, ended pool) -> unavailable; the retry with a healthy pool is refused; 0 releases -- {\"failed\":\"SessionVerificati",
+          "FAIL  12b read-back uncertain (black-holed answer, deadline) -> unavailable/uncertain; NOT restored; 0 releases",
+          "FAIL  13 confirmed commit but revoked row -> 0 releases (null once, then refused) -- {\"releases\":0}"
+        ]
+      }
+    }
+  },
+  {
+    "mutation": "N4 authorization reuse (never consumed)",
+    "file": "apps/web/lib/authSessionStore.ts",
+    "caught": true,
+    "restored_sha256_identical": true,
+    "results": {
+      "authSessionR3Db": {
+        "exit": 1,
+        "summary": "15 passed, 9 failed",
+        "failing_checks": [
+          "FAIL  8 sequential reuse -> exactly 1 release; the second call is refused",
+          "FAIL  9 2 overlapping release calls -> exactly 1 release, 1 refused -- {\"releases\":2}",
+          "FAIL  10 25 overlapping release calls -> exactly 1 release, 24 refused -- {\"releases\":25}",
+          "FAIL  11 read-back held at a barrier: 5 overlapping calls are refused BEFORE it completes; only the reserving call releases (exactly 1) -- {\"refused\":",
+          "FAIL  12a read-back fails (confirmed, ended pool) -> unavailable; the retry with a healthy pool is refused; 0 releases -- {\"failed\":\"SessionVerificati",
+          "FAIL  12b read-back uncertain (black-holed answer, deadline) -> unavailable/uncertain; NOT restored; 0 releases"
+        ]
+      },
+      "authSessionR1Db": {
+        "exit": 1,
+        "summary": "41 passed, 1 failed",
+        "failing_checks": [
+          "FAIL  B2 an authorization releases at most once -- resolved"
+        ]
+      }
+    }
+  },
+  {
+    "mutation": "N5 release authority restored after an ambiguous COMMIT",
+    "file": "apps/web/lib/authSessionStore.ts",
+    "caught": true,
+    "restored_sha256_identical": true,
+    "results": {
+      "authSessionR3Db": {
+        "exit": 1,
+        "summary": "19 passed, 1 failed",
+        "failing_checks": [
+          "FAIL  unexpected error TypeError: Only a provisional session whose commit was ambiguous can be classified."
+        ]
+      }
+    }
+  }
+]

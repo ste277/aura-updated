@@ -1,0 +1,11 @@
+Final results of run 45998039990 (recorded after completion; not rerun)
+status=completed conclusion=failure attempt=1 created=2026-11-27T12:22:04Z updated=2026-11-27T12:36:53Z
+  SUCCESS  MCP Server (Node 20 compatibility) (job 140502297966)
+  SUCCESS  Day Constructor acceptance DB tests (job 140502298360)
+  SUCCESS  Next.js production build (job 140502298390)
+  SUCCESS  Ephemeris / panchang tests (job 140502298436)
+  FAILURE  Database migration validation (job 140502298446)
+  SUCCESS  MCP Server (job 140502298451)
+  SUCCESS  Palmistry upload pipeline tests (G5) (job 140502298521)
+  job 140502298360 checkout: HEAD is now at 40f6cba
+  job 140502298436 checkout: HEAD is now at 40f6cba

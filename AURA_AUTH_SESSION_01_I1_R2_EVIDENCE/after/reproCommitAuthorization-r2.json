@@ -1,0 +1,30 @@
+{
+  "api": "R2",
+  "acknowledgedCommit": {
+    "callerCommit": "committed",
+    "dbRowCommitted": true,
+    "readBacks": [
+      "RELEASED raw sid"
+    ],
+    "sessionMaterialReleased": true
+  },
+  "ambiguousCommitThatSucceeded": {
+    "callerCommit": "ambiguous",
+    "dbRowCommitted": true,
+    "readBacks": [
+      "committed_undisclosed",
+      "committed_undisclosed",
+      "committed_undisclosed"
+    ],
+    "sessionMaterialReleased": false
+  },
+  "ambiguousCommitThatDidNotSucceed": {
+    "callerCommit": "ambiguous",
+    "dbRowCommitted": false,
+    "readBacks": [
+      "not_committed",
+      "not_committed"
+    ],
+    "sessionMaterialReleased": false
+  }
+}
