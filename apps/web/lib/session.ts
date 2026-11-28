@@ -27,7 +27,6 @@
  * re-issues or slides it. Expiry is fixed at 30 days (720 h) by the database.
  */
 import type { Pool, PoolClient } from 'pg';
-import { NextResponse } from 'next/server';
 import { getAuthSecret } from './auth';
 import { createSessionPool, SESSION_WRITE_BOUNDS } from './authSessionDb';
 import {
@@ -76,6 +75,15 @@ export interface RequestSessionWithUser extends RequestSession {
 /** "Could not find out" -- the database was unreachable, slow, or answered unexpectedly. Maps to 503. */
 export const SESSION_UNAVAILABLE: unique symbol = Symbol('aura.session.unavailable');
 export type SessionUnavailable = typeof SESSION_UNAVAILABLE;
+
+/**
+ * A response whose cookies can be set (a NextResponse). Structural, so this
+ * module has no runtime or type dependency on `next` (it is also loaded by the
+ * MCP consent path and by tests without apps/web dependencies).
+ */
+export interface CookieWritableResponse {
+  cookies: { set(name: string, value: string, options: { httpOnly: boolean; secure: boolean; sameSite: 'lax'; path: string; maxAge: number }): unknown };
+}
 
 /** Anything with a Next.js-style `cookies.get(name)` -- a NextRequest, or next/headers `cookies()`. */
 export interface CookieSource {
@@ -230,8 +238,8 @@ export async function getSessionFromCookieHeader(cookieHeader: string | null | u
 }
 
 /** 503 for "could not verify the session". Never clears or sets a cookie. */
-export function sessionUnavailableResponse(): NextResponse {
-  return NextResponse.json(
+export function sessionUnavailableResponse(): Response {
+  return Response.json(
     { error: SESSION_UNAVAILABLE_MESSAGE },
     { status: 503, headers: { 'Retry-After': '2', 'Cache-Control': 'no-store' } }
   );
@@ -361,7 +369,7 @@ export function issueSessionToken(session: CommittedAuthSession, now: number = D
  * clears every other session cookie name, including legacy `as_session`.
  * Max-Age is a client hint derived from the database-set expiresAt.
  */
-export function setSessionCookie(res: NextResponse, session: CommittedAuthSession, now: number = Date.now()): void {
+export function setSessionCookie(res: CookieWritableResponse, session: CommittedAuthSession, now: number = Date.now()): void {
   const secure = sessionCookieSecure();
   const name = sessionCookieName(secure);
   const token = issueSessionToken(session, now);
@@ -370,12 +378,12 @@ export function setSessionCookie(res: NextResponse, session: CommittedAuthSessio
 }
 
 /** Clears every session cookie name (v2 secure / insecure and legacy `as_session`) with deletable attributes. */
-export function clearSessionCookies(res: NextResponse): void {
+export function clearSessionCookies(res: CookieWritableResponse): void {
   for (const c of sessionCookieClearList(sessionCookieSecure())) res.cookies.set(c.name, '', c.options);
 }
 
 /** Clears ONLY the legacy v1 cookie (cutover, N6). Never touches a v2 cookie, so a concurrent sign-in elsewhere is unaffected. */
-export function clearLegacySessionCookie(res: NextResponse): void {
+export function clearLegacySessionCookie(res: CookieWritableResponse): void {
   const legacy = sessionCookieClearList(sessionCookieSecure()).find((c) => c.name === LEGACY_SESSION_COOKIE_NAME);
   if (legacy) res.cookies.set(legacy.name, '', legacy.options);
 }

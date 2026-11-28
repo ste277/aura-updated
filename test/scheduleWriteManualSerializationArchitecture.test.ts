@@ -348,7 +348,7 @@ function POST(req) {
 check('MUTATION 5 -- a successful response returned from INSIDE the catch block (after a failed transaction): detected', !successResponseIsOutsideTryCatchFinally(SUCCESS_AFTER_FAILURE_SNIPPET));
 
 // ---- authority and lock domain ----
-check('SERVER AUTHORITY: the lock identity is the authenticated session user and nothing from the request body or query', /const session = getSessionFromRequest\(req\);/.test(post) && !/body/.test(post.slice(lockAt, lockAt + 160)) && !/searchParams|params\./.test(post.slice(lockAt, lockAt + 160)));
+check('SERVER AUTHORITY: the lock identity is the authenticated session user and nothing from the request body or query', /const session = await getSession(WithUser)?FromRequest\(req\);\s*if \(session === SESSION_UNAVAILABLE\) return sessionUnavailableResponse\(\);/.test(post) && !/body/.test(post.slice(lockAt, lockAt + 160)) && !/searchParams|params\./.test(post.slice(lockAt, lockAt + 160)));
 const keyLiterals = production.flatMap((x) => Array.from(x.src.matchAll(/`(day-constructor-accept:\$\{[^}]+\})`/g)).map((m) => ({ f: x.f, key: m[1].replace(/session\.userId/, 'userId') })));
 check('NO NEW LOCK DOMAIN: every advisory-lock key in production code is the same `day-constructor-accept:${userId}` construction (acceptance, Move, Recomposition acceptance, and now the manual writer)', keyLiterals.length === 4 && new Set(keyLiterals.map((k) => k.key)).size === 1 && keyLiterals.map((k) => k.f).sort().join() === ['apps/web/app/api/plans/route.ts', 'apps/web/lib/dayConstructorAcceptancePersistence.ts', 'apps/web/lib/planMove.ts', 'apps/web/lib/remainingDayRecompositionAcceptance.ts'].sort().join());
 // Onboarding V1 PR 2 -- First-Run Reliability Correction added a FIFTH,
@@ -371,8 +371,13 @@ const SESSION_STORE_TIMEOUT_MODULE = 'apps/web/lib/authSessionDb.ts';
 // lib/sessionErrors.ts only NAMES the 'statement_timeout' / 'lock_timeout'
 // failure reasons (diagnostic labels); it contains no SQL (asserted below).
 const SESSION_ERROR_LABELS_MODULE = 'apps/web/lib/sessionErrors.ts';
-const I1_TIMEOUT_EXEMPT = [SESSION_STORE_TIMEOUT_MODULE, SESSION_ERROR_LABELS_MODULE];
-check('no NOWAIT, lock_timeout or statement_timeout was introduced (the lock waits under the existing timeout semantics; re-baselined by AURA-AUTH-SESSION-01-I1: only lib/authSessionDb.ts may set timeouts, for session queries; lib/sessionErrors.ts only names the reasons)', !production.some((x) => !I1_TIMEOUT_EXEMPT.includes(x.f) && /NOWAIT|lock_timeout|statement_timeout|SKIP LOCKED/i.test(x.src)) && !production.some((x) => x.f === SESSION_STORE_TIMEOUT_MODULE && /NOWAIT|SKIP LOCKED/i.test(x.src)));
+// AURA-AUTH-SESSION-01-I2: lib/session.ts bounds its own SESSION transactions
+// (sign-in code + AuthSession insert; the B3 FOR SHARE re-check) with SET LOCAL
+// timeouts; it never touches the schedule-write lock (asserted below).
+const SESSION_TRANSACTION_MODULE = 'apps/web/lib/session.ts';
+const I1_TIMEOUT_EXEMPT = [SESSION_STORE_TIMEOUT_MODULE, SESSION_ERROR_LABELS_MODULE, SESSION_TRANSACTION_MODULE];
+check('no NOWAIT, lock_timeout or statement_timeout was introduced (the lock waits under the existing timeout semantics; re-baselined by AURA-AUTH-SESSION-01-I1: only lib/authSessionDb.ts may set timeouts, for session queries; lib/sessionErrors.ts only names the reasons; re-baselined by AURA-AUTH-SESSION-01-I2: lib/session.ts for its own session transactions)', !production.some((x) => !I1_TIMEOUT_EXEMPT.includes(x.f) && /NOWAIT|lock_timeout|statement_timeout|SKIP LOCKED/i.test(x.src)) && !production.some((x) => (x.f === SESSION_STORE_TIMEOUT_MODULE || x.f === SESSION_TRANSACTION_MODULE) && /NOWAIT|SKIP LOCKED/i.test(x.src)));
+check('I2: the session transaction module never touches the schedule-write lock (no advisory lock, no "day-constructor-accept:" key)', production.some((x) => x.f === SESSION_TRANSACTION_MODULE) && !production.some((x) => x.f === SESSION_TRANSACTION_MODULE && /pg_advisory|day-constructor-accept:/.test(x.src)));
 check('the session-store timeout module never touches the schedule-write lock (no advisory lock, no "day-constructor-accept:" key)', !production.some((x) => x.f === SESSION_STORE_TIMEOUT_MODULE && /pg_advisory|day-constructor-accept:/.test(x.src)));
 check('the session error-label module contains no SQL at all (it cannot set a timeout)', !production.some((x) => x.f === SESSION_ERROR_LABELS_MODULE && /SET\s+LOCAL|\.query\s*\(|SELECT\s|UPDATE\s|INSERT\s|DELETE\s/i.test(x.src)));
 check('NO LOCK HELPER / RENAME in this slice: no extracted lock helper, and the key is not renamed', !production.some((x) => /withUserScheduleLock|scheduleWriteLock|acquireScheduleLock|schedule-write:/.test(x.src)));
