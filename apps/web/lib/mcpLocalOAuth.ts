@@ -12,14 +12,17 @@ import {
   type AddressUnresolvedReason,
   type ClientAddressSource,
 } from '../../../packages/mcp-tools/src/security/clientAddress';
-import { MCP_PG_POOL_BOUNDS, StoreUnavailableError } from '../../../packages/mcp-tools/src/security/deadline';
+import { MCP_PG_POOL_BOUNDS, requestBudgetRemainingMs, StoreUnavailableError } from '../../../packages/mcp-tools/src/security/deadline';
 import { SessionVerificationUnavailableError } from './sessionErrors';
 import { randomBytes } from 'crypto';
 import { createPostgresRateLimiter } from '../../../packages/mcp-tools/src/security/postgresRateLimit';
 import { createBucketHasher, deriveBucketKey, type BucketHasher } from '../../../packages/mcp-tools/src/security/preAuthRules';
 import { createFixedWindowRateLimiter, type McpRateLimiter } from '../../../packages/mcp-tools/src/security/rateLimit';
 import type { RemoteMcpConfig } from '../../../packages/mcp-tools/src/http/remoteMcpHandler';
-import { getSessionFromCookieHeader, withSessionShareLock } from './session';
+import { getSessionFromCookieHeader, getSessionPool, sessionRowRefFromCookieHeader } from './session';
+import { finalizeConsent, isConsentFinalized } from './mcpConsentFinalization';
+import { SESSION_LOOKUP_BOUNDS, SESSION_WRITE_BOUNDS, SYSTEM_SESSION_CLOCK } from './authSessionDb';
+import type { ConsentFinalizationHooks } from '../../../packages/mcp-tools/src/auth/consentFinalization';
 import { resolveRuntimeMcpAuthMode } from './mcpAuthGate';
 
 /**
@@ -32,8 +35,9 @@ import { resolveRuntimeMcpAuthMode } from './mcpAuthGate';
  *
  * Login reuses Aura's session (AURA-AUTH-SESSION-01-I2, D6): the v2 session
  * cookie, verified against the database by lib/session.ts -- the same central
- * validation as every route. Consent approval re-checks the session FOR SHARE
- * while the grant is issued (B3). Nothing else in MCP OAuth changes.
+ * validation as every route. Consent approval saves a new grant and finalizes
+ * it against the live session in the Aura database; only finalized grants are
+ * usable (design Rev 4 B3, AURA-AUTH-SESSION-01-I2-R2).
  *
  * Storage (I2b):
  *   - default: in memory (lost on restart);
@@ -128,18 +132,39 @@ export async function sessionUserFromCookie(cookieHeader: string | null | undefi
  * approving user's session row is held FOR SHARE after a live re-check, so a
  * concurrent logout is strictly ordered before (no grant: null) or after it.
  */
-async function guardConsentGrant(req: IncomingMessage, userId: string, issue: () => Promise<string>): Promise<string | null> {
+/** The caller deadline (session clock) = what remains of this request's OAuth budget, capped by `capMs`. */
+function budgetDeadlineAt(capMs: number): number {
+  return SYSTEM_SESSION_CLOCK.now() + Math.min(capMs, requestBudgetRemainingMs());
+}
+
+/** Session-store outage -> the OAuth server's 503 (never "signed out" / "not authorized"). */
+async function asStoreOutcome<T>(work: () => Promise<T>): Promise<T> {
   try {
-    const session = await getSessionFromCookieHeader(req.headers.cookie);
-    if (!session || session.userId !== userId) return null;
-    const locked = await withSessionShareLock(session, issue);
-    return locked.ok ? locked.value : null;
+    return await work();
   } catch (err) {
-    // I2-R1 (39246-03): a session-store outage is 503 at the consent handler, never "sign in".
-    if (err instanceof SessionVerificationUnavailableError) throw new StoreUnavailableError('error');
+    if (err instanceof SessionVerificationUnavailableError) throw new StoreUnavailableError(err.reason === 'deadline' ? 'timeout' : 'error');
     throw err;
   }
 }
+
+/**
+ * Rev 4 B3 (AURA-AUTH-SESSION-01-I2-R2): session-bound consent finalization.
+ * finalize: binds the freshly saved grant to its exact account, client and
+ * authorization, conditional on the approving Aura session being live, in
+ * one Aura-database statement (lib/mcpConsentFinalization.ts). isFinalized:
+ * the check the OAuth server's Grant model applies on every grant use.
+ * Both run inside the request's OAuth budget (the consent POST's is 2 s).
+ */
+const consentFinalization: ConsentFinalizationHooks = {
+  finalize: ({ req, grantId, accountId, clientId, authorization, grantLifetimeSeconds }) =>
+    asStoreOutcome(async () => {
+      const session = sessionRowRefFromCookieHeader((req as IncomingMessage).headers.cookie);
+      if (!session || session.userId !== accountId) return 'refused';
+      return finalizeConsent(getSessionPool(), { grantId, userId: accountId, clientId, authorization, grantLifetimeSeconds, session, deadlineAt: budgetDeadlineAt(SESSION_WRITE_BOUNDS.deadlineMs) });
+    }),
+  isFinalized: ({ grantId, accountId, clientId, authorization }) =>
+    asStoreOutcome(() => isConsentFinalized(getSessionPool(), { grantId, accountId, clientId, authorization, deadlineAt: budgetDeadlineAt(SESSION_LOOKUP_BOUNDS.deadlineMs) })),
+};
 
 /** Only an explicit loopback database may hold local OAuth state. */
 export function localOAuthDatabaseUrl(env: Record<string, string | undefined>): string {
@@ -196,10 +221,11 @@ export function getLocalMcpAuth(config: RemoteMcpConfig): LocalState {
     resourceUrl: config.resourceUrl,
     clients: LOCAL_CLIENTS,
     resolveSessionUser: async (req: IncomingMessage) => {
-      const userId = await sessionUserFromCookie(req.headers.cookie);
-      return userId ? { userId } : null;
+      // Inside the request's OAuth budget (consent POST: 2 s, Rev 4 / F2).
+      const session = await getSessionFromCookieHeader(req.headers.cookie, { deadlineAt: budgetDeadlineAt(SESSION_LOOKUP_BOUNDS.deadlineMs) });
+      return session ? { userId: session.userId } : null;
     },
-    guardConsentGrant,
+    consentFinalization,
     signInUrl: (returnTo) => `/connect/sign-in?returnTo=${encodeURIComponent(returnTo)}`,
     connectionsUrl: '/connect/apps',
     audit,

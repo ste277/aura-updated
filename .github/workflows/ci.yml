@@ -1353,6 +1353,28 @@ jobs:
           # Synthetic, CI-only: the local MCP gate refuses the public development fallback.
           AUTH_SECRET: ci-i2r1-synthetic-session-secret-0123456789
         run: npx ts-node test/authSessionI2R1OutageDb.test.ts
+      # AURA-AUTH-SESSION-01-I2-R2 (39250, design Rev 4 B3) -- session-bound MCP
+      # consent finalization across TWO databases, as deployed: the Aura database
+      # (sessions + McpConsentFinalization, migration 0057) and a SEPARATE MCP
+      # OAuth database. Real consent / token / resource handlers; both
+      # finalization-vs-logout orders, connection termination, idle timeout, late
+      # grant commits, expiry, ambiguous COMMIT, outages at consent / token /
+      # resource, a SIGKILLed consent process, retry and resume, scope extension
+      # and reuse, every grant-use path, revocation, account deletion and the
+      # 2 s consent budget at each stage.
+      - name: Create the separate disposable MCP OAuth database (AUTH-SESSION-01-I2-R2)
+        run: PGPASSWORD=aura_ci psql -h localhost -U aura_ci -d aura_ci -v ON_ERROR_STOP=1 -c 'CREATE DATABASE aura_ci_mcp_oauth'
+      - name: Apply the migration chain to the MCP OAuth database (AUTH-SESSION-01-I2-R2)
+        working-directory: apps/web
+        env:
+          DATABASE_URL: postgresql://aura_ci:aura_ci@localhost:5432/aura_ci_mcp_oauth
+        run: npx prisma migrate deploy
+      - name: Run MCP consent finalization two-database DB test (AUTH-SESSION-01-I2-R2)
+        env:
+          AURA_MCP_OAUTH_DATABASE_URL: postgresql://aura_ci:aura_ci@localhost:5432/aura_ci_mcp_oauth
+          # Synthetic, CI-only: the local MCP gate refuses the public development fallback.
+          AUTH_SECRET: ci-i2r2-synthetic-session-secret-0123456789
+        run: npx ts-node test/mcpConsentFinalizationDb.test.ts
       - name: Verify every repository migration was recorded as applied
         run: |
           set -euo pipefail

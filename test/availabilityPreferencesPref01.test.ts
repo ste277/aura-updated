@@ -217,7 +217,7 @@ const starts = (list: readonly TimingCandidate[]) => list.map((c) => c.start).jo
   check('11l. Plan My Day links straight to the Availability card and says today works without it', (planDay.match(/preferenceSettingsHref\('availability'\)/g) ?? []).length === 3 && /You can still plan today without it\./.test(planDay));
   check('11m. Find a Time shows the hint only when results exist', /findResult\.candidates\.length > 0 && \(\(\) => \{[\s\S]{0,400}describeFindATimePreferenceHint/.test(findView));
   check('11n. No mandatory onboarding step was added', !/work hours|availability/i.test(read('apps/web/components/OnboardingJourney.tsx').replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '')));
-  check('11o. No new migration (re-baselined by AURA-AUTH-SESSION-01-I1 for its additive, dormant 0055 and by AURA-MP-1 for its additive 0056)', !fs.readdirSync(path.join(__dirname, '../apps/web/prisma/migrations')).some((d) => !['0055_auth_session', '0056_my_people_foundation'].includes(d) && /^005[5-9]_|^00[6-9]\d_/.test(d)));
+  check('11o. No new migration (re-baselined by AURA-AUTH-SESSION-01-I1 for its additive, dormant 0055 by AURA-MP-1 for its additive 0056 and by AURA-AUTH-SESSION-01-I2-R2 for its additive 0057)', !fs.readdirSync(path.join(__dirname, '../apps/web/prisma/migrations')).some((d) => !['0055_auth_session', '0056_my_people_foundation', '0057_mcp_consent_finalization'].includes(d) && /^005[5-9]_|^00[6-9]\d_/.test(d)));
 }
 
 console.log(allPassed ? '\nALL PREF-01 AVAILABILITY PREFERENCE CHECKS PASSED' : '\nSOME PREF-01 AVAILABILITY PREFERENCE CHECKS FAILED');

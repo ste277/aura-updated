@@ -124,6 +124,7 @@ model User {
   goalActivityOccurrences GoalActivityOccurrence[]
   captures            Capture[]
   authSessions        AuthSession[]
+  mcpConsentFinalizations McpConsentFinalization[]
 }
 
 // A lightweight profile for someone the user plans with -- the minimum
@@ -1313,6 +1314,25 @@ model AuthSession {
   expiresAt    DateTime  @db.Timestamptz(3)
   revokedAt    DateTime? @db.Timestamptz(3)
   revokeReason String?
+
+  @@index([expiresAt])
+}
+
+// AURA-AUTH-SESSION-01-I2-R2 (migration 0057, design Rev 4 B3) -- session-bound
+// MCP consent finalization. An MCP OAuth grant (separate OAuth database) is
+// usable only while a row here binds it to its account, client and complete
+// authorization; the row is written only while the approving AuthSession is
+// live (FOR SHARE, database clock). Immutable (update trigger in the
+// migration); CHECK constraints live in the migration.
+model McpConsentFinalization {
+  grantKey          String   @id
+  userId            String
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  clientId          String
+  authorization     String
+  authSessionIdHash String
+  createdAt         DateTime @default(now()) @db.Timestamptz(3)
+  expiresAt         DateTime @db.Timestamptz(3)
 
   @@index([expiresAt])
 }

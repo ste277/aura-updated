@@ -151,19 +151,19 @@ function verifiedClaims(token: string | undefined | null): SessionTokenClaims | 
  * Authenticates one cookie value. null = not authenticated. Throws
  * SessionVerificationUnavailableError when the database cannot answer.
  */
-async function authenticateToken(token: string | undefined | null, withUser: false): Promise<RequestSession | null>;
-async function authenticateToken(token: string | undefined | null, withUser: true): Promise<RequestSessionWithUser | null>;
-async function authenticateToken(token: string | undefined | null, withUser: boolean): Promise<RequestSession | RequestSessionWithUser | null> {
+async function authenticateToken(token: string | undefined | null, withUser: false, deadlineAt?: number): Promise<RequestSession | null>;
+async function authenticateToken(token: string | undefined | null, withUser: true, deadlineAt?: number): Promise<RequestSessionWithUser | null>;
+async function authenticateToken(token: string | undefined | null, withUser: boolean, deadlineAt?: number): Promise<RequestSession | RequestSessionWithUser | null> {
   const claims = verifiedClaims(token);
   if (!claims) return null;
   const idHash = hashSessionId(claims.sid);
   const pool = getSessionPool();
   if (withUser) {
-    const live = await lookupAuthSessionWithUser(pool, idHash, claims.uid);
+    const live = await lookupAuthSessionWithUser(pool, idHash, claims.uid, { deadlineAt });
     if (!live || live.expiresAt.getTime() !== claims.exp) return null;
     return Object.freeze({ userId: live.userId, idHash, expiresAt: live.expiresAt, user: live.user as unknown as User });
   }
-  const live = await lookupAuthSession(pool, idHash, claims.uid);
+  const live = await lookupAuthSession(pool, idHash, claims.uid, { deadlineAt });
   // The token's exp is copied from the row at issue; a mismatch means it is not this row's token.
   if (!live || live.expiresAt.getTime() !== claims.exp) return null;
   return Object.freeze({ userId: live.userId, idHash, expiresAt: live.expiresAt });
@@ -233,8 +233,22 @@ function readSessionCookieFromHeader(cookieHeader: string | null | undefined): s
 }
 
 /** E4 (MCP consent, D6). Throws SessionVerificationUnavailableError on an outage. */
-export async function getSessionFromCookieHeader(cookieHeader: string | null | undefined): Promise<RequestSession | null> {
-  return authenticateToken(readSessionCookieFromHeader(cookieHeader), false);
+export async function getSessionFromCookieHeader(cookieHeader: string | null | undefined, opts: { deadlineAt?: number } = {}): Promise<RequestSession | null> {
+  return authenticateToken(readSessionCookieFromHeader(cookieHeader), false, opts.deadlineAt);
+}
+
+/**
+ * AURA-AUTH-SESSION-01-I2-R2 (Rev 4 B3): the session row a Cookie header's
+ * VERIFIED token names (signature and claims only; no database read), for a
+ * caller that validates that row atomically itself -- MCP consent
+ * finalization does so in its own conditional statement (revocation, expiry
+ * by the database clock, and the token's exp bound to the row). null = no
+ * verifiable token.
+ */
+export function sessionRowRefFromCookieHeader(cookieHeader: string | null | undefined): { readonly idHash: string; readonly userId: string; readonly expiresAt: Date } | null {
+  const claims = verifiedClaims(readSessionCookieFromHeader(cookieHeader));
+  if (!claims) return null;
+  return Object.freeze({ idHash: hashSessionId(claims.sid), userId: claims.uid, expiresAt: new Date(claims.exp) });
 }
 
 /** 503 for "could not verify the session". Never clears or sets a cookie. */

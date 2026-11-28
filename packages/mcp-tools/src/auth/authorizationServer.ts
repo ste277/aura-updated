@@ -5,7 +5,8 @@ import Provider, { errors, interactionPolicy, type InteractionDetails } from 'oi
 import { MCP_SCOPE, type AccessTokenVerifier } from '../http/remoteMcpHandler';
 import { noopAuditSink, type McpAuditSink } from '../security/audit';
 import { nodeAddressRequest, resolveClientAddressDetailed, type ClientAddressSource } from '../security/clientAddress';
-import { isStoreUnavailableError, outsideRequestBudget, runWithRequestBudget, StoreUnavailableError } from '../security/deadline';
+import { isStoreUnavailableError, outsideRequestBudget, requestBudgetRemainingMs, runWithRequestBudget, StoreUnavailableError } from '../security/deadline';
+import { grantAuthorizationItems, withConsentFinalization, type ConsentFinalizationHooks } from './consentFinalization';
 import { buildPreAuthRules, type BucketHasher } from '../security/preAuthRules';
 import type { McpRateLimiter } from '../security/rateLimit';
 import { validateClientRegistry } from './clientPolicy';
@@ -191,11 +192,14 @@ export interface AuraOAuthServerOptions {
    */
   resolveSessionUser: (req: IncomingMessage) => Promise<{ userId: string } | null> | { userId: string } | null;
   /**
-   * AURA-AUTH-SESSION-01-I2 (B3): optional guard around issuing a consented
-   * grant. Aura runs `issue` while the approving session is held FOR SHARE
-   * after a live re-check; null = the session is no longer live (no grant).
+   * AURA-AUTH-SESSION-01-I2-R2 (Rev 4 B3): session-bound consent finalization
+   * (consentFinalization.ts). When set, every consent saves a NEW grant,
+   * finalizes it against the approving Aura session, and finishes the
+   * interaction only after a confirmed finalization; and the provider's Grant
+   * model returns only finalized grants. Aura's wiring always sets it
+   * (apps/web/lib/mcpLocalOAuth.ts); package-only tests may omit it.
    */
-  guardConsentGrant?: (req: IncomingMessage, userId: string, issue: () => Promise<string>) => Promise<string | null>;
+  consentFinalization?: ConsentFinalizationHooks;
   /**
    * Where an unauthenticated user is sent to sign in. A function receives
    * the interaction path to return to (always an /oauth/interaction/ path).
@@ -316,6 +320,10 @@ async function readForm(req: IncomingMessage): Promise<URLSearchParams | null> {
   return new URLSearchParams(Buffer.concat(chunks).toString('utf8'));
 }
 
+/** I2-R2 (F2, approved): one consent-approval budget, and the least that must remain to attempt finalization. */
+export const CONSENT_BUDGET_MS = 2000;
+export const CONSENT_FINALIZE_MIN_MS = 300;
+
 export function createAuraOAuthServer(options: AuraOAuthServerOptions): AuraOAuthServer {
   const issuer = options.issuer.replace(/\/$/, '');
   if (!isOriginOnly(issuer)) throw new TypeError('issuer must be an origin without a path');
@@ -383,8 +391,11 @@ export function createAuraOAuthServer(options: AuraOAuthServerOptions): AuraOAut
     0,
   );
 
+  // Rev 4 B3: the provider sees only finalized grants (every Grant.find path).
+  const providerStore = options.consentFinalization ? withConsentFinalization(adapterStore, options.consentFinalization) : adapterStore;
+  const grantTtlSeconds = Math.max(30 * 24 * 3600, refreshAbsolute);
   const provider = new Provider(issuer, {
-    adapter: adapterStore.factory,
+    adapter: providerStore.factory,
     clients: options.clients.map((c) => ({
       client_id: c.client_id,
       redirect_uris: c.redirect_uris,
@@ -436,7 +447,7 @@ export function createAuraOAuthServer(options: AuraOAuthServerOptions): AuraOAut
       AuthorizationCode: 60,
       Interaction: 600,
       Session: 3600,
-      Grant: Math.max(30 * 24 * 3600, refreshAbsolute),
+      Grant: grantTtlSeconds,
       // Idle lifetime, capped by the absolute lifetime of the chain (iiat =
       // when the first refresh token of this grant was issued).
       RefreshToken: (_ctx: unknown, token: { iiat?: number }) => {
@@ -735,12 +746,15 @@ export function createAuraOAuthServer(options: AuraOAuthServerOptions): AuraOAut
     res.end();
   }
 
-  /** Grants exactly the allowlisted scopes the prompt is missing. */
-  async function grantFor(details: InteractionDetails, userId: string): Promise<string> {
+  /**
+   * A NEW grant with exactly the allowlisted scopes this request asked for.
+   * Rev 4 B3 (I2-R2): never reuses or extends an existing grant -- a
+   * finalized grant is immutable, so an incomplete consent can never widen a
+   * completed authorization. Returns its id and canonical authorization items.
+   */
+  async function saveNewGrant(details: InteractionDetails, userId: string): Promise<{ grantId: string; authorization: string[] }> {
     const clientId = String(details.params.client_id);
-    const found = details.grantId ? await provider.Grant.find(details.grantId) : undefined;
-    const existing = found && found.accountId === userId && found.clientId === clientId ? found : undefined;
-    const grant = existing ?? new provider.Grant({ accountId: userId, clientId });
+    const grant = new provider.Grant({ accountId: userId, clientId });
     // Always (re)state the allowlisted scopes this request asked for.
     const requested = String(details.params.scope ?? '').split(' ');
     if (requested.includes(MCP_SCOPE)) grant.addResourceScope(resourceUrl, MCP_SCOPE);
@@ -753,7 +767,10 @@ export function createAuraOAuthServer(options: AuraOAuthServerOptions): AuraOAut
       const allowed = scopes.filter((s) => s === MCP_SCOPE);
       if (resource === resourceUrl && allowed.length) grant.addResourceScope(resource, allowed.join(' '));
     }
-    return grant.save();
+    const authorization = grantAuthorizationItems(grant as unknown as { openid?: unknown; resources?: unknown; rar?: unknown });
+    if (!authorization || authorization.length === 0) throw new TypeError('consent produced no bindable authorization');
+    const grantId = await grant.save();
+    return { grantId, authorization };
   }
 
   async function handleInteraction(req: IncomingMessage, res: ServerResponse, path: string): Promise<void> {
@@ -838,20 +855,42 @@ ${duration}${manage}
       audit({ event: 'oauth.grant', outcome: 'denied', clientId: client.client_id, userId: user.userId });
       return finish(req, res, { error: 'access_denied', error_description: 'The user denied access.' });
     }
-    let grantId: string | null;
+    // Rev 4 B3 (I2-R2): save a NEW grant -> finalize it against the live Aura
+    // session (the linearization point, in the Aura database) -> finish the
+    // interaction ONLY after a confirmed finalization, all inside the one
+    // consent budget (CONSENT_BUDGET_MS, started before the session check).
+    // Anything else answers without finishing: an unfinalized grant is never
+    // usable, so a late grant commit after logout authorizes nothing.
+    const unavailable = (errorCode: string) => {
+      audit({ event: 'oauth.error', outcome: 'store_unavailable', clientId: client.client_id, errorCode });
+      return sendPage(res, 503, 'Temporarily unavailable', '<h1>Aura is temporarily unavailable</h1><p>The connection was not completed. Try again in a moment.</p>', { 'retry-after': '1' });
+    };
+    let grantId: string;
     try {
-      grantId = options.guardConsentGrant
-        ? await options.guardConsentGrant(req, user.userId, () => grantFor(details, user.userId))
-        : await grantFor(details, user.userId);
+      const saved = await saveNewGrant(details, user.userId);
+      grantId = saved.grantId;
+      if (options.consentFinalization) {
+        if (requestBudgetRemainingMs() < CONSENT_FINALIZE_MIN_MS) return unavailable('ConsentBudgetExhausted');
+        const outcome = await options.consentFinalization.finalize({ req, grantId, accountId: user.userId, clientId: client.client_id, authorization: saved.authorization, grantLifetimeSeconds: grantTtlSeconds });
+        if (outcome !== 'finalized') {
+          audit({ event: 'oauth.grant', outcome: 'denied', clientId: client.client_id, userId: user.userId });
+          return sendPage(res, 401, 'Sign in required', '<h1>Sign in required</h1>');
+        }
+        // A finalization confirmed only after the budget ran out finishes nothing.
+        if (!(requestBudgetRemainingMs() > 0)) return unavailable('ConsentBudgetExhausted');
+      }
     } catch (err) {
       if (!isStoreUnavailableError(err)) throw err;
-      // I2-R1 (39246-03): the session re-check or the store could not answer -- 503, not sign-in.
-      audit({ event: 'oauth.error', outcome: 'store_unavailable', clientId: client.client_id, errorCode: err.name });
-      return sendPage(res, 503, 'Temporarily unavailable', '<h1>Aura is temporarily unavailable</h1><p>The connection was not completed. Try again in a moment.</p>', { 'retry-after': '1' });
+      // I2-R1 (39246-03) / I2-R2: the grant save or the finalization could not be confirmed -- 503, not sign-in.
+      return unavailable(err.name);
     }
-    if (grantId === null) return sendPage(res, 401, 'Sign in required', '<h1>Sign in required</h1>');
     audit({ event: 'oauth.grant', outcome: 'ok', clientId: client.client_id, userId: user.userId });
-    return finish(req, res, { consent: { grantId } });
+    try {
+      return await finish(req, res, { consent: { grantId } });
+    } catch (err) {
+      if (!isStoreUnavailableError(err) || res.headersSent) throw err;
+      return unavailable(err.name);
+    }
   }
 
   /**
@@ -923,7 +962,11 @@ ${duration}${manage}
       }
       pinRequestOrigin(req);
       // I2b-S10: every store call of this request shares ONE budget (requestBudgetMs).
-      await runWithRequestBudget(requestBudgetMs, async () => {
+      // I2-R2 (F2): a consent POST gets the shorter consent budget, which starts
+      // here -- before its session verification -- and covers pool acquisition,
+      // the grant save, the finalization and the interaction completion.
+      const consentPost = path.startsWith(INTERACTION_PREFIX) && req.method === 'POST';
+      await runWithRequestBudget(consentPost ? Math.min(CONSENT_BUDGET_MS, requestBudgetMs) : requestBudgetMs, async () => {
         if (path.startsWith(INTERACTION_PREFIX)) {
           await handleInteraction(req, res, path);
           return;
@@ -977,9 +1020,13 @@ ${duration}${manage}
   async function listUserConnections(userId: string): Promise<AuraConnection[]> {
     const grants = await adapterStore.listUserGrants(userId);
     const out: AuraConnection[] = [];
+    const finalizedGrants = new providerStore.factory('Grant');
     for (const g of grants) {
       const client = clientsById.get(g.clientId);
-      if (client) out.push({ grantId: g.grantId, clientId: g.clientId, label: client.label, createdAt: g.createdAt });
+      if (!client) continue;
+      // Rev 4 B3: an unfinalized grant is not a connection (it can never be used). Outages throw (503).
+      if (options.consentFinalization && !(await finalizedGrants.find(g.grantId))) continue;
+      out.push({ grantId: g.grantId, clientId: g.clientId, label: client.label, createdAt: g.createdAt });
     }
     return out;
   }
