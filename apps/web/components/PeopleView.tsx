@@ -5,7 +5,9 @@ import { CITY_OPTIONS } from '../lib/cities';
 import type { CityOption } from '../lib/cities';
 import * as theme from './theme';
 import { colors, spacing, typography } from './theme';
-import { SurfaceCard, PrimaryButton, SecondaryButton, DestructiveButton, EmptyState, FieldLabel, TextInput, SelectInput } from './ui';
+import { SurfaceCard, PrimaryButton, SecondaryButton, DestructiveButton, EmptyState, FieldLabel, FieldHint, TextInput, TextAreaInput, SelectInput } from './ui';
+import { ComingUpList, SpecialDaysSection, KIND_ICON, birthdayFromChartDate, formatSavedDay, occasionTitle, type OccasionRow, type UpcomingRow } from './MyPeopleOccasions';
+import { COMING_UP_DAYS, LIST_NEXT_OCCASION_DAYS, personNextOccasionLine } from '../lib/myPeopleOccasionUi';
 import { isMyPeopleClientEffective, isMyPeoplePresentationEnabled, MY_PEOPLE_CAPABILITY_HEADER } from '../lib/myPeopleGate';
 
 export type RelationshipType = 'PARTNER' | 'SPOUSE' | 'FAMILY' | 'FRIEND' | 'OTHER' | 'PARENT' | 'CHILD' | 'SIBLING';
@@ -23,6 +25,9 @@ export interface SavedPersonRow {
   birthLatitude?: number | null;
   birthLongitude?: number | null;
   hasChartDetails?: boolean;
+  // AURA-MP-2: present only while My People is effective (server + presentation flag).
+  relationshipLabel?: string | null;
+  nextOccasion?: { id: string; kind: 'BIRTHDAY' | 'ANNIVERSARY' | 'OTHER'; label: string | null; date: string; daysUntil: number } | null;
 }
 
 /** AURA-MP-1: true only when the person has complete birth (chart) details. */
@@ -39,6 +44,26 @@ function effectiveFromResponse(res: { headers?: { get(name: string): string | nu
 
 interface SavedPersonDetail extends SavedPersonRow {
   natalContext: { janmaNakshatra: string; janmaRashi: string; moonElement: string } | null;
+  // AURA-MP-2: My People detail fields (absent while My People is off).
+  notes?: string | null;
+  occasions?: OccasionRow[];
+}
+
+/** AURA-MP-2: "Friend", "Friend · Best friend", or the label alone for Other. */
+function relationshipLine(person: Pick<SavedPersonRow, 'relationshipType' | 'relationshipLabel'>): string {
+  const type = RELATIONSHIP_LABEL[person.relationshipType];
+  if (!person.relationshipLabel) return type;
+  // OTHER + a label ("Colleague") reads as the label alone (design D2).
+  return person.relationshipType === 'OTHER' ? person.relationshipLabel : `${type} · ${person.relationshipLabel}`;
+}
+
+/** AURA-MP-2: initial-letter avatar (no photos, design 5.2). */
+function Avatar({ name }: { name: string }) {
+  return (
+    <span aria-hidden style={{ width: 36, height: 36, flex: '0 0 36px', borderRadius: '50%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: colors.relationshipSoft, color: colors.relationship, fontWeight: 800, fontSize: 15 }}>
+      {(name.trim()[0] ?? '?').toUpperCase()}
+    </span>
+  );
 }
 
 interface PeopleViewProps {
@@ -76,15 +101,25 @@ export function PeopleView({ onBack }: PeopleViewProps) {
   // valid only when the server has My People enabled); presentation only
   // decides which options are shown.
   const [serverEnabled, setServerEnabled] = useState(false);
+  // AURA-MP-2: upcoming special days (My People only): 60 days for the list's
+  // leap-day annotation; Coming up shows the first 30.
+  const [upcoming, setUpcoming] = useState<UpcomingRow[]>([]);
 
   const loadPeople = async () => {
     setError('');
     try {
       const res = await fetch('/api/people');
       if (!res.ok) throw new Error('Unable to load people.');
-      setMyPeopleEffective(effectiveFromResponse(res));
+      const effective = effectiveFromResponse(res);
+      setMyPeopleEffective(effective);
       setServerEnabled(res.headers?.get(MY_PEOPLE_CAPABILITY_HEADER) === 'enabled');
       setPeople(await res.json());
+      if (effective) {
+        const up = await fetch(`/api/people/occasions/upcoming?days=${LIST_NEXT_OCCASION_DAYS}`).catch(() => null);
+        setUpcoming(up && up.ok ? await up.json() : []);
+      } else {
+        setUpcoming([]);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to load people.');
       setPeople([]);
@@ -100,11 +135,11 @@ export function PeopleView({ onBack }: PeopleViewProps) {
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
         <button type="button" onClick={mode.kind === 'LIST' ? onBack : () => setMode({ kind: 'LIST' })} aria-label="Back" style={backButtonStyle}>
           <span style={{ fontSize: 16, lineHeight: 1 }}>←</span>
-          {mode.kind === 'LIST' ? 'You' : 'People'}
+          {mode.kind === 'LIST' ? 'You' : myPeopleEffective ? 'My People' : 'People'}
         </button>
         <div>
-          <h1 style={{ fontSize: 20, fontWeight: 700, margin: 0, lineHeight: 1.2 }}>People</h1>
-          <p style={{ fontSize: 12, color: '#94a3b8', marginTop: 4 }}>The people you plan with.</p>
+          <h1 style={{ fontSize: 20, fontWeight: 700, margin: 0, lineHeight: 1.2 }}>{myPeopleEffective ? 'My People' : 'People'}</h1>
+          <p style={{ fontSize: 12, color: '#94a3b8', marginTop: 4 }}>{myPeopleEffective ? 'The people who matter most.' : 'The people you plan with.'}</p>
         </div>
       </div>
 
@@ -113,6 +148,8 @@ export function PeopleView({ onBack }: PeopleViewProps) {
       {mode.kind === 'LIST' && (
         <PeopleList
           people={people}
+          myPeopleEffective={myPeopleEffective}
+          upcoming={upcoming}
           onAddPerson={() => setMode({ kind: 'ADD' })}
           onViewPerson={(id) => setMode({ kind: 'DETAIL', personId: id })}
         />
@@ -158,10 +195,11 @@ export function PeopleView({ onBack }: PeopleViewProps) {
   );
 }
 
-function PeopleList({ people, onAddPerson, onViewPerson }: { people: SavedPersonRow[] | null; onAddPerson: () => void; onViewPerson: (id: string) => void }) {
+function PeopleList({ people, myPeopleEffective = false, upcoming = [], onAddPerson, onViewPerson }: { people: SavedPersonRow[] | null; myPeopleEffective?: boolean; upcoming?: UpcomingRow[]; onAddPerson: () => void; onViewPerson: (id: string) => void }) {
   if (people === null) {
     return <SurfaceCard><div style={{ fontSize: 12, color: colors.textFaint }}>Loading…</div></SurfaceCard>;
   }
+  if (myPeopleEffective) return <MyPeopleList people={people} upcoming={upcoming} onAddPerson={onAddPerson} onViewPerson={onViewPerson} />;
 
   return (
     <>
@@ -197,17 +235,64 @@ function PeopleList({ people, onAddPerson, onViewPerson }: { people: SavedPerson
   );
 }
 
+/** AURA-MP-2: the My People overview -- "Coming up" first, then the people (design 5.2). */
+function MyPeopleList({ people, upcoming, onAddPerson, onViewPerson }: { people: SavedPersonRow[]; upcoming: UpcomingRow[]; onAddPerson: () => void; onViewPerson: (id: string) => void }) {
+  if (people.length === 0) {
+    return (
+      <SurfaceCard>
+        <EmptyState
+          title="Keep the people who matter close"
+          description="Add someone and Aura will remember their special days and help you find good times together."
+          action={<PrimaryButton onClick={onAddPerson}>+ Add person</PrimaryButton>}
+        />
+      </SurfaceCard>
+    );
+  }
+  return (
+    <>
+      <ComingUpList items={upcoming.filter((u) => u.daysUntil <= COMING_UP_DAYS)} onOpenPerson={onViewPerson} />
+      <div style={typography.sectionEyebrow}>People</div>
+      {people.map((person) => (
+        <SurfaceCard key={person.id}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: spacing.md }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: spacing.md, minWidth: 0 }}>
+              <Avatar name={person.name} />
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 15, fontWeight: 800, color: colors.textPrimary, overflowWrap: 'anywhere' }}>{person.name}</div>
+                <div style={{ fontSize: 12, color: colors.textFaint, marginTop: 3 }}>{relationshipLine(person)}</div>
+                {person.nextOccasion && person.nextOccasion.daysUntil <= LIST_NEXT_OCCASION_DAYS && (
+                  <div style={{ fontSize: 12, color: colors.textSecondary, marginTop: 3 }}>
+                    {KIND_ICON[person.nextOccasion.kind]} {occasionTitle(person.nextOccasion.kind, person.nextOccasion.label)} · {personNextOccasionLine(person.nextOccasion, upcoming)}
+                  </div>
+                )}
+              </div>
+            </div>
+            <SecondaryButton onClick={() => onViewPerson(person.id)} style={{ minHeight: 38, padding: '0 14px' }}>
+              View
+            </SecondaryButton>
+          </div>
+        </SurfaceCard>
+      ))}
+      <PrimaryButton onClick={onAddPerson} style={{ width: '100%' }}>+ Add person</PrimaryButton>
+    </>
+  );
+}
+
 function PersonDetail({ personId, onEdit, onDeleted }: { personId: string; onEdit: () => void; onDeleted: () => void }) {
   const [person, setPerson] = useState<SavedPersonDetail | null>(null);
   const [error, setError] = useState('');
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  // AURA-MP-2: My People sections only when the server AND presentation flag allow it.
+  const [effective, setEffective] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
     fetch(`/api/people/${personId}`)
       .then(async (res) => {
         if (!res.ok) throw new Error((await res.json().catch(() => null))?.error || 'Unable to load this person.');
+        if (!cancelled) setEffective(effectiveFromResponse(res));
         return res.json();
       })
       .then((data: SavedPersonDetail) => {
@@ -219,7 +304,7 @@ function PersonDetail({ personId, onEdit, onDeleted }: { personId: string; onEdi
     return () => {
       cancelled = true;
     };
-  }, [personId]);
+  }, [personId, reloadKey]);
 
   const handleDelete = async () => {
     setDeleting(true);
@@ -236,36 +321,77 @@ function PersonDetail({ personId, onEdit, onDeleted }: { personId: string; onEdi
   if (error) return <SurfaceCard><div style={errorBoxStyle}>{error}</div></SurfaceCard>;
   if (!person) return <SurfaceCard><div style={{ fontSize: 12, color: colors.textFaint }}>Loading…</div></SurfaceCard>;
 
+  // The chart (birth details) block: inside the header card on the legacy
+  // screen; its own card after special days and the note in My People (5.4).
+  const chartBlock = (
+    <>
+      <div style={{ ...typography.sectionEyebrow, marginTop: effective ? 0 : spacing.lg }}>{effective ? 'Chart details' : 'Birth details'}</div>
+      {person.birthDate && person.birthTime ? (
+        <div style={{ fontSize: 13, color: colors.textSecondary, marginTop: spacing.sm, lineHeight: 1.7 }}>
+          📅 {person.birthDate.slice(0, 10)} · ⏰ {person.birthTime}
+          {person.birthCityName && <><br />📍 {person.birthCityName}</>}
+        </div>
+      ) : (
+        // AURA-MP-1: a person may be saved without birth details.
+        <div data-testid="person-no-birth-details" style={{ fontSize: 13, color: colors.textSecondary, marginTop: spacing.sm, lineHeight: 1.7 }}>
+          No birth details saved. Add them to include {person.name} in a shared Muhurtham.
+        </div>
+      )}
+
+      {person.natalContext && (
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: spacing.sm, marginTop: spacing.md }}>
+          <PanchangaMiniCell label="Janma Rashi" value={person.natalContext.janmaRashi} />
+          <PanchangaMiniCell label="Janma Nakshatra" value={person.natalContext.janmaNakshatra} />
+        </div>
+      )}
+    </>
+  );
+
   return (
     <>
       <SurfaceCard>
-        <div style={{ fontSize: 18, fontWeight: 800, color: colors.textPrimary }}>{RELATIONSHIP_ICON[person.relationshipType]} {person.name}</div>
-        <div style={{ fontSize: 12, color: colors.textFaint, marginTop: 3 }}>{RELATIONSHIP_LABEL[person.relationshipType]}</div>
-
-        <div style={{ ...typography.sectionEyebrow, marginTop: spacing.lg }}>Birth details</div>
-        {person.birthDate && person.birthTime ? (
-          <div style={{ fontSize: 13, color: colors.textSecondary, marginTop: spacing.sm, lineHeight: 1.7 }}>
-            📅 {person.birthDate.slice(0, 10)} · ⏰ {person.birthTime}
-            {person.birthCityName && <><br />📍 {person.birthCityName}</>}
+        {effective ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: spacing.md }}>
+            <Avatar name={person.name} />
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 18, fontWeight: 800, color: colors.textPrimary, overflowWrap: 'anywhere' }}>{person.name}</div>
+              <div style={{ fontSize: 12, color: colors.textFaint, marginTop: 3 }}>{relationshipLine(person)}</div>
+            </div>
           </div>
         ) : (
-          // AURA-MP-1: a person may be saved without birth details.
-          <div data-testid="person-no-birth-details" style={{ fontSize: 13, color: colors.textSecondary, marginTop: spacing.sm, lineHeight: 1.7 }}>
-            No birth details saved. Add them to include {person.name} in a shared Muhurtham.
-          </div>
+          <>
+            <div style={{ fontSize: 18, fontWeight: 800, color: colors.textPrimary }}>{RELATIONSHIP_ICON[person.relationshipType]} {person.name}</div>
+            <div style={{ fontSize: 12, color: colors.textFaint, marginTop: 3 }}>{RELATIONSHIP_LABEL[person.relationshipType]}</div>
+          </>
         )}
 
-        {person.natalContext && (
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: spacing.sm, marginTop: spacing.md }}>
-            <PanchangaMiniCell label="Janma Rashi" value={person.natalContext.janmaRashi} />
-            <PanchangaMiniCell label="Janma Nakshatra" value={person.natalContext.janmaNakshatra} />
-          </div>
-        )}
+        {!effective && chartBlock}
 
         <SecondaryButton onClick={onEdit} style={{ marginTop: spacing.lg }}>
           Edit
         </SecondaryButton>
       </SurfaceCard>
+
+      {effective && (
+        <SpecialDaysSection
+          personId={person.id}
+          personName={person.name}
+          occasions={person.occasions ?? []}
+          chartBirthDate={person.birthDate ?? null}
+          currentYear={new Date().getFullYear()}
+          onChanged={() => setReloadKey((k) => k + 1)}
+        />
+      )}
+
+      {effective && person.notes && (
+        <SurfaceCard>
+          <div style={typography.sectionEyebrow}>Private note</div>
+          <div data-testid="person-notes" style={{ fontSize: 13, color: colors.textSecondary, marginTop: spacing.sm, lineHeight: 1.6, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{person.notes}</div>
+          <div style={{ fontSize: 11, color: colors.textFaint, marginTop: spacing.sm }}>🔒 Only you can see this.</div>
+        </SurfaceCard>
+      )}
+
+      {effective && <SurfaceCard>{chartBlock}</SurfaceCard>}
 
       <SurfaceCard>
         {!confirmingDelete ? (
@@ -338,6 +464,9 @@ interface OriginalPerson {
   birthCityName: string | null;
   birthLatitude: number | null;
   birthLongitude: number | null;
+  // AURA-MP-2: My People fields (undefined = not presented -> never sent).
+  relationshipLabel?: string | null;
+  notes?: string | null;
 }
 
 /** What the form currently holds. `birthTimezone` is its OWN control (R3). */
@@ -348,6 +477,26 @@ export interface PersonFormValues {
   birthTime: string;
   birthTimezone: string; // '' = not chosen
   birthCity: string; // SAVED_LOCATION | NO_CITY | a city name
+  // AURA-MP-2: present only while My People is effective. Untouched / empty on
+  // Add -> omitted; on Edit sent only when changed (emptied -> null = cleared).
+  relationshipLabel?: string;
+  notes?: string;
+}
+
+/** AURA-MP-2: optional My People text fields, on the R4 contract. */
+function myPeopleTextFields(values: PersonFormValues, original: OriginalPerson | null): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const key of ['relationshipLabel', 'notes'] as const) {
+    const value = values[key];
+    if (value === undefined) continue;
+    const next = value.trim();
+    if (!original) {
+      if (next) out[key] = next;
+    } else if (next !== (original[key] ?? '')) {
+      out[key] = next ? next : null;
+    }
+  }
+  return out;
 }
 
 type PayloadResult = { ok: true; body: Record<string, unknown> | null } | { ok: false; error: string };
@@ -392,6 +541,7 @@ export function buildPersonCreatePayload(values: PersonFormValues, cities: CityO
   // R4 P3: an untouched relationship is omitted -- the API default (OTHER) applies.
   const body: Record<string, unknown> = { name: values.name };
   if (values.relationshipType) body.relationshipType = values.relationshipType;
+  Object.assign(body, myPeopleTextFields(values, null));
   const cityChosen = values.birthCity !== NO_CITY && values.birthCity !== SAVED_LOCATION;
   const anyChart = Boolean(values.birthDate || values.birthTime || values.birthTimezone || cityChosen);
   if (!anyChart) {
@@ -414,6 +564,7 @@ export function buildPersonEditPayload(original: OriginalPerson, values: PersonF
   const body: Record<string, unknown> = {};
   if (values.name !== original.name) body.name = values.name;
   if (values.relationshipType !== original.relationshipType) body.relationshipType = values.relationshipType;
+  Object.assign(body, myPeopleTextFields(values, original));
 
   const hadChart = Boolean(original.birthDate && original.birthTime && original.birthTimezone);
   const initialCity = hasSavedLocation(original) ? SAVED_LOCATION : NO_CITY;
@@ -464,6 +615,11 @@ function timezoneOptions(extra: Array<string | null | undefined>): string[] {
 function PersonForm({ mode, personId, onSaved, onCancel, myPeopleEffective: listEffective = false, serverEnabled: listServerEnabled = false }: { mode: 'ADD' | 'EDIT'; personId?: string; onSaved: () => void; onCancel: () => void; myPeopleEffective?: boolean; serverEnabled?: boolean }) {
   const [customCities, setCustomCities] = useState<CityOption[]>([]);
   const [name, setName] = useState('');
+  // AURA-MP-2: optional My People fields (presented only while effective).
+  const [relationshipLabel, setRelationshipLabel] = useState('');
+  const [notes, setNotes] = useState('');
+  // D3: copying the chart birth date into a birthday is ALWAYS an explicit choice (unchecked).
+  const [copyBirthday, setCopyBirthday] = useState(false);
   // R4 P3: no relationship is pre-selected on Add.
   const [relationshipType, setRelationshipType] = useState<RelationshipType | ''>('');
   const [birthDate, setBirthDate] = useState('');
@@ -514,10 +670,14 @@ function PersonForm({ mode, personId, onSaved, onCancel, myPeopleEffective: list
           birthCityName: data.birthCityName ?? null,
           birthLatitude: data.birthLatitude ?? null,
           birthLongitude: data.birthLongitude ?? null,
+          relationshipLabel: data.relationshipLabel ?? null,
+          notes: data.notes ?? null,
         };
         const withChart = personHasChartDetails(data);
         setOriginal(snapshot);
         setName(snapshot.name);
+        setRelationshipLabel(snapshot.relationshipLabel ?? '');
+        setNotes(snapshot.notes ?? '');
         setRelationshipType(snapshot.relationshipType);
         setHadChart(withChart);
         setBirthDate(snapshot.birthDate);
@@ -545,17 +705,18 @@ function PersonForm({ mode, personId, onSaved, onCancel, myPeopleEffective: list
 
   const save = async (method: 'POST' | 'PATCH', url: string, body: Record<string, unknown>) => {
     const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      throw new Error(data.error || 'Unable to save this person.');
-    }
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || 'Unable to save this person.');
+    return data as { id?: string };
   };
+  // D3: offered only on Add, only while My People is effective, only for a complete chart date.
+  const birthdayOffer = mode === 'ADD' && myPeopleEnabled ? birthdayFromChartDate(birthDate) : null;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
     setError('');
-    const values: PersonFormValues = { name, relationshipType, birthDate, birthTime, birthTimezone, birthCity };
+    const values: PersonFormValues = { name, relationshipType, birthDate, birthTime, birthTimezone, birthCity, ...(myPeopleEnabled ? { relationshipLabel, notes } : {}) };
     try {
       if (mode === 'EDIT') {
         if (!original || !personId) throw new Error('Unable to load this person.');
@@ -566,7 +727,15 @@ function PersonForm({ mode, personId, onSaved, onCancel, myPeopleEffective: list
       } else {
         const payload = buildPersonCreatePayload(values, combinedCities, listServerEnabled);
         if (!payload.ok) throw new Error(payload.error);
-        await save('POST', '/api/people', payload.body!);
+        const created = await save('POST', '/api/people', payload.body!);
+        if (birthdayOffer && copyBirthday && created.id) {
+          try {
+            await save('POST', `/api/people/${created.id}/occasions`, { kind: 'BIRTHDAY', month: birthdayOffer.month, day: birthdayOffer.day, year: birthdayOffer.year });
+          } catch {
+            // The person IS saved; say so rather than implying nothing happened.
+            throw new Error(`${name.trim()} was saved, but the birthday wasn't. Add it from their page.`);
+          }
+        }
       }
       onSaved();
     } catch (err) {
@@ -600,6 +769,22 @@ function PersonForm({ mode, personId, onSaved, onCancel, myPeopleEffective: list
           </SelectInput>
         </div>
 
+        {myPeopleEnabled && (
+          <>
+            <div>
+              <FieldLabel htmlFor="person-relationship-label">What you call them (optional)</FieldLabel>
+              <TextInput id="person-relationship-label" type="text" maxLength={40} value={relationshipLabel} placeholder="Amma, best friend, mentor…" onChange={(e) => setRelationshipLabel(e.target.value)} />
+            </div>
+            <div>
+              <FieldLabel htmlFor="person-notes">Private note (optional)</FieldLabel>
+              <TextAreaInput id="person-notes" rows={3} maxLength={1000} value={notes} onChange={(e) => setNotes(e.target.value)} />
+              <FieldHint>🔒 Only you can see this.</FieldHint>
+            </div>
+            <div style={{ ...typography.sectionEyebrow, marginTop: 4 }}>Chart details (optional)</div>
+            <FieldHint>Only needed for shared Muhurtham timing. Never used to judge your relationship.</FieldHint>
+          </>
+        )}
+
         <div>
           <FieldLabel htmlFor="person-birth-date">Birth date</FieldLabel>
           <TextInput id="person-birth-date" required={chartRequired} type="date" value={birthDate} onChange={(e) => setBirthDate(e.target.value)} />
@@ -630,6 +815,13 @@ function PersonForm({ mode, personId, onSaved, onCancel, myPeopleEffective: list
             ))}
           </SelectInput>
         </div>
+
+        {birthdayOffer && (
+          <label htmlFor="person-copy-birthday" style={{ display: 'flex', gap: 10, alignItems: 'flex-start', fontSize: 13, color: colors.textSecondary, lineHeight: 1.5, cursor: 'pointer' }}>
+            <input id="person-copy-birthday" type="checkbox" checked={copyBirthday} onChange={(e) => setCopyBirthday(e.target.checked)} style={{ marginTop: 3 }} />
+            <span>Also remember their birthday ({formatSavedDay(birthdayOffer.month, birthdayOffer.day, birthdayOffer.year)}). You can change it later.</span>
+          </label>
+        )}
 
         <PrimaryButton type="submit" disabled={saving} style={{ width: '100%', marginTop: 4 }}>
           {saving ? 'Saving…' : 'Save person'}
