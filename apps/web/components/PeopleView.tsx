@@ -6,6 +6,7 @@ import type { CityOption } from '../lib/cities';
 import * as theme from './theme';
 import { colors, spacing, typography } from './theme';
 import { SurfaceCard, PrimaryButton, SecondaryButton, DestructiveButton, EmptyState, FieldLabel, FieldHint, TextInput, TextAreaInput, SelectInput } from './ui';
+import { KeepInTouchSection } from './MyPeopleRhythms';
 import { ComingUpList, SpecialDaysSection, KIND_ICON, birthdayFromChartDate, formatSavedDay, occasionTitle, type OccasionRow, type UpcomingRow } from './MyPeopleOccasions';
 import { COMING_UP_DAYS, LIST_NEXT_OCCASION_DAYS, personNextOccasionLine, planHandoffForPerson, type PersonPlanHandoff } from '../lib/myPeopleOccasionUi';
 import { isMyPeopleClientEffective, isMyPeoplePresentationEnabled, MY_PEOPLE_CAPABILITY_HEADER } from '../lib/myPeopleGate';
@@ -394,6 +395,8 @@ function PersonDetail({ personId, onEdit, onDeleted, onPlanWithPerson }: { perso
           onPlanOccasion={onPlanWithPerson}
         />
       )}
+
+      {effective && <KeepInTouchSection personId={person.id} personName={person.name} />}
 
       {effective && person.notes && (
         <SurfaceCard>

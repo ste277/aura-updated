@@ -957,6 +957,16 @@ model GoalActivity {
   rhythmPreferredTimeOfDay       String?
   rhythmPreferredDurationMinutes Int?
 
+  // AURA-MP-4 (migration 0058) -- the saved person this Life Rhythm is with
+  // (NULL for every rhythm not set up from My People). Same-account is
+  // enforced in SQL by the composite foreign key
+  // "GoalActivity_person_owner_fkey" (savedPersonId, userId) ->
+  // SavedPerson(id, ownerUserId), ON DELETE NO ACTION, plus a partial index;
+  // neither is modelled as a Prisma relation (Prisma cannot express a
+  // composite key whose userId half must survive). Person deletion pauses
+  // the rhythm and clears this link first (lib/db.ts deleteSavedPerson).
+  savedPersonId                  String?
+
   createdAt         DateTime         @default(now()) @db.Timestamptz(3)
   updatedAt         DateTime         @updatedAt @db.Timestamptz(3)
 

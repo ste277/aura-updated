@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionFromRequest } from '../../../lib/session';
 import { DIRECT_PLAN_SCHEDULING_MODE } from '../../../lib/plannedActivitySchedulingMode';
-import { beginTransaction, createPlannedActivity, listPlannedActivities, getPlannedActivityForOwner, getGuestConversionRedemption, claimGuestConversionToken, fillGuestConversionRedemption, getPlanCreationClaim, claimPlanCreation, fillPlanCreationClaim, linkGoalActivityToPlannedActivity, lockGoalParentLifecycleForPlanning, materializeGoalActivityRhythmOccurrence, getUserById, getSavedPersonForOwner } from '../../../lib/db';
+import { beginTransaction, carryGoalActivityPersonToPlan, createPlannedActivity, listPlannedActivities, getPlannedActivityForOwner, getGuestConversionRedemption, claimGuestConversionToken, fillGuestConversionRedemption, getPlanCreationClaim, claimPlanCreation, fillPlanCreationClaim, linkGoalActivityToPlannedActivity, lockGoalParentLifecycleForPlanning, lockLinkedPeopleForGoalActivities, materializeGoalActivityRhythmOccurrence, getUserById, getSavedPersonForOwner } from '../../../lib/db';
 import { isMyPeopleServerEnabled } from '../../../lib/myPeopleGate';
 import { parseJsonObject } from '../../../lib/request';
 import { verifyGuestStateToken, hashGuestConversionToken } from '../../../lib/guestState';
@@ -369,6 +369,9 @@ export async function POST(req: NextRequest) {
     // HPG2 -- same transaction, same client, immediately after the Plan
     // insert that just happened: the exact pattern Day Constructor
     // acceptance already uses (dayConstructorAcceptancePersistence.ts).
+    // AURA-MP-4 -- the linked rhythm's person is locked first (person -> rhythm
+    // -> plan, the order a person DELETE uses); a no-op without a Goal link.
+    await lockLinkedPeopleForGoalActivities(session.userId, goalActivityId ? [goalActivityId] : [], client);
     if (goalActivityId) {
       // HPG2 P0 fix -- Goal LIFECYCLE authorization, the same boundary Day
       // Constructor acceptance already enforces (dayConstructorAcceptancePersistence.ts,
@@ -429,6 +432,8 @@ export async function POST(req: NextRequest) {
         const linked = await linkGoalActivityToPlannedActivity(session.userId, goalActivityId, plan.id, client);
         if (!linked) throw goalActivityNotAvailableError();
       }
+      // AURA-MP-4 -- a plan for a person-linked rhythm keeps that person.
+      await carryGoalActivityPersonToPlan(session.userId, goalActivityId, plan.id, client);
     }
     await client.query('COMMIT');
   } catch (err) {
