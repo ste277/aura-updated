@@ -93,6 +93,14 @@ const E1_READING_CONSUMERS = ['test/palm03E1Engine.test.ts', 'test/palmD6I1Readi
 // package or test reach is still refused (B2b closure below treats only this one module as the integration sink).
 const E1_APP_CONSUMER = `${UI_DIR}/PalmImageInput.tsx`;
 const E1_APP_IMPORT = "import { generateConfirmedScannerReading } from '../../../../packages/palm-reading-engine/e1/src/reading';";
+// AURA-PALM-D6-I1 (owner-approved, Option A, ticket 50368) -- the ONE B2b scan exception: the frozen G6 isolation guard
+// test states the approved line as an ASSERTION (a string literal naming what it allows), not as an import. Exactly that
+// one string literal, once, in exactly that one file, is removed before the import scan; the rest of the file is scanned
+// as before, so any real import, any second copy and any other reference there is still a consumer (B2c negatives).
+const G6_GUARD_TEST = 'packages/palm-reading-engine/prototype/test/isolation.test.mjs';
+const G6_GUARD_ASSERTION = `line: "${E1_APP_IMPORT}",`;
+/** The scan's view of a file: the G6 guard test without its one approved assertion string; every other file as is. */
+const scanView = (f: Src): Src => (f.rel === G6_GUARD_TEST && f.text.split(G6_GUARD_ASSERTION).length === 2 ? { rel: f.rel, text: f.text.replace(G6_GUARD_ASSERTION, '') } : f);
 const LIB_REF = /(?:from\s+|import\s*\(\s*|require\s*\(\s*)['"][^'"]*lib\/palm-analysis\/[^'"]*['"]/g;
 type Src = { rel: string; text: string };
 /** B2 with the E1-R3 exception: files outside palm-scan that reference lib/palm-analysis (static, dynamic or require). */
@@ -139,7 +147,8 @@ function importersClosure(files: Src[], target: string): string[] {
 }
 const e1Pkg = 'packages/palm-reading-engine/e1/';
 /** D6-I1: reach of the E1 interface with the one designated app module as the sink (its own importers are expected). */
-const reachersExceptApp = (files: Src[]) => importersClosure(files.filter((f) => f.rel !== E1_APP_CONSUMER), E1_READING).filter((f) => !f.startsWith(e1Pkg));
+const reachersExceptApp = (files: Src[]) => importersClosure(files.filter((f) => f.rel !== E1_APP_CONSUMER).map(scanView), E1_READING).filter((f) => !f.startsWith(e1Pkg));
+check('B2b-g6. (D6-I1) the G6 guard test carries the approved assertion string exactly once (the only scan exception)', read(G6_GUARD_TEST).split(G6_GUARD_ASSERTION).length === 2);
 /** D6-I1: the designated app module's E1 references -- exactly the one approved import statement, nothing else. */
 function appImportViolations(files: Src[]): string[] {
   const out: string[] = [];
@@ -181,6 +190,11 @@ const neg: Array<[string, Src[], 'b2' | 'closure' | 'app']> = [
   ['another palm-scan file imports the E1 interface', [{ rel: `${UI_DIR}/Other.tsx`, text: "import { generateConfirmedScannerReading } from '../../../../packages/palm-reading-engine/e1/src/reading';" }], 'closure'],
   ['the designated module also imports the synthetic entry', [{ rel: E1_APP_CONSUMER, text: read(E1_APP_CONSUMER).replace(E1_APP_IMPORT, "import { generateConfirmedScannerReading, generateSyntheticReading } from '../../../../packages/palm-reading-engine/e1/src/reading';") }], 'app'],
   ['the designated module adds a second E1 reference', [{ rel: E1_APP_CONSUMER, text: `${read(E1_APP_CONSUMER)}\nconst e1 = require('../../../../packages/palm-reading-engine/e1/src/packaged.mjs');` }], 'app'],
+  // Option A negatives: the G6 guard-test exception covers only its one assertion string
+  ['the G6 guard test really imports the E1 interface', [{ rel: G6_GUARD_TEST, text: `${read(G6_GUARD_TEST)}\nimport { generateConfirmedScannerReading as g } from '../../e1/src/reading';` }], 'closure'],
+  ['the G6 guard test carries a second copy of the import string', [{ rel: G6_GUARD_TEST, text: `${read(G6_GUARD_TEST)}\nconst again = ${JSON.stringify(E1_APP_IMPORT)};` }], 'closure'],
+  ['the G6 guard test requires the E1 interface', [{ rel: G6_GUARD_TEST, text: `${read(G6_GUARD_TEST)}\nconst r = require('../../e1/src/reading');` }], 'closure'],
+  ['another package test file uses the approved assertion text', [{ rel: 'packages/palm-reading-engine/prototype/test/other.test.mjs', text: `const x = { ${G6_GUARD_ASSERTION} };` }], 'closure'],
 ];
 const neg2 = neg as Array<[string, Src[], 'b2' | 'closure' | 'app']>;
 for (const [name, files, kind] of neg2) {
