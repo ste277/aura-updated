@@ -516,7 +516,7 @@ export function CalendarViewSection({
                            * offline-queued entry (log.syncStatus === 'pending') with the
                            * exact same confirmed styling as a real, persisted log. */}
                           {log.syncStatus === 'pending' ? (
-                            <StatusBadge label="Pending sync" tone="caution" />
+                            <StatusBadge label="Not confirmed" tone="caution" />
                           ) : (
                             <span style={{ color: '#4ade80', fontWeight: 800 }}>✓</span>
                           )}

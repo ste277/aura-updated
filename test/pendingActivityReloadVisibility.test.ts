@@ -356,7 +356,8 @@ check('page.tsx still generates clientRequestId once per log attempt via generat
 // AURA-ANDROID-REL-04 IR-01: replay moved to lib/activitySync.ts (account-bound); same classification.
 const activitySyncSource = fs.readFileSync('apps/web/lib/activitySync.ts', 'utf8');
 // R15 (39257) supersedes: replay classifies through THE shared response decoder.
-check('offline-queue replay classifies via the shared decodeHabitLogResponse (now in lib/activitySync.ts)', /decode: decodeHabitLogResponse/.test(activitySyncSource) && /replayOfflineQueue\(\)/.test(pageSource));
+// AURA-ANDROID-REL-04 R18 (39265, online-first): automatic replay is deferred -- page.tsx no longer triggers it.
+check('the (dormant) queue replay classifies via the shared decodeHabitLogResponse (lib/activitySync.ts); page.tsx never triggers it (online-first)', /decode: decodeHabitLogResponse/.test(activitySyncSource) && !/replayOfflineQueue/.test(pageSource));
 check('the replay queue-removal/retention logic classifies accepted / retry / unverified / rejected (R15)', /const decoded = await __decoder\.decode\(res,/.test(activitySyncSource) && /decoded\.kind === 'retry'/.test(activitySyncSource) && /decoded\.kind === 'unverified'/.test(activitySyncSource) && /decoded\.kind === 'accepted'/.test(activitySyncSource));
 check('Plan logging (handlePlanLogged) remains separate and untouched in page.tsx', /const handlePlanLogged = useCallback\(async \(\) => \{/.test(pageSource));
 check('Timing Location save orchestration (handleLocationChanged) remains untouched in page.tsx', /const handleLocationChanged = useCallback\(async \(city: \{/.test(pageSource));
@@ -366,10 +367,10 @@ check('LocationPicker.tsx was not touched by this change (no reference to offlin
 // boundary are untouched by this PR -- reconstructed entries flow
 // through the exact same syncStatus discriminator those already branch
 // on, so no new presentation logic was (or needed to be) added.
-check('CalendarViewSection.tsx\'s pending-row StatusBadge treatment (PR #90) is untouched', /log\.syncStatus === 'pending' \?[\s\S]*?<StatusBadge label="Pending sync" tone="caution" \/>/.test(calendarSource));
+check('CalendarViewSection.tsx\'s pending-row StatusBadge treatment (PR #90) is untouched', /log\.syncStatus === 'pending' \?[\s\S]*?<StatusBadge label="Not confirmed" tone="caution" \/>/.test(calendarSource));
 check('Timeline.tsx\'s PR #90 pending count/badge treatment is untouched', /windowPendingCount = windowLogs\.filter\(\(log\) => log\.syncStatus === 'pending'\)\.length/.test(timelineSource));
 check('InsightsView.tsx\'s PR #90 confirmed-only evidence filter is untouched', /const confirmedLogEntries = logEntries\.filter\(\(entry\) => entry\.syncStatus !== 'pending'\);/.test(insightsSource));
-check('InsightsView.tsx\'s Recent Activity Trail still visibly labels a pending entry (untouched)', /entry\.syncStatus === 'pending' && <StatusBadge label="Pending sync" tone="caution" \/>/.test(insightsSource));
+check('InsightsView.tsx\'s Recent Activity Trail still visibly labels a pending entry (untouched)', /entry\.syncStatus === 'pending' && <StatusBadge label="Not confirmed" tone="caution" \/>/.test(insightsSource));
 
 if (!allPassed) {
   console.error('\nSome Pending Activity Reload Visibility checks FAILED.');

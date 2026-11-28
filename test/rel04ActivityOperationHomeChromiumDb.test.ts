@@ -113,10 +113,17 @@ async function main() {
             tx.oncomplete = null;
             w.releaseAck = () => {
               if (fail) {
-                const before = IDBObjectStore.prototype.get;
+                // R18: the decision reads markers through get() or getAll() (one account-wide discovery): the one-shot
+                // failure applies to the first read-only marker read either way.
+                const before = IDBObjectStore.prototype.get, beforeAll = IDBObjectStore.prototype.getAll;
+                const restore = () => { IDBObjectStore.prototype.get = before; IDBObjectStore.prototype.getAll = beforeAll; };
                 IDBObjectStore.prototype.get = function (this: IDBObjectStore, ...a: any[]) {
-                  if (this.name === 'tombstones' && this.transaction.mode === 'readonly') { IDBObjectStore.prototype.get = before; w.decisionReadFailed = true; throw new Error('synthetic one-shot decision read failure'); }
+                  if (this.name === 'tombstones' && this.transaction.mode === 'readonly') { restore(); w.decisionReadFailed = true; throw new Error('synthetic one-shot decision read failure'); }
                   return (before as any).apply(this, a);
+                };
+                IDBObjectStore.prototype.getAll = function (this: IDBObjectStore, ...a: any[]) {
+                  if (this.name === 'tombstones' && this.transaction.mode === 'readonly') { restore(); w.decisionReadFailed = true; throw new Error('synthetic one-shot decision read failure'); }
+                  return (beforeAll as any).apply(this, a);
                 };
               }
               reject?.call(tx, new Event('error'));
@@ -167,16 +174,18 @@ async function main() {
           await r.fulfill({ response });
         });
       }
-      // The other tab, past the claim lifetime, replays and settles the committed request.
+      // The other tab, past the claim lifetime, re-sends and settles the committed request. R18 (39265, online-first):
+      // nothing is sent automatically any more, so this is that tab's user pressing Retry on the shared notice.
       await b.goto(origin);
       await b.getByText('Good Right Now', { exact: false }).first().waitFor({ timeout: 15000 });
       await b.waitForTimeout(350);
-      await b.evaluate(() => { const now = Date.now.bind(Date); Date.now = () => now() + 61_000; window.dispatchEvent(new Event('online')); });
+      await b.evaluate(() => { const now = Date.now.bind(Date); Date.now = () => now() + 61_000; });
+      await b.locator(`[data-operation-id="${original}"]`).getByRole('button', { name: 'Retry', exact: true }).click();
       if (mode === 'settled-during') await within(serverAccepted.seen, 10000, 'replay POST');
       else {
         let settled = false;
         for (let i = 0; i < 80 && !settled; i++) { settled = (await inspect(a)).tombstones.some((x: any) => x.clientRequestId === original && x.receipt?.kind === 'accepted'); if (!settled) await a.waitForTimeout(125); }
-        check(`A ${mode}: the other tab replayed and persisted a VALIDATED accepted receipt for the original request`, settled);
+        check(`A ${mode}: the other tab's explicit Retry persisted a VALIDATED accepted receipt for the original request`, settled);
       }
       await a.evaluate(() => (window as any).releaseAck());
       if (mode === 'g3-original') {
@@ -203,7 +212,7 @@ async function main() {
         check('A g3-original: the original tab reports the outcome as UNRESOLVED or confirmed (never "not saved", never a retry invitation) after the lost acknowledgement + failed decision read', !/Couldn.t log\. Try again/.test(afterAck) && (/Couldn't verify|Logged at|Saved offline/.test(afterAck)));
         check('A g3-original: the stale pre-save list (and the same-title unrelated row) never releases the operation: no fresh "Start now" on that card after it, after refresh and after remount', !freshOffered && !/Couldn.t log\. Try again/.test(afterRemount));
         check(`A g3-original: exactly ONE row for the operation, under the ORIGINAL request id (${mine.length} rows; ids ${mine.map((r: any) => r.clientRequestId.slice(0, 8)).join(',')}), plus the untouched unrelated row`, mine.length === 1 && mine[0].clientRequestId === original && rows.length === 2);
-        check('A g3-original: zero POSTs from the original tab; one bound replay POST from the other tab carrying the original id, the account header and the canonical body', S.posts.a.length === 0 && S.posts.b.length === 1 && S.posts.b[0].body.clientRequestId === original && S.posts.b[0].account === S.user.id && S.posts.b[0].body.activityTitle === title);
+        check('A g3-original: zero POSTs from the original tab; one bound POST (the explicit Retry) from the other tab carrying the original id, the account header and the canonical body', S.posts.a.length === 0 && S.posts.b.length === 1 && S.posts.b[0].body.clientRequestId === original && S.posts.b[0].account === S.user.id && S.posts.b[0].body.activityTitle === title);
         check('A g3-original (after restart): the durable decision carries the validated receipt (server record id == the PostgreSQL row); no copy or claim remains', final.tombstones.some((d: any) => d.clientRequestId === original && d.receipt?.kind === 'accepted' && d.receipt.serverRecordId === mine[0]?.id) && final.records.length === 0);
       } else {
         if (mode === 'settled-during') {

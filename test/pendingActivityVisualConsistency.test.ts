@@ -61,8 +61,8 @@ const calendarRowBraceIndex = calendarSource.indexOf('{', calendarRowStart + cal
 const calendarRowSlice = calendarSource.slice(calendarRowStart, calendarSource.indexOf('log.notes?.trim()', calendarRowStart));
 
 check(
-  "the row conditionally renders StatusBadge label=\"Pending sync\" tone=\"caution\" for a pending entry",
-  /log\.syncStatus === 'pending' \?[\s\S]*?<StatusBadge label="Pending sync" tone="caution" \/>/.test(calendarRowSlice)
+  "the row conditionally renders StatusBadge label=\"Not confirmed\" tone=\"caution\" for a pending entry",
+  /log\.syncStatus === 'pending' \?[\s\S]*?<StatusBadge label="Not confirmed" tone="caution" \/>/.test(calendarRowSlice)
 );
 check(
   'the row still renders the plain green ✓ for the non-pending (confirmed) branch',
@@ -85,7 +85,7 @@ const badgesBlockEnd = timelineSource.indexOf('{/* Activity Discovery Cards List
 const badgesBlock = timelineSource.slice(badgesBlockStart, badgesBlockEnd);
 
 check('the pill list checks log.syncStatus === \'pending\' per entry', /log\.syncStatus === 'pending'/.test(badgesBlock));
-check('a pending entry renders StatusBadge label="Pending sync" tone="caution"', /<StatusBadge label="Pending sync" tone="caution" \/>/.test(badgesBlock));
+check('a pending entry renders StatusBadge label="Not confirmed" tone="caution" (R18 online-first: was "Pending sync")', /<StatusBadge label="Not confirmed" tone="caution" \/>/.test(badgesBlock));
 check('a confirmed entry still renders the plain ✓ pill unchanged', /<span>✓<\/span>/.test(badgesBlock) && /<span>\{log\.activityTitle\}<\/span>/.test(badgesBlock));
 
 // ============================================================
@@ -103,8 +103,8 @@ check(
   /windowPendingCount = windowLogs\.filter\(\(log\) => log\.syncStatus === 'pending'\)\.length/.test(countBlock)
 );
 check(
-  'the rendered count shows "{confirmed} logged · {pending} pending sync" when pending exists',
-  /\$\{windowConfirmedCount\} logged · \$\{windowPendingCount\} pending sync/.test(countBlock)
+  'the rendered count shows "{confirmed} logged · {pending} not confirmed" when pending exists',
+  /\$\{windowConfirmedCount\} logged · \$\{windowPendingCount\} not confirmed/.test(countBlock)
 );
 check(
   'the rendered count falls back to the simple "{N} logged" form when nothing is pending',
@@ -182,7 +182,7 @@ check('the Recent Activity Trail section was located', trailMapStart !== -1);
 const trailBlock = insightsSource.slice(trailMapStart, trailMapStart + 1500);
 
 check('the Recent Activity Trail still maps over the full, unfiltered logEntries (not confirmedLogEntries)', /\{logEntries\.slice\(0, 5\)\.map\(\(entry\) => \(/.test(trailBlock));
-check('a pending entry in the trail is visibly labeled via StatusBadge label="Pending sync"', /entry\.syncStatus === 'pending' && <StatusBadge label="Pending sync" tone="caution" \/>/.test(trailBlock));
+check('a pending entry in the trail is visibly labeled via StatusBadge label="Not confirmed"', /entry\.syncStatus === 'pending' && <StatusBadge label="Not confirmed" tone="caution" \/>/.test(trailBlock));
 
 // ============================================================
 // Regression guards -- PR #86 (direct-log classification/queue) and
@@ -201,7 +201,8 @@ check('handleLogActivity still sets syncStatus: \'pending\' only from the fetch-
 check('handleLogActivity still clears syncStatus on confirmed success', /syncStatus: undefined,/.test(pageSource));
 // AURA-ANDROID-REL-04 IR-01: replay moved to lib/activitySync.ts (account-bound), same classification.
 // R15 (39257) supersedes: replay classifies through THE shared response decoder, never transport status alone.
-check('offline-queue replay classifies via the shared decodeHabitLogResponse (lib/activitySync.ts, called from page.tsx)', /decode: decodeHabitLogResponse/.test(fs.readFileSync('apps/web/lib/activitySync.ts', 'utf8')) && /replayOfflineQueue\(\)/.test(pageSource));
+// AURA-ANDROID-REL-04 R18 (39265, online-first): automatic replay is deferred -- page.tsx no longer triggers it.
+check('the (dormant) queue replay classifies via the shared decodeHabitLogResponse (lib/activitySync.ts); page.tsx never triggers it (online-first)', /decode: decodeHabitLogResponse/.test(fs.readFileSync('apps/web/lib/activitySync.ts', 'utf8')) && !/replayOfflineQueue/.test(pageSource));
 check('page.tsx still generates clientRequestId once per log attempt (PR #86 idempotency untouched; AURA-MOBILE-01-M2-B/AND-01: generateClientRequestId(), not crypto.randomUUID() directly, which throws outside a secure context)', /const clientRequestId = generateClientRequestId\(\);/.test(pageSource));
 check('Plan logging (handlePlanLogged) remains separate and untouched in page.tsx', /const handlePlanLogged = useCallback\(async \(\) => \{/.test(pageSource));
 

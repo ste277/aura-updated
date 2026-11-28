@@ -1078,6 +1078,10 @@ jobs:
         env:
           TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
         run: npx ts-node --project tsconfig.jsdom-tests.json test/rel04R17RecoveryDecision.test.ts
+      - name: Run REL-04 R18 online-first test (39262 G10/G11 witnesses on ab3c15b vs current; generative consumer agreement; no automatic dispatch)
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/rel04R18OnlineFirst.test.ts
       - name: Run REL-04 R3-head (b323d2a) reproduction test
         env:
           TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
@@ -1327,6 +1331,10 @@ jobs:
         env:
           REL04_SKIP_BUILD: '1'
         run: npx ts-node test/rel04R17RecoveryChromiumDb.test.ts
+      - name: Run REL-04 R18 online-first closure test (production build, real Chromium, PostgreSQL; contradictory copy, receipt + conflict, offline, zero automatic POSTs, restart Retry, two tabs)
+        env:
+          REL04_SKIP_BUILD: '1'
+        run: npx ts-node test/rel04R18OnlineFirstChromiumDb.test.ts
   web-build:
     name: Next.js production build
     runs-on: ubuntu-latest

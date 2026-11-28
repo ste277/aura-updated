@@ -2429,7 +2429,7 @@ function GoodRightNowCard({
         {status === 'logged' ? (
           <span style={{ marginTop: 'auto', paddingTop: 8, color: '#4ade80', fontSize: 11, fontWeight: 850 }}>✓ Logged at {loggedAtLabel}</span>
         ) : (
-          <span style={{ marginTop: 'auto', paddingTop: 8, color: '#facc15', fontSize: 11, fontWeight: 850 }}>⏳ Saved offline · will sync</span>
+          <span style={{ marginTop: 'auto', paddingTop: 8, color: '#facc15', fontSize: 11, fontWeight: 850 }}>⏳ Not confirmed yet</span>
         )}
       </div>
     );

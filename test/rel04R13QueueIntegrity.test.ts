@@ -82,7 +82,14 @@ function afterSnapshotRead(replacement: any) {
   return { restore, done };
 }
 /** Barrier: run `effect` when the claim transaction's first decision read succeeds (inside the claim). */
-function insideClaim(effect: () => void) { const o = fidb.IDBObjectStore.prototype.get; fidb.IDBObjectStore.prototype.get = function (...a: any[]) { const r = o.apply(this, a); if (this.name === 'tombstones' && this.transaction.mode === 'readwrite') { fidb.IDBObjectStore.prototype.get = o; r.addEventListener('success', effect); } return r; }; return () => { fidb.IDBObjectStore.prototype.get = o; }; }
+// R18: the claim transaction's first decision read is get() (R12-R17) or getAll() (R18: one account-wide discovery).
+function insideClaim(effect: () => void) {
+  const o = fidb.IDBObjectStore.prototype.get, oa = fidb.IDBObjectStore.prototype.getAll;
+  const restore = () => { fidb.IDBObjectStore.prototype.get = o; fidb.IDBObjectStore.prototype.getAll = oa; };
+  const hook = (orig: any) => function (this: any, ...a: any[]) { const r = orig.apply(this, a); if (this.name === 'tombstones' && this.transaction.mode === 'readwrite') { restore(); r.addEventListener('success', effect); } return r; };
+  fidb.IDBObjectStore.prototype.get = hook(o); fidb.IDBObjectStore.prototype.getAll = hook(oa);
+  return restore;
+}
 /** The next read-write transaction commits, but its caller sees an error (lost acknowledgement). */
 function loseNextAck(onLost?: () => void) { const o = fidb.IDBDatabase.prototype.transaction; fidb.IDBDatabase.prototype.transaction = function (...a: any[]) { const t = o.apply(this, a); if (t.mode === 'readwrite') { fidb.IDBDatabase.prototype.transaction = o; t.addEventListener('complete', () => { onLost?.(); t.onerror?.(new Event('error')); }); } return t; }; return () => { fidb.IDBDatabase.prototype.transaction = o; }; }
 

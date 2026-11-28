@@ -33,7 +33,18 @@ import { acceptedReceipt, canonicalPayload, claimForDispatch, enqueueOwned, read
 export type HabitLogPayload = Omit<QueuedHabitLog, 'tempId'>;
 
 export const UPGRADE_REQUIRED_CODE = 'client_upgrade_required';
-export const UPGRADE_MESSAGE = 'Aura was updated. Reload the app to continue; this activity is kept on this device and will sync after you reload.';
+export const UPGRADE_MESSAGE = 'Aura was updated. Reload the app to continue; this activity is kept on this device, and after you reload you can Retry it.';
+
+/**
+ * AURA-ANDROID-REL-04 R18 (39265) -- ONLINE-FIRST initial release. New offline activity recording and automatic
+ * replay are deferred. Every activity write is a user action (a new submission or an explicit Retry); the operation
+ * is stored durably (identity + canonical payload) BEFORE a possibly ambiguous dispatch, and anything not confirmed
+ * stays UNRESOLVED -- never sent again automatically. A confirmed pre-dispatch offline failure stores nothing.
+ */
+export const ONLINE_FIRST = true;
+/** R18: the device reports no network at all, so a request cannot leave it (a confirmed pre-dispatch failure). */
+export const confirmedOffline = (): boolean => { try { return typeof navigator !== 'undefined' && navigator.onLine === false; } catch { return false; } };
+export const OFFLINE_MESSAGE = "You're offline, so this activity wasn't saved. Try again when you're back online.";
 
 export type ActivityWriteResult =
   /** R15: the shared decoder validated the server row for exactly this operation (the receipt is persisted). */
@@ -46,7 +57,7 @@ export type ActivityWriteResult =
   | { kind: 'account-changed'; keptForAccount: boolean }
   /** Unresolved and could not be stored on this device. R14: `reason: 'discarded'` = this exact request was durably
    *  discarded on this device (it will not be sent; never a success, never a storage failure). */
-  | { kind: 'not-stored'; reason?: 'discarded' | 'not-committed' }
+  | { kind: 'not-stored'; reason?: 'discarded' | 'not-committed' | /** R18: confirmed offline before dispatch -- nothing stored, nothing sent */ 'offline' }
   /**
    * R9: this device's activity storage could not be read reliably, so the activity's eligibility could not be
    * established: NOTHING was stored or sent. Recoverable -- the user can try again.
@@ -56,7 +67,7 @@ export type ActivityWriteResult =
    * R13: the queue write's commit could not be confirmed and could not be reconciled. The activity MAY be queued on
    * this device (it would then sync under this same request id); it must not be re-entered as a new activity.
    */
-  | { kind: 'outcome-unknown'; reason?: 'unverified-response' | 'unverified-marker' | 'refused-after-possible-send' | 'evidence-unavailable' }
+  | { kind: 'outcome-unknown'; reason?: 'unverified-response' | 'unverified-marker' | 'refused-after-possible-send' | 'evidence-unavailable' | /** R18 */ 'conflict' | 'not-confirmed' | 'server-has-it' | 'not-found' }
   /** R14/R15: this exact request (account + request id + payload) was already accepted by the server -- proven by a
    *  validated receipt or validated server evidence, never by a bare marker. */
   | { kind: 'already-recorded'; serverLog?: BoundServerRow }
@@ -98,9 +109,10 @@ export type { OperationStatus };
 export function operationStatusOf(r: ActivityWriteResult): OperationStatus {
   switch (r.kind) {
     case 'confirmed': case 'already-recorded': return 'confirmed';
-    case 'queued': case 'upgrade-required': return 'pending';
+    // R18 (online-first): a stored operation that was not confirmed is UNRESOLVED -- nothing sends it automatically.
+    case 'queued': case 'upgrade-required': return ONLINE_FIRST ? 'unresolved' : 'pending';
     case 'recovery-required': return 'unresolved'; // R17: describes the OTHER (open) operation; this one was never created
-    case 'account-changed': return r.keptForAccount ? 'pending' : 'unresolved';
+    case 'account-changed': return r.keptForAccount && !ONLINE_FIRST ? 'pending' : 'unresolved';
     case 'outcome-unknown': return 'unresolved';
     case 'rejected': case 'storage-unavailable': return 'failed';
     case 'not-stored': return r.reason === 'discarded' ? 'discarded' : 'failed';
@@ -166,6 +178,9 @@ export const __decoder = { decode: decodeHabitLogResponse };
 export async function submitActivityLog(payload: HabitLogPayload, tempId: string, fetchImpl: typeof fetch = (i, n) => fetch(i, n), binding?: AccountBinding, { explicitRetry = false, newOperation }: { explicitRetry?: boolean; newOperation?: RecoveryIntent } = {}): Promise<ActivityWriteResult> {
   return runActivityOperation(async (lease) => {
     const tab = getTabId();
+    // R18 (online-first): no network at all -> nothing is stored or sent (a new offline activity is not recorded; an
+    // explicit Retry leaves its operation exactly as it was).
+    if (ONLINE_FIRST && confirmedOffline()) return { kind: 'not-stored', reason: 'offline' };
     // R9 -- THE transmission boundary: an activity is sent only after enqueueOwned stored it AND, in the same
     // transaction, established its eligibility (no decision, no quarantined copy, readable retired sources) and
     // claimed it. There is no direct-network fallback: if storage cannot be read, nothing is sent.
@@ -208,7 +223,7 @@ export async function submitActivityLog(payload: HabitLogPayload, tempId: string
 }
 
 async function applyDirectAnswer(decoded: DecodedHabitLogResponse, token: ClaimToken, lease: AccountLease, outbox: string | null, release: () => Promise<void>): Promise<ActivityWriteResult> {
-  const settleTo = async (receipt: ReturnType<typeof acceptedReceipt> | ReturnType<typeof rejectedReceipt>) => { if (outbox) await settleRecords([outbox], token, { owner: lease.account, receipt }); };
+  const settleTo = async (receipt: ReturnType<typeof acceptedReceipt> | ReturnType<typeof rejectedReceipt>) => (outbox ? settleRecords([outbox], token, { owner: lease.account, receipt }) : undefined);
   switch (decoded.kind) {
     case 'upgrade': await release(); reportUpgradeRequired(); return outbox ? { kind: 'upgrade-required' } : { kind: 'not-stored' };
     case 'hold': await release(); return { kind: 'account-changed', keptForAccount: Boolean(outbox) };
@@ -218,14 +233,18 @@ async function applyDirectAnswer(decoded: DecodedHabitLogResponse, token: ClaimT
       const receipt = settlementReceipt(decoded, token, lease.account);
       // R16: a later refusal cannot disprove an earlier send that may have committed -- kept, unresolved, not settled.
       if (!receipt) { await release(); return { kind: 'outcome-unknown', reason: 'refused-after-possible-send' }; }
-      await settleTo(receipt);
+      const settled = await settleTo(receipt);
+      // R18: only THE decision's validated failure is reported as one (a conflicting copy keeps it unresolved).
+      if (settled?.decision !== undefined && settled.decision !== 'failed') return { kind: 'outcome-unknown', reason: 'conflict' };
       return { kind: 'rejected', status: decoded.status };
     }
     case 'accepted': {
       // The server fact is established by the validated row; the receipt and the matching-copy removal are one
       // transaction. If that local write fails, the copy replays under the same id and converges on this row.
-      await settleTo(acceptedReceipt(lease.account, token.crid!, token.payload!, decoded.row));
+      const settled = await settleTo(acceptedReceipt(lease.account, token.crid!, token.payload!, decoded.row));
       if (!lease.isCurrent()) return { kind: 'account-changed', keptForAccount: false };
+      // R18 (39262 G11): the server accepted THIS payload, but the operation is confirmed only when the decision is.
+      if (settled?.decision !== undefined && settled.decision !== 'confirmed') return { kind: 'outcome-unknown', reason: 'conflict' };
       return { kind: 'confirmed', serverLog: decoded.row };
     }
   }
@@ -243,13 +262,15 @@ export async function checkActivityOperation(op: ActivityOperation, fetchImpl: t
   return runActivityOperation(async (lease) => {
     if (lease.account !== op.account) return { kind: 'account-changed', keptForAccount: true };
     const payload = canonicalPayload({ ...(op.body as HabitLogPayload), tempId: '' } as QueuedHabitLog);
+    // R18 (39262 G11 / 39265): READ-ONLY. The outcome is THE recovery decision's (its view of this payload); Check again
+    // never sends, never persists a receipt and never removes a copy -- any write is the user's explicit Retry.
     const state = await readOperationState(op.account, op.clientRequestId, payload);
     if (state?.kind === 'success') return { kind: 'already-recorded', serverLog: state.receipt.row };
     if (state?.kind === 'failed') return { kind: 'rejected', status: state.status };
     if (state?.kind === 'discarded') return { kind: 'not-stored', reason: 'discarded' };
-    if (state?.kind === 'live') return { kind: 'queued' };
+    if (state?.kind === 'conflict') return { kind: 'outcome-unknown', reason: 'conflict' }; // conflicting bodies: never resolved by a read
     if (state?.kind === 'absent' && !dispatched) return { kind: 'not-stored', reason: 'not-committed' };
-    // Unverified marker, conflicting/paused evidence, unreadable storage, or absent after a dispatch: ask the server.
+    // Unresolved, stored, paused, unreadable, or absent after a dispatch: ask the server (a read), bound by the same row rules.
     let res: Response | 'network-error';
     try {
       res = await fetchImpl(HABIT_LOGS_PATH, { method: 'GET', headers: lease.headers(), credentials: 'same-origin', redirect: 'error', signal: lease.signal });
@@ -257,9 +278,8 @@ export async function checkActivityOperation(op: ActivityOperation, fetchImpl: t
       res = 'network-error';
     }
     const found = await decodeHabitLogList(res, { account: op.account, clientRequestId: op.clientRequestId, body: op.body as unknown as Record<string, unknown> }, () => lease.isCurrent());
-    if (found.kind !== 'match') return { kind: 'outcome-unknown', reason: 'evidence-unavailable' };
-    await recordVerifiedReceipt(acceptedReceipt(op.account, op.clientRequestId, payload, found.row));
-    return { kind: 'already-recorded', serverLog: found.row };
+    if (found.kind === 'match') return { kind: 'outcome-unknown', reason: 'server-has-it' }; // Retry finishes it (same id: no new row)
+    return { kind: 'outcome-unknown', reason: found.kind === 'absent' ? 'not-found' : 'evidence-unavailable' };
   }, binding);
 }
 
@@ -272,7 +292,7 @@ export interface ReplayResult {
   conflicts: number;
   /** R8: activity kept on this device that does not sync automatically (quarantined retired formats, conflicts, unreadable entries). */
   paused: number;
-  stoppedBecause: null | 'account-changed' | 'account-hold' | 'unreadable' | 'busy' | 'unavailable' | 'upgrade-required' | 'transition';
+  stoppedBecause: null | 'account-changed' | 'account-hold' | 'unreadable' | 'busy' | 'unavailable' | 'upgrade-required' | 'transition' | /** R18: automatic replay is disabled (online-first) */ 'disabled';
   /** R15: answers that proved nothing about the operation (kept under the same id, never settled). */
   unverified?: number;
 }
@@ -280,8 +300,16 @@ const EMPTY = (stoppedBecause: ReplayResult['stoppedBecause']): ReplayResult => 
 
 const replaysInFlight = new Map<string, Promise<ReplayResult>>();
 
-/** Replays the verified account's queue. Never throws. */
+/**
+ * R18 (39265) -- THE single enforceable boundary for automatic dispatch. Automatic replay is DEFERRED from the
+ * online-first release: this returns 'disabled' (nothing read, nothing sent) unless a test explicitly enables the
+ * retained, dormant library code. No application module can enable it.
+ */
+export const DORMANT_REPLAY_TEST_FLAG = '__AURA_TEST_ENABLE_DORMANT_REPLAY__';
+const dormantReplayEnabled = () => (globalThis as Record<string, unknown>)[DORMANT_REPLAY_TEST_FLAG] === true;
+/** Replays the verified account's queue (dormant in the online-first release). Never throws. */
 export function replayOfflineQueue(fetchImpl: typeof fetch = (i, n) => fetch(i, n)): Promise<ReplayResult> {
+  if (!dormantReplayEnabled()) return Promise.resolve(EMPTY('disabled'));
   const account = getVerifiedAccount();
   if (!account || isTransitionActive()) return Promise.resolve(EMPTY('unavailable'));
   const existing = replaysInFlight.get(account);

@@ -62,6 +62,7 @@ export function PastActivityModal({
 }: PastActivityModalProps) {
   // R15: the unresolved operation this form submitted (request id; null = blocked without a known id).
   const [unresolvedOperation, setUnresolvedOperation] = useState<{ id: string | null; retryable?: boolean } | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [selectedChip, setSelectedChip] = useState<string>('');
   const [customTitle, setCustomTitle] = useState<string>('');
   const [notes, setNotes] = useState<string>('');
@@ -120,6 +121,7 @@ export function PastActivityModal({
   const handleSubmit = async (e?: React.FormEvent, request?: { retryOf?: string; separate?: boolean }) => {
     if (e) e.preventDefault();
     if (!activeTitle || submitting || isFutureTimestamp || (unresolvedOperation && !request)) return;
+    setSaveError(null);
 
     setSubmitting(true);
 
@@ -176,6 +178,8 @@ export function PastActivityModal({
       onClose();
     } catch (err) {
       console.error('Error saving activity log:', err);
+      // R18 (online-first): the reason is shown (e.g. offline before dispatch: nothing was saved or sent).
+      setSaveError(err instanceof Error && err.message ? err.message : "This activity couldn't be saved. Try again.");
     } finally {
       setSubmitting(false);
     }
@@ -194,6 +198,9 @@ export function PastActivityModal({
       maxWidth={400}
     >
       <form onSubmit={handleSubmit}>
+        {saveError && !unresolvedOperation && (
+          <div role="alert" data-save-error="true" style={{ marginBottom: 12, padding: '9px 10px', borderRadius: 10, border: '1px solid rgba(248, 113, 113, 0.35)', color: '#fca5a5', fontSize: 13 }}>{saveError}</div>
+        )}
         {unresolvedOperation && (
           <div role="status" data-operation-state="unresolved" style={{ marginBottom: 12, padding: '9px 10px', borderRadius: 10, border: '1px solid rgba(250, 204, 21, 0.3)', color: '#facc15', fontSize: 13 }}>
             {UNVERIFIED_ACTIVITY_MESSAGE}{' '}

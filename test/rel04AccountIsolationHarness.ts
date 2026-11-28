@@ -58,6 +58,11 @@ export class FaultyStorage {
   private emit(k: string, v: string | null) { for (const f of this.onMutate) queueMicrotask(() => f(k, v)); }
 }
 export const storage = new FaultyStorage();
+// AURA-ANDROID-REL-04 R18 (39265): automatic replay is DISABLED in the online-first release (lib/activitySync.ts
+// replayOfflineQueue returns 'disabled'). The suites on this harness verify the RETAINED, dormant replay library code
+// that a later offline release builds on, so they opt in explicitly. The application never sets this flag;
+// test/rel04R18OnlineFirst.test.ts clears it to prove the boundary.
+(globalThis as Record<string, unknown>).__AURA_TEST_ENABLE_DORMANT_REPLAY__ = true;
 (global as any).localStorage = storage;
 
 // ---------------------------------------------------------------- IndexedDB (R4: the offline queue store)

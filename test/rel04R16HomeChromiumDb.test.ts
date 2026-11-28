@@ -209,7 +209,8 @@ async function main() {
       await a.route('**/api/habit-logs', (r: any) => (r.request().method() === 'POST' ? r.abort('failed') : r.continue())); // first: offline
       await openHome(a);
       await logOnce(a);
-      await a.getByText(/Saved offline/, { exact: false }).first().waitFor({ timeout: 10000 });
+      // R18 (39265, online-first): a failed send is shown as UNRESOLVED (no "saved offline, will sync" state)
+      await a.getByText(/Couldn't verify whether this activity was saved|Not confirmed yet/, { exact: false }).first().waitFor({ timeout: 10000 });
       const seeded = await a.evaluate((account: string) => new Promise((resolve, reject) => {
         const req = indexedDB.open('aura-offline', 2);
         req.onsuccess = () => {

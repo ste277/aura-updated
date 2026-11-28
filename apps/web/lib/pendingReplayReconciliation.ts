@@ -86,6 +86,8 @@ export interface ActivityOperationView {
   retryable?: boolean;
   /** R17 (39260 G7/G9): every activity intent the durable evidence names under this request id (activity matching). */
   intents?: RecoveryIntent[];
+  /** R18: the result of the user's last (read-only) Check again, shown with the operation. */
+  note?: string;
 }
 /** R17: one activity intent (title, and the catalog id when the card has one). */
 export interface RecoveryIntent { activityTitle: string; activityId?: string }

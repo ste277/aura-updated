@@ -107,7 +107,7 @@ export const RECONCILE_TIMEOUT_MS = 10_000;
 export const SIGN_OUT_FAILED_MESSAGE = "Couldn't sign out. Check your connection and try again.";
 export const SIGN_OUT_BUSY_MESSAGE = 'Something is still being saved, or another window is signing in or out. Try again in a moment.';
 export const SIGN_OUT_UNVERIFIED_MESSAGE = "Aura couldn't confirm whether you're signed out. Your unsynced activity is kept. Check your connection and tap Retry.";
-export const SIGN_OUT_UNCONFIRMED_MESSAGE = "You're signed out on this device. Aura couldn't get the server's confirmation, so this account's unsynced activity was kept on this device; it will only sync if you sign in to the same account again.";
+export const SIGN_OUT_UNCONFIRMED_MESSAGE = "You're signed out on this device. Aura couldn't get the server's confirmation, so this account's unsynced activity was kept on this device; nothing is sent automatically, and it can be retried only after you sign in to the same account again.";
 export const SIGN_OUT_ACCOUNT_CHANGED_MESSAGE = "A different account is now signed in on this device (from another window). Aura is showing that account; nothing was removed.";
 
 /**
@@ -141,7 +141,7 @@ export function discardOutcomeMessage(r: SignOutResult): string | null {
   const o = r.owned;
   if (o) {
     if (o.unknown) {
-      parts.push("Aura couldn't read this account's unsynced activity on this device, so none of it was removed. Whatever is stored is kept on this device and syncs only if you sign in to the same account again.");
+      parts.push("Aura couldn't read this account's unsynced activity on this device, so none of it was removed. Whatever is stored is kept on this device; nothing is sent automatically, and it can be retried only after you sign in to the same account again.");
     } else {
       if (o.removed > 0) parts.push(`${plural(o.removed, '1 unsynced activity log was', '# unsynced activity logs were')} removed from this device.`);
       // R10: "possibly sent" is stated only for the activities of THIS category.
@@ -191,7 +191,7 @@ export interface PendingWork {
  */
 export function describePendingWork(p: PendingWork): string | null {
   if (p.owned === null) {
-    return "Aura couldn't read this device's unsynced activity for this account. If you sign out, anything stored will be kept on this device (not removed) and will sync only if you sign in to this account again. Sign out?";
+    return "Aura couldn't read this device's unsynced activity for this account. If you sign out, anything stored will be kept on this device (not removed); nothing is sent automatically, and it can be retried only after you sign in to this account again. Sign out?";
   }
   if (p.owned === 0) return null;
   const sent = p.ownedSent ?? 0;

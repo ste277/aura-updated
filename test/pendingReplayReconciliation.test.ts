@@ -252,9 +252,11 @@ check(
   /operation\?: ActivityOperationRequest\s*\): Promise<ActivityLogResult> => \{/.test(pageSource)
 );
 
+// AURA-ANDROID-REL-04 R18 (39265, online-first) supersedes the syncOfflineLogs pin: automatic replay is deferred, so
+// page.tsx has no replay effect; another tab's settlement still re-reads the account's operations (read-only).
 check(
-  'syncOfflineLogs still calls loadUserDataAndLogs() after every replay attempt (success or permanent failure), and loadMyDay() only when something was confirmed -- the same refresh path (AURA-ANDROID-REL-04: replay now in lib/activitySync.ts)',
-  /if \(!active \|\| result\.attempted === 0\) return;\s*loadUserDataAndLogs\(\);\s*if \(result\.confirmed > 0\) loadMyDay\(\);/.test(pageSource)
+  'page.tsx triggers no automatic replay (online-first: no syncOfflineLogs, no "online" listener); another tab\'s settlement still re-reads the operations via loadUserDataAndLogs()',
+  !/syncOfflineLogs|replayOfflineQueue|addEventListener\('online'/.test(pageSource) && /onOperationsChanged\(verifiedUserId, \(\) => \{ if \(active\) loadUserDataAndLogs\(\); \}\)/.test(pageSource)
 );
 
 // R15 (39257, 39256 option B) supersedes the R14-era pin here; see the R15 handover's adjusted-assertion list.

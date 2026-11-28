@@ -469,7 +469,7 @@ export function TimelineView({
                   // ✓/green styling regardless of log.syncStatus.
                   log.syncStatus === 'pending' ? (
                     <div key={log.id} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                      <StatusBadge label="Pending sync" tone="caution" />
+                      <StatusBadge label="Not confirmed" tone="caution" />
                       <span style={{ color: '#f8fafc', fontSize: 10, fontWeight: 600 }}>{log.activityTitle}</span>
                     </div>
                   ) : (
@@ -903,7 +903,7 @@ export function TimelineView({
                 {windowLogs.length > 0 && (
                   <span style={{ fontSize: 10, color: isCompleted ? '#64748b' : '#86efac' }}>
                     {windowPendingCount > 0
-                      ? `${windowConfirmedCount} logged · ${windowPendingCount} pending sync`
+                      ? `${windowConfirmedCount} logged · ${windowPendingCount} not confirmed`
                       : `${windowLogs.length} logged`}
                   </span>
                 )}

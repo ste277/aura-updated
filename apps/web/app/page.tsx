@@ -31,7 +31,7 @@ import { fetchVerifiedSession, subscribeAccount, getAccountEpoch, getVerifiedAcc
 import { installAccountBoundFetch } from '../lib/accountBoundFetch';
 import { readLegacySnapshot } from '../lib/offlineHabitQueue';
 import { UPGRADE_MESSAGE } from '../lib/activitySync';
-import { submitActivityLog, replayOfflineQueue, checkActivityOperation, operationStatusOf, type HabitLogPayload } from '../lib/activitySync';
+import { submitActivityLog, checkActivityOperation, operationStatusOf, OFFLINE_MESSAGE, type HabitLogPayload } from '../lib/activitySync';
 import { UNVERIFIED_ACTIVITY_MESSAGE, ActivityRecoveryRequiredError, findRecoverableOperation, unresolvedOperations, type ActivityLogResult, type ActivityOperationRequest, type ActivityOperations, type ActivityOperationView, type OperationStatus } from '../lib/pendingReplayReconciliation';
 import { refreshAfterHomeCompletion } from '../lib/homeRefresh';
 import { selectTodaysPendingActivities } from '../lib/myDayPendingOverlay';
@@ -231,7 +231,9 @@ function DashboardPageInner() {
         account: owner,
         // R16: an in-memory UNRESOLVED (the last answer proved nothing) is never downgraded to "pending" merely because
         // its copy is still stored; only terminal durable evidence (or a durable unresolved marker) replaces it.
-        status: prev?.status === 'unresolved' && so.status === 'pending' ? 'unresolved' : so.status,
+        // R18 (online-first): a stored, unconfirmed copy is UNRESOLVED (nothing sends it automatically) -- except this
+        // page's own submission that is still in flight (in memory: pending).
+        status: so.status === 'pending' && prev?.status !== 'pending' ? 'unresolved' : so.status,
         activityTitle: typeof body?.activityTitle === 'string' ? body.activityTitle : prev?.activityTitle ?? '',
         activityId: typeof (body as unknown as { activityId?: unknown } | null)?.activityId === 'string' ? (body as unknown as { activityId: string }).activityId : prev?.activityId,
         logSource: typeof body?.logSource === 'string' ? body.logSource : prev?.logSource,
@@ -1258,26 +1260,20 @@ function DashboardPageInner() {
   // account (the server refuses it under any other session), single-flight,
   // stopped by any auth transition, and removing only the ids it settled.
   // It starts only once this instance has a verified signed-in account.
+  // AURA-ANDROID-REL-04 R18 (39265, online-first): NO automatic dispatch -- not at startup, on connectivity restoration,
+  // on visibility changes or after a submission. Stored, unconfirmed operations stay unresolved until the user acts
+  // (Retry / Check again). Only a read-only re-read of the account's operations runs here.
   const verifiedUserId = user ? user.id : null;
   useEffect(() => {
     if (!verifiedUserId) return;
     let active = true;
-    const syncOfflineLogs = async () => {
-      const result = await replayOfflineQueue();
-      if (!active || result.attempted === 0) return;
-      loadUserDataAndLogs();
-      if (result.confirmed > 0) loadMyDay();
-    };
-    syncOfflineLogs();
-    window.addEventListener('online', syncOfflineLogs);
-    // R15: another tab settled or discarded one of this account's operations: re-read (account-scoped).
+    // R15: another tab settled or discarded one of this account's operations: re-read (account-scoped, read-only).
     const unsubscribe = onOperationsChanged(verifiedUserId, () => { if (active) loadUserDataAndLogs(); });
     return () => {
       active = false;
-      window.removeEventListener('online', syncOfflineLogs);
       unsubscribe();
     };
-  }, [verifiedUserId, loadUserDataAndLogs, loadMyDay]);
+  }, [verifiedUserId, loadUserDataAndLogs]);
 
   // The panchang day is defined by the USER'S timezone (their selected city),
   // never the browser clock or UTC: the weekday selects the Rahu/Gulika/Yama
@@ -1673,6 +1669,13 @@ function DashboardPageInner() {
         operation?.onOperation?.(open.clientRequestId);
         throw new ActivityRecoveryRequiredError(open.clientRequestId, shown?.activityTitle ?? activityTitle, open.retryable);
       }
+      if (outcome.kind === 'not-stored' && outcome.reason === 'offline') {
+        // R18 (online-first): confirmed offline before dispatch -- nothing was stored or sent. A new activity is not
+        // recorded; a Retry leaves its operation exactly as it was (still unresolved, same id and body).
+        if (retryOf) putOperation(retryOf);
+        else { setLogEntries((prev) => prev.filter((item) => item.id !== tempId)); dropOperation(clientRequestId); }
+        throw new Error(OFFLINE_MESSAGE);
+      }
       const status: OperationStatus = operationStatusOf(outcome);
       const dispatched = (retryOf?.dispatched ?? false) || outcome.kind === 'queued' || (outcome.kind === 'outcome-unknown' && outcome.reason === 'unverified-response');
       const serverLog = outcome.kind === 'confirmed' || outcome.kind === 'already-recorded' ? outcome.serverLog : undefined;
@@ -1724,7 +1727,7 @@ function DashboardPageInner() {
       if (outcome.kind === 'rejected') throw new Error(`Unable to log this activity (server responded ${outcome.status}).`);
       if (outcome.kind === 'not-stored' && outcome.reason === 'discarded') throw new Error("This activity was discarded on this device when you signed out, so it won't be sent.");
       if (outcome.kind === 'not-stored' && outcome.reason === 'not-committed') throw new Error("This activity wasn't saved. You can log it again.");
-      if (outcome.kind === 'not-stored') throw new Error("You're offline and this device couldn't keep the activity. Try again when you're back online.");
+      if (outcome.kind === 'not-stored') throw new Error("This device couldn't keep this activity safely, so it wasn't sent. Try again in a moment.");
       // R9: storage could not be read, so the activity's eligibility was not established: nothing was stored or sent.
       if (outcome.kind === 'storage-unavailable') throw new Error("Aura couldn't safely read this device's storage, so this activity wasn't saved or sent. Try again in a moment.");
       // account-changed (not kept): the ORIGINAL account's operation.
@@ -1747,17 +1750,19 @@ function DashboardPageInner() {
         const again = clientRequestId ? operationsRef.current[clientRequestId] : undefined;
         return again ? again.status : stored === null ? 'unresolved' : 'confirmed';
       }
+      // R18: READ-ONLY -- the decision's outcome plus the server's read; nothing is sent, persisted or removed.
       const result = await checkActivityOperation({ account: op.account, clientRequestId: op.clientRequestId, body: op.body }, undefined, binding, { dispatched: op.dispatched });
       const status = operationStatusOf(result);
       const serverLog = result.kind === 'already-recorded' || result.kind === 'confirmed' ? result.serverLog : undefined;
-      putOperation({ ...op, status, ...(serverLog ? { serverLog } : {}) });
+      const note = result.kind === 'outcome-unknown' && result.reason === 'server-has-it' && op.retryable !== false
+        ? 'Aura found this activity on your account. Select Retry to finish — it won’t be saved twice.'
+        : result.kind === 'outcome-unknown' && result.reason === 'conflict' ? 'This device holds conflicting copies of this entry, so Aura won’t send it.' : undefined;
+      putOperation({ ...op, status, note, ...(serverLog ? { serverLog } : {}) });
       if (status === 'confirmed' && serverLog) {
         setLogEntries((prev) => prev.map((item) => (item.clientRequestId === op.clientRequestId ? { ...item, id: serverLog.id, activeWindow: serverLog.activeWindow ?? item.activeWindow, logMinuteOfDay: serverLog.logMinuteOfDay ?? item.logMinuteOfDay, syncStatus: undefined } : item)));
         loadMyDay();
       } else if (status === 'failed' || status === 'discarded') {
         setLogEntries((prev) => prev.filter((item) => item.clientRequestId !== op.clientRequestId));
-      } else if (status === 'pending') {
-        void replayOfflineQueue().then(() => loadUserDataAndLogs());
       }
       return status;
     },
@@ -2077,7 +2082,7 @@ function DashboardPageInner() {
     >
       {queueUnavailable && (
         <div role="status" data-queue-state="unavailable" style={{ width: '100%', maxWidth: 560, marginBottom: 12, padding: 12, borderRadius: 10, border: '1px solid var(--as-border)', background: 'var(--as-surface)', fontSize: 13 }}>
-          Aura couldn&apos;t read this device&apos;s unsynced activity, so pending activity may not be shown here. Nothing was removed; it will sync when the device storage can be read again.
+          Aura couldn&apos;t read this device&apos;s unsynced activity, so it may not be shown here. Nothing was removed and nothing is sent automatically; it will appear again once the device storage can be read.
         </div>
       )}
       {operationsUnreadable && (
@@ -2099,7 +2104,7 @@ function DashboardPageInner() {
           <ul style={{ margin: '6px 0 0', paddingLeft: 18 }}>
             {unresolvedOperations(operations).filter((op) => op.account === user.id).map((op) => (
               <li key={op.clientRequestId} data-operation-id={op.clientRequestId}>
-                {op.activityTitle}{' '}
+                {op.activityTitle}{' '}{op.note ? <span data-operation-note="true">{op.note} </span> : null}
                 <button type="button" onClick={() => { void handleCheckActivity(op.clientRequestId).catch(() => undefined); }} style={{ background: 'none', border: 'none', color: 'inherit', textDecoration: 'underline', cursor: 'pointer', padding: 0, fontSize: 13 }}>Check again</button>
                 {/* R17 (39260 G7): Retry only where the recovery decision established one payload for this id. */}
                 {op.retryable === false ? (

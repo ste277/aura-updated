@@ -54,6 +54,7 @@ function __req(id) {
   var m = { exports: {} }; __cache[id] = m; __mods[id](__req, m, m.exports); return m.exports;
 }
 ${defs}
+window.__AURA_TEST_ENABLE_DORMANT_REPLAY__ = true; // R18: these cases verify the retained, dormant replay library code
 var acct = __req('./accountSession');
 window.aura = { acct: acct, q: __req('./offlineHabitQueue'), sync: __req('./activitySync'), so: __req('./signOut'), si: __req('./signInCode'), bf: __req('./accountBoundFetch'), policy: __req('./accountRoutePolicy'), cls: __req('./habitLogSyncPolicy') };
 window.__nativeFetch = window.fetch.bind(window); // what an old bundle uses

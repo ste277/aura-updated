@@ -149,7 +149,7 @@ export interface QueueRecord {
  *   `blocked`      every request id it may stand for, incl. conflicting candidates: never eligible;
  *   `payloads`     crid -> canonical payload, only for a COMPLETE valid entry.
  */
-export interface QuarantinedSource { key: string; raw: string; entries: number; crids: string[]; unidentified: number; blocked: string[]; payloads?: Record<string, string>; /** R14: entries that name NO request id (unparseable / id-less): they may hold any request -- physical absence can never be concluded while they exist. */ unattributable?: number }
+export interface QuarantinedSource { key: string; raw: string; entries: number; crids: string[]; unidentified: number; blocked: string[]; payloads?: Record<string, string>; /** R14: entries that name NO request id (unparseable / id-less): they may hold any request -- physical absence can never be concluded while they exist. */ unattributable?: number; /** R18: the activity intent of each readable entry, with its request id when it resolves (null: unattributable). */ intents?: Array<{ crid: string | null; intent: RecoveryIntent }> }
 
 export type QueueRead =
   | {
@@ -548,14 +548,17 @@ function inspectQuarantine(owner: string): Quarantine {
     let opaque = false;
     const classify = (key: string, raw: string, values: unknown[], outer: string | null | undefined, partial?: string): QuarantinedSource => {
       const crids = new Set<string>(), blocked = new Set<string>(), payloads: Record<string, string> = {};
+      const intents: Array<{ crid: string | null; intent: RecoveryIntent }> = [];
       let unidentified = 0, unattributable = 0;
       for (const v of values) {
         const id = resolveIdentity(owner, owner, outer, v, partial);
+        const intent = intentOf(v);
+        if (intent) intents.push({ crid: id.kind === 'valid' || id.kind === 'damaged' ? id.crid : null, intent });
         for (const c of id.candidates) blocked.add(c);
         if (id.kind === 'valid' || id.kind === 'damaged') { crids.add(id.crid!); if (isQueuedHabitLog(v) && v.clientRequestId === id.crid) payloads[id.crid!] = canonicalPayload(v); }
         else { unidentified++; if (id.candidates.length === 0) unattributable++; }
       }
-      return { key, raw, entries: values.length, crids: [...crids], unidentified, blocked: [...blocked], payloads, unattributable };
+      return { key, raw, entries: values.length, crids: [...crids], unidentified, blocked: [...blocked], payloads, unattributable, intents };
     };
     const v2 = s.getItem(QUEUE_V2_PREFIX + owner);
     if (v2 !== null) {
@@ -581,7 +584,8 @@ function inspectQuarantine(owner: string): Quarantine {
         const nested = v && typeof v === 'object' && nonEmptyId((v as { clientRequestId?: unknown }).clientRequestId) ? [(v as { clientRequestId: string }).clientRequestId] : [];
         const i = rest.lastIndexOf(':');
         const variants = [rest, rest.replace(/:+$/, ''), i > 0 ? rest.slice(0, i) : ''].filter(nonEmptyId);
-        sources.push({ key, raw, entries: 1, crids: [], unidentified: 1, blocked: [...new Set([...variants, ...nested])], payloads: {} });
+        const intent = intentOf(v);
+        sources.push({ key, raw, entries: 1, crids: [], unidentified: 1, blocked: [...new Set([...variants, ...nested])], payloads: {}, intents: intent ? [{ crid: null, intent }] : [] });
       }
     }
     return { state: 'ok', sources, crids: new Set(sources.flatMap((x) => x.blocked)), identified: new Set(sources.flatMap((x) => x.crids)), opaque };
@@ -771,34 +775,18 @@ export type RequestState =
   | { kind: 'failed'; status: number }
   | { kind: 'discarded'; possiblySent: boolean }
   /** R15: a marker that proves nothing: unresolved (its live copies, if any, are kept). */
-  | { kind: 'unverified'; possiblySent: boolean; copies: Stored[] }
+  | { kind: 'unverified'; possiblySent: boolean; copies: Stored[]; /** R18: this payload is the decision's dispatch payload */ dispatchable?: boolean }
   | { kind: 'conflict' }
   | { kind: 'paused' }
   | { kind: 'live'; copies: Stored[]; /** a blocking (damaged / contradictory / retired) copy also exists */ paused: boolean }
   | { kind: 'absent' };
-async function scanCopies(st: Stores, owner: string, crid: string, payload: string, q: Extract<Quarantine, { state: 'ok' }>): Promise<{ copies: Stored[]; paused: boolean; conflict: boolean }> {
-  const owned = await relevantRecords(st, owner); // R12: incl. records without (or with another) outer owner
-  const copies: Stored[] = [];
-  let paused = q.opaque || q.crids.has(crid); // a quarantined / blocked retired copy
-  for (const r of owned) {
-    const id = recordIdentity(owner, r);
-    if (id.crid !== crid && !id.candidates.includes(crid)) continue;
-    if (id.kind !== 'valid' || id.crid !== crid || !isActive(r)) { paused = true; continue; } // damaged, contradictory, incomplete or retired copy
-    copies.push(r);
-  }
-  return { copies, paused, conflict: copies.some((r) => canonicalPayload(r.item) !== payload) };
-}
+/**
+ * R18 (39262 G11) -- requestState is NO LONGER an independent authority: it is THE recovery decision's view of one
+ * proposed payload (stateForPayload). A validated receipt for a payload is a FACT about that payload; it never hides a
+ * surviving copy with another body (the operation is then a conflict, whatever the receipt says).
+ */
 async function requestState(st: Stores, owner: string, crid: string, payload: string, q: Extract<Quarantine, { state: 'ok' }>): Promise<RequestState> {
-  const a = decisionAuthority(await asPromise(st.tombstones.get(decisionKey(owner, crid))), owner, crid, payload);
-  if (a.kind === 'success') return { kind: 'success', receipt: a.receipt, possiblySent: a.possiblySent };
-  if (a.kind === 'failed') return { kind: 'failed', status: a.status };
-  if (a.kind === 'discarded') return { kind: 'discarded', possiblySent: a.possiblySent };
-  if (a.kind === 'conflict') return { kind: 'conflict' };
-  const scan = await scanCopies(st, owner, crid, payload, q);
-  if (a.kind === 'unverified') return { kind: 'unverified', possiblySent: a.possiblySent, copies: scan.conflict || scan.paused ? [] : scan.copies };
-  if (scan.conflict) return { kind: 'conflict' };
-  if (scan.copies.length) return { kind: 'live', copies: scan.copies, paused: scan.paused };
-  return scan.paused ? { kind: 'paused' } : { kind: 'absent' };
+  return stateForPayload((await decideOperations(st, owner, q, crid)).get(crid), payload);
 }
 
 // ------------------------------------------------------------------ R17 (39260): THE recovery decision
@@ -823,9 +811,18 @@ async function requestState(st: Stores, owner: string, crid: string, payload: st
  * copy, an unbound marker's payload, no payload at all -- yields null: never sent, every copy preserved.
  */
 export type RecoveryStatus = 'pending' | 'unresolved' | 'conflict' | 'confirmed' | 'failed' | 'discarded';
+/** R18: a validated fact about ONE payload under the id (the server's answer it proves), separate from the overall status. */
+export interface PayloadFact { payload: string | null; outcome: 'accepted' | 'rejected' | 'discarded'; receipt?: AcceptedReceipt; httpStatus?: number; possiblySent: boolean }
 export interface RecoveryOperation {
+  /** The request id; for evidence whose request identity cannot be attributed, `unattributed:<source>` (never sent, never decided). */
   clientRequestId: string;
+  /** R18 (39262 G10): false = account evidence (an activity intent) whose request identity is contradictory or unknown. */
+  attributable: boolean;
+  /** R18: for unattributed evidence, every request id it may stand for (each is fenced: nothing is sent under it). */
+  candidates?: string[];
   status: RecoveryStatus;
+  /** R18: what the validated decision marker proves about its own payload (absent: nothing proven). */
+  fact?: PayloadFact;
   dispatchPayload: string | null;
   /** The operation's own intent for display: the dispatch payload, else the single payload the evidence names (a live copy first). */
   body: Record<string, unknown> | null;
@@ -836,12 +833,19 @@ export interface RecoveryOperation {
 }
 export const isOpenRecovery = (op: RecoveryOperation) => op.status === 'pending' || op.status === 'unresolved' || op.status === 'conflict';
 const parseObject = (p: unknown): Record<string, unknown> | null => { if (typeof p !== 'string') return null; try { const v = JSON.parse(p); return v && typeof v === 'object' && !Array.isArray(v) ? v : null; } catch { return null; } };
-const intentOf = (v: unknown): RecoveryIntent | null => {
+function intentOf(v: unknown): RecoveryIntent | null {
   const o = v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
   if (!o || typeof o.activityTitle !== 'string' || !o.activityTitle.trim()) return null;
   return typeof o.activityId === 'string' && o.activityId ? { activityTitle: o.activityTitle, activityId: o.activityId } : { activityTitle: o.activityTitle };
-};
+}
 async function decideOperations(st: Stores, owner: string, q: Extract<Quarantine, { state: 'ok' }>, only?: string): Promise<Map<string, RecoveryOperation>> {
+  // R18 (39262 G10): ONE discovery. An exact-id lookup is the account-wide decision's answer for that id (incl. the
+  // unattributed evidence naming it as a candidate) -- never a separate, narrower evidence scan.
+  if (only !== undefined) {
+    const all = await decideOperations(st, owner, q);
+    const hit = all.get(only) ?? [...all.values()].find((o) => !o.attributable && (o.candidates ?? []).includes(only));
+    return new Map(hit ? [[only, hit]] : []);
+  }
   const records = await relevantRecords(st, owner);
   const markers = new Map<string, Partial<Decision>>();
   if (only !== undefined) {
@@ -853,21 +857,30 @@ async function decideOperations(st: Stores, owner: string, q: Extract<Quarantine
       if (typeof d?.recordId === 'string' && d.recordId.startsWith(prefix)) markers.set(d.recordId.slice(prefix.length), d);
     }
   }
+  // R18 (39262 G10) -- COMPLETE discovery: every id a marker, a resolved copy or a retired entry names; then every copy
+  // and retired entry whose identity names none of those (contradictory / incomplete) becomes UNATTRIBUTED account
+  // evidence carrying its activity intent -- it can withhold a new submission, never authorize a send or cleanup.
   const crids = new Set<string>(only !== undefined ? [only] : markers.keys());
-  if (only === undefined) for (const r of records) { const id = recordIdentity(owner, r); if (id.crid) crids.add(id.crid); }
+  if (only === undefined) {
+    for (const r of records) { const id = recordIdentity(owner, r); if (id.crid) crids.add(id.crid); }
+    for (const c of q.identified) crids.add(c);
+  }
+  const retiredIntents = (crid: string) => q.sources.flatMap((src) => (src.intents ?? []).filter((x) => x.crid === crid).map((x) => x.intent));
   const out = new Map<string, RecoveryOperation>();
+  const concealed: Stored[] = []; // blocked copies beside a terminal decision: surfaced as unattributed evidence below
   for (const crid of crids) {
     const marker = markers.get(crid);
     const a = decisionAuthority(marker, owner, crid);
     const live: Stored[] = [];
     let blocked = q.opaque || q.crids.has(crid); // a quarantined / blocked retired copy
-    const intents: RecoveryIntent[] = [];
+    const intents: RecoveryIntent[] = [...retiredIntents(crid)];
+    const blockedRecords: Stored[] = [];
     let at = typeof marker?.at === 'number' ? marker.at : 0;
     for (const r of records) {
       const id = recordIdentity(owner, r);
       if (id.crid !== crid && !id.candidates.includes(crid)) continue;
       if (id.kind === 'valid' && id.crid === crid && isActive(r)) live.push(r);
-      else { blocked = true; const i = intentOf(r.item); if (i) intents.push(i); } // damaged, contradictory, incomplete or retired copy
+      else { blocked = true; blockedRecords.push(r); const i = intentOf(r.item); if (i) intents.push(i); } // damaged, contradictory, incomplete or retired copy
       if (!at && typeof r.queuedAt === 'number') at = r.queuedAt;
     }
     if (a.kind === 'none' && live.length === 0 && !blocked) continue; // nothing names this id
@@ -876,16 +889,24 @@ async function decideOperations(st: Stores, owner: string, q: Extract<Quarantine
     for (const p of [...livePayloads, ...(markerPayload !== null ? [markerPayload] : [])]) { const i = intentOf(parseObject(p)); if (i && !intents.some((x) => x.activityTitle === i.activityTitle && x.activityId === i.activityId)) intents.unshift(i); }
     const single = livePayloads.length === 1 ? livePayloads[0] : null;
     const display = (p: string | null) => parseObject(p);
-    const op = (status: RecoveryStatus, dispatchPayload: string | null, shown: string | null, receipt?: AcceptedReceipt): RecoveryOperation =>
-      ({ clientRequestId: crid, status, dispatchPayload, body: display(dispatchPayload ?? shown), intents, ...(receipt ? { receipt } : {}), at });
-    if (a.kind === 'success' || a.kind === 'failed' || (a.kind === 'discarded' && markerPayload !== null)) {
-      const decided = a.kind === 'success' ? a.receipt.payload : markerPayload!;
+    // R18: the validated marker's FACT about its own payload (kept even when the overall status is a conflict).
+    const fact: PayloadFact | undefined = a.kind === 'success' ? { payload: a.receipt.payload, outcome: 'accepted', receipt: a.receipt, possiblySent: true }
+      : a.kind === 'failed' ? { payload: markerPayload, outcome: 'rejected', httpStatus: a.status, possiblySent: false }
+      : a.kind === 'discarded' ? { payload: markerPayload, outcome: 'discarded', possiblySent: a.possiblySent } : undefined;
+    const op = (status: RecoveryStatus, dispatchPayload: string | null, shown: string | null): RecoveryOperation => {
+      const o: RecoveryOperation = { clientRequestId: crid, attributable: true, status, ...(fact ? { fact } : {}), dispatchPayload, body: display(dispatchPayload ?? shown), intents, ...(fact?.receipt && status === 'confirmed' ? { receipt: fact.receipt } : {}), at };
+      liveCopiesOf.set(o, dispatchPayload === null ? [] : live.filter((r) => canonicalPayload(r.item) === dispatchPayload));
+      evidenceOf.set(o, { blocked, marker: a.kind !== 'none', named: [...new Set([...livePayloads, ...(markerPayload !== null ? [markerPayload] : [])])] });
+      return o;
+    };
+    if (fact && fact.payload !== null) {
       // A validated decision is final for ITS payload; a surviving copy with another payload under the same id is a conflict.
-      if (livePayloads.some((p) => p !== decided)) { out.set(crid, op('conflict', null, single)); continue; }
-      out.set(crid, a.kind === 'success' ? op('confirmed', null, decided, a.receipt) : op(a.kind === 'failed' ? 'failed' : 'discarded', null, decided));
+      if (livePayloads.some((p) => p !== fact.payload)) { out.set(crid, op('conflict', null, single)); continue; }
+      out.set(crid, op(fact.outcome === 'accepted' ? 'confirmed' : fact.outcome === 'rejected' ? 'failed' : 'discarded', null, fact.payload));
+      concealed.push(...blockedRecords); // R18: a terminal decision never conceals a surviving copy it cannot account for
       continue;
     }
-    if (a.kind === 'discarded') { out.set(crid, op('discarded', null, single)); continue; } // a null-payload discard fences every payload
+    if (a.kind === 'discarded') { out.set(crid, op('discarded', null, single)); concealed.push(...blockedRecords); continue; } // a null-payload discard fences every payload
     // No validated outcome (no marker, or a marker that proves nothing): the evidence is evaluated together.
     const named = new Set(livePayloads);
     if (markerPayload !== null) named.add(markerPayload);
@@ -898,7 +919,50 @@ async function decideOperations(st: Stores, owner: string, q: Extract<Quarantine
     const trusted = only1 !== null && !blocked && (livePayloads.includes(only1) || (a.kind === 'unverified' && a.payload === only1 && isQueuedHabitLog(parseObject(only1)) && parseObject(only1)!.clientRequestId === crid));
     out.set(crid, op('unresolved', trusted ? only1 : null, only1));
   }
+  if (only === undefined) {
+    // R18 (39262 G10): evidence whose request identity names no discovered id -- preserved, shown, matched, never sent.
+    const unattributed = (key: string, intent: RecoveryIntent | null, at: number, candidates: string[]) => {
+      const o: RecoveryOperation = { clientRequestId: `unattributed:${key}`, attributable: false, candidates, status: 'unresolved', dispatchPayload: null, body: intent ? { ...intent } : null, intents: intent ? [intent] : [], at };
+      liveCopiesOf.set(o, []);
+      evidenceOf.set(o, { blocked: true, marker: false, named: [] });
+      out.set(o.clientRequestId, o);
+    };
+    for (const r of records) {
+      const id = recordIdentity(owner, r);
+      if (!concealed.includes(r) && (id.crid || id.candidates.some((c) => crids.has(c)))) continue;
+      unattributed(`record:${r.recordId}`, intentOf(r.item), typeof r.queuedAt === 'number' ? r.queuedAt : 0, id.candidates);
+    }
+    for (const src of q.sources) for (const x of src.intents ?? []) if (x.crid === null || !crids.has(x.crid)) unattributed(`retired:${src.key}`, x.intent, 0, x.crid ? [x.crid] : [...src.blocked]);
+  }
   return out;
+}
+/** R18: the live copies that carry an operation's dispatch payload (internal; never exposed to the UI). */
+const liveCopiesOf = new WeakMap<RecoveryOperation, Stored[]>();
+/** R18: what the decision was made from (internal): a blocking copy, a marker, every payload the evidence names. */
+const evidenceOf = new WeakMap<RecoveryOperation, { blocked: boolean; marker: boolean; named: string[] }>();
+/**
+ * R18 (39262 G11) -- THE mapping from the recovery decision to the state of ONE proposed payload under its id. Every
+ * consumer (transmission gate, explicit Retry, enqueue recovery, Check again) reads this; nothing returns a terminal
+ * outcome the decision does not hold.
+ */
+function stateForPayload(d: RecoveryOperation | undefined, payload: string): RequestState {
+  if (!d) return { kind: 'absent' };
+  const f = d.fact;
+  if (d.status === 'confirmed') return f?.payload === payload && f.receipt ? { kind: 'success', receipt: f.receipt, possiblySent: true } : { kind: 'conflict' };
+  if (d.status === 'failed') return f?.payload === payload ? { kind: 'failed', status: f.httpStatus ?? 400 } : { kind: 'conflict' };
+  if (d.status === 'discarded') return !f || f.payload === null || f.payload === payload ? { kind: 'discarded', possiblySent: f?.possiblySent ?? false } : { kind: 'conflict' };
+  if (d.status === 'conflict') return { kind: 'conflict' };
+  const copies = d.dispatchPayload === payload ? liveCopiesOf.get(d) ?? [] : [];
+  if (d.status === 'pending') {
+    if (d.dispatchPayload === null) return { kind: 'paused' }; // a blocking (damaged / contradictory / retired) copy
+    if (d.dispatchPayload !== payload) return { kind: 'conflict' }; // another body under this id
+    return { kind: 'live', copies, paused: false };
+  }
+  // unresolved: the decision's one dispatch payload (if any) is the only recoverable body
+  const ev = evidenceOf.get(d) ?? { blocked: false, marker: true, named: [] };
+  if (ev.named.length > 0 && !ev.named.includes(payload)) return { kind: 'conflict' }; // the evidence names another body under this id
+  if (!ev.marker && ev.blocked && d.dispatchPayload === null) return { kind: 'paused' }; // only blocking copies: paused, never sent
+  return { kind: 'unverified', possiblySent: true, copies, dispatchable: d.dispatchPayload === payload };
 }
 /** R17: THE recovery decision for an account (null = it could not be read: unresolved, never "nothing open"). */
 export async function readRecoveryDecision(owner: string): Promise<RecoveryOperation[] | null> {
@@ -930,17 +994,14 @@ type Gate = { status: 'eligible'; copies: Stored[] } | { status: 'settled'; stat
  * (the server is idempotent per account + request id, so the same id and payload can only converge).
  */
 async function eligibilityGate(st: Stores, owner: string, crid: string, payload: string, q: Extract<Quarantine, { state: 'ok' }>, explicitRetry = false): Promise<Gate> {
+  // R17/R18: THE recovery decision, evaluated in this same claiming transaction, is the only authority: only its one
+  // dispatch payload may be sent under an existing id; terminal answers come only from its validated status.
   const state = await requestState(st, owner, crid, payload, q);
   if (state.kind === 'success' || state.kind === 'failed' || state.kind === 'discarded') return { status: 'settled', state };
   if (state.kind === 'conflict') return { status: 'conflict' };
   if (state.kind === 'paused' || (state.kind === 'live' && state.paused)) return { status: 'paused' };
   if (state.kind === 'absent') return { status: 'eligible', copies: [] }; // nothing names this id: a new operation
-  // R17 (39260 G7): a Retry or replay of an EXISTING id is bound to THE recovery decision, evaluated in this same
-  // claiming transaction -- only its one authoritative dispatch payload may be sent; conflicting or unprovable
-  // evidence stays unresolved (nothing written, every copy kept).
-  const decided = (await decideOperations(st, owner, q, crid)).get(crid);
-  if (!decided || decided.dispatchPayload !== payload) return state.kind === 'live' ? { status: 'paused' } : { status: 'unverified' };
-  if (state.kind === 'unverified') return explicitRetry && decided.status === 'unresolved' ? { status: 'eligible', copies: state.copies } : { status: 'unverified' };
+  if (state.kind === 'unverified') return explicitRetry && state.dispatchable ? { status: 'eligible', copies: state.copies } : { status: 'unverified' };
   return { status: 'eligible', copies: state.copies };
 }
 
@@ -1089,7 +1150,7 @@ export async function releaseClaim(token: ClaimToken): Promise<'released' | 'sup
   }
 }
 
-export interface RemovalResult { removed: number; alreadyGone: number; failed: number; superseded?: boolean; /** Records of another account, left untouched. */ foreign?: number; /** R8: quarantined records, never settled by a send. */ paused?: number }
+export interface RemovalResult { removed: number; alreadyGone: number; failed: number; superseded?: boolean; /** R18: THE recovery decision's status for the settled id, read in the same transaction after the write. */ decision?: RecoveryStatus; /** Records of another account, left untouched. */ foreign?: number; /** R8: quarantined records, never settled by a send. */ paused?: number }
 
 /** The account a settlement acts for (explicit, or the claim token's). */
 const ownerOfToken = (token?: ClaimToken) => (token ? token.key.split('\u0000')[0] : undefined);
@@ -1147,6 +1208,10 @@ export async function settleRecords(recordIds: Iterable<string>, token?: ClaimTo
       for (const { o, crid } of targets.values()) {
         const stillNamed = (await relevantRecords(st, o)).some((r) => recordIdentity(o, r).candidates.includes(crid));
         if (!stillNamed) await asPromise(st.dispatches.delete(requestKey(o, crid)));
+        // R18 (39262 G11): the outcome a sender reports is the decision's, never the answer alone (a surviving copy
+        // with another body keeps the operation a conflict).
+        const q = inspectQuarantine(o);
+        if (q.state === 'ok') out.decision = (await decideOperations(st, o, q, crid)).get(crid)?.status;
       }
       return out;
     }).then((out) => { notifyOperationsChanged(owner); return out; });

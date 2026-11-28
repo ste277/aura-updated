@@ -105,10 +105,13 @@ function afterSnapshotRead(effect: (db: IDBDatabase) => void) {
   return restore;
 }
 /** Barrier inside the claim transaction (its first decision read): the reviewer's N2 injection point. */
+// R18: the claim transaction's first decision read is get() (R12-R17) or getAll() (R18: one account-wide discovery).
 function insideClaim(effect: () => void) {
-  const o = fidb.IDBObjectStore.prototype.get;
-  fidb.IDBObjectStore.prototype.get = function (...a: any[]) { const r = o.apply(this, a); if (this.name === 'tombstones' && this.transaction.mode === 'readwrite') { fidb.IDBObjectStore.prototype.get = o; r.addEventListener('success', effect); } return r; };
-  return () => { fidb.IDBObjectStore.prototype.get = o; };
+  const o = fidb.IDBObjectStore.prototype.get, oa = fidb.IDBObjectStore.prototype.getAll;
+  const restore = () => { fidb.IDBObjectStore.prototype.get = o; fidb.IDBObjectStore.prototype.getAll = oa; };
+  const hook = (orig: any) => function (this: any, ...a: any[]) { const r = orig.apply(this, a); if (this.name === 'tombstones' && this.transaction.mode === 'readwrite') { restore(); r.addEventListener('success', effect); } return r; };
+  fidb.IDBObjectStore.prototype.get = hook(o); fidb.IDBObjectStore.prototype.getAll = hook(oa);
+  return restore;
 }
 
 async function n1(impl: Impl, newOwner: string) {

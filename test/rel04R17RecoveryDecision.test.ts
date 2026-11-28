@@ -269,7 +269,9 @@ async function main() {
   // ================================================================ negative controls (each R17 rule removed in turn)
   {
     // N7 the Retry/replay binding to the decision removed from the claiming gate
-    const noBinding = mutant('N7-no-decision-binding', 'q', [["  if (!decided || decided.dispatchPayload !== payload) return state.kind === 'live' ? { status: 'paused' } : { status: 'unverified' };\n", ''], ["  if (state.kind === 'unverified') return explicitRetry && decided.status === 'unresolved' ? { status: 'eligible', copies: state.copies } : { status: 'unverified' };", "  if (state.kind === 'unverified') return explicitRetry ? { status: 'eligible', copies: state.copies } : { status: 'unverified' };"]]);
+    // R18: the binding lives in stateForPayload (the decision's view of one payload); the control turns a conflicting
+    // decision into a dispatchable one at the claim boundary.
+    const noBinding = mutant('N7-no-decision-binding', 'q', [["  if (d.status === 'conflict') return { kind: 'conflict' };", "  if (d.status === 'conflict') return { kind: 'unverified', possiblySent: true, copies: [], dispatchable: true };"], ["  if (ev.named.length > 0 && !ev.named.includes(payload)) return { kind: 'conflict' };", "  if (false as boolean) return { kind: 'conflict' };"]]);
     await fresh();
     const s = await tab(noBinding);
     const id = 'n7';
@@ -465,7 +467,7 @@ async function main() {
   // ================================================================ one decision, no component-specific interpretation (source)
   {
     const q = src('offlineHabitQueue.ts');
-    const consumers = { projection: /export async function readRecoveryDecision[\s\S]*?decideOperations\(st, owner, q\)/.test(q) && /export async function readActivityOperations[\s\S]*?readRecoveryDecision\(owner\)/.test(q), newOperation: /if \(newOperation\) \{\n\s+const open = openFor\(\(await decideOperations\(st, owner, q\)\)/.test(q), retryAndReplay: /const decided = \(await decideOperations\(st, owner, q, crid\)\)\.get\(crid\);/.test(q) };
+    const consumers = { projection: /export async function readRecoveryDecision[\s\S]*?decideOperations\(st, owner, q\)/.test(q) && /export async function readActivityOperations[\s\S]*?readRecoveryDecision\(owner\)/.test(q), newOperation: /if \(newOperation\) \{\n\s+const open = openFor\(\(await decideOperations\(st, owner, q\)\)/.test(q), retryAndReplay: /const decided = \(await decideOperations\(st, owner, q, crid\)\)\.get\(crid\);/.test(q) || /async function requestState\([^)]*\): Promise<RequestState> \{\n\s+return stateForPayload\(\(await decideOperations\(st, owner, q, crid\)\)\.get\(crid\), payload\);/.test(q) /* R18: the gate reads requestState, a view of the decision */ };
     const ui = ['app/page.tsx', 'components/HomeDashboard.tsx', 'components/Timeline.tsx', 'components/PastActivityModal.tsx', 'components/CalendarViewSection.tsx'].map((f) => fs.readFileSync(path.join(WEB, f), 'utf8')).join('\n');
     const noUiInterpretation = !/decisionAuthority|validReceipt|tombstones|decisionKey\(/.test(ui);
     const oneMatcher = /matchesActivityIntent\(op\.intents, next\)/.test(q) && /matchesActivityIntent\(intentsOf\(op\), next\)/.test(src('pendingReplayReconciliation.ts'));

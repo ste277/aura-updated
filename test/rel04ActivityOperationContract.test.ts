@@ -279,7 +279,9 @@ async function main() {
       const rp = await s.sync.replayOfflineQueue(dev.fetch as any);
       Date.now = realNow;
       const final = await s.sync.submitActivityLog(body(id), 'tmp', dev.fetch as any);
-      check(`E ${fault}: the route committed but the answer was lost -> queued (same id kept); Check again -> pending (${ca.kind}); Retry/replay converge on ONE row (${committed}->${rows(A, id).length}); afterwards already-recorded`, r1.kind === 'queued' && committed === 1 && ca.kind === 'queued' && (retry.kind === 'queued' || retry.kind === 'confirmed') && rows(A, id).length === 1 && final.kind === 'already-recorded' && rp.removeFailed === 0);
+      // R18 (39265, online-first): Check again is READ-ONLY -- the server's read proves the request exists, the operation
+      // stays unresolved (nothing persisted) until the user's Retry finishes it under the same id.
+      check(`E ${fault}: the route committed but the answer was lost -> queued (same id kept; online-first status ${s.sync.operationStatusOf(r1)}); Check again (read-only) -> ${ca.kind}/${ca.reason}; Retry/replay converge on ONE row (${committed}->${rows(A, id).length}); afterwards already-recorded`, r1.kind === 'queued' && s.sync.operationStatusOf(r1) === 'unresolved' && committed === 1 && ca.kind === 'outcome-unknown' && ca.reason === 'server-has-it' && (retry.kind === 'queued' || retry.kind === 'confirmed') && rows(A, id).length === 1 && final.kind === 'already-recorded' && rp.removeFailed === 0);
     }
   }
 
@@ -396,7 +398,8 @@ async function main() {
 
   // ================================================================ N: negative controls (each protection removed)
   {
-    const bypassDirect = mutant('N-bypass-direct', 'sync', [["const decoded = await __decoder.decode(res, expectationOf(token, lease.account, body), () => lease.isCurrent(), UPGRADE_REQUIRED_CODE);\n    return applyDirectAnswer", "const decoded: any = res !== 'network-error' && res.ok ? { kind: 'accepted', row: { id: 'unchecked', userId: lease.account, clientRequestId: token.crid, activityTitle: '', logTimestamp: '', durationMinutes: 0 } } : await __decoder.decode(res, expectationOf(token, lease.account, body), () => lease.isCurrent(), UPGRADE_REQUIRED_CODE);\n    return applyDirectAnswer"]]);
+    // R18: the reported outcome is also the settlement decision's, so the bypass must remove that second protection too.
+    const bypassDirect = mutant('N-bypass-direct', 'sync', [["const decoded = await __decoder.decode(res, expectationOf(token, lease.account, body), () => lease.isCurrent(), UPGRADE_REQUIRED_CODE);\n    return applyDirectAnswer", "const decoded: any = res !== 'network-error' && res.ok ? { kind: 'accepted', row: { id: 'unchecked', userId: lease.account, clientRequestId: token.crid, activityTitle: '', logTimestamp: '', durationMinutes: 0 } } : await __decoder.decode(res, expectationOf(token, lease.account, body), () => lease.isCurrent(), UPGRADE_REQUIRED_CODE);\n    return applyDirectAnswer"], ["      if (settled?.decision !== undefined && settled.decision !== 'confirmed') return { kind: 'outcome-unknown', reason: 'conflict' };\n", ""]]);
     await fresh();
     let s = await tab(bypassDirect);
     dev.fault('POST', route, 'html200');
