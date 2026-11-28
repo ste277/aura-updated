@@ -34,4 +34,4 @@ The C5/C6 COMMIT fault injection now targets the guarded COMMIT message.
 
 **39248.** Its disposition was not available locally when this was written.
 
-**Migrations.** MP-4 owns 0058. Whichever of #407 and MP-4 merges second reconciles guards 11o, S9 and G12 to 0055–0058.
+**Migrations.** MP-4 owns 0058. Confirmed order: MP-4 merged first (`45e9cca`); #407 merges second and reconciles guards 11o, S9 and G12 to 0055–0058 (done in I2-R4).
