@@ -1,0 +1,46 @@
+$ npx ts-node --project tsconfig.jsdom-tests.json test/myPeopleMp2Db.test.ts
+# job=day-constructor-acceptance-db-tests step=Run AURA-MP-2 My People journeys DB test env={}
+OK   Overview: title "My People" and the approved empty state; no Coming up section when nothing is upcoming
+OK   Add: name, Parent, custom label and private note -> payload exactly {name, relationshipType, relationshipLabel (trimmed), notes}, 201, persisted
+OK   Add: no birthday copy offered without a chart birth date
+OK   Add: name only -> payload exactly {name}; API default OTHER; no label, note, chart or special day
+OK   Add with chart details: the birthday copy is OFFERED, UNCHECKED by default; left unchecked -> only the person is created, no special day
+OK   Add with chart details + explicit "Also remember their birthday" -> person 201, then POST occasion exactly {kind BIRTHDAY, month, day, year from the chart} 201
+OK   Overview: Coming up shows Ravi's birthday in 3 days with "Turns N" and the in-app reminder marker (inside the 7-day window)
+OK   Overview: people list shows initial avatar, "Friend · Best friend" and the next special day
+OK   Detail: name, "Friend · Best friend", Special days with the birthday (saved year shown), countdown, age and reminder choice
+OK   Detail: "Birthday" is not offered again for a person who already has one (one per person)
+OK   Add anniversary without a year, reminder untouched -> payload exactly {kind, month, day}; persisted remindDaysBefore 7 (API default, D5); no age/count shown
+OK   Add "Another important date" without a name -> refused before any request, with a message
+OK   Add other date with a name and "No reminder" -> payload {kind, month, day, label, remindDaysBefore: null}, 201, persisted
+OK   Detail with no special days: an inviting prompt, and no chart-copy button (no chart details)
+OK   29 February 2001 -> refused before any request ("wasn't a leap year")
+OK   29 February: the form explains it is marked on 28 February in other years
+OK   29 February 2000 (leap) -> 201, persisted 2/29/2000; shown as "29 February 2000"
+OK   29 February next occurrence follows D4 (28 Feb in a non-leap year, flagged and labelled "(for 29 Feb)")
+OK   Edit special day: clear the year -> PATCH exactly {year: null}, 200; persisted year NULL, still 29 Feb (optional year)
+OK   Edit special day: reminder "On the day only" -> PATCH exactly {remindDaysBefore: 0}
+OK   Edit special day: save without changes -> no request
+OK   Detail shows the saved reminder choice "Reminder on the day"
+OK   Remove special day (confirmed) -> DELETE 200; row gone; person kept
+OK   Coming up: chronological (3 days before 20 days), only within 30 days (Graduation at 45 days absent)
+OK   Coming up: reminder marker follows each day's own window (Meera 30-day window -> marked; anniversary 7-day default at 20 days -> not marked)
+OK   Edit person: change only the custom label -> PATCH exactly {relationshipLabel}, 200; note and relationship unchanged
+OK   Edit person: clear the private note -> PATCH exactly {notes: null}; persisted NULL
+OK   Edit person: save without changes -> no request
+OK   Isolation: another account gets 404 for the person, its special days, and add/edit/delete of them; sees no people and no upcoming days
+OK   Isolation: the owner's special days are untouched by those attempts
+OK   Privacy: the list response carries no notes or birth fields (MP-1 list contract)
+OK   Delete person: confirmation says special days and notes go and plans stay; DELETE 200; person and all 3 special days removed
+OK   Delete person: returns to the overview, Ravi gone from people and Coming up
+OK   Server OFF: legacy "People" screen -- no "My People" title, no Coming up, no custom label in the list
+OK   Server OFF: detail has no Special days or private note sections
+OK   Server OFF: the form has no custom label, note or birthday-copy controls
+OK   Server OFF: occasion and upcoming APIs answer 404; rows are kept
+OK   Server ON, public flag OFF: legacy UI (no My People title or Coming up)
+OK   Re-enabled: Coming up and the custom label are back unchanged
+OK   You: the row reads "My People" only behind isMyPeoplePresentationEnabled(); the legacy "People" row is kept otherwise; no new navigation tab
+
+ALL MY PEOPLE MP-2 DB CHECKS PASSED (40)
+
+# exit=0 signal=

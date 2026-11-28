@@ -1,0 +1,108 @@
+$ npx ts-node test/promotionInput.test.ts
+# job=math-core-tests step=Run promotion input test env={}
+=== eligibility: every gate, one input per eligible final-Deferred candidate ===
+OK   BASIC ELIGIBLE: pressured + finally Deferred + real contention + one final owner + all above-pressure dimensions tie -> exactly one PromotionInput for B with owner A
+OK   PRESSURE NONE: the same authority with pressure NONE produces no input (NONE can never enter a promotion evaluation)
+OK   MISSING PRESSURE: no pressure on record fails closed -- pressure is never inferred
+OK   CONTENDED THEN PROPOSED: a pressured candidate that contended but is finally Proposed produces no input
+OK   NO CONTENTION: a pressured final Deferred candidate with no trace event produces no input (a Deferred reason is not contention)
+OK   NO FINAL OWNER: the historical owner is no longer Proposed -> no input
+OK   OWNER ABSENT FROM THE FINAL RESULT ENTIRELY is valid history, not an owner: no input
+OK   IMPORTANCE BLOCK: a HIGH owner against a pressured MEDIUM loser -> no input; a LOW-vs-HIGH loser likewise
+OK   DEADLINE-TODAY BLOCK: an owner whose deadline is today blocks, even against a higher-importance loser
+OK   DEADLINE BLOCK: with deadline-today and importance tied, an owner with a stronger (present / earlier) deadline blocks
+OK   LOSER-STRONGER ANOMALY: a loser that outranks its final owner above pressure is an anomaly, never authority -> no input
+OK   UNKNOWN PRECEDENCE: missing facts for the loser, or for a final owner, -> no input
+OK   ORIGINALORDER-ONLY: the facts carry no originalOrder, so candidates that differ only by it (the only dimension pressure is meant to precede) still produce an input
+OK   DUPLICATE IDS fail closed: a loser appearing twice in the final result, or a historical owner appearing twice, -> no input
+OK   ROUND IS NEVER READ: the same authority with any round numbers (including malformed / negative ones) yields the identical input
+OK   ATTEMPTED INTERVALS AND EVENT COUNTS ARE NEVER READ: three events over different intervals and rounds for the same owner give the same single-owner input as one event
+=== owners: 1..N, deduplicated, final only, all-owner rule, never collapsed ===
+OK   MULTI-OWNER ALL-TIE: two final owners that both tie above pressure -> ONE input carrying BOTH owners (never collapsed to a single winner), in order of first appearance in the trace
+OK   owner order follows first appearance in the trace, not the final-result or alphabetical order
+OK   MULTI-OWNER MIXED: one owner ties, the other is stronger -> no input (the all-owner rule is mandatory)
+OK   MULTI-OWNER ANOMALY: one owner ties, the other is WEAKER above pressure (loser stronger) -> no input; an anomaly is never hidden by a tying owner
+OK   MULTI-OWNER UNKNOWN: a final owner without precedence facts voids the input even though the other owner ties
+OK   REPEATED OWNER / MULTI-ROUND OWNER: one owner across several events and rounds is ONE owner entry
+OK   HISTORICAL OWNER REMOVED: A1 (stronger, but no longer Proposed) neither blocks nor appears; the remaining tied FINAL owner A2 is the only owner entry
+OK   ALL OWNERS REMOVED: every historical owner displaced -> no input
+OK   only the loser's OWN contention relationships define owners: an unrelated Proposed candidate (even one tying above pressure) is never an owner
+=== several losers: 0..N inputs, independence, a shared owner is not deduplicated across losers ===
+OK   0..N INPUTS: two pressured losers of the same owner produce two inputs (final-result order); the third (NONE) produces none; the shared owner appears in BOTH
+OK   CROSS-LOSER INDEPENDENCE: B1 (an anomaly, LOW vs MEDIUM) producing no input does not alter B2's
+OK   INPUT ORDER is the final-result (Deferred) order, deterministic, never Map iteration luck
+=== P3b equivalence: an input exists IF AND ONLY IF P3b says PRESSURE_ELIGIBLE_AGAINST_ALL_FINAL_OWNERS (exhaustive matrix) ===
+[info] 829440 scenarios; 1960 eligible; P3b classifications exercised: BLOCKED_BY_STRONGER_OWNER,INCOMPLETE_INPUT,NOT_FINAL_DEFERRED,NOT_PRESSURED,NO_CONTENTION,NO_FINAL_CONTENTION_OWNER,PRECEDENCE_ANOMALY,PRESSURE_ELIGIBLE_AGAINST_ALL_FINAL_OWNERS
+OK   EQUIVALENCE (829440 exhaustive scenarios over pressure x loser final state x contention history x owner final states x each owner's own pressure x precedence facts incl. missing; owner pressure enriches the payload and never changes existence): the set of candidates with an input equals the set P3b classifies PRESSURE_ELIGIBLE_AGAINST_ALL_FINAL_OWNERS, with the same final owners in the same order
+OK   the matrix exercised every P3b non-eligible classification as well as eligibility (NOT_PRESSURED, NO_CONTENTION, NOT_FINAL_DEFERRED, NO_FINAL_CONTENTION_OWNER, BLOCKED_BY_STRONGER_OWNER, PRECEDENCE_ANOMALY, INCOMPLETE_INPUT), so every non-eligible class is proven to produce no input
+=== O5 P4a2: owner pressure -- each owner carries its OWN categorical pressure; existence is unchanged ===
+OK   BASIC CONTROL: pressured candidate, owner pressure NONE -> the input exists and owner A carries pressure NONE
+OK   PRESSURED OWNER CONTROL (closes the P4b0 discovery): the owner is ALSO LAST_KNOWN_OPPORTUNITY and everything above pressure ties -> the input STILL exists and the owner carries LAST_KNOWN_OPPORTUNITY (rejecting it is an active-policy rule for P4b, not an admission rule)
+OK   MULTI-OWNER MIX: owners {A1 NONE, A2 LAST_KNOWN_OPPORTUNITY} are both retained, each with its own pressure, in trace order (nothing aggregated)
+OK   the owner pressure is the OWNER's, not the candidate's: a NONE owner of a LAST_KNOWN_OPPORTUNITY candidate is NONE, and reversing the owners' pressures reverses the payload while the owner ORDER is unchanged
+OK   ALL OWNERS PRESSURED: every owner is retained with LAST_KNOWN_OPPORTUNITY; the input is not suppressed
+OK   STRONGER OWNER / ANOMALY are unchanged by owner pressure: no input whatever the owner's pressure
+OK   HISTORICAL OWNER: a historical owner that is no longer final Proposed carries no payload at all -- it is absent, so its pressure is never read
+OK   REPEATED OWNER: one owner entry carrying exactly one pressure value however many events / rounds
+OK   MISSING OWNER PRESSURE fails closed: with the candidate's pressure on record but no pressure for its final owner there is no input (never a partially authoritative owner) -- while the P3b oracle, which has no owner-pressure notion, still classifies the relationship eligible (this is an authority-completeness gate, not an eligibility change; the production boundary derives pressure for every resolved intent)
+OK   a non-categorical owner value is never accepted either (an out-of-contract value is treated as missing)
+OK   ONE ENTRY, ONE PRESSURE: a pressure map holds exactly one value per intent id, so an owner can never resolve to two pressures within one assembly; duplicate ids in the final result fail closed (above)
+OK   the candidate's own pressure is still encoded by existence only: the input has no candidate `pressure` field
+OK   OWNER ORDER IS UNCHANGED BY PRESSURE: owners follow first appearance in the trace for every combination of owner pressures
+=== VALID-ONLY matrix (normalised, internally consistent scheduling states only): eligibility identical to P3b, owner payload exact ===
+[info] valid-only matrix: 131072 scenarios, 2112 eligible
+OK   VALID-ONLY EQUIVALENCE (131072 valid scenarios = 2 candidate pressures x 4 owner-pressure combinations x 2 loser states x 4 contention histories x 4 owner states x 8^3 precedence facts): zero eligibility mismatches against P3b and every owner's payload pressure equals that owner's own pressure
+=== ownership, immutability, determinism, purity ===
+OK   INPUTS ARE NEVER MUTATED: the final day, the trace, the pressure map and the facts map are unchanged by an assembly
+OK   DEEP IMMUTABILITY: the collection, each input, the owner collection and each owner are frozen; writes at every depth throw
+OK   DETACHED: no object reachable from the output is shared with any input (no Constructor, trace or facts object is retained)
+OK   OUTPUT CONTENT: stable intent ids and each owner own categorical pressure only -- the input keys are exactly candidateIntentId,owners and an owner has only intentId,pressure (NONE | LAST_KNOWN_OPPORTUNITY); no candidate pressure copy, no Date, Map, Set, function, importance, deadline, round, interval, count, reason, title, evidence or source
+OK   INDEPENDENT OWNERSHIP: two assemblies of the same authority share no object at any depth (no cached or shared owner / input record), so one consumer's reference can never be another's
+OK   DETERMINISM: 20 assemblies are byte-identical
+OK   NO SOURCE VOCABULARY IN BEHAVIOR: ids shaped like automatic Goal demand, a manual hand-off and a typed row yield the same inputs modulo the ids themselves
+OK   0 inputs is a valid, frozen empty collection
+=== REAL pipeline: basic contention, pressure, and the stronger dimensions ===
+OK   BASIC ELIGIBLE (real pipeline): B (pressured: scarce Friday, resolved duration) really loses to A, is finally Deferred, and differs only by originalOrder -> exactly ONE PromotionInput (candidate B, owner A)
+OK   SCHEDULING IS THE BASELINE: the Constructor result, loader calls and searches are identical to a normal run -- A Proposed, B Deferred (the input is not applied)
+OK   NONE CONTROL: the same real contention with NO pressure facts (pressure NONE) -> zero PromotionInputs
+OK   IMPORTANCE BLOCK (real): a pressured LOW loses to HIGH -> zero PromotionInputs
+OK   DEADLINE-TODAY BLOCK (real): an owner with its deadline today -> zero PromotionInputs
+OK   DEADLINE BLOCK (real): an owner with a stronger non-today deadline (importance tied) -> zero PromotionInputs
+OK   REVERSE SUBMISSION ORDER: the intents submitted in the opposite order leave the input unchanged (originalOrder is the intents' own and is not a blocking dimension)
+=== REAL pipeline: multiple owners (a real P3a multi-owner trace) ===
+OK   MULTI-OWNER ALL-TIE (real): B's attempted interval overlaps TWO Proposed owners; both tie above pressure -> ONE input with BOTH owners (not collapsed)
+OK   MULTI-OWNER MIXED (real): one owner ties, the other has HIGHER importance -> zero PromotionInputs
+=== REAL pipeline: historical vs final owners across replenishment rounds ===
+OK   HISTORICAL OWNER REMOVED (real): L first lost to O (round 0); O is later displaced and L loses again to H (round 1). The input carries only the FINAL owner H -- the displaced historical owner O is not an owner entry
+OK   ALL OWNERS REMOVED (real): L's only owner O is displaced and L is left with NO_CANDIDATES -> zero PromotionInputs
+OK   CONTENDED THEN PROPOSED (real): B really contended but replenishment found it another slot and it ends Proposed -> zero PromotionInputs
+OK   SEVERAL LOSERS / MULTI-ROUND (real): across the replenishment rounds the same owner is one entry per loser and every produced input agrees with P3b
+=== REAL pipeline: controls that are NOT contention, FIXED, fallback ===
+OK   PRESSURE WITHOUT CONTENTION (real): B is pressured and finally Deferred because it has no candidate intervals -> zero PromotionInputs (a Deferred reason is not contention)
+OK   EXTERNAL BLOCKER (real): B deferred only because an existing plan occupies its slot -> zero PromotionInputs (candidate-vs-blocker is not contention)
+OK   FIXED (real): a FIXED candidate can really lose contention but its pressure is NONE upstream -> zero PromotionInputs
+OK   GENERIC_FALLBACK (real): a candidate whose duration is the generic fallback has pressure NONE upstream -> zero PromotionInputs (P4a never inspects the duration basis)
+=== REAL pipeline (O5 P4a2): owner pressure comes from the same run's evidence, whatever the owner is ===
+OK   BASIC (real): the pressured loser B vs an UNPRESSURED owner A -> the input exists and A carries pressure NONE
+OK   PRESSURED OWNER (real; the P4b0 discovery): A and B are BOTH pressured (scarce Friday, resolved durations), tie on every dimension above pressure, B really loses to A -> the input STILL exists (eligibility unchanged, P3b agrees) and owner A carries LAST_KNOWN_OPPORTUNITY
+OK   MULTI-OWNER MIX (real): B really loses to TWO owners, one pressured (A1) and one not (A2) -> both retained in trace order with their own pressure
+OK   ALL OWNERS PRESSURED (real): both owners are retained with LAST_KNOWN_OPPORTUNITY; the input is not suppressed
+OK   STRONGER OWNER (real): a pressured HIGH owner still blocks -- no input whatever the owner's pressure
+OK   FIXED OWNER (real): a FIXED owner never receives pressure upstream, so it carries NONE even when facts were supplied for it (no special P4a2 FIXED policy -- P4b rejects a FIXED owner separately)
+OK   GENERIC_FALLBACK OWNER (real): an owner whose duration is the generic fallback has pressure NONE upstream and carries NONE
+OK   DUPLICATE RESOLVED ID fails closed: one intent id can never carry two pressures -- the preparation is UNAVAILABLE with NO inputs (never picks one)
+=== source parity: automatic / manual / generic ===
+OK   AUTO / MANUAL / GENERIC PARITY (real): equivalent scheduling authority yields the SAME PromotionInput -- including the owners' pressure, whether the owner is unpressured or pressured -- whether the ids look like automatic Goal demand, a manual hand-off or a generic typed intent
+=== composed authority: P2d coherent context -> facts -> evidence -> pressure -> PromotionInput ===
+OK   COHERENT AUTHORITY (S0): the facts come from the context, the duration (stored preference 60) and the availability / blocker adaptation come from the SAME context, and the resulting pressure yields exactly one PromotionInput (the later Friday candidate vs the first) -- with zero live range reads
+OK   THE INPUT FOLLOWS THE CONTEXT: a context whose persisted plans commit the whole day (a different coherent state) makes the supply KNOWN_INFEASIBLE, pressure NONE, and the SAME Constructor scenario produces zero PromotionInputs -- pressure is never injected from outside
+=== inert: normal runs never assemble an input; failure is fail-closed; tokens are identical ===
+OK   NORMAL PREVIEW PATH: `orchestrateConstructDay` assembles no PromotionInput (zero calls to the assembler)
+OK   the preparation boundary assembles once, after construction
+OK   FAIL CLOSED (assembler throws): the Constructor result is returned exactly as normal and the outcome is UNAVAILABLE / PREPARATION_FAILED with NO inputs
+OK   a run that is not READY returns its result untouched with the outcome UNAVAILABLE / RUN_NOT_READY
+OK   TOKENS: the signed preview body, every acceptance token included, is identical with and without P4a assembly; the preview carries no promotion output
+OK   the outcome (status + inputs) is deeply frozen
+ALL PROMOTION INPUT CHECKS PASSED
+
+# exit=0 signal=

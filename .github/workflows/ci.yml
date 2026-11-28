@@ -958,6 +958,150 @@ jobs:
         env:
           TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
         run: npx ts-node --project tsconfig.jsdom-tests.json test/ios02LocationErrorsAndPrivacy.test.ts
+      # ---- AURA-ANDROID-REL-04 -- application release readiness (offline only) ----
+      # Backup/device-transfer off, cookie flush, release-build gate, logout attributes.
+      - name: Run REL-04 Android application readiness static test
+        run: node test/androidRel04AppReadiness.test.mjs
+      # Sign-out reports success only when the server removed the cookie; clears the
+      # account-less offline queue (after asking) only then.
+      - name: Run REL-04 sign-out test
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/signOutRel04.test.ts
+      # IR-01/IR-03 -- account isolation and the sign-out transition: real client
+      # modules (one instance per tab) against the real logout/session/habit-logs/
+      # plans routes in-process, synthetic accounts A and B, held/failed requests.
+      - name: Run REL-04 account isolation integration test (IR-01/IR-03)
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/rel04AccountIsolation.test.ts
+      # The real Home page and /find mounted in jsdom across sign-out, sign-in,
+      # late responses, session expiry and another tab's account switch.
+      - name: Run REL-04 Home and /find transition test (IR-01/IR-03)
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/rel04HomeFindTransitionJsdom.test.ts
+      # The original cross-account failure reproduces with the reviewed head's code
+      # (a54daf6, vendored verbatim) and is prevented by the corrected head.
+      - name: Run REL-04 reviewed-head reproduction test (IR-01)
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/rel04ReviewedHeadReproduction.test.ts
+      # R2 -- plan creation and existing mutations through the real callers
+      # (shared helper, overlap override, fetch wrapper) and the real mounted /find
+      # sign-in-and-save flow, incl. competing sign-in and late completion.
+      - name: Run REL-04 bound writes and /find flow test (IR-01/IR-03 R2)
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/rel04BoundWritesJsdom.test.ts
+      # R2 -- the delta review's findings reproduce with the R1 head's code
+      # (d09449b, vendored verbatim) and are prevented by the corrected head,
+      # including the pre-REL-04 client against both routes (mixed-version).
+      - name: Run REL-04 R1-head reproduction and mixed-version test (R2)
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/rel04R1HeadReproduction.test.ts
+      # R3 -- final independent disposition of 091e3ce: queue durability and auth
+      # transitions; shared account boundary across every surface; overlap-override
+      # binding on the mounted My Day / PlanWithAura flows; 091e3ce reproductions.
+      - name: Run REL-04 R3 queue durability and auth-transition test
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/rel04R3QueueAuth.test.ts
+      - name: Run REL-04 R3 shared account boundary test (route inventory, surfaces)
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/rel04R3BoundaryJsdom.test.ts
+      - name: Run REL-04 R3 overlap-override binding test (mounted)
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/rel04R3OverrideBindingJsdom.test.ts
+      - name: Run REL-04 R2-head (091e3ce) reproduction test
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/rel04R2HeadReproduction.test.ts
+      # AURA-ANDROID-REL-04 R4 (assessment of b323d2a): IndexedDB queue integrity,
+      # account-bound server-rendered state and downloads, and b323d2a reproductions.
+      - name: Run REL-04 R4 queue integrity test
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/rel04R4QueueIntegrity.test.ts
+      - name: Run REL-04 R4 server-rendered account agreement and bound download test
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/rel04R4SsrAgreementJsdom.test.ts
+      - name: Run REL-04 R5 queue lifecycle test
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/rel04R5QueueLifecycle.test.ts
+      - name: Run REL-04 R6 findings test (R5-head reproductions + corrections)
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/rel04R6Findings.test.ts
+      - name: Run REL-04 R7 queue ownership test (historical record; R6 head 13d773e vs R7 head 7cae58a)
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/rel04R7QueueOwnership.test.ts
+      - name: Run REL-04 R8 logical lifecycle test (R7-assessment findings on 7cae58a vs current; retired formats quarantined)
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/rel04R8LogicalLifecycle.test.ts
+      - name: Run REL-04 R9 lifecycle enforcement test (R8-assessment witnesses on eab072c vs current)
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/rel04R9LifecycleEnforcement.test.ts
+      - name: Run REL-04 R10 durable discard identity test (39228-R9 witnesses on 513c12b vs current)
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/rel04R10DurableDiscardIdentity.test.ts
+      - name: Run REL-04 R11 structural queue test (39244 witnesses on 8f3d316 vs current; cross-format matrix)
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/rel04R11StructuralQueue.test.ts
+      - name: Run REL-04 R12 queue concurrency test (39247 witnesses on abdd9d8 vs current; per-boundary concurrency)
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/rel04R12QueueConcurrency.test.ts
+      - name: Run REL-04 R13 queue integrity test (39249 witnesses on 02e283e vs current; invariant matrix and negative controls)
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/rel04R13QueueIntegrity.test.ts
+      - name: Run REL-04 R14 outcome reconciliation test (39252 witnesses on a8a9767 vs current; real Home retry; cleanup matrix)
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/rel04R14OutcomeReconciliation.test.ts
+      - name: Run REL-04 R15 shared operation contract test (39255 witnesses on 6c69d7d vs current; decoder, receipts, identity; negative controls)
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/rel04ActivityOperationContract.test.ts
+      - name: Run REL-04 R16 operation-contract correction test (39258 G4-G6 witnesses on e6a6a66 vs current; negative controls)
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/rel04R16OperationCorrection.test.ts
+      - name: Run REL-04 R17 recovery-decision test (39260 G7-G9 witnesses on e94a863 vs current; decision matrix; negative controls)
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/rel04R17RecoveryDecision.test.ts
+      - name: Run REL-04 R18 online-first test (39262 G10/G11 witnesses on ab3c15b vs current; generative consumer agreement; no automatic dispatch)
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/rel04R18OnlineFirst.test.ts
+      - name: Run REL-04 R3-head (b323d2a) reproduction test
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/rel04R3HeadReproduction.test.ts
+      # Pending replay reconciliation (was outside CI; structural assertion corrected in R3).
+      - name: Run pending replay reconciliation test
+        run: npx ts-node test/pendingReplayReconciliation.test.ts
+      # S5-A RV-1 in-process: logout clears the cookie; a copied token stays valid
+      # until exp (documents the accepted residual of revocation Option B).
+      - name: Run REL-04 RV-1 token replay test
+        run: npx ts-node test/rel04Rv1TokenReplay.test.ts
+      # An older, slower city-search response never replaces newer results.
+      - name: Run LocationPicker REL-04 search race test
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/locationPickerRel04SearchRace.test.ts
       # AURA-AUTH-SESSION-01-I1 -- dormant session store foundation (no auth
       # behaviour change): v2 token, HKDF key, cookie helpers and SQL literal
       # guards; plus the static guard that nothing in the app imports the I1
@@ -1110,6 +1254,91 @@ jobs:
       # emitting content, LHA, pack, gzip LZH, old-magic gzip; real readers on Ubuntu.
       - name: Run Palm bundle scanner reader-versus-scanner matrix (G5-C17)
         run: npx ts-node test/palmG5C17ReaderMatrix.test.ts
+  rel04-chromium-multitab:
+    # AURA-ANDROID-REL-04 (R3) -- REAL Chromium multi-tab checks: two tabs in one
+    # browser context (real localStorage, Web Locks and cookie jar) running the
+    # actual client modules against the real middleware and route handlers over
+    # HTTP. Synthetic accounts, in-memory db stub, no network beyond localhost.
+    # Chromium only: not WKWebView / Android WebView / device acceptance.
+    name: REL-04 Chromium multi-tab tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Install root deps
+        run: npm install
+      - name: Install web deps
+        working-directory: apps/web
+        run: npm install
+      - name: Install Chromium for Playwright
+        run: npx playwright install --with-deps chromium
+      - name: Run REL-04 Chromium multi-tab test
+        run: npx ts-node test/rel04Chromium.test.ts
+  rel04-next-app-rendering:
+    # AURA-ANDROID-REL-04 (R5) -- ACTUAL APPLICATION RENDERING evidence: the real
+    # production build (next build + next start) against a fresh Postgres with a
+    # synthetic account. Checks the real HTTP responses of Plan Day, Goals, Goal
+    # detail and Captures carry no account data, the real bootstrap route is
+    # account-scoped, and (real Chromium) data appears only after verification.
+    name: REL-04 Next.js app rendering tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: aura_ci
+          POSTGRES_PASSWORD: aura_ci
+          POSTGRES_DB: aura_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U aura_ci -d aura_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://aura_ci:aura_ci@localhost:5432/aura_ci
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - name: Install root deps
+        run: npm install
+      - name: Install web deps
+        working-directory: apps/web
+        run: npm install
+      - name: Apply the complete migration chain to a fresh database
+        working-directory: apps/web
+        run: npx prisma migrate deploy
+      - name: Install Chromium for Playwright
+        run: npx playwright install --with-deps chromium
+      - name: Run REL-04 Next.js app rendering test (builds the app)
+        run: npx ts-node test/rel04R5NextAppRendering.test.ts
+      # AURA-ANDROID-REL-04 R15 (39257) -- the same production build and disposable PostgreSQL: the habit-log
+      # idempotency guarantee plus the client's shared row-binding rule against real persisted rows, then the operation
+      # contract through the real Home "Start now" flow in two real Chromium tabs (G3 ordering, HTML 200 + Retry, a cut
+      # response, an unreadable operations store).
+      - name: Run HabitLog idempotency + R15 row-binding DB test
+        run: npx ts-node test/habitLogIdempotencyDb.test.ts
+      - name: Run REL-04 R15 operation contract Home test (production build, two real Chromium tabs, PostgreSQL)
+        env:
+          REL04_SKIP_BUILD: '1'
+        run: npx ts-node test/rel04ActivityOperationHomeChromiumDb.test.ts
+      - name: Run REL-04 R16 closure test (production build, real Chromium, PostgreSQL; JSON 429, Calendar remount/restart, contradictory receipt)
+        env:
+          REL04_SKIP_BUILD: '1'
+        run: npx ts-node test/rel04R16HomeChromiumDb.test.ts
+      - name: Run REL-04 R17 recovery-decision closure test (production build, real Chromium, PostgreSQL; conflicting marker, held startup, incomplete marker)
+        env:
+          REL04_SKIP_BUILD: '1'
+        run: npx ts-node test/rel04R17RecoveryChromiumDb.test.ts
+      - name: Run REL-04 R18 online-first closure test (production build, real Chromium, PostgreSQL; contradictory copy, receipt + conflict, offline, zero automatic POSTs, restart Retry, two tabs)
+        env:
+          REL04_SKIP_BUILD: '1'
+        run: npx ts-node test/rel04R18OnlineFirstChromiumDb.test.ts
   web-build:
     name: Next.js production build
     runs-on: ubuntu-latest
@@ -1441,6 +1670,18 @@ jobs:
         run: npx prisma migrate deploy
       - name: Run Day Constructor acceptance persistence DB tests
         run: npx ts-node test/dayConstructorAcceptancePersistenceDb.test.ts
+      # AURA-ANDROID-REL-04 (R3) -- five DB suites changed by REL-04 (they call the
+      # account-bound plan route) that were outside this workflow until now.
+      - name: Run plan goal-activity link DB test
+        run: npx ts-node test/planGoalActivityLinkDb.test.ts
+      - name: Run plan goal-activity completion integrity DB test
+        run: npx ts-node test/planGoalActivityCompletionIntegrityDb.test.ts
+      - name: Run plan goal-activity archived lifecycle DB test
+        run: npx ts-node test/planGoalActivityArchivedLifecycleDb.test.ts
+      - name: Run plan status preservation DB test
+        run: npx ts-node test/planStatusPreservationDb.test.ts
+      - name: Run planned activity scheduling mode DB test
+        run: npx ts-node test/plannedActivitySchedulingModeDb.test.ts
       - name: Run Goal demand candidates DB test
         run: npx ts-node test/goalDemandCandidatesDb.test.ts
       # AURA-HPG-FIX-01 -- read-only daily-occupancy loader agrees with the

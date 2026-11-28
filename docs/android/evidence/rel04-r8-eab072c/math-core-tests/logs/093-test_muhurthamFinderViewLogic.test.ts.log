@@ -1,0 +1,34 @@
+$ npx ts-node test/muhurthamFinderViewLogic.test.ts
+# job=math-core-tests step=Run Muhurtham Finder view logic test env={"TS_NODE_COMPILER_OPTIONS":"{\"jsx\":\"react\"}"}
+OK   THIS_MONTH starts today and ends the last day of the current month
+OK   THIS_MONTH handles a 31-day month correctly
+OK   NEXT_MONTH starts on the 1st of next month and ends on its last day
+OK   NEXT_MONTH rolls over the year boundary from December
+OK   NEXT_3_MONTHS starts today and spans 90 days total
+OK   NEXT_3_MONTHS stays within the 180-day API cap
+OK   CUSTOM with a valid start/end is accepted as-is
+OK   CUSTOM with no dates chosen yet returns null (not a manufactured range)
+OK   CUSTOM with end before start returns null
+OK   CUSTOM with start === end is accepted (single-day search)
+OK   addDaysToDateStr advances within a month
+OK   addDaysToDateStr rolls over a month boundary
+OK   addDaysToDateStr rolls over a year boundary
+OK   daySpan is 0 for the same date
+OK   daySpan counts inclusive-exclusive day difference
+OK   formatDateLabel renders a short weekday + month + day
+OK   partitionDatesByStrength separates ACCEPTABLE from stronger ratings
+OK   partitionDatesByStrength keeps EXCELLENT/STRONG/FAVORABLE in "strong"
+OK   partitionDatesByStrength keeps only ACCEPTABLE in "acceptable"
+OK   partitionDatesByStrength preserves original order within each bucket
+OK   When every returned date is only ACCEPTABLE, "strong" is empty (drives the no-result state even though the API returned rows)
+OK   partitionDatesByStrength on an empty result is empty on both sides (true no-result state)
+OK   partitionSharedDatesByStrength separates MIXED_SHARED_FIT from stronger ratings
+OK   partitionSharedDatesByStrength keeps EXCELLENT/STRONG/GOOD in "strong"
+OK   partitionSharedDatesByStrength keeps only MIXED_SHARED_FIT in "mixed"
+OK   partitionSharedDatesByStrength preserves original order within each bucket
+OK   When every returned SHARED date is only MIXED_SHARED_FIT, "strong" is empty (drives the no-result state even though the API returned rows)
+OK   partitionSharedDatesByStrength on an empty result is empty on both sides (true no-result state)
+
+ALL MUHURTHAM FINDER VIEW LOGIC CHECKS PASSED
+
+# exit=0 signal=

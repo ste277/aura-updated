@@ -1,0 +1,63 @@
+$ npx ts-node --project tsconfig.jsdom-tests.json test/hpg5I3HomeSaveJsdom.test.ts
+# job=math-core-tests step=Run Home save conflict component test (HPG5-V2-I3) env={}
+OK   HT setup (tz Asia/Kolkata): the opportunity renders with a Plan action
+OK   HT CHECK re-evaluated the exact displayed instant
+OK   HT save opts in to REJECT_ACTIVE_OVERLAP, keeps activityId and the idempotency key
+OK   HT save carries the exact proposed instants
+OK   HT 409 shows the conflict panel, nothing marked saved, no generic error
+OK   HT panel renders beside the tapped timeline row (shared nearest container, not the page root)
+OK   HT exactly one conflict panel on the page
+OK   HT panel names the proposed activity and its date/start–end in the user timezone
+OK   HT panel names the conflicting plan and its time
+OK   HT Save anyway shows the exact proposed start time
+OK   HT role=alert and focus moves to the conflict heading
+OK   HT no automatic retry (exactly one POST)
+OK   HT Choose another time opens Plan prefilled with the activity and writes nothing
+OK   HT same-tick double click on Save anyway sends exactly one POST
+OK   HT override sends ALLOW with the byte-identical refused payload (incl. clientRequestId)
+OK   HT override is disabled and shows Saving… while in flight
+OK   HT after the override succeeds the panel closes and Home refreshes
+OK   HT same-tick double click on Plan runs one CHECK and one POST
+OK   HT stale setup: conflict visible
+OK   HT when the refused opportunity moves/leaves the timeline the conflict is cleared
+OK   HT stale clear wrote nothing
+OK   HT spotlight not rendered for this fixture (timeline path covers the save)
+OK   HT a non-overlap failure takes the generic path: one POST, no conflict panel, Plan re-enabled
+OK   HT generic error text appears only where it did before (spotlight=false)
+OK   HT spotlight setup: the active opportunity has a Right Now Plan button and a timeline Plan button
+OK   HT spotlight refusal: one panel, beside the Right Now action (spotlight id), not in the timeline row
+OK   HT spotlight panel is nearer the spotlight Plan than the timeline Plan
+OK   HT spotlight panel shows the exact proposed time
+OK   HT RV-1: after a non-Plan click in the Right Now row, a timeline tap shows its panel in the timeline row
+OK   HT spotlight non-overlap failure still shows the existing "Could not plan this" text, no panel
+OK   DB setup: one suggestion with two time chips and + Add
+OK   DB Add opts in to REJECT_ACTIVE_OVERLAP with its stable clientRequestId and activityId
+OK   DB Add carries the selected chip's exact instants
+OK   DB conflict panel renders inside the refused suggestion card
+OK   DB panel names the proposed time and the conflicting plan, nothing saved
+OK   DB Save anyway shows the exact proposed start time
+OK   DB no automatic retry, not marked added, onCreated not called
+OK   DB focus moves to the conflict heading
+OK   DB Choose another time closes the panel, writes nothing, focuses the time chips
+OK   DB stale setup: conflict visible
+OK   DB selecting a different time chip clears the pending conflict (no override for an old slot)
+OK   DB second refusal is for the newly selected chip
+OK   DB same-tick double click on Save anyway sends exactly one POST
+OK   DB override sends ALLOW with the byte-identical refused payload (same clientRequestId)
+OK   DB after the override succeeds: Added, onCreated once, suggestions refreshed
+OK   DB same-tick double click on + Add sends exactly one POST
+OK   DB a non-overlap failure keeps the existing generic error and shows no panel
+OK   no unhandled promise rejections (no hidden background save/retry)
+
+48 checks
+ALL CHECKS PASSED
+(node:43754) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+Failed to plan opportunity from Home: Error: Unable to save plan.
+    at saveUpcomingPlanFromCandidate (/Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/android-rel-04-app/apps/web/components/PlanWithAuraView.tsx:411:11)
+    at async handlePlanOpportunity (/Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/android-rel-04-app/apps/web/components/HomeDashboard.tsx:1445:9)
+Failed to plan opportunity from Home: Error: Unable to save plan.
+    at saveUpcomingPlanFromCandidate (/Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/android-rel-04-app/apps/web/components/PlanWithAuraView.tsx:411:11)
+    at async handlePlanOpportunity (/Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/android-rel-04-app/apps/web/components/HomeDashboard.tsx:1445:9)
+
+# exit=0 signal=

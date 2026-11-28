@@ -1,0 +1,35 @@
+$ npx ts-node test/goalActivityRhythmGoalDetailDb.test.ts
+# job=day-constructor-acceptance-db-tests step=Run Goal activity rhythm Goal Detail DB test env={}
+OK   42. NONE Goal Detail GET succeeds
+OK   42. NONE activity presents rhythm: { kind: "NONE" }
+OK   42. NONE activity derivedState is COMPLETED, unaffected by R4
+OK   42. finite-only Goal keeps existing "N of M completed" progress label
+OK   43. derivedState is COMPLETED (linked plan is LOGGED)
+OK   43. rhythm.kind is N_PER_WEEK, targetPerWeek 3
+OK   43. completedThisWeek 1, committedThisWeek 0, remainingThisWeek 2
+OK   43. eligibleForAnotherOccurrence true -- NOT permanently completed
+OK   44. derivedState is PLANNED (current link is UPCOMING)
+OK   44. completedThisWeek 1, committedThisWeek 1, remainingThisWeek 1 -- no double counting
+OK   44. still eligible (1 remaining)
+OK   45. completedThisWeek 3, committedThisWeek 0, remainingThisWeek 0
+OK   45. eligibleForAnotherOccurrence false -- this week's target is met
+OK   45. remainingThisWeek is never negative
+OK   46. completedThisWeek 0 (prior week excluded)
+OK   46. remainingThisWeek back to 3
+OK   46. eligibleForAnotherOccurrence true again
+OK   47. completedThisWeek 4 (over target, no clamp on the raw count)
+OK   47. remainingThisWeek 0, never negative
+OK   47. eligibleForAnotherOccurrence false
+OK   48. completedThisWeek 1 (the skip never counts as completed)
+OK   48. remainingThisWeek reflects the skip as free capacity (2, not 1)
+OK   49. exactly one committed fact (the MOVED row itself is never read -- the occurrence already points at the successor)
+OK   49. remainingThisWeek 2, not double-counted down to 1
+OK   50. mixed Goal: progress.hasOngoingRhythmActivity is true
+OK   50. the finite activity row itself is unaffected (rhythm.kind NONE, derivedState COMPLETED)
+OK   50. the ongoing activity row carries its own N_PER_WEEK facts independently
+OK   51. User B fetching User A's goal -> 404 (never another user's Rhythm data)
+OK   51. User B's OWN goal shows User B's own policy (targetPerWeek 2), untouched by User A's fixtures
+OK   51. User B's own activity shows zero completed/committed (User A's 5 LOGGED never leak across users)
+ALL GOAL ACTIVITY RHYTHM GOAL DETAIL DB CHECKS PASSED
+
+# exit=0 signal=

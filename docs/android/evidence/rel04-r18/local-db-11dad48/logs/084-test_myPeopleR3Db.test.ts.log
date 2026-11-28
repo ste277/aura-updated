@@ -1,0 +1,46 @@
+$ npx ts-node --project tsconfig.jsdom-tests.json test/myPeopleR3Db.test.ts
+# job=day-constructor-acceptance-db-tests step=Run AURA-MP-1 R3 optional birth location DB test env={}
+OK   ENABLED: the Add form opens with NO timezone and NO city pre-selected
+OK   ENABLED: name-only Add -> one POST with exactly [name, relationshipType] -> 201
+OK   ENABLED: name-only Add persists no birth information at all
+OK   ENABLED: date + time + timezone without a city -> payload exactly the trio + name/relationship -> 201
+OK   ENABLED: ...persisted with timezone America/Chicago and NO city / coordinates
+OK   ENABLED: explicit non-default timezone (Pacific/Auckland) without a city persists exactly that
+OK   ENABLED: explicit city (Mumbai) -> payload carries the city, its coordinates and its timezone
+OK   ENABLED: ...persisted Mumbai with its exact coordinates
+OK   ENABLED: changing the selected city (Chennai -> London) persists London, its coordinates and timezone -- no trace of Chennai
+OK   ENABLED: selecting then clearing a city keeps the timezone it filled in (Asia/Kolkata) and sends no city / coordinates
+OK   ENABLED: ...persisted with no city and no coordinates
+OK   ENABLED: an explicitly chosen timezone wins over the city's (Mumbai + Asia/Dubai)
+OK   ENABLED: date without time or timezone -> refused in the UI (no request, nothing persisted, clear message)
+OK   ENABLED: date + time without timezone -> refused in the UI (no request, nothing persisted, clear message)
+OK   ENABLED: timezone without date or time -> refused in the UI (no request, nothing persisted, clear message)
+OK   ENABLED: city without date or time -> refused in the UI (no request, nothing persisted, clear message)
+OK   ENABLED: time without date -> refused in the UI (no request, nothing persisted, clear message)
+OK   ENABLED: the API still refuses an impossible date and an incomplete trio (400)
+OK   DISABLED: the Add form opens with NO timezone and NO city pre-selected
+OK   DISABLED: name-only Add is refused in the UI (legacy contract) -- no request, nothing persisted, a clear message
+OK   DISABLED: date + time + timezone without a city -> payload exactly the trio + name/relationship -> 201
+OK   DISABLED: ...persisted with timezone America/Chicago and NO city / coordinates
+OK   DISABLED: explicit non-default timezone (Pacific/Auckland) without a city persists exactly that
+OK   DISABLED: explicit city (Mumbai) -> payload carries the city, its coordinates and its timezone
+OK   DISABLED: ...persisted Mumbai with its exact coordinates
+OK   DISABLED: changing the selected city (Chennai -> London) persists London, its coordinates and timezone -- no trace of Chennai
+OK   DISABLED: selecting then clearing a city keeps the timezone it filled in (Asia/Kolkata) and sends no city / coordinates
+OK   DISABLED: ...persisted with no city and no coordinates
+OK   DISABLED: an explicitly chosen timezone wins over the city's (Mumbai + Asia/Dubai)
+OK   DISABLED: date without time or timezone -> refused in the UI (no request, nothing persisted, clear message)
+OK   DISABLED: date + time without timezone -> refused in the UI (no request, nothing persisted, clear message)
+OK   DISABLED: timezone without date or time -> refused in the UI (no request, nothing persisted, clear message)
+OK   DISABLED: city without date or time -> refused in the UI (no request, nothing persisted, clear message)
+OK   DISABLED: time without date -> refused in the UI (no request, nothing persisted, clear message)
+OK   DISABLED: the API still refuses an impossible date and an incomplete trio (400)
+OK   ENABLED Edit: adding birth information WITHOUT a city -> payload exactly the trio -> persisted, no city
+OK   DISABLED Edit: re-selecting the SAME timezone is not a change -> no request
+OK   ENABLED Edit: changing ONLY the timezone keeps the saved Naperville city and coordinates
+OK   DISABLED Edit: clearing the saved city keeps date, time and timezone; city and coordinates removed
+OK   No implicit location: the ONLY persisted cities are the ones explicitly chosen (no Chennai default anywhere)
+
+ALL MY PEOPLE R3 DB CHECKS PASSED
+
+# exit=0 signal=

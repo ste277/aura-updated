@@ -1,0 +1,13 @@
+$ npx ts-node test/androidBackNavigation.test.ts
+# job=math-core-tests step=Run M2 Android back navigation test env={}
+OK   unauthenticated, no modal, empty stack -> exit
+OK   unauthenticated takes priority even with a modal open and history present -> exit (not close-modal, not navigate)
+OK   authenticated, modal open, non-empty stack -> close-modal (modal wins)
+OK   authenticated, modal open, empty stack -> still close-modal (modal still wins)
+OK   authenticated, no modal, 3-deep stack -> navigate to the MOST RECENT entry ("you"), not the oldest ("home")
+OK   authenticated, no modal, 1-deep stack -> navigate to that single entry
+OK   authenticated, no modal, empty stack (root) -> exit, not navigate, not close-modal
+
+All androidBackNavigation tests passed.
+
+# exit=0 signal=

@@ -1,0 +1,41 @@
+$ npx ts-node test/ephemeris.test.ts
+# job=math-core-tests step=Run ephemeris test env={}
+=== VERIFIED CASES (checked against live sunrise/sunset sources) ===
+
+Chennai, IN — 2026-07-28  (source: theskylive.com, time.now, oneindia.com (fetched live))
+  sunrise: got 05:52  expected ~05:52  (Δ0m) OK
+  sunset:  got 18:39  expected ~18:38  (Δ1m) OK
+  solar noon: 12:16
+  panchang windows:
+    Brahma Muhurtham   04:16 - 05:04
+    Abhijit Muhurtham  11:50 - 12:42
+    Rahu Kalam         15:27 - 17:03
+    Gulika Kalam       12:16 - 13:51
+    Yama Gandam        09:04 - 10:40
+  active window at solar noon: ABHIJIT OK
+
+=== SANITY CASES (internal consistency only, not verified against a live source) ===
+
+New Delhi, IN — 2026-01-15 (winter, unverified sanity check)
+  sunrise: 07:13  sunset: 17:46  solar noon: 12:30  daylight: 633m
+  panchang windows:
+    Brahma Muhurtham   05:37 - 06:25
+    Abhijit Muhurtham  12:09 - 12:51
+    Rahu Kalam         13:49 - 15:08
+    Gulika Kalam       09:51 - 11:10
+    Yama Gandam        07:13 - 08:32
+  active window at solar noon: ABHIJIT OK
+
+Mumbai, IN — 2026-06-21 (solstice, unverified sanity check)
+  sunrise: 06:00  sunset: 19:19  solar noon: 12:40  daylight: 799m
+  panchang windows:
+    Brahma Muhurtham   04:24 - 05:12
+    Abhijit Muhurtham  12:13 - 13:07
+    Rahu Kalam         17:39 - 19:19
+    Gulika Kalam       15:59 - 17:39
+    Yama Gandam        12:40 - 14:19
+  active window at solar noon: ABHIJIT OK
+
+ALL CHECKS PASSED
+
+# exit=0 signal=

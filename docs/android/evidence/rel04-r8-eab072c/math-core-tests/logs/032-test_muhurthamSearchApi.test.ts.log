@@ -1,0 +1,49 @@
+$ npx ts-node test/muhurthamSearchApi.test.ts
+# job=math-core-tests step=Run Muhurtham search API validation test env={}
+OK   Valid request is accepted
+OK   Request carries the activityId
+OK   Request carries the dateRange
+OK   Request carries the resolved context untouched
+OK   Request carries the requested limit
+OK   Request without optional fields is accepted with defaults
+OK   Default timePreference is ANY
+OK   durationMinutes is left undefined for the domain layer to default
+OK   Missing activityId is rejected
+OK   Empty activityId is rejected
+OK   An unknown (not-in-catalog) activityId is rejected
+OK   A NOT_YET_SUPPORTED (but real catalog) activityId is rejected
+OK   A PARTIALLY_SUPPORTED (AMBIGUOUS-status) activityId is rejected
+OK   A real catalog activity with PARTIAL rule-pack support (engagement) is rejected, not silently exposed
+OK   The now-SUPPORTED marriage activity (Chaturmas/Kharmas/Adhika Masa + Guru/Shukra Asta now implemented) is accepted
+OK   The new business-start activity (SUPPORTED via reused rule-pack base) is accepted
+OK   The new property-purchase activity (SUPPORTED via reused rule-pack base) is accepted
+OK   The now-SUPPORTED griha-pravesh activity (genuine sourced rule pack) is accepted
+OK   Unsupported-activity rejection uses 400
+OK   Missing dateRange is rejected
+OK   Malformed dateRange (not YYYY-MM-DD) is rejected
+OK   dateRange with end before start is rejected
+OK   dateRange spanning more than 180 days is rejected
+OK   Over-cap rejection uses 400 (brief section 9)
+OK   dateRange exactly at the 180-day cap is accepted
+OK   dateRange of zero days (start === end) is accepted
+OK   Invalid time preference is rejected
+OK   Duration below the minimum is rejected
+OK   Duration above the maximum is rejected
+OK   Non-numeric duration is rejected
+OK   limit below the minimum is rejected
+OK   limit above the maximum is rejected
+OK   Omitting scope defaults to GENERAL
+OK   Explicit scope: GENERAL is accepted
+OK   Explicit scope: PERSONAL is accepted
+OK   An invalid scope value is rejected with 400
+OK   Explicit scope: SHARED is accepted when savedPersonId is present
+OK   SHARED without savedPersonId is rejected with 400
+OK   SHARED with a blank/whitespace-only savedPersonId is rejected with 400
+OK   GENERAL/PERSONAL requests never require savedPersonId
+OK   handleSharedMuhurthamSearchBody returns ok:true with a SHARED result when the request validates and a partner is supplied
+OK   handleSharedMuhurthamSearchBody still runs request validation (rejects an unsupported activity with 400)
+OK   handleSharedMuhurthamSearchBody rejects a body whose own scope is not SHARED
+
+ALL MUHURTHAM SEARCH API CHECKS PASSED
+
+# exit=0 signal=

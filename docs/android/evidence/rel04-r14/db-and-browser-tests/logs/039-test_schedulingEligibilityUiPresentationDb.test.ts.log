@@ -1,0 +1,49 @@
+$ npx ts-node test/schedulingEligibilityUiPresentationDb.test.ts
+# job=day-constructor-acceptance-db-tests step=Run Scheduling eligibility UI presentation DB test env={}
+OK   1-weekly. setup: first occurrence saves
+OK   1-weekly. real response code is known to the UI presentation layer
+OK   1-weekly. presentation severity is "conflict" (genuine scheduling conflict, not a validation failure)
+OK   1-weekly. presentation headline/detail are non-empty and distinct from the raw server message
+OK   1-weekly. rejection leaves PlannedActivity count unchanged
+OK   1-weekly. rejection leaves GoalActivityOccurrence count unchanged (no occurrence materialized on a rejected write)
+OK   1-daily. setup: first occurrence saves
+OK   1-daily. real response code is known to the UI presentation layer
+OK   1-daily. presentation severity is "conflict" (genuine scheduling conflict, not a validation failure)
+OK   1-daily. presentation headline/detail are non-empty and distinct from the raw server message
+OK   1-daily. rejection leaves PlannedActivity count unchanged
+OK   1-daily. rejection leaves GoalActivityOccurrence count unchanged (no occurrence materialized on a rejected write)
+OK   1-unresolved. setup: first occurrence saves
+OK   1-unresolved. real response code is DAILY_ATTRIBUTION_UNRESOLVED
+OK   1-unresolved. presentation never claims to auto-retry or bypass the check (this ticket's own section 4)
+OK   1-unresolved. presentation severity is "conflict", distinct from an ordinary daily-capacity message
+OK   1-unresolved. rejection leaves PlannedActivity count unchanged
+OK   1-unresolved. rejection leaves GoalActivityOccurrence count unchanged
+OK   1-archived. code is GOAL_NOT_ACTIVE, severity "blocked"
+OK   1-archived. rejection leaves PlannedActivity count unchanged
+OK   2-daily. setup: first occurrence SAVED
+OK   2-daily. server result carries code DAILY_CAPACITY_EXCEEDED
+OK   2-daily. UI state classifies as FAILED carrying the code
+OK   2-daily. UI message is NOT the generic pre-A3b fallback
+OK   2-daily. rejection leaves PlannedActivity count unchanged
+OK   2-daily. rejection leaves GoalActivityOccurrence count unchanged
+OK   2-weekly. setup: first occurrence SAVED
+OK   2-weekly. UI state carries CAPACITY_EXCEEDED and never suggests a different time would help (this ticket's own section 3)
+OK   2-weekly. rejection leaves PlannedActivity count unchanged
+OK   2-codeless. classifyAcceptanceUiState({status:"SAVE_FAILED"}) (no code) is byte-identical to pre-A3b behavior
+OK   3-move. setup: first occurrence SAVED
+OK   3-move. setup: second occurrence (different day) SAVED
+OK   3-move. Move rejects with DAILY_CAPACITY_EXCEEDED (Move's own, pre-existing decision -- unchanged by A3b)
+OK   3-move. that exact code is recognized by the shared UI presentation layer
+OK   3-move. presentation severity is "conflict"
+OK   3-move. a REJECTED Move leaves PlannedActivity count unchanged (no partial Move, this ticket touches zero Move transaction code)
+OK   3-move. a REJECTED Move leaves GoalActivityOccurrence count unchanged
+OK   4-multi. setup: first same-day occurrence saves
+OK   4-multi. a SECOND same-day occurrence for MULTIPLE_PER_DAY succeeds (no daily-capacity code reaches the UI at all)
+OK   4-multi. occurrence at +4h (still within weekly target 5) succeeds with no code
+OK   4-multi. occurrence at +6h (still within weekly target 5) succeeds with no code
+OK   4-multi. occurrence at +8h (still within weekly target 5) succeeds with no code
+OK   4-multi. the 6th occurrence against a weekly target of 5 correctly hits CAPACITY_EXCEEDED (weekly limit still enforced), never a daily code
+OK   4-multi. the UI presentation for that rejection is the weekly-limit copy, not the daily one
+ALL SCHEDULING ELIGIBILITY UI PRESENTATION DB CHECKS PASSED
+
+# exit=0 signal=

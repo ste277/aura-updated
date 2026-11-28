@@ -1,0 +1,52 @@
+$ npx ts-node test/goalActivityRhythmMaterializationStructuralGuards.test.ts
+# job=math-core-tests step=Run Goal activity rhythm materialization structural guards test env={}
+OK   Constructor core (dayConstructor.ts) does not reference Rhythm
+OK   Constructor orchestrator (dayConstructorOrchestrator.ts) does not reference Rhythm
+OK   Day Constructor acceptance evaluation (dayConstructorAcceptance.ts) does not reference Rhythm
+OK   Recomposition decision engine (remainingDayRecomposition.ts) does not reference Rhythm
+OK   Recomposition server wiring (remainingDayRecompositionServer.ts) does not reference Rhythm
+OK   Recomposition integrity (remainingDayRecompositionIntegrity.ts) does not reference Rhythm
+OK   Timeline (HomeTimeline.tsx) does not reference Rhythm
+OK   DailyAgenda (dailyAgenda.ts) does not reference Rhythm
+OK   MyDay orchestrator (myDayOrchestrator.ts) does not reference Rhythm
+OK   Home timeline composer (homeTimelineComposer.ts) does not reference Rhythm
+OK   Right Now selection (rightNowSelection.ts) does not reference Rhythm
+OK   Home completion (homeCompletion.ts) does not reference Rhythm
+OK   Goal completion domain (goalCompletion.ts) does not reference Rhythm
+OK   Goal activity execution domain (goalActivityExecution.ts) does not reference Rhythm
+OK   goalsPresentation.ts defines the canonical rhythm view shape (R4) -- no rhythmKind/targetPerWeek DB column names, no eligibility-engine import/call
+OK   at least one Ask Aura orchestrator file exists to check
+OK   Ask Aura (lib/askAuraOrchestrator.ts) does not reference Rhythm
+OK   Ask Aura (lib/homeAskAuraHandoff.ts) does not reference Rhythm
+OK   myDayOrchestrator.ts (Home/DailyAgenda's own build path) never calls materializeGoalActivityRhythmOccurrence
+OK   no cron/scheduled-task file anywhere in apps/web/app/api/internal references Rhythm
+OK   materializeGoalActivityRhythmOccurrence introduces no ordinal/windowKey/occurrenceKey concept of its own
+OK   materializeGoalActivityRhythmOccurrence creates at most ONE occurrence per call (exactly one INSERT INTO GoalActivityOccurrence)
+OK   materializeGoalActivityRhythmOccurrence delegates eligibility entirely to the pure engine (Multi-Occurrence Rhythm PR 2: calls evaluateNewOccurrenceEligibility, PR 1's own unmodified delegation to computeGoalActivityRhythmEligibility -- never reimplements the formula)
+OK   materializeGoalActivityRhythmOccurrence sets no occurrence status and no Rhythm/CompletionRequirement snapshot on the occurrence row (this ticket's own section 15)
+OK   logPlannedActivity itself does not call materializeGoalActivityRhythmOccurrence
+OK   skipPlannedActivity itself does not call materializeGoalActivityRhythmOccurrence
+OK   createGoalWithActivities itself does not call materializeGoalActivityRhythmOccurrence (template/manual creation stays occurrence-free)
+OK   addGoalActivity itself does not call materializeGoalActivityRhythmOccurrence
+OK   materializeGoalActivityRhythmOccurrence is called from dayConstructorAcceptancePersistence.ts
+OK   materializeGoalActivityRhythmOccurrence has EXACTLY ONE production call site WITHIN apps/web/lib (dayConstructorAcceptancePersistence.ts) -- the HPG3-A2 route.ts caller lives outside this directory and is proven separately
+OK   the route.ts caller HPG3-A2 adds is the only production call site outside apps/web/lib
+OK   dayConstructorAcceptance.ts (E1, the Constructor's own acceptance evaluation) has zero Rhythm reference -- Rhythm enters only in the persistence write loop, after E1 has already decided
+OK   planMove.ts (applyMoveWrites) repoints GoalActivityOccurrence exactly once, via UPDATE only -- never INSERT (no new occurrence on Move, this ticket's own section 31)
+OK   remainingDayRecompositionAcceptance.ts never references Rhythm/GoalActivityOccurrence directly -- continuity flows ONLY through its existing, unmodified call to applyMoveWrites
+OK   GOAL_TEMPLATES gained no Rhythm DEFAULTS (R5's own GOAL_TEMPLATE_LIKELY_ONGOING is advisory-only -- no targetPerWeek assignment, no eligibility computation, GOAL_TEMPLATES's own entries carry no rhythm field)
+OK   no Goal/GoalActivity title string anywhere in db.ts is used to choose a targetPerWeek/frequency (no title-keyed lookup table/conditional near materializeGoalActivityRhythmOccurrence)
+OK   goalActivityRhythm.ts (unmodified by R3) still defines no AURA_DECIDES
+OK   goalActivityRhythm.ts (unmodified by R3) still references no RRULE
+OK   materializeGoalActivityRhythmOccurrence never loops/batches to create more than one occurrence per call (no for/while/map around the INSERT)
+OK   materializeGoalActivityRhythmOccurrence never queries/creates a plan for a FUTURE week beyond planningLocalDate (no addDaysToDateStr call; localCalendarWeekStart is called exactly once, only to derive the PR2 scheduledWeekStart snapshot from plannedStartAt -- never applied to planningLocalDate itself, which would silently shift eligibility/placement into a different week)
+OK   the GoalActivityOccurrence schema still has no status column (R3 did not add one)
+OK   db.ts was not given a new windowKey column reference in real CODE (R1/R2's own omission preserved; doc-comment prose explaining the omission is excluded)
+OK   materializeGoalActivityRhythmOccurrence does not write GoalActivityExecution.currentValue or any partial-progress field
+OK   materializeGoalActivityRhythmOccurrence does not reference day-accumulation concepts (dayBucket/dailyTarget)
+OK   GoalDetailClient.tsx never sends rhythmKind/rhythmTargetPerWeek/remainingOccurrences back to the server (client never authors Rhythm, this ticket's own section 20)
+OK   GoalDetailClient.tsx gained no Rhythm CONFIGURATION UI (R4 only reads/displays the existing policy, never edits it; still disallows the raw rhythmKind/rhythmTargetPerWeek DB column names and any input/select control for a rhythm field)
+OK   planDayBootstrap.ts's resolveGoalActivityHandoff re-derives eligibility server-side from persisted facts -- never trusts a client-supplied Rhythm/eligibility flag
+ALL GOAL ACTIVITY RHYTHM MATERIALIZATION STRUCTURAL GUARD CHECKS PASSED
+
+# exit=0 signal=

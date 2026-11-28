@@ -31,6 +31,7 @@ import { orchestrateAskAura, AskAuraOrchestratorDeps } from '../apps/web/lib/ask
 import { parseAskAuraRequest } from '../packages/recommendation/src/askAuraIntent';
 import { DailyAssistantContext } from '../packages/recommendation/src/dailyAssistant';
 import { getDatePartsInTimezone, addDaysToDateStr } from '../apps/web/lib/timezone';
+import { boundHeaders } from './rel04BoundTestHeaders';
 
 let allPassed = true;
 function check(label: string, condition: boolean, detail?: unknown) {
@@ -40,12 +41,18 @@ function check(label: string, condition: boolean, detail?: unknown) {
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const sql = async (text: string, params: unknown[] = []) => (await pool.query(text, params)).rows;
-const fakeReq = (token: string, body?: unknown, url = 'http://localhost/api/people'): any => ({
+const fakeReq = (token: string, body?: unknown, url = 'http://localhost/api/people', headers: Headers = new Headers()): any => ({
   cookies: { get: (n: string) => (n === 'as_session' ? { value: token } : undefined) },
   json: async () => body,
-  headers: new Headers(),
+  headers,
   nextUrl: new URL(url),
 });
+// AURA-ANDROID-REL-04 (R2/R3 pattern, test/rel04BoundTestHeaders.ts): POST /api/plans is an account-bound write --
+// the request states its OWN session account (X-Aura-Expected-Account), exactly what the app sends.
+const callPlan = async (token: string, body: unknown) => {
+  const res = await createPlan(fakeReq(token, body, 'http://localhost/api/plans', boundHeaders(token)));
+  return { status: res.status, body: await res.json().catch(() => null) };
+};
 const call = async (fn: (req: any, ctx?: any) => Promise<Response>, token: string, body?: unknown, params?: Record<string, string>, url?: string) => {
   const res = await fn(fakeReq(token, body, url), params ? { params } : undefined);
   return { status: res.status, body: await res.json().catch(() => null) as any };
@@ -143,7 +150,7 @@ async function main() {
 
   const start = new Date(Date.now() + 4 * 86_400_000);
   const end = new Date(start.getTime() + 45 * 60_000);
-  const plan = await call(createPlan, token, { title: `${tag} coffee`, activityType: 'coffee', plannedStartAt: start.toISOString(), plannedEndAt: end.toISOString(), durationMinutes: 45, windowType: 'NEUTRAL', savedPersonId: meera.body.id });
+  const plan = await callPlan(token, { title: `${tag} coffee`, activityType: 'coffee', plannedStartAt: start.toISOString(), plannedEndAt: end.toISOString(), durationMinutes: 45, windowType: 'NEUTRAL', savedPersonId: meera.body.id });
   const planLink = (await sql(`SELECT "savedPersonId" FROM "PlannedActivity" WHERE id = $1`, [plan.body?.id]))[0];
   check('2.18 OFF: /api/plans still creates the plan, and IGNORES savedPersonId (no link written)', (plan.status === 200 || plan.status === 201) && planLink && planLink.savedPersonId === null, plan);
 

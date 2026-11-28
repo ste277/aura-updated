@@ -9,6 +9,7 @@ import { saveUpcomingPlanFromCandidate } from './PlanWithAuraView';
 import { RESULT_LABEL_TEXT } from '../lib/planFormatting';
 import type { TimingCandidateLabel, TimingSearchResponse } from '../../../packages/recommendation/src/timingSearch';
 import { shouldConsumeAskAuraHandoff, isResponseCurrent, type AskAuraHandoffRequest } from '../lib/homeAskAuraHandoff';
+import { boundFetch, captureAccountBinding } from '../lib/accountBoundFetch';
 
 /**
  * Ask Aura Orchestration V1 -- this view no longer parses intent or streams
@@ -257,8 +258,11 @@ export function AskAuraView({
     trackEvent('ASK_AURA_RESULT_ACTION', { metadata: { action: action.type } });
     setActionState((prev) => ({ ...prev, [key]: 'saving' }));
     try {
+      // AURA-ANDROID-REL-04 IR-01 (R2) -- the account the user acted under,
+      // captured at the tap and kept through the CHECK-then-save sequence.
+      const binding = captureAccountBinding();
       if (action.type === 'PLAN_THIS' && action.planPayload) {
-        const res = await fetch('/api/plans', {
+        const res = await boundFetch(binding, '/api/plans', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(action.planPayload),
@@ -295,7 +299,7 @@ export function AskAuraView({
         const checkBody: TimingSearchResponse = await checkRes.json();
         const candidate = checkBody.requestedCandidate;
         if (!candidate) throw new Error('Unable to verify this time.');
-        await saveUpcomingPlanFromCandidate(candidate, durationMinutes, { activityId });
+        await saveUpcomingPlanFromCandidate(candidate, durationMinutes, { activityId, binding });
         onPlanLogged?.();
       }
       setActionState((prev) => ({ ...prev, [key]: 'done' }));

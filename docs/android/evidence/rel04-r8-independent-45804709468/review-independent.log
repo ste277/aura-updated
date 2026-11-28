@@ -1,0 +1,21 @@
+OK   fixture rel04-r2-head/offlineHabitQueue.ts.txt == db8607e apps/web/lib/offlineHabitQueue.ts
+OK   fixture rel04-r3-head/offlineHabitQueue.ts.txt == b323d2a apps/web/lib/offlineHabitQueue.ts
+OK   fixture rel04-r6-head/offlineHabitQueue.ts.txt == 13d773e apps/web/lib/offlineHabitQueue.ts
+OK   fixture rel04-r7-head/offlineHabitQueue.ts.txt == 7cae58a apps/web/lib/offlineHabitQueue.ts
+OK   fixture rel04-r7-head/activitySync.ts.txt == 7cae58a apps/web/lib/activitySync.ts
+OK   fixture rel04-r7-head/signOut.ts.txt == 7cae58a apps/web/lib/signOut.ts
+Original mixed format witness R7 {"seededRandomIdRecord":true,"q3SourcePresent":true,"signedOut":true,"afterDiscard":0,"recreated":0,"replayed":1,"serverRows":1}
+Original 45-day witness R7 B-first {"aDiscardedUnderR6":true,"sharedId":"mceee7a214a49c39f","tombsBefore":1,"markerAfter":false,"tombsAfter":1,"replayed":1,"serverRows":1}
+Original 45-day witness R7 A-first {"aDiscardedUnderR6":true,"sharedId":"mceee7a214a49c39f","tombsBefore":1,"markerAfter":false,"tombsAfter":0,"replayed":0,"serverRows":0}
+Original mixed format witness current {"seededRandomIdRecord":true,"q3SourcePresent":true,"signedOut":true,"afterDiscard":0,"recreated":0,"replayed":0,"serverRows":0}
+Original 45-day witness current B-first {"aDiscardedUnderR6":true,"sharedId":"mceee7a214a49c39f","tombsBefore":1,"markerAfter":true,"tombsAfter":1,"replayed":0,"serverRows":0}
+Original 45-day witness current A-first {"aDiscardedUnderR6":true,"sharedId":"mceee7a214a49c39f","tombsBefore":1,"markerAfter":true,"tombsAfter":1,"replayed":0,"serverRows":0}
+Original random-ID cross-account/representation witness R7 {"foreign":false,"held":[],"paused":null,"visible":["pending"],"replayAttempts":1,"rows":1,"decisions":["r8-account-b"]}
+Original random-ID cross-account/representation witness R7 {"foreign":true,"held":["r7-random-foreign"],"paused":null,"visible":["pending"],"replayAttempts":0,"rows":0,"decisions":["r8-account-a"]}
+Original random-ID cross-account/representation witness current {"foreign":false,"held":null,"paused":1,"visible":[],"replayAttempts":0,"rows":0,"decisions":[]}
+Original random-ID cross-account/representation witness current {"foreign":true,"held":null,"paused":1,"visible":[],"replayAttempts":0,"rows":0,"decisions":["r8-account-a"]}
+LocalStorage-only confirmed discard followed by same request {"format":"r2","removed":1,"markersBeforeRetry":0,"submit":"confirmed","serverRows":1}
+LocalStorage-only confirmed discard followed by same request {"format":"r3","removed":1,"markersBeforeRetry":0,"submit":"confirmed","serverRows":1}
+IndexedDB failure after confirmed active discard {"removed":1,"decision":"discarded","submit":"confirmed","serverRows":1}
+Interrupted IndexedDB discard with successful localStorage cleanup {"initialPaused":1,"confirmation":"You have 2 activity logs that have not synced yet (1 of them is paused legacy activity that won't sync automatically). If you sign out, Aura will remove them from this device where it can and tell you the result; anything another window is still sending is kept. Sign out?","removed":1,"failed":1,"sourceCount":0,"afterPaused":0,"afterPending":1,"attempted":1,"serverRows":1}
+Direct submission while a matching retired source was unreadable {"direct":"confirmed","stillPaused":1,"rows":1}

@@ -1,0 +1,10 @@
+$ npx ts-node test/homeDashboardLogic.test.ts
+# job=math-core-tests step=Run Home dashboard logic test env={"TS_NODE_COMPILER_OPTIONS":"{\"jsx\":\"react\"}"}
+OK   No moments -> updates[0] is undefined -> Home renders no card
+OK   Home's single card is the actionable ANOTHER_TIME, even though it is chronologically oldest
+OK   Home never sees more than one card worth of data from this pattern (updates[0] is a single item, not a slice)
+OK   With no actionable updates, Home's single card is the most recent informational one
+
+ALL HOME DASHBOARD LOGIC CHECKS PASSED
+
+# exit=0 signal=

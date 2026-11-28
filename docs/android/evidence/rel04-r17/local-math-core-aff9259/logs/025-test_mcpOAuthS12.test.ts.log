@@ -1,0 +1,93 @@
+$ npx ts-node test/mcpOAuthS12.test.ts
+# job=math-core-tests step=Run I2b-S12 offline residual test env={}
+OK   R-P2-1 accepted: valid query-mode redirect (code, state, iss)
+OK   R-P2-1 accepted: valid with status 302
+OK   R-P2-1 accepted: valid without iss
+OK   R-P2-1 refused: code in the PATH
+OK   R-P2-1 refused: code in the FRAGMENT
+OK   R-P2-1 refused: any fragment at all
+OK   R-P2-1 refused: code in an UNRELATED parameter (and the code param)
+OK   R-P2-1 refused: code ONLY in an unrelated parameter (same status, wrong location)
+OK   R-P2-1 refused: DUPLICATE code parameters
+OK   R-P2-1 refused: a second, different code parameter
+OK   R-P2-1 refused: changed callback HOST
+OK   R-P2-1 refused: changed callback PATH
+OK   R-P2-1 refused: changed callback SCHEME
+OK   R-P2-1 refused: changed STATE
+OK   R-P2-1 refused: MISSING state when one was requested
+OK   R-P2-1 refused: state present although none was requested
+OK   R-P2-1 accepted: no state requested, none present
+OK   R-P2-1 refused: wrong iss
+OK   R-P2-1 refused: an unexpected extra parameter
+OK   R-P2-1 refused: userinfo in the URL
+OK   R-P2-1 refused: status 200
+OK   R-P2-1 refused: status 307
+OK   R-P2-1 refused: relative location
+OK   R-P2-1 registered callback query parameters are PRESERVED (accepted when intact)
+OK   R-P2-1 a registered parameter that was dropped or changed is refused
+OK   R-P3-1 review probe: a ROLLBACK acknowledged after the 50 ms deadline is NOT reported as a timely 429 -> unavailable/deadline, no COMMIT
+OK   R-P3-1 a missing-row ROLLBACK past the deadline does not start another attempt (1 BEGIN), -> deadline
+OK   R-P3-1 expiredAt: the deadline instant itself is expired; one tick before is not
+OK   R-P3-1 store: a COMMIT acknowledged EXACTLY at the deadline is a failure (outcome unknown), never a success
+OK   R-P3-1 held: a COMMIT acknowledged EXACTLY at its bound -> unknown
+OK   R-P3-1 limiter: a COMMIT confirmed EXACTLY at the deadline -> commit_late (counted, not admitted)
+OK   R-P3-1 the store deadline is the request budget's ORIGINAL instant (not now + a remaining-time sample)
+OK   R-P3-1 gaps between clock reads cannot stretch the budget: the instant is stable across reads
+OK   R-P3-2 the overlap value is canonical base64url (the ambiguity is real) and not periodic
+OK   R-P3-2 the untagged hex-lexical overlap value gets NO base64url credit (legacy text rule) and is refused
+OK   R-P3-2 even DECLARED as base64url, 8 distinct symbols over 35 characters is refused (low variety for that alphabet)
+OK   R-P3-2 declared canonical values: decoded lengths 16 / 24 / 32 bytes = 128 / 192 / 256 bits
+OK   R-P3-2 refused as not canonical: hex: odd length
+OK   R-P3-2 refused as not canonical: hex: mixed case
+OK   R-P3-2 refused as not canonical: base64: missing padding
+OK   R-P3-2 refused as not canonical: base64: url alphabet
+OK   R-P3-2 refused as not canonical: base64url: padded
+OK   R-P3-2 refused as not canonical: base64url: impossible length (4n+1)
+OK   R-P3-2 refused as not canonical: base64 with non-canonical pad bits
+OK   R-P3-2 declared but only 15 decoded bytes (120 bits) is refused
+OK   R-P3-2 new configuration must declare its format: an untagged AURA_MCP_OAUTH_COOKIE_KEYS is refused (value not echoed)
+OK   R-P3-2 new configuration must declare its format: an untagged AURA_MCP_OAUTH_PAIRWISE_SALT is refused (value not echoed)
+OK   R-P3-2 new configuration must declare its format: an untagged AURA_MCP_AUDIT_KEY is refused (value not echoed)
+OK   R-P3-2 compatibility path: an untagged RETAINED cookie key is accepted (legacy rule)
+OK   R-P3-2 no secret material is transformed: the loader returns every value byte for byte (tag included)
+OK   R-P3-2 a weak untagged RETAINED key is still refused by the legacy rule
+OK   R-P3-2 the review's overlap value as a retained key is refused (no format credit)
+OK   R-P3-2 declared hex: 16 B: 10,000 CSPRNG samples all accepted
+OK   R-P3-2 declared hex: 32 B upper: 10,000 CSPRNG samples all accepted
+OK   R-P3-2 declared base64: 16 B: 10,000 CSPRNG samples all accepted
+OK   R-P3-2 declared base64: 32 B: 10,000 CSPRNG samples all accepted
+OK   R-P3-2 declared base64url: 16 B: 10,000 CSPRNG samples all accepted
+OK   R-P3-2 declared base64url: 32 B: 10,000 CSPRNG samples all accepted
+OK   R-P2-2 audit sanitizer keeps the bounded cause "deadline"
+OK   R-P2-2 audit sanitizer keeps the bounded cause "commit_timeout"
+OK   R-P2-2 audit sanitizer keeps the bounded cause "commit_late"
+OK   R-P2-2 audit sanitizer keeps the bounded cause "commit_lost"
+OK   R-P2-2 audit sanitizer keeps the bounded cause "commit_failed"
+OK   R-P2-2 audit sanitizer keeps the bounded cause "checkout"
+OK   R-P2-2 audit sanitizer keeps the bounded cause "driver"
+OK   R-P2-2 audit sanitizer keeps the bounded cause "internal"
+OK   R-P2-2 a raw error string in the cause field is DROPPED (never logged)
+OK   P3-corr reported case 1: "base64:" + openssl rand -hex 12 -> refused (ambiguous_encoding) 2000/2000
+OK   P3-corr variant: "base64url:" + openssl rand -hex 16 -> refused (ambiguous_encoding) 2000/2000
+OK   P3-corr reported case 2: untagged 32 chars of "ghijGHIJ" (retained-key path) -> refused 2000/2000
+OK   P3-corr near-hex: 21 hex chars + 1 non-hex under "base64url:" -> ambiguous_encoding
+OK   P3-corr a PADDED canonical base64 body made only of hex-alphabet chars -> ambiguous_encoding (padding ignored)
+OK   P3-corr untagged near-hex (31 hex + "g"): no base64 credit (legacy rule) and refused
+OK   P3-corr "hex:" with a hex body is unaffected (accepted, 128 bits)
+OK   P3-corr boundary (n=43): 33 hex-alphabet chars accepted, 34 refused as ambiguous_encoding
+OK   P3-corr no false refusal: declared base64: 16 B (10,000 fixed-seed samples; verdicts match policy; 0 refused by policy)
+OK   P3-corr no false refusal: declared base64url: 16 B (10,000 fixed-seed samples; verdicts match policy; 0 refused by policy)
+OK   P3-corr no false refusal: declared base64url: 32 B (10,000 fixed-seed samples; verdicts match policy; 0 refused by policy)
+OK   P3-corr no false refusal: untagged retained base64url 32 B (10,000 fixed-seed samples; verdicts match policy; 0 refused by policy)
+OK   P3-corr no false refusal: untagged retained base64 24 B (10,000 fixed-seed samples; verdicts match policy; 0 refused by policy)
+OK   P3-corr no false refusal: untagged retained hex 16 B (10,000 fixed-seed samples; verdicts match policy; 0 refused by policy)
+OK   P3-corr CI-01 reproduction: digits-only untagged hex is refused by policy (the old random-sample assertion fails on it)
+OK   P3-corr CI-01: the same value declared "hex:" is accepted
+OK   P3-corr loader: hex under "base64:" refused, advises "hex:", value not echoed
+OK   P3-corr loader: low-variety untagged RETAINED key refused, value not echoed
+OK   P3-corr loader: a legitimate untagged retained key is accepted and returned byte for byte
+
+All 86 AURA-MCP-02-I2b-S12 offline checks passed.
+oidc-provider WARNING: Unsupported runtime. Use Node.js v22.x LTS, or a later LTS release.
+
+# exit=0 signal=

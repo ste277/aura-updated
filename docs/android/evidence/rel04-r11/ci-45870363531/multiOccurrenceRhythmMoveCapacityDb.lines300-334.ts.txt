@@ -1,0 +1,35 @@
+    // the manual Move route) -- proving there is exactly one check,
+    // shared by both callers of applyMoveWrites. Uses "today" (real
+    // near-future, remaining-today window) since Recomposition's own
+    // acceptance validates the destination is within the SAME real
+    // local day as the server's current instant.
+    // ============================================================
+    const { ga: gaR } = await makeGoalActivity('Recomp', 1);
+    // Recomposition's own acceptance validates BOTH that targetDate equals
+    // the real current Asia/Kolkata local calendar date AND that the
+    // destination instant falls within that SAME local day -- a real-
+    // wall-clock-dependent window, same accepted residual risk every
+    // other Recomposition DB test in this codebase already carries
+    // (see goalActivityRhythmMaterializationDb.test.ts's own section 53).
+    // Scheduling comfortably EARLY (a short, bounded lead time, never
+    // more than what's left before local midnight) minimizes it.
+    const todayLocalDateRecomp = getDatePartsInTimezone(TZ, new Date()).dateStr;
+    const [midY, midM, midD] = addDaysToDateStr(todayLocalDateRecomp, 1).split('-').map(Number);
+    const tomorrowMidnightUTC = Date.UTC(midY, midM - 1, midD) - 5.5 * HOUR; // Asia/Kolkata is a fixed UTC+5:30 offset, no DST
+    const remainingTodayMs = tomorrowMidnightUTC - Date.now();
+    const idealLeadMs = 20 * MIN;
+    const moveOffsetMs = 15 * MIN;
+    const itemDurationMs = 20 * MIN;
+    const bufferMs = 2 * MIN;
+    const leadMs = Math.max(MIN, Math.min(idealLeadMs, remainingTodayMs - moveOffsetMs - itemDurationMs - bufferMs));
+    const recompBase = Math.ceil((Date.now() + leadMs) / MIN) * MIN;
+    const dR = await accept(gaR, recompBase, 'intent-r');
+    check('Recomp setup: 1 of 1 occurrence created (capacity now exactly full for this week)', dR.status === 'SAVED');
+    const planR = (dR as any).plans[0];
+    const recompDate = todayLocalDateRecomp;
+    const recompDest = recompBase + moveOffsetMs; // later the SAME day -- same week, already at capacity (1 of 1) for gaR, but excluding itself makes this a same-week self-move
+    const rcDecision = { decision: 'MOVE' as const, planId: planR.id, title: planR.title, current: { start: new Date(planR.plannedStartAt), end: new Date(planR.plannedEndAt) }, to: { start: new Date(recompDest), end: new Date(recompDest + 20 * MIN) } };
+    const rcToken = signRecompositionProposal(user.id, { generatedAt: new Date(), targetDate: recompDate, timezone: TZ, summary: { state: 'CHANGES_PROPOSED' }, decisions: [rcDecision] } as any)!;
+    const rcResult = await acceptRemainingDayRecomposition(user.id, rcToken, realRecompositionAcceptanceDeps);
+    check('Recomp. the SAME enforcement point is reached via Recomposition acceptance: a same-week self-move (not exceeding capacity) SUCCEEDS through applyMoveWrites, proving one shared check, not two', rcResult.status === 'ACCEPTED');
+  } finally {

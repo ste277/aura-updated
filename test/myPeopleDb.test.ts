@@ -30,6 +30,7 @@ import { PATCH as patchOccasion, DELETE as deleteOccasion } from '../apps/web/ap
 import { GET as upcoming } from '../apps/web/app/api/people/occasions/upcoming/route';
 import { GET as exportData } from '../apps/web/app/api/users/export/route';
 import { POST as createPlan } from '../apps/web/app/api/plans/route';
+import { boundHeaders } from './rel04BoundTestHeaders';
 
 let allPassed = true;
 function check(label: string, condition: boolean, detail?: unknown) {
@@ -40,13 +41,20 @@ function check(label: string, condition: boolean, detail?: unknown) {
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const sql = async (text: string, params: unknown[] = []) => (await pool.query(text, params)).rows;
 
-const fakeReq = (token: string | undefined, body?: unknown, url = 'http://localhost/api/people'): any => ({
+const fakeReq = (token: string | undefined, body?: unknown, url = 'http://localhost/api/people', headers: Headers = new Headers()): any => ({
   cookies: { get: (n: string) => (token !== undefined && n === 'as_session' ? { value: token } : undefined) },
   json: async () => body,
-  headers: new Headers(),
+  headers,
   nextUrl: new URL(url),
 });
 type Res = { status: number; body: any };
+// AURA-ANDROID-REL-04 (R2/R3 pattern, test/rel04BoundTestHeaders.ts): POST /api/plans is an account-bound write --
+// every current client states the account it writes for (X-Aura-Expected-Account), here the request's OWN session
+// account, exactly what the app sends. Ownership is still decided by the route (D6: B states B and is refused A's person).
+const callPlan = async (token: string, body: unknown): Promise<Res> => {
+  const res = await createPlan(fakeReq(token, body, 'http://localhost/api/plans', boundHeaders(token)));
+  return { status: res.status, body: await res.json().catch(() => null) };
+};
 const call = async (fn: (req: any, ctx?: any) => Promise<Response>, token: string, body?: unknown, params?: Record<string, string>, url?: string): Promise<Res> => {
   const res = await fn(fakeReq(token, body, url), params ? { params } : undefined);
   return { status: res.status, body: await res.json().catch(() => null) };
@@ -158,9 +166,9 @@ async function main() {
   const start = new Date(Date.now() + 3 * 86_400_000);
   const end = new Date(start.getTime() + 45 * 60_000);
   const planBody = (title: string, savedPersonId: string) => ({ title, activityType: title, plannedStartAt: start.toISOString(), plannedEndAt: end.toISOString(), durationMinutes: 45, windowType: 'NEUTRAL', savedPersonId });
-  const crossPlan = await call(createPlan, B.token, planBody(`${tag} cross`, ravi.body.id));
+  const crossPlan = await callPlan(B.token, planBody(`${tag} cross`, ravi.body.id));
   check('D6 POST /api/plans by B with A\'s person -> 404, no plan created', crossPlan.status === 404 && (await sql(`SELECT 1 FROM "PlannedActivity" WHERE title = $1`, [`${tag} cross`])).length === 0);
-  const ownPlan = await call(createPlan, A.token, planBody(`${tag} coffee with Ravi`, ravi.body.id));
+  const ownPlan = await callPlan(A.token, planBody(`${tag} coffee with Ravi`, ravi.body.id));
   const ownRow = (await sql(`SELECT "savedPersonId" FROM "PlannedActivity" WHERE id = $1`, [ownPlan.body?.id]))[0];
   check('D7 POST /api/plans by A with A\'s person -> created and linked', (ownPlan.status === 200 || ownPlan.status === 201) && ownRow?.savedPersonId === ravi.body.id, ownPlan);
   // The INSERT re-checks ownership in SQL: bypass the route and call the DB helper with a foreign id.

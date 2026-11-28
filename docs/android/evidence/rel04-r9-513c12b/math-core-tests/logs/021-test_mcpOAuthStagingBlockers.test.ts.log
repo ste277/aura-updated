@@ -1,0 +1,61 @@
+$ npx ts-node test/mcpOAuthStagingBlockers.test.ts
+# job=math-core-tests step=Run I2b-S2 staging-blocker offline test env={}
+OK   R-3 parser: IPv6 spellings give the RFC 5952 canonical form
+OK   R-3 parser: both IPv4-mapped forms normalise to the IPv4 address
+OK   R-3 parser: IPv4-mapped forms share the IPv4 /32 bucket
+OK   R-3 parser: zone ids, brackets, ports, prefixes, lists, CR/LF, garbage and over-long values rejected
+OK   R-3 parser fuzz: 2000 random addresses -- uncompressed and canonical spellings agree, Node accepts every canonical form
+OK   R-3 buckets: 1,000 addresses in one /64 share one key
+OK   R-3 buckets: a different /64 has its own key
+OK   R-3 buckets: IPv4 is per /32
+OK   R-3 buckets: invalid / empty input -> the shared unresolved bucket, never a new one
+OK   R-3 buckets: equivalent spellings of one IPv6 address give one key
+OK   R-3 resolve: trusted header canonicalised
+OK   R-3 resolve: reasons are fixed codes (missing / list / invalid / repeated / no_source)
+OK   R-3 resolve: forwarding headers other than the configured one are never read
+OK   R-3 resolve: configuring X-Forwarded-For / Forwarded / cf-connecting-ip is still refused
+OK   I2b-1 shards: for every ceiling 1..3000 and shard count, shard limits sum to EXACTLY the ceiling (never more)
+OK   I2b-1 shards: default 6000 -> 16 shards of 375; small ceilings stay one exact row
+OK   I2b-1 shards: invalid shard counts refused (0, > ceiling, > 64, non-integer)
+OK   I2b-1 rules: one global shard + the /64 address bucket
+OK   I2b-1 rules: no address -> shared unresolved bucket with the per-address limit (never global-only)
+OK   I2b-1 rules: shard choice is random and covers every shard, independent of the address
+OK   I2b-1 rules: invalid limits refused (global < perAddress, non-integer, bad picker)
+OK   I2b-1 aggregate: 40,000 requests from 4,000 networks -> exactly the 6000 ceiling admitted, not one more
+OK   R-2 withDeadline: a hung operation rejects with StoreUnavailableError(timeout) at the deadline
+OK   R-2 withDeadline: driver errors become a generic StoreUnavailableError (no driver message, 503, not exposed)
+OK   R-2 singleFlight: 20 overlapping cleanups -> one in flight, the rest skipped; runs again once idle
+OK   R-2 limiter: exhausted/hung pool checkout -> deny "unavailable" at the deadline
+OK   R-2 limiter: a connection that arrives after the deadline is returned unused and clean (no query, no transaction)
+OK   R-2 limiter: a hung statement -> deny at the deadline and the connection is destroyed (never returned mid-transaction)
+OK   R-2 limiter: transaction-local lock and statement timeouts are set in the BEGIN message
+OK   R-2 limiter: a server-side timeout error -> deny "unavailable", connection destroyed
+OK   R-2 limiter: invalid timeout options refused
+OK   R-2 store: a hung query -> StoreUnavailableError at the deadline (not "not found")
+OK   R-2 store: upsert / consume / revoke / list all fail closed the same way
+OK   R-2 store: opportunistic cleanup is single-flight (30 writes, cleanup every write -> 1 DELETE in flight)
+OK   503 MCP: pre-auth limiter unavailable -> 503 temporarily_unavailable + Retry-After (not 429)
+OK   503 MCP: post-auth limiter unavailable -> 503
+OK   503 MCP: token store unavailable during verification -> 503 (not 401, never a pass)
+OK   MCP: any other verifier error is still a 401 rejection
+OK   429 MCP: a real limit (incl. in-memory capacity) stays 429 with its Retry-After
+OK   audit: 503 outcomes recorded as limiter_unavailable / store_unavailable
+OK   R-3 MCP: malformed / missing addresses share ONE bucket (3 allowed, then 429), never global-only
+OK   R-3 MCP: unresolved addresses audited with a reason code only (no address value in any event)
+OK   R-3 MCP: rotating addresses inside one /64 shares one budget; the neighbouring /64 is independent
+OK   503 AS: pre-auth limiter unavailable -> 503 temporarily_unavailable + Retry-After
+OK   audit AS: limiter_unavailable recorded
+OK   R-3 AS: missing / invalid / XFF-only requests share the bounded unresolved bucket; a valid address has its own
+OK   R-3 AS: oauth.address_unresolved audited with reason codes
+OK   R-2 AS: store unavailable during authorization -> no code issued (503 / error, never a code)
+OK   R-2 AS: store unavailable at the token endpoint -> 503, no access or refresh token
+OK   R-2 AS: token verification with the store down throws StoreUnavailableError (mapped to 503 by /api/mcp)
+OK   R-2 AS: recovery -- once the store answers again, the full flow issues a token
+OK   audit AS: store_unavailable recorded, no token_issued while down
+
+All 52 AURA-MCP-02-I2b-S2 staging-blocker offline checks passed.
+oidc-provider WARNING: Unsupported runtime. Use Node.js v22.x LTS, or a later LTS release.
+[aura-mcp-remote] token verification failed (StoreUnavailableError)
+[aura-mcp-remote] token verification failed (Error)
+
+# exit=0 signal=

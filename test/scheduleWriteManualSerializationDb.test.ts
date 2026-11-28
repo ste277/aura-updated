@@ -20,6 +20,7 @@
  *   DATABASE_URL="postgresql://..." npx ts-node test/scheduleWriteManualSerializationDb.test.ts
  */
 import { upsertUserByEmail, updateBirthProfile, beginTransaction, createPlannedActivity, getUserById } from '../apps/web/lib/db';
+import { boundHeaders } from './rel04BoundTestHeaders';
 import { createSessionToken } from '../apps/web/lib/auth';
 import { persistAcceptedConstructedDay } from '../apps/web/lib/dayConstructorAcceptancePersistence';
 import { movePlannedActivity } from '../apps/web/lib/planMove';
@@ -53,7 +54,7 @@ async function sql(text: string, params: unknown[] = []): Promise<any[]> {
     c.release();
   }
 }
-const fakeReq = (cookie: string | undefined, body: unknown): any => ({ cookies: { get: (n: string) => (cookie !== undefined && n === 'as_session' ? { value: cookie } : undefined) }, json: async () => body, headers: new Headers() });
+const fakeReq = (cookie: string | undefined, body: unknown): any => ({ cookies: { get: (n: string) => (cookie !== undefined && n === 'as_session' ? { value: cookie } : undefined) }, json: async () => body, headers: boundHeaders(cookie) });
 
 type Ev = { t: number; ev: string; pid?: number; title?: string; tx?: boolean };
 

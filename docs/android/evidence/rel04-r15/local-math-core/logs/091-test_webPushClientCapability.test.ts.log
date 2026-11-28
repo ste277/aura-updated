@@ -1,0 +1,19 @@
+$ npx ts-node test/webPushClientCapability.test.ts
+# job=math-core-tests step=Run Web Push client capability test env={}
+OK   isPushSupported is false when serviceWorker/PushManager/Notification are unavailable
+OK   isPushSupported is true when all required browser APIs are present
+OK   getPushCapabilityState() never calls Notification.requestPermission() when permission is 'default'
+OK   getPushCapabilityState() never calls Notification.requestPermission() when permission is 'denied'
+OK   getPushCapabilityState() never calls Notification.requestPermission() when permission is 'granted'
+OK   UNSUPPORTED when the browser lacks push APIs
+OK   DENIED when Notification.permission is 'denied'
+OK   NOT_ASKED when Notification.permission is 'default'
+OK   GRANTED when permission is granted but there is no browser PushManager subscription yet
+OK   SUBSCRIBED only when BOTH a browser subscription AND an active server record exist
+OK   SUBSCRIPTION_EXPIRED (not SUBSCRIBED) when the browser has a subscription object but the server disagrees
+OK   subscribeToPush() DOES call Notification.requestPermission() -- it is the one deliberate, user-initiated path
+OK   subscribeToPush() reports permission_denied without throwing when the browser blocks it
+
+ALL WEB PUSH CLIENT CAPABILITY CHECKS PASSED
+
+# exit=0 signal=

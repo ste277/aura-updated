@@ -1,0 +1,18 @@
+OK   T1 (R8) after 45 days the decision is RETAINED; a re-appearing interim copy stays quarantined (never active) and a re-enqueue of the request is refused as already settled
+OK   T1 (R8) with no interim source left the decision is still kept (no expiry; positive retirement evidence does not exist)
+OK   T2 (R8/R9) a quarantined source that changed after it was shown is NOT removed (uncertain: preserved); the shown request is durably discarded and reported as not yet cleaned up
+OK   T2 (R8/R9) it stays quarantined: counted as paused (its key request crid-t2 and its new content crid-t2b), never in the active queue
+OK   T3 the request has two records; claiming one record claims the REQUEST: the other record cannot be claimed by another context
+OK   T3 a discard of the sibling record while the request is being sent keeps it (keptInFlight)
+OK   T4 a late release by the superseded attempt is refused ("superseded") and attempt 2's claim is intact
+OK   T4 a late DEFINITIVE answer for attempt 1 settles the records (the server has them) but reports superseded and leaves attempt 2's claim alone
+OK   T4 attempt 2 then releases its own claim
+OK   T5 the replay reclaimed and resent the request (same clientRequestId); the server stored it exactly once
+OK   T5 the delayed first attempt completes consistently: confirmed, no record, claim or dispatch mark left behind
+OK   T6 the presentation read returns [] for an empty queue but null for an UNREADABLE one (never presented as "no pending activity")
+OK   T6 Home shows an "unavailable" state and keeps pending rows when the queue cannot be read
+OK   T7 a version-1 database upgrades: the record is kept and its dispatch mark is carried over to the request (still reported "may have been sent")
+OK   T8 a sign-out the worker did not send (unsettled) ends BUSY after reconciling the session (still A), never "signed out" or "failed"
+OK   T8 a sign-in the worker did not send is reported "still in progress ... nothing was changed", not "couldn't reach the server", and the account is unchanged
+
+16 passed, 0 failed

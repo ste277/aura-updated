@@ -1,0 +1,34 @@
+$ npx ts-node test/timingSearchDailyRhythm.test.ts
+# job=math-core-tests step=Run Daily Rhythm Find a Time test env={}
+OK   1. Go for a run (workout, PERSONAL): a mixed inside/outside batch filters to ONLY the outside-work candidates
+OK   2. the outside-work subset preserves its ORIGINAL relative order (morning before evening, not re-sorted by score/label)
+OK   3. a 4th-ranked outside-work candidate (beyond a 3-candidate top cut) is the one that survives filtering
+OK   4. no outside-work candidate anywhere in the batch -> falls back to the ORIGINAL, full, unfiltered set (same objects, same order)
+OK   5. a WORK activity (task-1) is never filtered, even with every candidate inside work hours
+OK   6. a FLEXIBLE_BREAK activity (tea-break) is never filtered, even entirely inside work hours
+OK   7. missing preferences (never configured) -> candidates pass through completely unfiltered
+OK   8. cleared preferences (workStart/workEnd null even with stale workDays left over) -> unfiltered, same as never-configured
+OK   9. a Saturday candidate (non-workday) is never filtered, even for a PERSONAL activity with Daily Rhythm configured
+OK   9b. a Saturday candidate gets no Daily Rhythm note at all
+OK   12. a candidate that only STARTS before work hours but runs into them is still treated as overlapping (filtered out of the preferred subset)
+OK   13. a UTC instant that is 6:30 PM in America/New_York is correctly treated as OUTSIDE the 10am-6pm work window (timezone-aware, not UTC-naive)
+OK   14. identical input filtered twice produces byte-identical output (deterministic, no hidden randomness/Date.now dependency)
+OK   15. a lower-quality (CAUTION) outside-work candidate is preferred over a higher-quality (BEST) inside-work one
+OK   16. FIND + configured + PERSONAL widens to exactly DAILY_RHYTHM_EXPANDED_SEARCH_LIMIT
+OK   16b. CHECK mode never widens (CHECK has no `limit` concept at all)
+OK   16c. COMPARE mode never widens
+OK   16d. a WORK activity widens the FIND search when Daily Rhythm is configured (re-baselined by AURA-PREF-01: work activities now prefer working hours)
+OK   16e. an unconfigured user never widens the FIND search
+OK   16f. an unresolvable/unknown activityId never widens the FIND search
+OK   17. a preferred (outside-work) candidate gets the exact "Fits your preferred personal time." text
+OK   17b. FIND mode fallback (inside-work, no search alternative) gets the exact bounded-results text
+OK   17c. an explicitly-selected (CHECK/COMPARE) inside-work candidate gets the DIFFERENT "overlaps your usual working hours" text, never the FIND fallback text
+OK   17d. a flexible break inside work hours gets the exact DR2-established text, reused verbatim
+OK   17e. a flexible break OUTSIDE work hours gets no note at all (nothing noteworthy to say, same as Day Constructor)
+OK   17f. a WORK activity inside work hours is noted as fitting them (re-baselined by AURA-PREF-01: work activities now prefer working hours)
+OK   17g. an unconfigured user never gets any note
+OK   18. unconfigured user: filtered output has the same length, same order, and the same candidate objects as the input
+
+ALL DAILY RHYTHM FIND-A-TIME (DR4-B) UNIT CHECKS PASSED
+
+# exit=0 signal=

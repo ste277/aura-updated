@@ -1,0 +1,47 @@
+$ npx ts-node test/myPeopleDb.test.ts
+# job=day-constructor-acceptance-db-tests step=Run AURA-MP-1 My People DB test env={}
+OK   A1 POST name-only (switch on) -> 201, no chart, hasChartDetails false
+OK   A2 POST with every optional field + chart -> 201, all stored
+OK   A3 GET detail: natalContext derived for a chart person
+OK   A4 GET detail: natalContext null for a name-only person (no crash)
+OK   B1 PATCH {name, notes} -> 200 and all six chart columns byte-identical
+OK   B2 PATCH with a partial chart -> 400 and the chart is unchanged
+OK   B3 PATCH with a whole new chart replaces it whole
+OK   B4 PATCH chart left every My People field intact
+OK   B5 PATCH chart:null clears all six chart columns together
+OK   B6 the DB CHECK itself refuses a half chart (direct SQL)
+OK   C1 POST birthday (no year) -> 201 with a resolved next occurrence
+OK   C2 a second birthday for the same person -> 409
+OK   C3 29 Feb 1992 anniversary -> 201
+OK   C4 29 Feb 1991 -> 400
+OK   C5 PATCH that makes an existing 29 Feb invalid (non-leap year) -> 400 (merged validation)
+OK   C6 PATCH remindDaysBefore -> 200, other fields kept
+OK   C7 GET special days for Ravi -> 2
+OK   C8 GET upcoming?days=60 -> 200, only A's, each with personName
+OK   C9 GET upcoming?days=61 -> 400
+OK   C10 GET /api/people (on) carries nextOccasion and the design 4.1 fields
+OK   C10b R1 F5: the list never carries notes, interests, location, owner id or detailed birth fields
+OK   C10c R1 F5: the detail route still returns notes and birth details to the owner
+OK   D1 B's list never contains A's people
+OK   D2 every person / special-day route with A's ids returns 404 for B
+OK   D3 ...and nothing of A's changed
+OK   D4 B's upcoming list is empty (never A's special days)
+OK   D5 the composite FK refuses a special day filed by B under A's person (direct SQL)
+OK   D6 POST /api/plans by B with A's person -> 404, no plan created
+OK   D7 POST /api/plans by A with A's person -> created and linked
+OK   D8 createPlannedActivity with a foreign savedPersonId stores NULL (never a cross-owner link)
+OK   E1 injected failure at the final step -> 500 and EVERYTHING rolled back (person, special days, priority ids, dismissals, attention, links)
+OK   E2 DELETE -> 200; person and special days gone
+OK   E3 id removed from dayBuilderPriorityPersonIds; other priority ids kept
+OK   E4 Day Builder dismissals and special-day attention rows deleted
+OK   E5 the linked plan is KEPT with its link cleared (title unchanged)
+OK   E6 the Aura Moment is KEPT, link cleared, display name kept (D6)
+OK   E7 deleting again -> 404
+OK   F1 A's export includes people[] with chart, notes, interests and special days
+OK   F2 A's export never includes B's people and carries no ownerUserId or natal context
+OK   F3 B's export holds only B's person
+
+ALL MY PEOPLE DB CHECKS PASSED
+[people] delete failed { personId: 'a491d9c5-4273-4e05-b319-52f6cbd06521' }
+
+# exit=0 signal=

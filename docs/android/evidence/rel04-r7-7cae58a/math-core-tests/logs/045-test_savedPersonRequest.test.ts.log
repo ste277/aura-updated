@@ -1,0 +1,36 @@
+$ npx ts-node test/savedPersonRequest.test.ts
+# job=math-core-tests step=Run SavedPerson request validation test env={}
+OK   A fully valid body is accepted
+OK   name is trimmed and preserved
+OK   relationshipType is preserved
+OK   birthDate is preserved
+OK   birthTime is preserved
+OK   birthCityName/lat/lng are preserved when present
+OK   A body with no relationshipType defaults to OTHER
+OK   A body with no birth location (lat/lng/city) is still accepted -- not required for natal calculation
+OK   relationshipType "PARTNER" is accepted
+OK   relationshipType "SPOUSE" is accepted
+OK   relationshipType "FAMILY" is accepted
+OK   relationshipType "FRIEND" is accepted
+OK   relationshipType "OTHER" is accepted
+OK   Missing name is rejected
+OK   Empty name is rejected
+OK   Overlong name is rejected
+OK   Missing birthDate is rejected
+OK   Missing birthTime is rejected (birth time is required, not optional -- brief section 4)
+OK   Missing birthTimezone is rejected
+OK   Invalid relationshipType is rejected
+OK   Malformed birthDate (not YYYY-MM-DD) is rejected
+OK   Invalid calendar-looking birthDate (bad month) is still format-checked (regex-level)
+OK   Malformed birthTime (not HH:MM 24h) is rejected
+OK   birthTime hour 24 is rejected (out of 24h range)
+OK   Invalid birthTimezone (not a real IANA name) is rejected
+OK   Invalid latitude (out of range) is rejected when coordinates are provided
+OK   Invalid longitude (out of range) is rejected when coordinates are provided
+OK   Non-numeric latitude is rejected when coordinates are provided
+OK   Providing only latitude without longitude is rejected (NaN longitude fails validation) rather than silently dropping it
+OK   Rejections use HTTP 400
+
+ALL SAVED PERSON REQUEST VALIDATION CHECKS PASSED
+
+# exit=0 signal=

@@ -1,0 +1,49 @@
+$ npx ts-node test/schedulingEligibilityErrorContractDb.test.ts
+# job=day-constructor-acceptance-db-tests step=Run scheduling eligibility error contract DB test env={}
+OK   1a. setup: first occurrence saves (weekly target 1)
+OK   1a. weekly capacity exceeded -> 409, code CAPACITY_EXCEEDED
+OK   1a. rejected transaction leaves no partial write (PlannedActivity count unchanged)
+OK   1b. setup: first occurrence saves (daily cap default ONCE_PER_DAY)
+OK   1b. daily capacity exceeded -> 409, code DAILY_CAPACITY_EXCEEDED
+OK   1b. rejected transaction leaves no partial write
+OK   1c. setup: first occurrence saves
+OK   1c. unresolved legacy attribution -> 409, code DAILY_ATTRIBUTION_UNRESOLVED
+OK   1c. rejected transaction leaves no partial write
+OK   1d. archived Goal -> 400 (unchanged status), code GOAL_NOT_ACTIVE
+OK   1d. message text unchanged from pre-A3a
+OK   1d. rejected transaction leaves no partial write
+OK   1e. cross-user link attempt -> 400 (unchanged status), code GOAL_ACTIVITY_NOT_AVAILABLE
+OK   1e. message text unchanged from pre-A3a
+OK   1e. rejected transaction leaves no partial write
+OK   1f. successful scheduling unchanged: 200, no code field, real plan body
+OK   1g. existing 401 unauthenticated behavior unchanged
+OK   2a. setup: first occurrence SAVED
+OK   2a. weekly capacity exceeded -> SAVE_FAILED, code CAPACITY_EXCEEDED
+OK   2a. rejected transaction leaves no partial write
+OK   2b. setup: first occurrence SAVED
+OK   2b. daily capacity exceeded -> SAVE_FAILED, code DAILY_CAPACITY_EXCEEDED
+OK   2b. rejected transaction leaves no partial write
+OK   2c. setup: first occurrence SAVED
+OK   2c. unresolved legacy attribution -> SAVE_FAILED, code DAILY_ATTRIBUTION_UNRESOLVED
+OK   2c. rejected transaction leaves no partial write
+OK   2d. cross-user link attempt -> SAVE_FAILED, code GOAL_ACTIVITY_NOT_AVAILABLE
+OK   2d. rejected transaction leaves no partial write
+OK   2e. successful scheduling unchanged: SAVED, one plan, no code field
+OK   3a. route success unchanged: 200, SAVED, no code field
+OK   3a. route daily capacity exceeded -> HTTP 409, status SAVE_FAILED, code DAILY_CAPACITY_EXCEEDED
+OK   4a. setup: first occurrence SAVED
+OK   4a. Move regression smoke test: ordinary same-week Move still succeeds (code path untouched)
+OK   4b. setup: two occurrences on different days SAVED
+OK   4b. Move into an already-occupied day -> DAILY_CAPACITY_EXCEEDED (unchanged, pre-existing Move behavior)
+OK   5a. parseAcceptResponseBody: a bare SAVE_FAILED body (pre-A3a shape) still parses with no code
+OK   5b. parseAcceptResponseBody: a known code is parsed through additively
+OK   5c. parseAcceptResponseBody: an unrecognized code is dropped, never trusted blindly
+OK   5d. classifyAcceptanceUiState: a codeless SAVE_FAILED keeps the exact pre-A3b generic message and safe fallback (no code -> ordinary retry stays available)
+OK   5e. every known scheduling-eligibility code classifies to kind FAILED with that SAME code carried through (never dropped, never swapped)
+OK   5f. all 5 known-code messages are mutually distinct from each other AND from the codeless generic message (genuinely differentiated, not just "has a code")
+OK   5g. DAILY_ATTRIBUTION_UNRESOLVED's message is specifically distinguishable from DAILY_CAPACITY_EXCEEDED's -- never presented as an ordinary daily-capacity conflict
+OK   5h. none of the 5 known codes ever classify to a codeless state -- every known code keeps `code` set, which is exactly what suppresses the ordinary "Try again" affordance in DayPlanPreview.tsx (no known scheduling conflict ever offers an ineffective retry)
+OK   5i. an unrecognized/unknown code still falls through to the exact same safe codeless fallback as a bare SAVE_FAILED (never crashes, never fabricates a code-specific message for an untrusted code)
+ALL SCHEDULING ELIGIBILITY ERROR CONTRACT CHECKS PASSED
+
+# exit=0 signal=

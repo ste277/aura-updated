@@ -1,0 +1,55 @@
+$ npx ts-node --project tsconfig.jsdom-tests.json test/myPeopleMp4RhythmsDb.test.ts
+# job=day-constructor-acceptance-db-tests step=Run AURA-MP-4 Relationship Rhythms DB test env={}
+OK   0058: GoalActivity.savedPersonId is a nullable text column
+OK   0058: composite same-account FK (savedPersonId, userId) -> SavedPerson(id, ownerUserId), ON DELETE NO ACTION
+OK   0058: one partial index for linked rows only
+OK   Existing Goals paths are unchanged: a goal and rhythm created the old way have no person (no backfill, no association)
+OK   0058: none of this account's GoalActivity rows carries a person before MP-4 creates one
+OK   Switch OFF: GET and POST /api/people/:id/rhythms are 404 and nothing is created
+OK   Adding or editing a person creates no goal and no rhythm (R1)
+OK   Invalid requests (0 per week, unknown choice, no goal) are 400 and create nothing
+OK   A client activityId is ignored: the activity comes from the choice (Call -> catch-up)
+OK   Explicit "Keep in touch" with a NEW goal: one visible "Stay close to Ravi" goal and one weekly rhythm linked to Ravi
+OK   GET lists the rhythm with its goal, cadence and pause state
+OK   Attach to an EXISTING goal: no new goal, the rhythm sits under the chosen goal (family-dinner)
+OK   An archived goal is refused (409) and nothing is created
+OK   Rhythms under an archived goal are not listed on the person
+OK   Cross-account: another owner's person -> 404; another owner's goal -> 404; listing someone else's person -> 404; no session -> 401; nothing created
+OK   Cross-account edit / pause of the rhythm is 404 (existing Life Rhythm route ownership)
+OK   DATABASE level: linking a rhythm to another account's person is rejected by the composite FK (23503)
+OK   DATABASE level: deleting a person outside the app path while a rhythm is linked fails (NO ACTION) -- never a silently running unlinked rhythm
+OK   Pause / resume / edit (existing route): state changes, the person link is kept throughout
+OK   A plan made for the rhythm (POST /api/plans with goalActivityId) is linked to the person and counts as an occurrence
+OK   R1 F2: the Plan success response reports the COMMITTED person association (same as the stored row)
+OK   Moving that plan keeps the person on the new plan (MP-3 Move contract)
+OK   A plan with no rhythm and no person stays unlinked
+OK   Remove (existing dismiss route): no longer listed on the person; the rhythm row and its goal are kept as history
+OK   Person DELETE with an ACTIVE linked rhythm: 200; the rhythm is PAUSED and unlinked; its goal, occurrence and plans are kept (plan link cleared)
+OK   The paused rhythm accepts no new plan (existing RHYTHM_PAUSED rule) -- Aura stops proposing time with a removed person
+OK   Creation first, person DELETE second: the DELETE waits on the person row; both succeed; the new rhythm ends PAUSED and unlinked (goal kept)
+OK   Person DELETE first, creation second: creation waits on the person, then 404 -- no rhythm and no goal created
+OK   Planning first (person locked before the rhythm), person DELETE second: DELETE waits on the person; both 200, no deadlock; plan kept and unlinked; rhythm paused and unlinked
+OK   Person DELETE first, planning second: planning waits on the person, then the now-paused rhythm refuses the plan (4xx, never a deadlock 500); no plan written
+OK   Resume first, person DELETE second: the DELETE waits on the rhythm row; both 200; the rhythm ends PAUSED and unlinked (D7); planning is refused
+OK   Person DELETE first, resume second (62027): the resume waits on the rhythm row, then 409 PERSON_LINK_CHANGED; the rhythm stays PAUSED and unlinked, cadence unchanged; planning is refused
+OK   Edit first, person DELETE second: both 200; the new cadence is kept and the rhythm ends PAUSED and unlinked; planning is refused
+OK   Person DELETE first, edit second: the edit waits, then 409 (its person is gone) and writes nothing; the rhythm stays PAUSED and unlinked; planning is refused
+OK   Stale person screen (deletion already committed, savedPersonId sent): 409, the rhythm stays PAUSED
+OK   A deliberate resume of the already-unlinked rhythm still works (no permanent ban): active again; planning allowed; the plan has no person (response = stored)
+OK   R2 Remove first (from the person page), person DELETE second: both 200; the rhythm is removed (DISMISSED, kept as history) and still paused and unlinked by the deletion
+OK   R2 person DELETE first, Remove second: the Remove waits on the rhythm row, then 409 PERSON_LINK_CHANGED; the rhythm stays SUGGESTED, PAUSED and unlinked
+OK   R2 stale person page Remove after deletion: 409 PERSON_LINK_CHANGED and the preserved rhythm is byte-for-byte unchanged (paused, unlinked, not removed)
+OK   R2 a later deliberate Resume from Goals restores planning (plan 200, unlinked, response = stored)
+OK   R2 legitimate Remove: from the person page (matching person) and from Goals (no body) both 200 -> DISMISSED, links kept
+OK   R2 a Remove naming a different person than the rhythm's is refused (409)
+OK   An unrelated rhythm (no person) pauses and resumes exactly as before
+OK   An unrelated rhythm (no person) is removed exactly as before
+OK   Another account's linked rhythm is untouched by this owner's person deletion
+OK   A failing rhythm insert rolls back the NEW goal too (one transaction): nothing left behind
+OK   Rhythm creation runs at an explicit READ COMMITTED (MP-3-R2 contract)
+OK   Invariant: no rhythm or plan links to a missing or foreign person
+OK   Account deletion cascade still works with a linked rhythm (User -> SavedPerson and User -> GoalActivity in one statement)
+
+ALL MY PEOPLE MP-4 RHYTHMS DB CHECKS PASSED (49)
+
+# exit=0 signal=

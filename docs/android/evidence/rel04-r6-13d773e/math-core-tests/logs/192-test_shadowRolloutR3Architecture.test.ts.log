@@ -1,0 +1,26 @@
+$ npx ts-node test/shadowRolloutR3Architecture.test.ts
+# job=math-core-tests step=Run shadow rollout R3 architecture test env={}
+=== the real tree conforms ===
+OK   THE REAL PRODUCTION TREE HAS ZERO SHADOW-ROLLOUT-R3 ARCHITECTURE VIOLATIONS (408 files scanned)
+=== the rules ===
+OK   THE ENVIRONMENT GUARD IS THE REVIEWED EXACT VALUE CHECK, READ ONCE, SERVER-ONLY
+OK   ELIGIBILITY REQUIRES BOTH reviewEligible AND onReview
+OK   NO CLIENT/REQUEST PATH CAN SET REVIEW ELIGIBILITY
+OK   NO STORAGE, NO LOGGING OF THE REVIEW PAYLOAD
+OK   THE REVIEW IS A SIBLING FIELD ATTACHED BEFORE SIGNING, NEVER MIXED INTO proposedItems
+OK   NO SECOND MATERIALIZER CALL FOR THE REVIEW
+=== mutations (in-memory; the real tree is untouched) ===
+OK   MUTATION: the Preview guard is removed (reviewEligible hardcoded true) -> detected
+OK   MUTATION: the guard itself is loosened (Production also eligible) -> detected
+OK   MUTATION: a second VERCEL_ENV read appears elsewhere -> detected
+OK   MUTATION: reviewEligible is fed from the request body or a header -> detected
+OK   MUTATION: eligibility collapses to reviewEligible alone (onReview no longer required) -> detected
+OK   MUTATION: a Plan/GoalActivityOccurrence/ProductEvent/DB write is added near the review hand-off -> detected
+OK   MUTATION: the review payload is logged -> detected
+OK   MUTATION: the review is merged into proposedItems instead of a sibling field -> detected
+OK   MUTATION: signing stops covering the field that carries the review (bypasses bodyWithReview) -> detected
+OK   MUTATION: the review hand-off is rewired to call the materializer a second time independently -> detected
+OK   the mutations were applied to in-memory copies only: the real tree still has zero violations afterwards
+ALL SHADOW ROLLOUT R3 ARCHITECTURE CHECKS PASSED
+
+# exit=0 signal=

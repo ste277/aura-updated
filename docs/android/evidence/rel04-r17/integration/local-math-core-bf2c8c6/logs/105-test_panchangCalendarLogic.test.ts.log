@@ -1,0 +1,17 @@
+$ npx ts-node test/panchangCalendarLogic.test.ts
+# job=math-core-tests step=Run Panchang calendar logic test env={"TS_NODE_COMPILER_OPTIONS":"{\"jsx\":\"react\"}"}
+OK   toDateStr formats a single-digit month/day with zero padding
+OK   toDateStr formats a double-digit month/day unchanged
+OK   August 2026 (starts on a Saturday) has a leading offset of 5 (Mon,Tue,Wed,Thu,Fri padding before Sat)
+OK   June 2026 (starts on a Monday) has a leading offset of 0
+OK   November 2026 (starts on a Sunday) has a leading offset of 6 in a Monday-first grid
+OK   Every leadingOffsetForMonth() result is within the valid 0-6 range across a full year
+OK   Today detection is timezone-sensitive: IST is already Aug 22 while UTC is still Aug 21 for the same instant
+OK   getDatePartsInTimezone dateStr round-trips through toDateStr for the same components
+OK   Previous month from January rolls back to December of the prior year
+OK   Next month from December rolls forward to January of the next year
+OK   Previous/next month are inverses for an ordinary mid-year month
+
+ALL PANCHANG CALENDAR LOGIC CHECKS PASSED
+
+# exit=0 signal=

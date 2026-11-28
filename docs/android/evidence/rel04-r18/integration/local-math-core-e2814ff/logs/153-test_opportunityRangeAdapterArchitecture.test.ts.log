@@ -1,0 +1,34 @@
+$ npx ts-node test/opportunityRangeAdapterArchitecture.test.ts
+# job=math-core-tests step=Run opportunity range adapter architecture test env={}
+OK   core imports are exactly the allowed pure canonical helpers (6)
+OK   core imports no database, Goal, Rhythm, Candidate A, provider, DecisionFacts, Constructor/orchestrator, acceptance/persistence, or the real wiring
+OK   core takes only the BlockedInterval TYPE from dayCapacity
+OK   core imports only a constant and a type from the projection engine, never the projection function
+OK   core reaches timezone conversion only through the canonical helpers
+OK   availability goes through the canonical resolveAvailability (no template/weekday logic reproduced)
+OK   Plan lifecycle goes through the canonical isActivePlanBlocker (no status rules reproduced)
+OK   no second timezone conversion: no manual offsets, no Intl, no getTimezoneOffset
+OK   the unconfigured fallback is not used: no fabricated clock times or day-long window in the core
+OK   window boundaries are checked for exactness via the canonical resolveLocalDateTime (DST hour -> UNKNOWN)
+OK   core: no clock (no Date.now, no new Date() without an argument), no randomness, no process/env access
+OK   core: no database or network access and no write verbs
+OK   real wiring imports exactly db, availabilityContext (type) and the adapter (type)
+OK   real wiring imports only two READ functions from db (plus the User type) -- no writers
+OK   real wiring contains no write verbs and no client-supplied data path (scoped by user.id only)
+OK   the overlap query is a single read-only SELECT scoped by userId with half-open overlap and the cancelled filter
+OK   the range contract is exactly an explicit startDate/endDate plus timezone and now
+OK   no period/horizon inference: no week, deadline or recurrence identifiers
+OK   core and real wiring mention no source, requirement, scoring, urgency, timing-quality, or Constructor vocabulary
+OK   no user-facing copy in the core (no string literal containing whitespace)
+OK   planBlockerLifecycle.ts has no imports (pure) and no I/O or clock
+OK   the orchestrator re-exports the lifecycle unchanged (existing importers unaffected) and no longer defines it
+OK   the orchestrator remains Goal/Rhythm-blind after the extraction
+OK   the adapter core is referenced only by its real-wiring leaf, the O4 enrichment (the loader caller), the preview handler and the O5 P1 fact-preparation module (both TYPE imports only) and, since O5 P2d, the scheduling context (TYPE import only) and its loader (the shared range-bounds helper)
+OK   the preview handler takes only the OpportunityRangeDeps TYPE from the adapter and never calls a loader
+OK   the LIVE real wiring is referenced by no production file (the preview route binds the coherent scheduling snapshot instead)
+OK   exactly one production file calls the adapter loader and projection: the generic O4 enrichment
+OK   DecisionFacts, the Goal provider, the orchestrator and the Constructor modules do not reference the range adapter
+OK   the range adapter does not widen any existing loader: listPlannedActivitiesForDay still selects by start time only (unchanged)
+ALL OPPORTUNITY RANGE ADAPTER ARCHITECTURE CHECKS PASSED
+
+# exit=0 signal=

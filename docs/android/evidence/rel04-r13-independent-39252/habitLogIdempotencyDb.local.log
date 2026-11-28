@@ -1,0 +1,12 @@
+OK   A sequential retry with the SAME clientRequestId returns the SAME row id
+OK   Exactly one HabitLog row exists for this clientRequestId after the retry (no duplicate)
+OK   A genuine concurrent race with the SAME clientRequestId still resolves to the SAME row id
+OK   Exactly one HabitLog row exists after the concurrent race (unique index + catch(23505) fallback both held)
+OK   Two different clientRequestIds for the same user create two independent rows
+OK   The same clientRequestId string for two different users creates two independent rows
+OK   Looking up the shared id scoped to the OTHER user's own id returns their own row, not the first user's
+OK   Looking up the shared id scoped to the owner's own id returns the owner's row, not the other user's
+OK   Two calls with clientRequestId omitted both persist (null does not dedupe against itself)
+OK   clientRequestId reads back null for a legacy/non-idempotent call
+
+ALL HABITLOG IDEMPOTENCY DB CHECKS PASSED

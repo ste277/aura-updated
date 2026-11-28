@@ -1,0 +1,53 @@
+$ npx ts-node test/decisionPressureArchitecture.test.ts
+# job=math-core-tests step=Run decision pressure architecture test env={}
+OK   PRESSURE TYPE: exactly `NONE | LAST_KNOWN_OPPORTUNITY`, a string-literal union -- no numeric score, no third value
+OK   the deriver is ONE exported pure function returning the categorical type: `deriveDecisionPressure(input): DecisionPressure`
+OK   NO NUMERIC SCORE: no score / weight / rank / boost / priority / shortfall / deficit / urgency vocabulary, and no numeric return type
+OK   NO USER-FACING LANGUAGE: no "must do today", "last chance" or "required today" wording anywhere (explanation belongs to P5)
+OK   the input is the minimal generic context: immutable evidence, the planning date and the candidate flexibility -- not a DayIntent
+OK   AUTHORITY: the evidence input is typed `DecisionEvidence` and the module imports exactly that type (from decisionEvidence) plus the strict civil-date validator -- nothing else
+OK   NO DECISIONFACTS AUTHORITY: the module neither imports the mutable `DecisionFacts` transport module nor names any of its types (DecisionFacts, RecurrenceDecisionFacts, OpportunityDecisionFacts, resolveDecisionFactsForIntent, decisionFacts)
+OK   P2A AUTHORITY BOUNDARY: the only production modules that import the immutable evidence module are the evidence preparation stage and the pressure deriver; the pressure deriver is the only one that is a POLICY module and it never imports DecisionFacts
+OK   PURE: no async, await, Promise, timer, DB, pool, query, transaction or write in the module
+OK   NO CLOCK: no `Date.now`, `new Date`, `Date.parse`, `getTime` or any Date construction in the deriver (civil dates are strings, compared as strings; validity comes from the existing strict validator)
+OK   NO ENVIRONMENT / FLAGS: no process.env, feature flag, config or global read
+OK   NO GLOBAL STATE: no module-level `let`/`var` and no mutable module state (only const arrow helpers and the exported function)
+OK   NO LOGGING / TELEMETRY: no console, logger, warn or metric call
+OK   FAILS CLOSED, NEVER THROWS: the derivation runs inside try/catch that returns NONE, and the module contains no `throw`
+OK   NO MUTATION OF EVIDENCE: no assignment to, delete of or mutating call on any evidence property
+OK   SOURCE NEUTRALITY: no Goal, manual/automatic, demand, provenance, hand-off, rhythm, intent-id, title, activity or UI vocabulary, and the input carries no id, title or source
+OK   EXCLUDED AUTHORITIES: no importance, deadline, original order, timing fit, capacity, contention or targetDate is read
+OK   NO CONSTRUCTOR RESULT: no proposed/deferred item, conflict diagnostic, winner/loser, placement or constructDay concept is read
+OK   NO SHORTFALL MATH: no line combines recurrence demand with opportunity supply (demand is occurrences, supply is viable civil days -- never subtracted or compared)
+OK   PREDICATE A: only FLEXIBLE can qualify; FIXED (and anything else) returns false
+OK   PREDICATE B/F: both evidence categories are required
+OK   PREDICATE C: the period must be LOCAL_CALENDAR_WEEK
+OK   PREDICATE strict civil dates for all five date inputs
+OK   PREDICATE date order: period and horizon
+OK   PREDICATE D: the planning date lies inside the period
+OK   PREDICATE recurrence counts are nonnegative integers
+OK   PREDICATE recurrence arithmetic: remaining equals the producer relation max(0, target - completed - committed)
+OK   PREDICATE E: at least one occurrence remains (>= 1, not exactly 1)
+OK   PREDICATE G: the horizon starts exactly at the planning date
+OK   PREDICATE H: the horizon ends exactly at the period end
+OK   PREDICATE I: the duration basis must be RESOLVED, and the duration a positive integer
+OK   PREDICATE opportunity counts are nonnegative integers (all six)
+OK   PREDICATE N: the evaluated partition
+OK   PREDICATE N: the viable partition
+OK   PREDICATE N: the unknown partition
+OK   PREDICATE J: the current day must be KNOWN_FEASIBLE
+OK   PREDICATE K: no later day is known viable
+OK   PREDICATE L: no later day is unknown
+OK   PREDICATE M: coverage must be COMPLETE
+OK   PREDICATE positive evidence only: the function ends in `return true` (anything not explicitly established was already NONE)
+OK   the predicate has no OR-branch that could widen it: every qualifying condition is an early `return false`, and there is exactly one `return true`
+OK   UNWIRED: the only production files that mention pressure at all are the deriver itself, since O5 P3b the two inert shadow modules and, since O5 P4a, the two inert promotion-input modules that consume its derived value (pinned by shadowPressureArchitecture.test.ts and promotionInputArchitecture.test.ts) -- not the orchestrator, Constructor, comparator, placement, capacity, replenishment, preview, acceptance, signing, persistence, routes or explanation code
+OK   the Constructor, comparator, placement, capacity, replenishment, evidence/preparation stage, preview request, signing, acceptance, persistence, Recomposition, presentation and routes contain no pressure reference (nothing is wired)
+OK   NO NEW FIELD ANYWHERE: pressure is not a field of DayIntent, ProposedItem, DeferredItem, the preview body, the signed item facts or any persisted row (no schema change: the Prisma schema and every migration directory's own contents mention no pressure -- count-independent)
+OK   no shadow evaluation, contention trace, active policy or explanation exists in this slice (P3a / P3b / P4 / P5 own them)
+OK   P2A UNCHANGED: the evidence module still has only a type-only import, no policy or pressure concept, and is not given a consumer by this slice
+OK   the unit test makes no claim that pressure is wired, active or changes any Constructor outcome
+OK   the unit test covers: the canonical positive, remaining > 1, Sunday one-day horizon, Monday, midweek, year boundary, DST dates, the single-predicate matrix (>=150), malformed counts/durations/dates, absence/hostile evidence, immutability, determinism, no clock/log, source neutrality, multiple candidates, and the REAL producers
+ALL DECISION PRESSURE ARCHITECTURE CHECKS PASSED
+
+# exit=0 signal=

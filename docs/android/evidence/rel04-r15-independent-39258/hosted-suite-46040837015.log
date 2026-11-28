@@ -1,0 +1,18 @@
+/private/tmp/aura-r15-ci.HT3NmC/46040837015/0_Ephemeris _ panchang tests.txt:11747:2026-11-27T17:32:29.2035238Z 15 passed, 0 failed
+/private/tmp/aura-r15-ci.HT3NmC/46040837015/0_Ephemeris _ panchang tests.txt:12411:2026-11-27T17:33:20.0171033Z 15 passed, 0 failed
+/private/tmp/aura-r15-ci.HT3NmC/46040837015/0_Ephemeris _ panchang tests.txt:12494:2026-11-27T17:33:36.6406275Z 15 passed, 0 failed
+/private/tmp/aura-r15-ci.HT3NmC/46040837015/0_Ephemeris _ panchang tests.txt:13149:2026-11-27T17:35:47.2289857Z SKIP fixture re-check: 6c69d7d not in this checkout (shallow clone); fixtures used as vendored
+/private/tmp/aura-r15-ci.HT3NmC/46040837015/0_Ephemeris _ panchang tests.txt:13215:2026-11-27T17:36:00.6751886Z 58 passed, 0 failed
+/private/tmp/aura-r15-ci.HT3NmC/46040837015/8_REL-04 Next.js app rendering tests.txt:728:2026-11-27T17:20:42.6198727Z ALL HABITLOG IDEMPOTENCY DB CHECKS PASSED
+/private/tmp/aura-r15-ci.HT3NmC/46040837015/8_REL-04 Next.js app rendering tests.txt:755:2026-11-27T17:20:58.1771089Z 15 passed, 0 failed
+/private/tmp/aura-r15-ci.HT3NmC/46040837015/5_REL-04 Chromium multi-tab tests.txt:442:2026-11-27T17:20:06.4450190Z CH15 R5 HEAD (a3a02b8) worker: {"statuses":[503,503,503,503,503,503,503,503],"reloaded":true,"domNavigations":1}
+/private/tmp/aura-r15-ci.HT3NmC/46040837015/REL-04 Next.js app rendering tests/11_Run REL-04 R15 operation contract Home test (production build, two real Chromium tabs, PostgreSQL).txt:27:2026-11-27T17:20:58.1771044Z 15 passed, 0 failed
+/private/tmp/aura-r15-ci.HT3NmC/46040837015/3_Day Constructor acceptance DB tests.txt:781:2026-11-27T17:20:47.2472705Z ALL WEEKLY PLAN REVIEW CLIENT DB CHECKS PASSED
+/private/tmp/aura-r15-ci.HT3NmC/46040837015/REL-04 Next.js app rendering tests/10_Run HabitLog idempotency + R15 row-binding DB test.txt:22:2026-11-27T17:20:42.6198724Z ALL HABITLOG IDEMPOTENCY DB CHECKS PASSED
+/private/tmp/aura-r15-ci.HT3NmC/46040837015/REL-04 Chromium multi-tab tests/7_Run REL-04 Chromium multi-tab test.txt:33:2026-11-27T17:20:06.4450144Z CH15 R5 HEAD (a3a02b8) worker: {"statuses":[503,503,503,503,503,503,503,503],"reloaded":true,"domNavigations":1}
+/private/tmp/aura-r15-ci.HT3NmC/46040837015/Ephemeris _ panchang tests/232_Run COMPAT-03 geolocation Java logic test.txt:23:2026-11-27T17:32:29.2035236Z 15 passed, 0 failed
+/private/tmp/aura-r15-ci.HT3NmC/46040837015/Day Constructor acceptance DB tests/17_Run Weekly plan review client DB test.txt:36:2026-11-27T17:20:47.2472703Z ALL WEEKLY PLAN REVIEW CLIENT DB CHECKS PASSED
+/private/tmp/aura-r15-ci.HT3NmC/46040837015/Ephemeris _ panchang tests/251_Run REL-04 Home and _find transition test (IR-01_IR-03).txt:23:2026-11-27T17:33:20.0171026Z 15 passed, 0 failed
+/private/tmp/aura-r15-ci.HT3NmC/46040837015/Ephemeris _ panchang tests/254_Run REL-04 R1-head reproduction and mixed-version test (R2).txt:24:2026-11-27T17:33:36.6406271Z 15 passed, 0 failed
+/private/tmp/aura-r15-ci.HT3NmC/46040837015/Ephemeris _ panchang tests/271_Run REL-04 R15 shared operation contract test (39255 witnesses on 6c69d7d vs current; decoder, receipts, identity; negative controls).txt:7:2026-11-27T17:35:47.2289806Z SKIP fixture re-check: 6c69d7d not in this checkout (sha
+/private/tmp/aura-r15-ci.HT3NmC/46040837015/Ephemeris _ panchang tests/271_Run REL-04 R15 shared operation contract test (39255 witnesses on 6c69d7d vs current; decoder, receipts, identity; negative controls).txt:73:2026-11-27T17:36:00.6751879Z 58 passed, 0 failed

@@ -1,0 +1,50 @@
+OK   fixture rel04-r2-head/offlineHabitQueue.ts.txt == db8607e apps/web/lib/offlineHabitQueue.ts
+OK   fixture rel04-r3-head/offlineHabitQueue.ts.txt == b323d2a apps/web/lib/offlineHabitQueue.ts
+OK   fixture rel04-r8-head/offlineHabitQueue.ts.txt == eab072c apps/web/lib/offlineHabitQueue.ts
+OK   fixture rel04-r8-head/activitySync.ts.txt == eab072c apps/web/lib/activitySync.ts
+OK   fixture rel04-r8-head/signOut.ts.txt == eab072c apps/web/lib/signOut.ts
+OK   the R8 independent witnesses are preserved byte-for-byte (SHA256SUMS of the evidence directory)
+X2 R8 r2: {"format":"r2","removed":1,"markersBeforeRetry":0,"submit":"confirmed","serverRows":1}
+OK   X2 R8 HEAD reproduces (R2 aura_q3 localStorage-only): the confirmed sign-out discard removes it with NO decision; the same request is then submitted and CONFIRMED (server row)
+X2 current r2: {"format":"r2","removed":1,"markersBeforeRetry":1,"submit":"not-stored","serverRows":0}
+OK   X2 CORRECTED (r2): the discard records a durable decision BEFORE removing the entry; the same request is refused (not sent), ZERO server rows
+X2 R8 r3: {"format":"r3","removed":1,"markersBeforeRetry":0,"submit":"confirmed","serverRows":1}
+OK   X2 R8 HEAD reproduces (R3 aura_q4 localStorage-only): the confirmed sign-out discard removes it with NO decision; the same request is then submitted and CONFIRMED (server row)
+X2 current r3: {"format":"r3","removed":1,"markersBeforeRetry":1,"submit":"not-stored","serverRows":0}
+OK   X2 CORRECTED (r3): the discard records a durable decision BEFORE removing the entry; the same request is refused (not sent), ZERO server rows
+X1 R8 IndexedDB failure: {"removed":1,"decision":"discarded","submit":"confirmed","replay":"unreadable","serverRows":1}
+OK   X1 R8 HEAD reproduces: after a confirmed discard (decision written), an IndexedDB read failure makes the submission fall back to the network: CONFIRMED, server row
+X1 current IndexedDB failure: {"removed":1,"decision":"discarded","submit":"storage-unavailable","replay":"unreadable","serverRows":0}
+OK   X1 CORRECTED: with IndexedDB reads failing the discarded request is NOT transmitted (storage-unavailable, no direct fallback); replay stops unreadable; ZERO server rows
+X1 R8 unreadable source (denied): {"direct":"confirmed","stillPaused":1,"rows":1}
+OK   X1 R8 HEAD reproduces (denied): with the matching retired source unreadable the request is submitted directly and CONFIRMED (server row) while still paused
+X1 current unreadable source (denied): {"direct":"storage-unavailable","stillPaused":1,"rows":0}
+OK   X1 CORRECTED (denied): an unreadable retired source blocks transmission (storage-unavailable), the entry stays paused, ZERO server rows
+X1 R8 unreadable source (getItem-throws): {"direct":"confirmed","stillPaused":1,"rows":1}
+OK   X1 R8 HEAD reproduces (getItem-throws): with the matching retired source unreadable the request is submitted directly and CONFIRMED (server row) while still paused
+X1 current unreadable source (getItem-throws): {"direct":"storage-unavailable","stillPaused":1,"rows":0}
+OK   X1 CORRECTED (getItem-throws): an unreadable retired source blocks transmission (storage-unavailable), the entry stays paused, ZERO server rows
+X3 R8: {"initialPaused":1,"removed":1,"failed":1,"sourceCount":0,"afterPaused":0,"afterPending":1,"attempted":1,"serverRows":1}
+OK   X3 R8 HEAD reproduces: the IndexedDB discard fails, the retired copy is removed anyway, the active copy is UNPAUSED and replayed (server row)
+OK   X3 R8 HEAD reproduces: sign-out asks about 2 activity logs for ONE logical activity (physical copies)
+X3 current: {"initialPaused":1,"removed":0,"failed":1,"sourceCount":1,"afterPaused":1,"afterPending":0,"attempted":0,"serverRows":0}
+OK   X3 CORRECTED: the failed discard transaction removes NOTHING (retired copy preserved), reports the activity as failed (never removed), it stays paused, nothing is replayed, ZERO server rows
+OK   X3 CORRECTED: sign-out asks about ONE activity log (logical), paused
+OK   E1 cleanup failing after the decisions committed: reported as discarded-but-not-deleted (cleanupPending 2, never "removed"), the message says they will never be sent
+OK   E1 the surviving copies stay paused (Home counts them for a retry) and are permanently ineligible: both re-submissions refused, replay sends nothing, ZERO server rows
+OK   E1 a retried sign-out safely completes the cleanup (2 removed), keeps the decisions, sends nothing
+OK   E2 a discard transaction interrupted after its first decision write commits NOTHING: both reported failed, no decision, both sources kept, still paused and never sent
+OK   E2 retrying the same confirmed discard completes it exactly once
+OK   E3 decision committed but cleanup never ran: the surviving retired entry is ineligible for any payload; ZERO server rows
+OK   E4 an unparseable aura_q3 value is identified by its key: that request is paused and never sent; unrelated activity is unaffected
+OK   E4 an unidentifiable (unparseable v2) entry blocks every transmission of the account (storage-unavailable, nothing sent) and is shown paused; the confirmed discard PRESERVES it (R10: reported as not identifiable, never removed) and transmission stays blocked
+OK   E5a a discard while another context is sending keeps the activity undecided (keptInFlight); the send completes and settles it exactly once
+OK   E5b 20 interleavings of a submission racing the durable discard of its localStorage-only request: never transmitted (zero server rows), refused afterwards
+OK   E6 Home: 1 pending + 4 paused logical activities (7 physical copies); sign-out asks about the SAME 5 (4 paused) and reports 5 removed
+OK   E7 A's durable discard decides only A's request: B's identical entry is untouched and still paused; no decision for B
+OK   E8 healthy online submission is confirmed once; offline submission is queued, shown pending, then replayed and confirmed once
+OK   E9 submitActivityLog sends only after enqueueOwned stored and claimed the activity (storage failure -> storage-unavailable; no "outbox ? … : send anyway" path)
+OK   E9 the only other client POSTs are the unused useHabitLogs hook (never imported) and PastActivityModal's fallback (no clientRequestId, never reached: every caller passes onConfirmLog)
+OK   E9 such a header-less POST is refused by the server before storing anything (503)
+
+36 passed, 0 failed

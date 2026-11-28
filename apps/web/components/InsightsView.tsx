@@ -1252,7 +1252,7 @@ export function InsightsView({ userId, onOpenBirthProfile, timezone, logEntries 
                        * every evidence-based calculation above, which excludes it via
                        * confirmedLogEntries), but only when it's visibly labeled as
                        * such -- never presented identically to a confirmed log. */}
-                      {entry.syncStatus === 'pending' && <StatusBadge label="Pending sync" tone="caution" />}
+                      {entry.syncStatus === 'pending' && <StatusBadge label="Not confirmed" tone="caution" />}
                     </div>
                   </div>
                   <span style={{ color: '#4ade80', fontFamily: 'monospace', fontSize: 11, whiteSpace: 'nowrap' }}>{entry.activeWindow}</span>

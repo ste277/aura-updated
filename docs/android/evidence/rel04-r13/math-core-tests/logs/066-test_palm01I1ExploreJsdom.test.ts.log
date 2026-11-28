@@ -1,0 +1,84 @@
+$ npx ts-node --project tsconfig.jsdom-tests.json test/palm01I1ExploreJsdom.test.ts
+# job=math-core-tests step=Run Palmistry Explore + guide component test env={}
+OK   A1. Explore renders exactly four feature cards
+OK   A2. first three cards are unchanged and in their original order
+OK   A3. Palmistry is the fourth card
+OK   A4. Palmistry card carries the approved description
+OK   A5. Quick Explore grid still renders
+OK   A6. selecting Palmistry calls onOpenPalmistry exactly once
+OK   A7. selecting Palmistry calls no other navigation callback
+OK   A8. the existing three cards still navigate to their own destinations
+OK   A9. gate closed: Explore shows only the original three cards
+OK   A10. gate: pending content is hidden in a production build
+OK   A11. gate: pending content is visible in local development
+OK   A12. gate: approved content is visible in production
+OK   A14. with the stand-in card copy (null) Explore shows only the original three cards
+OK   S1. stand-in gate is always closed
+OK   S2. stand-in card copy is null
+OK   S3. stand-in view renders nothing
+OK   A13. gate: defaults read the real review status (approved -> visible when NODE_ENV=production)
+OK   B1. intro heading is shown
+OK   B2. general disclosure is visible on the guide itself (not a separate page)
+OK   B3. disclosure is exposed as an accessible note
+OK   B4. review-pending notice follows the real approval record (APPROVED -> notice hidden)
+OK   B5. overview is shown before any selection
+OK   B6. longevity disclosure is not shown before ayurlekha is selected
+OK   B7. text list offers every entry (text alternative to the diagram)
+OK   B8. list buttons are real <button>s with aria-pressed=false initially
+OK   B9. selecting from the list shows that entry's detail
+OK   B10. detail shows title, traditional name, tradition and attribution
+OK   B11. detail shows source attribution
+OK   B12. longevity disclosure appears for ayurlekha
+OK   B13. no numeric lifespan appears in the detail
+OK   B14. selected list button reports aria-pressed=true
+OK   B15. the matching SVG line is highlighted
+OK   B16. selecting a feature makes no network request (no per-selection tracking)
+OK   B17. a short polite status announces the selection (not the whole entry)
+OK   B17b. a list selection moves focus to the detail heading (brings it into view on phones)
+OK   B18. selecting another entry updates the explanation
+OK   B19. previous highlight is cleared
+OK   B20. longevity disclosure is removed for other entries
+OK   C1. the diagram exposes four focusable line controls
+OK   C2. each line control has an accessible name
+OK   C3. focusing a line draws a visible focus ring
+OK   C4. Enter on a focused line selects it
+OK   C5. Space on a line selects it
+OK   C6. other keys do not change selection
+OK   C7. focus ring is removed on blur
+OK   C8. selected state is not colour-only (thicker stroke + end markers)
+OK   C9. one precise-hit path per drawn line, inside an aria-hidden group
+OK   C10. precise layer is above every line group (last child of the SVG)
+OK   C11. the upward line is first in the precise layer (transverse lines win at crossings)
+OK   C12. clicking a precise-hit path selects that line
+OK   C13. a diagram selection keeps keyboard focus on the diagram line
+OK   C14. "Back to overview" returns focus to the diagram line that opened the entry
+OK   C15a. switching to Marks unmounts the diagram
+OK   C15b. focus falls back to the list entry when the diagram line is gone
+OK   D1. selecting a mark switches to the Marks view
+OK   D2. mark detail says it is shown as a symbol only
+OK   D3. selected mark button reports aria-pressed=true
+OK   D4. "Back to overview" returns to the overview
+OK   D5. focus returns to the list entry that was open
+OK   D6. Lines tab restores the hand diagram
+OK   D7. Back to Explore calls onBack once
+OK   D9. an invalid initial selection shows a safe notice, not a crash
+OK   D10. invalid selection never renders a detail
+OK   D11. invalid notice recovers to the overview
+OK   D12. a valid initial mark id opens that mark in the Marks view
+OK   E1. AppTab union includes palmistry
+OK   E2. VALID_TABS includes palmistry only when the launch gate is open
+OK   E3. Explore opens the palmistry tab (not Home/Plan/Timeline), and only when the gate is open
+OK   E3b. the Explore card copy is passed from the guide module (excluded with it in production)
+OK   E4. Palmistry renders inside the shell with Back -> Explore, behind the gate
+OK   E5. the Explore dock item stays highlighted on the palmistry tab
+OK   E6. GUIDE_OPENED fires from the existing per-tab effect
+OK   E7. no new routing framework (no next/navigation router push for palmistry)
+OK   E8. dock still has six items
+OK   F1. mounting and using the guide made no network request
+OK   F3. no <input type=file>, <video>, <canvas> or <img> in the guide
+OK   F4. external source links open safely (noopener)
+OK   F5. the Sources list shows the CC BY-SA 4.0 notice and licence link for Zysk 2025
+
+78 passed, 0 failed
+
+# exit=0 signal=

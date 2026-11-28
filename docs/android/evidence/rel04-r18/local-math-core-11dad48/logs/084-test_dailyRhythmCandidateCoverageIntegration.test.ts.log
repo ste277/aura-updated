@@ -1,0 +1,19 @@
+$ npx ts-node test/dailyRhythmCandidateCoverageIntegration.test.ts
+# job=math-core-tests step=Run Daily Rhythm candidate coverage test env={}
+OK   1/2. DR3 widens the search enough to reach the 4th-ranked, outside-work candidate (invisible to DR2's own default limit of 3)
+OK   1b. the explanation reflects the preferred placement
+OK   14. the search was widened to exactly DAILY_RHYTHM_EXPANDED_SEARCH_LIMIT, never larger (bounded, not unbounded)
+OK   3. no outside-work candidate anywhere in the bounded search -> falls back to the engine's own BEST-ranked candidate
+OK   3b. the fallback explanation is attached
+OK   4. a lower-quality (CAUTION) outside-work candidate is preferred over a higher-quality (EXCELLENT) inside-work one
+OK   5. a FIXED commitment is placed exactly as requested, even during work hours
+OK   5b. a FIXED intent never calls searchTiming -- no search to widen
+OK   5c. a FIXED placement never receives a Daily Rhythm explanation
+OK   6. UserAvailabilityPeriod and the DR3-widened search both apply together without error or interference
+OK   13. identical requests run twice through the widened-search path produce an identical placement
+OK   11. an unconfigured user's search request carries no `limit` override at all (undefined, not merely 3)
+OK   8. a WORK activity's search request is widened like a personal one when Daily Rhythm is configured (re-baselined by AURA-PREF-01: work activities now prefer working hours)
+
+ALL DAILY RHYTHM CANDIDATE COVERAGE INTEGRATION CHECKS PASSED
+
+# exit=0 signal=

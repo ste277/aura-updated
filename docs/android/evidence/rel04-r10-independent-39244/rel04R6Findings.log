@@ -1,0 +1,31 @@
+OK   fixture sw.js.txt == a3a02b8 apps/web/public/sw.js
+OK   fixture offlineHabitQueue.ts.txt == a3a02b8 apps/web/lib/offlineHabitQueue.ts
+OK   fixture bootstrap.route.ts.txt == a3a02b8 apps/web/app/api/plan-day/bootstrap/route.ts
+Q1 R5: {"a":1,"b":0,"bSourceStillPresent":false}
+OK   Q1 R5 HEAD reproduces the assessment: two accounts, same id and payload -> ONE migrated entry, B's source deleted
+Q1 current (R8): {"a":0,"b":0,"bSourceStillPresent":true}
+OK   Q1 CORRECTED (R8): each account keeps its own entry, quarantined in place (A paused 1, B paused 1); nothing migrated; both sources preserved
+OK   Q1 (R8) replay for A sends nothing (quarantined entries are never sent; no server row for either account); B's entry is untouched
+OK   Q1 (R8) B's discard removes exactly B's entry; A's identical entry is unaffected
+OK   Q1 (R8) a re-appearing source of either account stays quarantined for THAT account: never active
+Q2 R5: {"reportedUnreadable":false,"markerKept":false,"restoredAlreadySettled":true}
+OK   Q2 R5 HEAD reproduces the assessment: denied storage read as retirement -> not reported unreadable, marker pruned, settled entry recreated
+Q2 current (R8): {"reportedUnreadable":true,"markerKept":true,"restoredAlreadySettled":false}
+OK   Q2 CORRECTED: denied storage is reported UNREADABLE, the marker is KEPT, and restored access does not recreate the settled entry
+OK   Q2 (R8) after access is restored the stale interim copy is preserved in place and quarantined (paused, never active); the decision never expires
+OK   Q2 after restore the previously settled entry is not replayed
+OK   Q2 while storage is denied Home's read is null (presented as unavailable, not empty) and sign-out asks "couldn't read" and reports the owned part UNKNOWN (kept)
+W R5: {"limit":"1,1,1,0,0","w1":{"queries":2,"navigations":1},"w2":{"queries":3,"navigations":3,"budgetUsed":3}}
+OK   W3 R5 HEAD: origin limit across restart already held (1,1,1,0,0)
+OK   W1 R5 HEAD reproduces the assessment: a current page acknowledging two overlapping checks is still RELOADED
+OK   W2 R5 HEAD reproduces the assessment: three overlapping checks for one old page use all three reload slots
+W R6: {"limit":"1,1,1,0,0","w1":{"queries":1,"navigations":0},"w2":{"queries":1,"navigations":1,"budgetUsed":1}}
+OK   W3 CORRECTED (preserved): origin limit across restart 1,1,1,0,0
+OK   W1 CORRECTED: overlapping checks for a current page are coalesced; its acknowledgement answers them; NOT reloaded
+OK   W2 CORRECTED: three overlapping checks for one old page = ONE check, ONE reload, ONE slot
+B1 R5: 200 {"timezone":null,"planningDate":null,"horizon":null,"availabilityConfigured":nul | 200
+OK   B1 R5 HEAD reproduces the assessment: missing and invalid sessions get an empty 200
+OK   B1 CORRECTED (real route): missing session -> 401 {"error":"Not authenticated."}, invalid -> 401, a session whose user no longer exists -> 401
+OK   B1 the missing/invalid-session paths are refused before any data loader runs
+
+22 passed, 0 failed

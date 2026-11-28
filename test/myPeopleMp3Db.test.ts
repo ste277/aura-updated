@@ -26,6 +26,7 @@ const occasionRoute = require('../apps/web/app/api/people/[personId]/occasions/[
 const upcomingRoute = require('../apps/web/app/api/people/occasions/upcoming/route');
 const dismissalRoute = require('../apps/web/app/api/people/occasions/[occasionId]/dismissal/route');
 const plansRoute = require('../apps/web/app/api/plans/route');
+const { boundHeaders } = require('./rel04BoundTestHeaders');
 const moveRoute = require('../apps/web/app/api/plans/[planId]/move/route');
 const { MyPeopleHomeCard } = require('../apps/web/components/MyPeopleHomeCard');
 const { PeopleView } = require('../apps/web/components/PeopleView');
@@ -57,7 +58,10 @@ async function route(method: string, url: string, body?: unknown, as: string | n
   if ((m = /^\/api\/people\/([^/]+)\/occasions\/([^/]+)$/.exec(path))) { const c = { params: { personId: m[1], occasionId: m[2] } }; return method === 'PATCH' ? occasionRoute.PATCH(r, c) : occasionRoute.DELETE(r, c); }
   if ((m = /^\/api\/people\/([^/]+)\/occasions$/.exec(path))) { const c = { params: { personId: m[1] } }; return method === 'POST' ? occasionsRoute.POST(r, c) : occasionsRoute.GET(r, c); }
   if ((m = /^\/api\/people\/([^/]+)$/.exec(path))) { const c = { params: { personId: m[1] } }; return method === 'PATCH' ? personRoute.PATCH(r, c) : method === 'DELETE' ? personRoute.DELETE(r, c) : personRoute.GET(r, c); }
-  if (path === '/api/plans') return method === 'POST' ? plansRoute.POST(r) : plansRoute.GET(r);
+  // AURA-ANDROID-REL-04 (R2/R3 pattern, test/rel04BoundTestHeaders.ts): POST /api/plans is an account-bound write --
+  // every current client states the account it writes for (X-Aura-Expected-Account), here the request's OWN session
+  // account, exactly what the app sends. Ownership is still decided by the route.
+  if (path === '/api/plans') return method === 'POST' ? plansRoute.POST({ ...r, headers: boundHeaders(as) }) : plansRoute.GET(r);
   if ((m = /^\/api\/plans\/([^/]+)\/move$/.exec(path))) return moveRoute.POST(r, { params: { planId: m[1] } });
   if (path === '/api/cities/custom') return new Response('[]', { status: 200 });
   throw new Error(`unrouted ${method} ${url}`);

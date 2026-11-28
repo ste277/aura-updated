@@ -1,0 +1,56 @@
+$ npx ts-node test/goalsReviewedCreateDb.test.ts
+# job=day-constructor-acceptance-db-tests step=Run Goals reviewed-create DB test env={}
+=== LEGACY COMPATIBILITY ===
+OK   legacy: 200/201-shaped success
+OK   legacy: exactly 3 GET_FITTER activities created
+OK   legacy: activities carry real template titles
+=== EXPLICIT REVIEW: SUBSET ===
+OK   subset: Goal created
+OK   subset: exactly 2 activities created (B removed, never reintroduced)
+OK   subset: "Strength training session" (B) is absent
+OK   subset: both kept activities present
+=== EXPLICIT REVIEW: RENAME ===
+OK   rename: Goal created
+OK   rename: renamed title persisted verbatim
+OK   rename: activityId preserved exactly as submitted (never rematched from the new title)
+=== EXPLICIT REVIEW: FREEFORM ===
+OK   freeform: Goal created
+OK   freeform: exactly one freeform GoalActivity created
+OK   freeform: activityId is null (never inferred from title)
+OK   freeform: completion defaults to DONE
+=== COMPLETION REQUIREMENT ===
+OK   DURATION preserved via canonical persisted fields
+OK   MEASURED_TARGET preserved via canonical persisted fields
+OK   omitted completionRequirement -> DONE (all three columns null)
+OK   invalid completionRequirement: whole request rejected (4xx)
+OK   invalid completionRequirement: zero new Goal rows (no partial write)
+=== RHYTHM ===
+OK   omitted rhythm -> NONE
+OK   explicit N_PER_WEEK rhythm persists correctly
+OK   invalid Rhythm: whole request rejected (4xx)
+OK   invalid Rhythm: zero new Goal rows
+=== INVALID ACTIVITY ID (TRUST GAP CLOSED) ===
+OK   invalid activityId: whole request rejected (4xx)
+OK   invalid activityId: zero Goal rows created
+OK   invalid activityId: zero GoalActivity rows created
+=== EXPLICIT EMPTY ===
+OK   explicit empty: Goal created
+OK   explicit empty: zero GoalActivities (templateCategory never re-expanded in EXPLICIT_REVIEW mode)
+=== AMBIGUOUS REQUEST ===
+OK   ambiguous request: rejected (4xx), never silently picks one
+OK   ambiguous request: zero new Goal rows
+=== MULTI-ROW ATOMIC FAILURE ===
+OK   atomic failure: rejected (4xx)
+OK   atomic failure: zero new Goal rows (the two valid rows are never persisted alone)
+OK   atomic failure: zero GoalActivity rows for the otherwise-valid siblings
+=== SIZE BOUND ===
+OK   size bound: a request with 21 activities (over the 20 cap) is rejected
+OK   size bound: zero new Goal rows
+=== OWNERSHIP ===
+OK   ownership: the Goal is created for the AUTHENTICATED user, ignoring any client-supplied userId
+OK   ownership: unauthenticated request is rejected
+=== CANDIDATE A HANDOFF ===
+OK   Candidate A handoff: A1 discovery sees the explicitly reviewed-created GoalActivity
+ALL GOALS REVIEWED CREATE CHECKS PASSED
+
+# exit=0 signal=

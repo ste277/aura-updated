@@ -1,0 +1,64 @@
+$ npx ts-node test/decisionFactsArchitecture.test.ts
+# job=math-core-tests step=Run Decision Facts V1 architecture test env={}
+OK   orchestrator is Goal-blind (no "goal" anywhere, comments included)
+OK   orchestrator is Rhythm-blind of the GOAL domain (no Goal Activity Rhythm leakage; the unrelated Daily Rhythm feature is expected)
+OK   orchestrator imports no goal-demand module (goalDemandIntentId/goalDemandCandidates/goalDemandProvenanceAuthorization/goalActivityRhythm)
+OK   orchestrator imports decisionFacts.ts only for the generic lookup/type
+OK   orchestrator has exactly one deps-bound fact acquisition: none (no loader dependency, no DB call for facts)
+OK   decisionFacts.ts has no import statements at all (source-blind)
+OK   decisionFacts.ts never mentions a source, goal, rhythm, or intent-id decoding
+OK   decisionFacts.ts does no DB/network I/O
+OK   DecisionFacts type carries no priority/urgency/rank/weight/boost/penalty/score or source-identity field
+OK   preview request handler is source-blind (no goal/rhythm mention, no goal module import)
+OK   provider reuses Candidate A1 read model verbatim (imports loadEligibleGoalDemand)
+OK   provider uses the ENCODER, never the decoder, and no ad hoc namespace parsing
+OK   provider never imports the provenance authorization layer
+OK   provider contains no Rhythm arithmetic of its own (no eligibility call, no Math.max, no week-start or date arithmetic)
+OK   O3: provider obtains the period bounds ONLY from the canonical Rhythm helper (import + single use)
+OK   O3: provider imports no opportunity (O1/O2) module and no range/availability module
+OK   O3: the canonical week helper lives with the Rhythm week-start it is derived from
+OK   O3: decisionFacts.ts CARRIES the period bounds but calculates nothing (no date arithmetic, no helper, no Date)
+OK   O4: opportunity facts are the generic TYPE only in decisionFacts.ts; the Goal provider produces none and never learns coverage/viability
+OK   provider imports db.ts for the User TYPE and the one pure rhythm-facts row mapper only (no direct query)
+OK   route wires the source-specific provider into the generic loader seam (through the coherent scheduling context)
+OK   dayConstructor.ts never references decision facts
+OK   dayCapacity.ts never references decision facts
+OK   compareByOverloadPrecedence has no DecisionFacts branch (exact existing precedence)
+OK   acceptance (dayConstructorAcceptance.ts) never references decision facts (facts are not provenance and never reach persistence)
+OK   acceptance persistence (dayConstructorAcceptancePersistence.ts) never references decision facts (facts are not provenance and never reach persistence)
+OK   preview integrity/signing (dayConstructorPreviewIntegrity.ts) never references decision facts (facts are not provenance and never reach persistence)
+OK   accept route never references decision facts (facts are not provenance and never reach persistence)
+OK   goal-demand provenance authorization never references decision facts (facts are not provenance and never reach persistence)
+OK   acceptance body builder (acceptConstructedDay.ts) never references decision facts (facts are not provenance and never reach persistence)
+OK   only the generic type module, the generic P2a evidence copy (decisionEvidence.ts: copies the fields by value, interprets nothing), the P2b pure pressure deriver (decisionPressure.ts: reads immutable evidence only, unwired) and the source-specific provider reference the recurrence fact fields
+OK   O3/O4/P2a/P2b: only the generic type module, the generic evidence copy, the unwired P2b pressure deriver (evidence-only), the source-specific provider and the generic opportunity enrichment (the horizon consumer) reference periodStartDate/periodEndDate -- no policy, precedence, placement, eligibility or acceptance consumer
+OK   O3: no component/route/page reads the period bounds either
+OK   no scarcity/wellbeing/score field exists anywhere in the decision-facts path
+OK   resolveDecisionFactsForIntent: returns the provider-associated facts
+OK   resolveDecisionFactsForIntent: unknown id -> undefined
+OK   resolveDecisionFactsForIntent: absent map -> undefined (behavior identical to no provider)
+OK   resolveDecisionFactsForIntent does not decode ids: a goal-demand-shaped id with no association gets nothing
+OK   translate: only facts for requested ids are produced (ga-3 not requested)
+OK   translate: an id encoded for a DIFFERENT planning date gets no facts (ga-2)
+OK   translate: exact canonical field mapping, with the explicit period literal
+OK   translate: carries no identity (no goalId/goalActivityId anywhere in the generic fact)
+OK   translate: a non-demand (typed) intent id never receives facts
+OK   provider: 3 goal-derived intents -> 3 fact entries
+OK   provider query shape: exactly one discovery call and one batched facts call, independent of intent count (no N+1)
+OK   provider: a request with no intents performs zero queries
+OK   provider failure behavior: a failed Goal-demand load yields NO facts (never throws, never fabricates)
+OK   handler: preview with a provider is READY
+OK   handler: provider facts reach the matching resolved intent
+OK   handler: intents without an association carry no facts (non-source intents unaffected)
+OK   handler: provider received the parsed request with the real intent ids
+OK   handler: provider receives a request with no pre-existing fact map
+OK   handler: no provider -> READY with no facts anywhere (byte-equivalent to pre-Decision-Facts behavior)
+OK   failure behavior: a throwing provider does NOT fail the preview (HTTP 200 READY)
+OK   failure behavior: ...and the intent simply carries no facts
+OK   trust: forged decisionFacts in the request body (top-level or per-intent) are ignored entirely
+OK   neutrality (A carries facts, A first by originalOrder): A wins only because of originalOrder
+OK   neutrality (A carries facts, B first by originalOrder): B wins -- facts never change the existing precedence outcome
+OK   neutrality: identical outcome with and without facts when originalOrder is the same
+ALL DECISION FACTS ARCHITECTURE CHECKS PASSED
+
+# exit=0 signal=

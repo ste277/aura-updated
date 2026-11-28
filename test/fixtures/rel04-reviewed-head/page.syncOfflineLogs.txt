@@ -1,0 +1,52 @@
+    const syncOfflineLogs = async () => {
+      const rawQueue = localStorage.getItem('offline_habit_queue');
+      if (!rawQueue) return;
+
+      let queue: any[];
+      try {
+        queue = JSON.parse(rawQueue);
+      } catch {
+        return;
+      }
+      if (!Array.isArray(queue) || queue.length === 0) return;
+
+      const remaining: any[] = [];
+      let anyConfirmed = false;
+
+      for (const queuedItem of queue) {
+        const { tempId, ...payload } = queuedItem;
+        try {
+          const res = await fetch('/api/habit-logs', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          });
+          const outcome = classifyHabitLogSyncOutcome(res.status);
+          if (outcome === 'confirmed') {
+            anyConfirmed = true;
+          } else if (outcome === 'retry') {
+            // Transient-looking server failure -- keep for a later retry.
+            remaining.push(queuedItem);
+          }
+          // 'permanent-failure' (a 4xx) here -- deliberately NOT pushed back
+          // onto `remaining`, so it stops being retried, but it was also never
+          // counted in anyConfirmed, so it's never treated as a success.
+        } catch {
+          // Genuine network failure mid-replay -- still ambiguous, keep it.
+          remaining.push(queuedItem);
+        }
+      }
+
+      if (remaining.length > 0) {
+        localStorage.setItem('offline_habit_queue', JSON.stringify(remaining));
+      } else {
+        localStorage.removeItem('offline_habit_queue');
+      }
+
+      // Refresh whenever anything was attempted, not only on a confirmed
+      // success -- a permanently-discarded 4xx entry still needs the stale
+      // "pending" optimistic row cleared out of logEntries, which this
+      // full refetch-and-replace already does as a side effect.
+      loadUserDataAndLogs();
+      if (anyConfirmed) loadMyDay();
+    };

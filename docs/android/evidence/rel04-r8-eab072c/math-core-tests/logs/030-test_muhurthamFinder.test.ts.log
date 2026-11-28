@@ -1,0 +1,106 @@
+$ npx ts-node test/muhurthamFinder.test.ts
+# job=math-core-tests step=Run Muhurtham Finder test env={}
+OK   Known SUPPORTED activity (start-journey) returns a non-empty result
+OK   Returns at most `limit` dates
+OK   evaluatedDateCount matches the requested date range (30 days)
+OK   Returned dates are chronologically ordered for display
+OK   Every returned date falls within the requested range
+OK   Every date has a bestWindow with a score on the 0-10 scale
+OK   bestWindow score matches the date-level score (best window IS the ranking score)
+OK   bestWindow respects the requested 60-minute duration
+OK   Each date carries a Panchang summary (Vara/Tithi/Nakshatra/Yoga/Karana)
+OK   reasons only carries SUPPORT-polarity entries
+OK   cautions only carries CAUTION/BLOCK-polarity entries
+OK   Activity metadata matches the catalog entry (id/title/icon)
+OK   Dates are ranked by score globally, not just the first N chronologically
+OK   A date with any caution/conflict never rates EXCELLENT
+OK   EXCELLENT dates always score >= 9.0, STRONG >= 8.0, FAVORABLE >= 7.0 (documented thresholds)
+OK   timePreference=MORNING restricts bestWindow start to the morning band (05:00-12:00 IST)
+OK   A 180-minute request produces 180-minute windows
+OK   isSupportedMuhurthamActivity is true for all documented supported ids
+OK   isSupportedMuhurthamActivity is false for a LIGHT-depth activity (tea-break)
+OK   findMuhurthams throws for a not-yet-supported activity rather than returning a manufactured result
+OK   findMuhurthams throws for a genuinely unknown (not-in-catalog) activityId
+OK   marriage is a real catalog activity, not unknown
+OK   marriage is now in SUPPORTED_MUHURTHAM_ACTIVITY_IDS (PR B implemented period exclusion + planetary combustion)
+OK   findMuhurthams no longer throws for marriage (genuinely searchable via the same SUPPORTED path as other ceremonial activities)
+OK   bestWindow score for a date equals blendStartSensitiveScore() of two direct evaluateTimingCandidate() calls (no hidden scoring formula)
+OK   bestWindow reasons for a date match evaluateTimingCandidate() called directly (same reasons, not re-derived -- blending only ever touches score/label)
+OK   No surfaced window (best or alternate) ever carries a FRICTION_WINDOW_BLOCKED conflict
+OK   A 30-min window whose span crosses from Abhijit into Rahu Kalam is not selected as the best window
+OK   A 20-min window at Abhijit's own start, which sits inside the Gulika overlap even though it stays clear of Rahu Kalam, is NOT selected as the best window
+OK   Muhurtham Finder still surfaces a genuinely clean Brahma window (no Rahu/Gulika/Yama overlap) for this date
+OK   90-day range is evaluated correctly (evaluatedDateCount === 90)
+OK   30-day range is evaluated correctly (evaluatedDateCount === 30)
+OK   Single-day range (start === end) is accepted and evaluates exactly 1 date
+OK   findMuhurthams throws when dateRange.end precedes dateRange.start
+OK   A date range spanning a DST transition evaluates every requested calendar date without drift
+OK   Every returned date across the DST boundary is within the requested range
+OK   Finder eligibility is metadata-derived: DEEP/CEREMONIAL, non-AMBIGUOUS, SUPPORTED-level activities only
+OK   Engagement remains PARTIAL and hidden from Finder (no intent-specific rule pack yet)
+OK   Griha Pravesh is now exposed in Finder (SUPPORTED as of the Muhurta Knowledge Pack V1 PR)
+OK   The newly-exposed property-purchase activity searches successfully and returns dates
+OK   property-purchase activity metadata matches its catalog entry
+OK   The newly-exposed business-start activity searches successfully and returns dates
+OK   The newly-SUPPORTED griha-pravesh activity searches successfully and returns dates
+OK   griha-pravesh activity metadata matches its catalog entry
+OK   findMuhurthams throws for engagement (PARTIAL support, not exposed) rather than silently searching it
+OK   blendStartSensitiveScore is a documented, bounded weighted average (not a new formula)
+OK   blendStartSensitiveScore returns the full-duration score unchanged when both inputs are equal
+OK   blendStartSensitiveScore weights the commencement probe by START_SENSITIVITY_WEIGHT (a stronger probe raises the blend)
+OK   START_SENSITIVITY_WEIGHT keeps the full-duration score dominant (< 50%)
+OK   evaluateMuhurthamCandidateAt: a real eligible instant returns eligible=true
+OK   evaluateMuhurthamCandidateAt: the eligible instant is not a low/CAUTION score
+OK   evaluateMuhurthamCandidateAt: window.start/end reflect the EXACT requested instant/duration, never moved
+OK   evaluateMuhurthamCandidateAt score is byte-identical to findMuhurthams()'s own bestWindow score for the same date/instant
+OK   evaluateMuhurthamCandidateAt: a 90-minute request evaluates a genuinely 90-minute span
+OK   Sanity: generic Timing Search alone scores this instant strongly positive (VERY_GOOD, no friction block)
+OK   evaluateMuhurthamCandidateAt correctly REJECTS the same instant (authoritative avoid Tithi), despite the strong generic score
+OK   The rejection is a genuine hard exclusion, not merely a lower displayed score: window.score still reflects the real generic score (8.19), only `eligible` differs
+OK   evaluateMuhurthamCandidateAt PERSONAL with no personalContext returns PERSONAL_PROFILE_INCOMPLETE
+OK   evaluateMuhurthamCandidateAt PERSONAL with a complete profile returns status OK
+OK   evaluateMuhurthamCandidateAt PERSONAL carries generalScore/personalScore alongside the personalized score
+OK   evaluateMuhurthamCandidateAt SHARED with no personalContext returns USER_PROFILE_INCOMPLETE
+OK   evaluateMuhurthamCandidateAt SHARED with no partner returns SAVED_PERSON_PROFILE_INCOMPLETE
+OK   evaluateMuhurthamCandidateAt SHARED with both profiles complete returns status OK
+OK   evaluateMuhurthamCandidateAt SHARED carries per-participant user/person breakdowns
+OK   L5 fixture sanity: 2026-09-10 17:30 IST (12:00 UTC) is genuinely Amavasya
+OK   L5 fixture sanity: 2026-09-10 20:30 IST (15:00 UTC) is still genuinely Amavasya (whole EVENING band)
+OK   L5 fixture sanity: 2026-09-14 12:30 IST (07:00 UTC) is genuinely Shukla Chaturthi
+OK   L5 fixture sanity: 2026-09-14 16:30 IST (11:00 UTC) is still genuinely Shukla Chaturthi (whole AFTERNOON band)
+OK   19. Amavasya + new-beginning + ActionPhase.START (real production call): exactly one factor===TITHI reason
+OK   19. that reason is TITHI_EXACT_CAUTION, value "Amavasya", impact -8
+OK   19. no TITHI_FAMILY_CAUTION alongside it
+OK   19. the existing, unmodified formatter produces the existing Amavasya explanation (no new copy)
+OK   19. (L6.1) WITHOUT actionPhase, the SAME instant still carries a Tithi reason -- but the pre-existing legacy TITHI_UNFAVORABLE, not TITHI_EXACT_CAUTION
+OK   19. (L6.1) score-producing evaluation genuinely differs in WHICH reason fired based on ActionPhase (proving the score path now consults it), even though this fixture's net -8 magnitude coincidentally ties the numeric score
+OK   19. findMuhurthams() itself does not throw and correctly excludes this low-scoring Amavasya date (MIN_INCLUSION_SCORE, unrelated to this PR)
+OK   20. Rikta + business-start + ActionPhase.START (real production call): exactly one factor===TITHI reason
+OK   20. that reason is TITHI_FAMILY_CAUTION, value "RIKTA", impact -8
+OK   20. no TITHI_EXACT_CAUTION alongside it
+OK   20. the existing, unmodified formatter produces the existing Rikta explanation (no new copy)
+OK   20. (L6.1) WITHOUT actionPhase, the same instant carries NO Tithi reason at all (clean baseline)
+OK   20. (L6.1) the score-PRODUCING evaluation (TimingCandidate.score -- the field Finder ranking/sorting/rateMuhurtham/MIN_INCLUSION_SCORE all actually use) is now genuinely LOWER with the Lunar caution than without it
+OK   20. (L6.1) auraFitScore moves in the same direction, confirming both evaluation paths now agree
+OK   20. (L6.1) the reason/score invariant holds: a Lunar caution is present in .reasons if and only if the score-producing path reflects it
+OK   20. findMuhurthams() itself does not throw for business-start on the Rikta date
+OK   21. every L5 production fixture above carries AT MOST ONE factor===TITHI reason
+OK   22. Griha Pravesh + Amavasya + ActionPhase.START (real production call): exactly one factor===TITHI reason
+OK   22. it is Griha Pravesh's own dedicated TITHI_UNFAVORABLE reason, NOT TITHI_EXACT_CAUTION -- tithiCoverage===IMPLEMENTED still short-circuits the generic overlay
+OK   22. Griha Pravesh's dedicated Tithi data itself was not touched by this PR (its own avoid pattern is still what produces this reason)
+OK   23. runFind() (Plan-with-Aura/Guest Find/Plan Ahead FIND mode) never references actionPhase
+OK   23. runCheck() (Plan-with-Aura CHECK mode) never references actionPhase
+OK   23. runCompare() (Plan-with-Aura COMPARE mode) never references actionPhase
+OK   25. financial-decision + Amavasya + START (via the real production path): no TITHI_EXACT_CAUTION appears (unsupported intent)
+OK   25. financial-decision + Amavasya + START: no TITHI_FAMILY_CAUTION appears either (unsupported intent)
+OK   30. ranking effect: the score used by every sort in muhurthamFinder.ts is now genuinely lower for a Lunar-cautioned candidate than an otherwise-identical one without the caution (proven at the real instant in section 20 -- a cross-date comparison would be artificial, since unrelated Panchang factors differ between any two real calendar dates)
+OK   35/36. (L6.1) findPersonalMuhurthams does not throw and returns OK for the real Rikta production path
+OK   35. (L6.1) PERSONAL scope: at most one TITHI reason (no duplication across general/personal layers)
+OK   35. (L6.1) PERSONAL scope: combinedScore (the actual PERSONAL ranking key) equals bestWindow.score -- the SAME repaired, phase-aware value, not a second independently-computed score
+OK   36. (L6.1) findSharedMuhurthams does not throw and returns OK for the real Rikta production path
+OK   36. (L6.1) SHARED scope: the Lunar reason appears at most once, at the GENERAL level only -- never duplicated into either participant's own reasons (no double-counting introduced by the repair)
+OK   36. (L6.1) SHARED scope: the repaired score reaches sharedScore (the actual SHARED ranking key) exactly once, not once per participant
+
+ALL MUHURTHAM FINDER CHECKS PASSED
+
+# exit=0 signal=

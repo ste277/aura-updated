@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from 'next';
 import './tokens.css';
+import { AccountBoundaryRoot } from './AccountBoundaryRoot';
 
 export const metadata: Metadata = {
   title: 'AuraSchedule',
@@ -22,7 +23,10 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body>
+        {children}
+        <AccountBoundaryRoot />
+      </body>
     </html>
   );
 }

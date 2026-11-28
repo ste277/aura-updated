@@ -1,0 +1,39 @@
+$ npx ts-node test/activeResultMaterializerArchitecture.test.ts
+# job=math-core-tests step=Run active result materializer architecture test env={}
+=== the real tree conforms ===
+OK   THE REAL PRODUCTION TREE HAS ZERO P4c3 ARCHITECTURE VIOLATIONS (589 production files scanned)
+=== confinement, unforgeability, purity ===
+OK   CONFINED: the vocabulary of the four modules exists in exactly the four modules, the P4b4 composition and (O5 SHADOW EVIDENCE / SHADOW ROLLOUT R3) the three pure SHADOW evidence/review modules; the authority is imported only by the composition, the selector, the materializer, the invariant verifier and the TYPE-only review-payload builder; only the SHADOW evidence derivation imports the selector and the materializer (their results are discarded, pinned by shadowEvidenceArchitecture.test.ts); only the materializer and the evidence derivation import the gate; the review-payload builder never imports the selector, gate or materializer
+OK   NO SURFACE: no route, preview request, orchestrator, Constructor, comparator, capacity, generator, predicate, preparation, execution boundary, signing, acceptance, persistence, recomposition, presentation or database module names the vocabulary
+OK   UNFORGEABLE: a non-exported unique-symbol brand, a module-private WeakSet registry with ONE add site, a mint that CALLS the predicate exactly once before any brand and takes only the four P4b3 inputs (no accepted flag), and no other production file casts to the authority type
+OK   ONLY THE COMPOSITION MINTS: `mintAcceptedCounterfactual` and `recordAcceptedObservation` are named by the authority and the P4b4 composition only; the composition no longer imports or calls the predicate directly
+OK   THE ONLY PREDICATE CALLER IS THE AUTHORITY (the shadow composition keeps TYPE-only imports of the predicate vocabulary)
+OK   SELECTOR: exactly two imports (the authority reader, type-only run / observation contracts), one APPLY site, the three NO_CHANGE reasons, technical failures fail closed, an authority-less ACCEPT is INCOMPLETE, no sort / rank / score / client fact / provenance, never throws
+OK   GATE: no imports, exactly-once P / unique ids / conflict subset are INCONSISTENT_AUTHORITY, checked BEFORE the two DEFERRED_DIAGNOSTIC_UNRESOLVED rules; no indexing, sorting or reason reading; never throws
+OK   MATERIALIZER: the pinned fail-closed order (authority -> same-run basis -> readiness -> gate -> cross-checks -> build -> conservation), one call each of the existing precedence sort and capacity function, empty Deferred / conflicts, candidateOrder never named, detached and frozen output, half-open overlap, duration / window / FIXED defenses
+OK   PURE: no database, clock, randomness, async, logging, environment, telemetry, ACTIVE flag, Constructor / orchestrator / search / P4b2 / P4b3 call, or input mutation in any of the four modules
+OK   NO SCHEMA, NO MIGRATION: the Prisma schema and every migration directory's own contents mention none of the vocabulary (count-independent -- holds regardless of how many unrelated migrations exist)
+OK   CI RUNS THE NEW SUITES: the behavior suite and this architecture suite are steps of the pure job
+OK   #208 SCOPE: the authority and the materializer are on the protected Date-mutator list
+=== mutations (in-memory copies only) ===
+OK   MUTATION: a production consumer / route / preview / acceptance / orchestrator naming the vocabulary or importing a module -> detected
+OK   MUTATION: another minter / mint caller / trust check / reader -> detected
+OK   MUTATION: FORGED AUTHORITY -- a cast to the authority type anywhere else, an exported brand or registry, a second mint site, an accepted flag parameter -> detected
+OK   MUTATION: the brand is applied WITHOUT the predicate deciding (the ACCEPT guard removed, the predicate not called, or called twice) -> detected
+OK   MUTATION: the authority holds Dates, loses its fail-closed mint failure, or its observation link is unchecked -> detected
+OK   MUTATION: SELECTOR ranks, scores, reads client facts, picks the first ACCEPT, ignores a technical failure or an authority-less ACCEPT, or applies more than once -> detected
+OK   MUTATION: GATE reads a Deferred reason, drops the exactly-once rule, checks UNRESOLVED before the structural rules, sorts or indexes, or throws -> detected
+OK   MUTATION: MATERIALIZER re-runs the Constructor / search / P4b2 / P4b3, or reads the clock, randomness, a database -> detected
+OK   MUTATION: the materializer skips a fail-closed step (authority, same-run basis, readiness, gate) or reorders them -> detected
+OK   MUTATION: candidateOrder is synthesized, Deferred / conflicts are filled or not empty, requestedCapacity recomputed, proposedCapacity copied, the precedence sort or capacity function bypassed -> detected
+OK   MUTATION: defense in depth removed -- the duration, window, blocker, overlap (half-open), FIXED or non-owner checks -> detected
+OK   MUTATION: the output is shared / unfrozen, the input is mutated, or the output is sorted in place on an input array -> detected
+OK   MUTATION: an ACTIVE flag / environment / mode, telemetry, or wiring into the preview path appears -> detected
+OK   MUTATION: the P4b4 composition calls the predicate directly, loses the link, or consumes the selector -> detected
+OK   MUTATION (O5 P4c4a): the materializer drops the baseline provenance check, moves it AFTER the gate / cross-checks, or checks it in any other place -> detected
+OK   MUTATION (O5 P4c4a): the baseline binding is weakened to structural equality / identity without the fingerprint, never bound, exported, bound twice, or replaced by a public run token -> detected
+OK   MUTATION (O5 P4c4a): the composition stops binding its own run's baseline, or another module names the binding check -> detected
+OK   the mutations were applied to in-memory copies only: the real tree still has zero violations afterwards
+ALL P4c3 ARCHITECTURE CHECKS PASSED
+
+# exit=0 signal=

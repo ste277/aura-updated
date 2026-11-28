@@ -1,0 +1,56 @@
+$ npx ts-node --project tsconfig.jsdom-tests.json test/rel04R11StructuralQueue.test.ts
+# job=math-core-tests step=Run REL-04 R11 structural queue test (39244 witnesses on 8f3d316 vs current; cross-format matrix) env={"TS_NODE_COMPILER_OPTIONS":"{\"jsx\":\"react-jsx\"}"}
+OK   fixture rel04-r10-head/offlineHabitQueue.ts.txt == 8f3d316 apps/web/lib/offlineHabitQueue.ts
+OK   fixture rel04-r10-head/activitySync.ts.txt == 8f3d316 apps/web/lib/activitySync.ts
+OK   fixture rel04-r10-head/signOut.ts.txt == 8f3d316 apps/web/lib/signOut.ts
+OK   the 39244 reviewer evidence is preserved byte-for-byte (27 SHA256SUMS entries; the two probes stored as .ts.txt)
+D1 {"R10":{"outcome":{"unknown":false,"removed":0,"removedPossiblySent":0,"keptInFlight":0,"failed":0,"cleanupPending":0,"cleanupPendingPossiblySent":0,"unidentified":0},"decisionsAtSignOut":0,"submit":"confirmed","rows":1,"copies":1},"current":{"outcome":{"unknown":false,"removed":1,"removedPossiblySent":0,"keptInFlight":0,"failed":0,"cleanupPending":0,"cleanupPendingPossiblySent":0,"unidentified":0,"uncertain":0,"discardedUnverified":0,"discardedUnverifiedPossiblySent":0},"decisionsAtSignOut":1,"submit":"not-stored","rows":0,"copies":0}}
+OK   D1 R10 reproduces: missing outer request id, intact nested identity -> no outcome, no decision; resubmission confirmed (1 row)
+OK   D1 CORRECTED: identified by its nested identity -> removed with a durable decision; resubmission refused; 0 rows
+D2 claim {"R10":{"direct":"not-stored","claim":"claimed","rows":0},"current":{"direct":"not-stored","claim":"paused","rows":0}}
+OK   D2 R10 reproduces: direct submission refuses the contradictory request but the replay CLAIM accepts it
+OK   D2 CORRECTED: direct submission and claim apply the same gate (both refuse)
+D2 replay {"R10":{"attempted":1,"rows":1},"current":{"attempted":0,"rows":0}}
+OK   D2 R10 reproduces: a contradiction written between replay's read and its claim is sent (1 row)
+OK   D2 CORRECTED: the claim transaction re-resolves every copy and refuses it (0 attempts, 0 rows)
+D3 aura_q3 {"R10":{"pausedA":0,"pausedB":0,"submitA":"confirmed","rowsA":1,"rowsB":0,"unidentified":0,"rawPreserved":true},"current":{"pausedA":1,"pausedB":0,"submitA":"not-stored","rowsA":0,"rowsB":0,"unidentified":1,"rawPreserved":true}}
+OK   D3 R10 reproduces (aura_q3): a key under A whose value names B is skipped -> A 0 paused, A's same-id submission confirmed (1 row), sign-out reports nothing
+OK   D3 CORRECTED (aura_q3): contradictory -> quarantined for A (paused 1), A's same-id submission refused, preserved and reported unidentified; B unaffected; 0 rows
+D3 aura_q4 {"R10":{"pausedA":0,"pausedB":0,"submitA":"confirmed","rowsA":1,"rowsB":0,"unidentified":0,"rawPreserved":true},"current":{"pausedA":1,"pausedB":0,"submitA":"not-stored","rowsA":0,"rowsB":0,"unidentified":1,"rawPreserved":true}}
+OK   D3 R10 reproduces (aura_q4): a key under A whose value names B is skipped -> A 0 paused, A's same-id submission confirmed (1 row), sign-out reports nothing
+OK   D3 CORRECTED (aura_q4): contradictory -> quarantined for A (paused 1), A's same-id submission refused, preserved and reported unidentified; B unaffected; 0 rows
+D4 {"R10":{"removed":1,"remaining":[],"markers":["unseen:discarded"]},"current":{"removed":1,"remaining":["unseen"],"markers":["approved:discarded"]}}
+OK   D4 R10 reproduces: a replacement identity written after confirmation is deleted and decided; the confirmed one gets no decision
+OK   D4 CORRECTED: only the confirmed identity is decided; the replacement (unseen) is neither deleted nor decided
+D5 {"R10":{"dispatched":0,"total":2,"owned":{"unknown":false,"removed":1,"removedPossiblySent":1,"keptInFlight":0,"failed":0,"cleanupPending":0,"cleanupPendingPossiblySent":0,"unidentified":1},"claims":1,"retired":0,"decisions":1},"current":{"dispatched":1,"total":2,"owned":{"unknown":false,"removed":0,"removedPossiblySent":0,"keptInFlight":1,"failed":0,"cleanupPending":0,"cleanupPendingPossiblySent":0,"unidentified":1,"uncertain":0,"discardedUnverified":0,"discardedUnverifiedPossiblySent":0},"claims":1,"retired":1,"decisions":0}}
+OK   D5 R10 reproduces: with another context's fresh claim and a damaged active copy, sign-out removes the retired copy and reports removed + possibly sent while the claim remains
+OK   D5 CORRECTED: the claimed activity is kept in flight as a whole (nothing deleted or decided); the damaged copy is reported unidentified without "never sent"; the confirmation counts the one send once
+D6 {"R10":{"first":{"unknown":false,"removed":0,"removedPossiblySent":0,"keptInFlight":0,"failed":0,"cleanupPending":1,"cleanupPendingPossiblySent":1,"unidentified":0},"second":{"unknown":false,"removed":1,"removedPossiblySent":0,"keptInFlight":0,"failed":0,"cleanupPending":0,"cleanupPendingPossiblySent":0,"unidentified":0},"rows":1},"current":{"first":{"unknown":false,"removed":0,"removedPossiblySent":0,"keptInFlight":0,"failed":0,"cleanupPending":1,"cleanupPendingPossiblySent":1,"unidentified":0,"uncertain":0,"discardedUnverified":0,"discardedUnverifiedPossiblySent":0},"second":{"unknown":false,"removed":1,"removedPossiblySent":1,"keptInFlight":0,"failed":0,"cleanupPending":0,"cleanupPendingPossiblySent":0,"unidentified":0,"uncertain":0,"discardedUnverified":0,"discardedUnverifiedPossiblySent":0},"rows":1}}
+OK   D6 R10 reproduces: the retry forgets the actual prior send (removedPossiblySent 0, server row exists)
+OK   D6 CORRECTED: the decision keeps the prior-send fact; the retry reports removed 1, possibly sent 1
+D7 {"R10":{"outcome":{"unknown":false,"removed":1,"removedPossiblySent":0,"keptInFlight":0,"failed":0,"cleanupPending":0,"cleanupPendingPossiblySent":0,"unidentified":0},"markers":1,"sourceLeft":null},"current":{"outcome":{"unknown":false,"removed":0,"removedPossiblySent":0,"keptInFlight":0,"failed":0,"cleanupPending":0,"cleanupPendingPossiblySent":0,"unidentified":1,"uncertain":0,"discardedUnverified":0,"discardedUnverifiedPossiblySent":0},"markers":0,"sourceLeft":"{bad"}}
+OK   D7 R10 reproduces: an aura_q4 key without its record-id part is trusted: deleted and decided
+OK   D7 CORRECTED: incomplete identity -> preserved, no decision, reported unidentified
+P3 {"R10":{"out":{"removed":0,"removedPossiblySent":0,"cleanupPending":0,"cleanupPendingPossiblySent":0,"keptInFlight":0,"failed":1,"unidentified":0,"alreadyGone":0},"markers":1,"sourcePreserved":true,"submit":"not-stored","rows":0},"current":{"out":{"removed":0,"removedPossiblySent":0,"cleanupPending":1,"cleanupPendingPossiblySent":0,"discardedUnverified":0,"discardedUnverifiedPossiblySent":0,"cleanupErrors":0,"keptInFlight":0,"failed":0,"uncertain":0,"unidentified":0,"alreadyGone":0},"markers":1,"sourcePreserved":true,"submit":"not-stored","rows":0}}
+OK   P3 R10 reproduces: a committed transaction whose acknowledgement fails is reported failed (as a rollback) although its decision exists
+OK   P3 CORRECTED: the outcome is verified: the decision exists -> cleanup pending (never "failed"), no cleanup attempted, request refused, 0 rows
+OK   X1 5 identifiable (damaged v2, aura_q3, unreadable aura_q4 with a complete key, damaged IndexedDB, IndexedDB without outer id) -> discarded with decisions; 7 incomplete/contradictory (v2 no id, v2 malformed id, v2 naming B, q3 key/value disagreement, q4 naming B, IndexedDB outer/nested disagreement, IndexedDB no id) -> preserved, reported unidentified
+OK   X1 every identified and every blocked candidate id is refused afterwards; 0 rows; contradictory copies retained
+OK   X2 for a retired copy, a damaged copy, an identity contradiction and a decision, direct submission, claim and replay all refuse (0 rows)
+X3 before {"during":"refused:transition","after":"refused:unverified","owned":{"unknown":false,"removed":1,"removedPossiblySent":1,"keptInFlight":0,"failed":0,"cleanupPending":0,"cleanupPendingPossiblySent":0,"unidentified":0,"uncertain":0,"discardedUnverified":0,"discardedUnverifiedPossiblySent":0},"serverRow":0}
+OK   X3 (server never processed it) the request handed to the network before sign-out is reported as possibly sent (or still being sent) -- never as not sent or cancelled; server rows 0
+OK   X3 (before) no NEW transmission begins once sign-out is confirmed: submissions during and after sign-out are refused and create no server row
+X3 after {"during":"refused:transition","after":"refused:unverified","owned":{"unknown":false,"removed":1,"removedPossiblySent":1,"keptInFlight":0,"failed":0,"cleanupPending":0,"cleanupPendingPossiblySent":0,"unidentified":0,"uncertain":0,"discardedUnverified":0,"discardedUnverifiedPossiblySent":0},"serverRow":1}
+OK   X3 (server saved it, answer lost) the request handed to the network before sign-out is reported as possibly sent (or still being sent) -- never as not sent or cancelled; server rows 1
+OK   X3 (after) no NEW transmission begins once sign-out is confirmed: submissions during and after sign-out are refused and create no server row
+OK   X4 identities introduced after the confirmation (a new retired entry; a replaced IndexedDB value) are not decided or deleted; the confirmed ones are
+OK   X5 a rolled-back transaction (verified: no decision) is reported "couldn't be discarded", entry preserved, still refused, 0 rows
+OK   X5 when neither the transaction nor a verification read can be completed, the outcome is UNCERTAIN (never "rolled back"); nothing is cleaned up
+OK   X6 across two failed cleanups and a successful retry the one logical activity is cleanup-pending+possibly-sent, cleanup-pending+possibly-sent, then removed+possibly-sent; one server row
+OK   X7 four activities, four outcomes: removed 1, cleanup-pending 1, kept in flight 1, unidentified 1 (sum = asked 4)
+OK   X8 A's discard decides and deletes only A's copies; B's retired and IndexedDB copies are untouched and counted for B only
+OK   X9 healthy online submission confirmed once; offline submission queued then replayed once
+
+38 passed, 0 failed
+
+# exit=0 signal=

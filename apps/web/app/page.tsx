@@ -25,8 +25,14 @@ import type { DailyStory } from '../lib/dailyStory';
 import type { DailyReflection } from '../lib/dailyReflection';
 import type { TomorrowPreview } from '../lib/tomorrowPreview';
 import { shouldRefreshMyDayForDateChange } from '../lib/myDayRefreshPolicy';
-import { classifyHabitLogSyncOutcome } from '../lib/habitLogSyncPolicy';
-import { readOfflineHabitQueue, toPendingLoggedEntry, mergeConfirmedLogEntries, selectQueueItemsToReconstruct } from '../lib/offlineHabitQueue';
+import { readOfflineQueueView, toPendingLoggedEntry, mergeConfirmedLogEntries, selectQueueItemsToReconstruct } from '../lib/offlineHabitQueue';
+import { readActivityOperations, onOperationsChanged, storedOperationOf, type StoredOperation } from '../lib/offlineHabitQueue';
+import { fetchVerifiedSession, subscribeAccount, getAccountEpoch, getVerifiedAccount, AccountUnavailableError, startForegroundReverification, captureAccountBinding } from '../lib/accountSession';
+import { installAccountBoundFetch } from '../lib/accountBoundFetch';
+import { readLegacySnapshot } from '../lib/offlineHabitQueue';
+import { UPGRADE_MESSAGE } from '../lib/activitySync';
+import { submitActivityLog, checkActivityOperation, operationStatusOf, OFFLINE_MESSAGE, type HabitLogPayload } from '../lib/activitySync';
+import { UNVERIFIED_ACTIVITY_MESSAGE, ActivityRecoveryRequiredError, findRecoverableOperation, unresolvedOperations, type ActivityLogResult, type ActivityOperationRequest, type ActivityOperations, type ActivityOperationView, type OperationStatus } from '../lib/pendingReplayReconciliation';
 import { refreshAfterHomeCompletion } from '../lib/homeRefresh';
 import { selectTodaysPendingActivities } from '../lib/myDayPendingOverlay';
 import type { GuidanceUiState } from '../lib/bestForYouViewModel';
@@ -60,6 +66,7 @@ import { formatDisplayName } from '../lib/displayName';
 import { trackEvent } from '../lib/trackEvent';
 import { generateClientRequestId } from '../lib/clientId';
 import { useAndroidBackButton } from '../lib/useAndroidBackButton';
+import { performSignOut, signOutOutcomeMessage } from '../lib/signOut';
 import { FULL_ACTIVITY_CATALOG } from '../../../packages/recommendation/src/personalizedTasks';
 import type { PersonPlanHandoff } from '../lib/myPeopleOccasionUi';
 import {
@@ -126,8 +133,121 @@ function isFrictionWindow(windowName: string): boolean {
   return normalized.includes('RAHU') || normalized.includes('YAMA');
 }
 
+// AURA-ANDROID-REL-04 IR-01 -- the dashboard is keyed on the account epoch
+// (lib/accountSession.ts). Any account change -- sign-out, sign-in, switch,
+// session expiry, another tab's transition -- remounts it, so every piece of
+// account-scoped state, ref and in-component cache starts empty for the next
+// account, and late responses for the previous one land on an unmounted
+// instance (ignored by React) instead of the new screen.
+// AURA-ANDROID-REL-04 (R2) -- every same-origin account-scoped API request
+// from this bundle states the verified account and obeys auth transitions
+// (lib/accountBoundFetch.ts). Installed at module load, before any effect.
+if (typeof window !== 'undefined') installAccountBoundFetch();
+
 export default function DashboardPage() {
+  const epoch = React.useSyncExternalStore(subscribeAccount, getAccountEpoch, () => 0);
+  useEffect(() => startForegroundReverification(), []);
+  return <DashboardPageInner key={epoch} />;
+}
+
+function DashboardPageInner() {
   const [user, setUser] = useState<SessionUser | null | undefined>(undefined);
+  // AURA-ANDROID-REL-04 IR-03 (R2) -- the session could not be verified
+  // (offline, server unreachable, ambiguous sign-out). Bound work is refused
+  // until a fresh answer arrives; pending activity is kept.
+  const [sessionUnverified, setSessionUnverified] = useState(false);
+  // Quarantined pre-update activity logs (no owner): shown with an explicit
+  // choice, never assigned automatically.
+  const [legacyCount, setLegacyCount] = useState(0);
+  // AURA-ANDROID-REL-04 (R5): the offline queue could not be read -- pending activity is UNKNOWN, not none.
+  const [queueUnavailable, setQueueUnavailable] = useState(false);
+  // R8: this account's activity kept on this device that does NOT sync automatically (quarantined).
+  const [pausedCount, setPausedCount] = useState(0);
+  // AURA-ANDROID-REL-04 IR-01 -- the verified account this dashboard instance
+  // belongs to (set from the session answer; the instance is remounted when
+  // the account changes).
+  const accountIdRef = useRef<string | null>(null);
+  // AURA-ANDROID-REL-04 R15 (39256 option B) -- the ID-KEYED operation projection: request id -> outcome, kept
+  // from the ONE outcome authority (lib/activitySync.ts + lib/offlineHabitQueue.ts). A server list, an empty queue
+  // view or a title never releases an entry here; only evidence about that exact request id does. `body` is the
+  // operation's immutable canonical dispatch body (Retry reuses it verbatim, incl. the original timestamp).
+  type OperationRecord = ActivityOperationView & { account: string; body: HabitLogPayload | null; dispatched: boolean; serverLog?: { id: string; activeWindow?: string; logMinuteOfDay?: number; logTimestamp?: string } };
+  const operationsRef = useRef<Record<string, OperationRecord>>({});
+  const [operations, setOperationsState] = useState<ActivityOperations>({});
+  // R15: the account's operations could not be read from durable storage: whether an earlier operation is still
+  // unresolved cannot be established, so NEW activity writes are blocked until a read succeeds (Check again).
+  const operationsUnreadableRef = useRef(false);
+  const [operationsUnreadable, setOperationsUnreadable] = useState(false);
+  const commitOperations = useCallback((next: Record<string, OperationRecord>) => {
+    operationsRef.current = next;
+    setOperationsState(next);
+  }, []);
+  // R17 (39260 G8) -- stale-read fencing. One logical clock orders projection READS (stamped when they start) and
+  // in-memory operation UPDATES: a read that started before a newer read was applied is discarded entirely, and a
+  // read never overwrites an operation this page updated after that read started. A read for another account than
+  // the current one is never applied.
+  const opsClockRef = useRef(0);
+  const opsAppliedReadRef = useRef(0);
+  const opsUpdatedAtRef = useRef<Record<string, number>>({});
+  const beginOperationsRead = useCallback(() => ++opsClockRef.current, []);
+  const readOperationsFenced = useCallback(async (owner: string) => {
+    const stamp = beginOperationsRead();
+    return { stamp, stored: await readActivityOperations(owner) };
+  }, [beginOperationsRead]);
+  const putOperation = useCallback((op: OperationRecord) => {
+    opsUpdatedAtRef.current[op.clientRequestId] = ++opsClockRef.current;
+    commitOperations({ ...operationsRef.current, [op.clientRequestId]: op });
+  }, [commitOperations]);
+  const dropOperation = useCallback((clientRequestId: string) => {
+    opsUpdatedAtRef.current[clientRequestId] = ++opsClockRef.current;
+    const { [clientRequestId]: _gone, ...rest } = operationsRef.current;
+    commitOperations(rest);
+  }, [commitOperations]);
+  /** Folds durable storage's view of the account's operations into the projection (storage is authoritative). */
+  const applyStoredOperations = useCallback((owner: string, stored: StoredOperation[] | null, stamp?: number): ReadonlyMap<string, OperationRecord> => {
+    const current = () => new Map(Object.entries(operationsRef.current));
+    if (accountIdRef.current !== null && owner !== accountIdRef.current) return current(); // R17: another account's read
+    if (stamp !== undefined) {
+      if (stamp < opsAppliedReadRef.current) return current(); // R17: superseded by a newer applied read
+      opsAppliedReadRef.current = stamp;
+    }
+    if (stored === null) {
+      operationsUnreadableRef.current = true;
+      setOperationsUnreadable(true);
+      return new Map(Object.entries(operationsRef.current)); // unknown, never "nothing open": keep every in-memory operation
+    }
+    operationsUnreadableRef.current = false;
+    setOperationsUnreadable(false);
+    const next: Record<string, OperationRecord> = { ...operationsRef.current };
+    for (const so of stored) {
+      const prev = next[so.clientRequestId];
+      // R17: this page updated the operation after the read started: the newer in-memory state stands.
+      if (stamp !== undefined && prev && (opsUpdatedAtRef.current[so.clientRequestId] ?? 0) > stamp) continue;
+      // R17 (39260 G7/G9): THE recovery decision supplies the operation's body (its own intent -- a live copy before a
+      // contradicting marker) and whether it may be retried; an in-memory body is kept only where storage names none.
+      const body = ((so.body as HabitLogPayload | null) ?? (so.conflict ? null : prev?.body)) ?? null;
+      next[so.clientRequestId] = {
+        clientRequestId: so.clientRequestId,
+        account: owner,
+        // R16: an in-memory UNRESOLVED (the last answer proved nothing) is never downgraded to "pending" merely because
+        // its copy is still stored; only terminal durable evidence (or a durable unresolved marker) replaces it.
+        // R18 (online-first): a stored, unconfirmed copy is UNRESOLVED (nothing sends it automatically) -- except this
+        // page's own submission that is still in flight (in memory: pending).
+        status: so.status === 'pending' && prev?.status !== 'pending' ? 'unresolved' : so.status,
+        activityTitle: typeof body?.activityTitle === 'string' ? body.activityTitle : prev?.activityTitle ?? '',
+        activityId: typeof (body as unknown as { activityId?: unknown } | null)?.activityId === 'string' ? (body as unknown as { activityId: string }).activityId : prev?.activityId,
+        logSource: typeof body?.logSource === 'string' ? body.logSource : prev?.logSource,
+        at: prev?.at ?? so.at,
+        body,
+        dispatched: prev?.dispatched ?? false,
+        serverLog: so.receipt?.row ?? prev?.serverLog,
+        retryable: so.retryable,
+        intents: so.intents,
+      };
+    }
+    commitOperations(next);
+    return new Map(Object.entries(next));
+  }, [commitOperations]);
   // Onboarding V1 PR 1 -- Location Trust Foundation: lets the global
   // disclosure banner's action land directly on the already-expanded
   // Location & Time panel, instead of a collapsed You tab the user then
@@ -391,25 +511,71 @@ export default function DashboardPage() {
     // still correctly clearing a permanently-rejected (4xx) entry's
     // stale row once it's no longer in the queue (PR #86's own
     // invariant) -- see that function's own doc comment.
-    setLogEntries((prev) => {
-      const queuedClientRequestIds = new Set(readOfflineHabitQueue().map((item) => item.clientRequestId));
-      return mergeConfirmedLogEntries(confirmedEntries, prev, queuedClientRequestIds);
+    // R4: the queue read is asynchronous (IndexedDB); the merge itself is unchanged.
+    const owner = accountIdRef.current;
+    // R15: the operation projection is re-read with the queue view; the merge never releases an operation the
+    // projection still holds open (a stale or empty list is not evidence).
+    void Promise.all([readOfflineQueueView(owner), owner ? readOperationsFenced(owner) : Promise.resolve({ stamp: undefined, stored: [] as StoredOperation[] })]).then(([view, read]) => {
+      if (accountIdRef.current !== owner) return; // the account changed meanwhile: this page is being replaced
+      const ops = owner ? applyStoredOperations(owner, read.stored, read.stamp) : new Map<string, OperationRecord>();
+      // R5: an UNREADABLE queue is unknown, not empty -- keep every pending row (never treat them as gone).
+      const queued = view ? view.items : null;
+      setQueueUnavailable(queued === null);
+      if (view) setPausedCount(view.paused);
+      setLogEntries((prev) => {
+        const queuedClientRequestIds = queued === null
+          ? new Set(prev.filter((e) => e.syncStatus === 'pending' && e.clientRequestId).map((e) => e.clientRequestId as string))
+          : new Set(queued.map((item) => item.clientRequestId));
+        return mergeConfirmedLogEntries(confirmedEntries, prev, queuedClientRequestIds, ops);
+      });
     });
-  }, []);
+  }, [applyStoredOperations, readOperationsFenced]);
 
   // Parallelize Session & Initial Data Fetches
   const loadUserDataAndLogs = useCallback(async () => {
     try {
-      const sessionRes = await fetch('/api/auth/session');
-      const sessionData = await sessionRes.json();
+      // AURA-ANDROID-REL-04 IR-01/IR-03 -- the session answer goes through
+      // the account boundary: a late answer from before a transition or an
+      // account change is 'stale' and never applied.
+      const check = await fetchVerifiedSession();
+      if (check.status === 'stale') return;
+      if (check.status === 'error') {
+        // I6: unknown account -- never shown as "signed out", never trusted as A.
+        setSessionUnverified(true);
+        return;
+      }
+      setSessionUnverified(false);
+      const sessionData = check.payload as any;
 
-      if (!sessionData?.user) {
+      if (check.status === 'signed-out' || !sessionData?.user) {
+        accountIdRef.current = null;
         setUser(null);
         setPlannedActivities([]);
         return;
       }
 
+      accountIdRef.current = check.user.id;
       setUser(sessionData.user);
+      const legacy = readLegacySnapshot();
+      setLegacyCount(legacy.ok ? legacy.count : 0);
+
+      // Pending Activity Reload Visibility V1, now account-scoped: only the
+      // verified account's own queued entries are reconstructed.
+      const view = await readOfflineQueueView(check.user.id);
+      if (accountIdRef.current !== check.user.id) return;
+      const queued = view ? view.items : null;
+      setQueueUnavailable(queued === null);
+      setPausedCount(view ? view.paused : 0);
+      // R15: reattach the account's operations (ID-keyed projection) after refresh / remount / restart.
+      const storedOps = await readOperationsFenced(check.user.id);
+      if (accountIdRef.current !== check.user.id) return;
+      applyStoredOperations(check.user.id, storedOps.stored, storedOps.stamp);
+      if (queued && queued.length > 0) {
+        setLogEntries((prev) => {
+          const reconstructed = selectQueueItemsToReconstruct(queued, prev).map(toPendingLoggedEntry);
+          return reconstructed.length === 0 ? prev : [...reconstructed, ...prev];
+        });
+      }
 
       // Onboarding V1 PR 2 -- captured exactly once per page load (see
       // onboardingDecidedRef's own doc comment above); a later refetch
@@ -439,36 +605,19 @@ export default function DashboardPage() {
         setPlannedActivities(await plansRes.json());
       }
     } catch {
-      setUser(null);
+      // A dashboard read failed: keep the verified account (the session
+      // answer above decided it); just leave the data empty.
       setPlannedActivities([]);
     }
-  }, [applyConfirmedLogs]);
+  }, [applyConfirmedLogs, applyStoredOperations, readOperationsFenced]);
 
   useEffect(() => {
     loadUserDataAndLogs();
   }, [loadUserDataAndLogs]);
 
-  // Pending Activity Reload Visibility V1 -- a still-queued offline log
-  // (localStorage['offline_habit_queue'], written by handleLogActivity's
-  // own catch branch below) has no server row yet, so the confirmed fetch
-  // above can never know about it. This is a pure, read-only
-  // reconstruction into presentation state -- it never mutates the queue,
-  // never POSTs, and is entirely separate from the Offline Log Sync
-  // Listener effect further down (which does attempt to resync and IS
-  // allowed to mutate the queue). Runs once on mount; order-independent
-  // relative to the confirmed fetch above by construction (see that
-  // effect's own setLogEntries merge comment) -- whichever of the two
-  // resolves first, the other's setLogEntries call preserves it rather
-  // than overwriting it.
-  useEffect(() => {
-    const queued = readOfflineHabitQueue();
-    if (queued.length === 0) return;
-    setLogEntries((prev) => {
-      const reconstructed = selectQueueItemsToReconstruct(queued, prev).map(toPendingLoggedEntry);
-      if (reconstructed.length === 0) return prev;
-      return [...reconstructed, ...prev];
-    });
-  }, []);
+  // Pending Activity Reload Visibility V1 -- reconstruction of still-queued
+  // offline logs now runs inside loadUserDataAndLogs, after the session
+  // answer verified WHICH account's queue may be shown (AURA-ANDROID-REL-04).
 
   // My Day Timing Location Change Refresh V1 -- extracted from its
   // original inline form (previously only reachable via the user-id-gated
@@ -1106,70 +1255,25 @@ export default function DashboardPage() {
   // exception during replay is retained for a later attempt. The queue is
   // rewritten to hold only what's still genuinely retry-worthy, never
   // blanket-cleared.
+  // AURA-ANDROID-REL-04 IR-01 -- replay goes through lib/activitySync.ts:
+  // only the VERIFIED account's own entries, each request bound to that
+  // account (the server refuses it under any other session), single-flight,
+  // stopped by any auth transition, and removing only the ids it settled.
+  // It starts only once this instance has a verified signed-in account.
+  // AURA-ANDROID-REL-04 R18 (39265, online-first): NO automatic dispatch -- not at startup, on connectivity restoration,
+  // on visibility changes or after a submission. Stored, unconfirmed operations stay unresolved until the user acts
+  // (Retry / Check again). Only a read-only re-read of the account's operations runs here.
+  const verifiedUserId = user ? user.id : null;
   useEffect(() => {
-    const syncOfflineLogs = async () => {
-      const rawQueue = localStorage.getItem('offline_habit_queue');
-      if (!rawQueue) return;
-
-      let queue: any[];
-      try {
-        queue = JSON.parse(rawQueue);
-      } catch {
-        return;
-      }
-      if (!Array.isArray(queue) || queue.length === 0) return;
-
-      const remaining: any[] = [];
-      let anyConfirmed = false;
-
-      for (const queuedItem of queue) {
-        const { tempId, ...payload } = queuedItem;
-        try {
-          const res = await fetch('/api/habit-logs', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload),
-          });
-          const outcome = classifyHabitLogSyncOutcome(res.status);
-          if (outcome === 'confirmed') {
-            anyConfirmed = true;
-          } else if (outcome === 'retry') {
-            // Transient-looking server failure -- keep for a later retry.
-            remaining.push(queuedItem);
-          }
-          // 'permanent-failure' (a 4xx) here -- deliberately NOT pushed back
-          // onto `remaining`, so it stops being retried, but it was also never
-          // counted in anyConfirmed, so it's never treated as a success.
-        } catch {
-          // Genuine network failure mid-replay -- still ambiguous, keep it.
-          remaining.push(queuedItem);
-        }
-      }
-
-      if (remaining.length > 0) {
-        localStorage.setItem('offline_habit_queue', JSON.stringify(remaining));
-      } else {
-        localStorage.removeItem('offline_habit_queue');
-      }
-
-      // Refresh whenever anything was attempted, not only on a confirmed
-      // success -- a permanently-discarded 4xx entry still needs the stale
-      // "pending" optimistic row cleared out of logEntries, which this
-      // full refetch-and-replace already does as a side effect.
-      loadUserDataAndLogs();
-      if (anyConfirmed) loadMyDay();
+    if (!verifiedUserId) return;
+    let active = true;
+    // R15: another tab settled or discarded one of this account's operations: re-read (account-scoped, read-only).
+    const unsubscribe = onOperationsChanged(verifiedUserId, () => { if (active) loadUserDataAndLogs(); });
+    return () => {
+      active = false;
+      unsubscribe();
     };
-
-    // Mount-time reconciliation (brief section 11) -- a queued entry must
-    // not depend indefinitely on a future offline -> online transition
-    // that may never come (e.g. every attempt failed with 5xx while the
-    // browser was online the whole time). This is a one-shot check on
-    // mount, never a poll/interval.
-    syncOfflineLogs();
-
-    window.addEventListener('online', syncOfflineLogs);
-    return () => window.removeEventListener('online', syncOfflineLogs);
-  }, [loadUserDataAndLogs, loadMyDay]);
+  }, [verifiedUserId, loadUserDataAndLogs]);
 
   // The panchang day is defined by the USER'S timezone (their selected city),
   // never the browser clock or UTC: the weekday selects the Rahu/Gulika/Yama
@@ -1417,6 +1521,10 @@ export default function DashboardPage() {
   }, [windows]);
 
   // Quick-Log Habit Handler with Optimistic UI & Offline Queueing
+  // AURA-ANDROID-REL-04 R15 -- every call is ONE operation: either an explicit NEW operation (a request id minted
+  // once, here) or `operation.retryOf`: the user's Retry of an existing operation, resubmitted with its ORIGINAL
+  // request id and canonical body. 'unresolved' = it may have been saved; the identity is kept and no new
+  // operation may replace it (the caller shows "Couldn't verify whether this activity was saved").
   const handleLogActivity = useCallback(
     async (
       activityTitle: string,
@@ -1432,159 +1540,247 @@ export default function DashboardPage() {
       // through to the server, never derived/guessed here -- the server
       // (POST /api/habit-logs) independently re-validates it against
       // FULL_ACTIVITY_CATALOG regardless of what this client sends.
-      activityId?: string
-    ): Promise<'confirmed' | 'pending'> => {
-      const targetDate = customTimestamp ? new Date(customTimestamp) : new Date();
-      const calculatedMinute = targetDate.getHours() * 60 + targetDate.getMinutes();
+      activityId?: string,
+      operation?: ActivityOperationRequest
+    ): Promise<ActivityLogResult> => {
+      // AURA-ANDROID-REL-04 IR-01 (R2) -- bound to the account the user acted
+      // under, captured now (throws, with a message, during a transition or
+      // without a verified account).
+      const binding = captureAccountBinding();
+      const retryOf = operation?.retryOf ? operationsRef.current[operation.retryOf] : undefined;
+      if (operation?.retryOf) {
+        // R15: Retry resumes the ORIGINAL operation. If its identity cannot be recovered safely, the action is
+        // blocked -- a replacement id is never generated.
+        // R17 (39260 G7): only an operation for which THE recovery decision established one dispatch payload; the
+        // claiming transaction re-checks that exact payload (conflicting evidence is never sent).
+        if (!retryOf || !retryOf.body || retryOf.account !== binding.account || retryOf.retryable === false) throw new Error(UNVERIFIED_ACTIVITY_MESSAGE);
+      } else if (operationsUnreadableRef.current) {
+        // R15: this device's operations could not be read, so an earlier operation may still be unresolved: no
+        // new operation until a read succeeds.
+        throw new Error(UNVERIFIED_ACTIVITY_MESSAGE);
+      } else if (!operation?.separate) {
+        // R16 (39258 G6): the shared recovery contract -- an OPEN operation for this activity (durable projection,
+        // so it survives remount, navigation and restart) withholds a fresh submission until the user recovers it
+        // or explicitly logs a separate activity.
+        const mine = Object.fromEntries(Object.entries(operationsRef.current).filter(([, op]) => op.account === binding.account));
+        const open = findRecoverableOperation(mine, { activityTitle, activityId });
+        if (open) { operation?.onOperation?.(open.clientRequestId); throw new ActivityRecoveryRequiredError(open.clientRequestId, open.activityTitle, open.retryable !== false); }
+      }
       const tempId = `temp-${Date.now()}`;
-      // Good Right Now / Log Activity Failure State Correctness V1 --
-      // generated once and reused verbatim across every retry, including
-      // offline-queue replay -- never regenerated per attempt. This is
-      // what lets the server (POST /api/habit-logs's own idempotent-replay
-      // check) recognize a retry as the SAME request instead of a new one.
-      const clientRequestId = generateClientRequestId();
-      const activeWindowForLog = overrideWindowType || activeType || 'NEUTRAL';
-      const inferredSignificance = activitySignificance ?? inferActivitySignificance(activityTitle);
-      const finalLogSource = logSource === 'MANUAL' && isFrictionWindow(activeWindowForLog) && inferredSignificance !== 'LOW'
-        ? 'OVERRIDE_CAUTION'
-        : logSource;
+      let dispatchBody: HabitLogPayload;
+      let operationId: string;
+      if (retryOf && retryOf.body) {
+        dispatchBody = { ...retryOf.body };
+        operationId = retryOf.clientRequestId;
+      } else {
+        const targetDate = customTimestamp ? new Date(customTimestamp) : new Date();
+        const calculatedMinute = targetDate.getHours() * 60 + targetDate.getMinutes();
+        // Good Right Now / Log Activity Failure State Correctness V1 --
+        // generated once and reused verbatim across every retry, including
+        // offline-queue replay -- never regenerated per attempt. This is
+        // what lets the server (POST /api/habit-logs's own idempotent-replay
+        // check) recognize a retry as the SAME request instead of a new one.
+        const clientRequestId = generateClientRequestId();
+        const activeWindowForLog = overrideWindowType || activeType || 'NEUTRAL';
+        const inferredSignificance = activitySignificance ?? inferActivitySignificance(activityTitle);
+        const finalLogSource = logSource === 'MANUAL' && isFrictionWindow(activeWindowForLog) && inferredSignificance !== 'LOW'
+          ? 'OVERRIDE_CAUTION'
+          : logSource;
+        const payload = {
+          activityTitle,
+          // Prospective Canonical Activity Identity V1 -- only the value
+          // explicitly propagated by the caller (e.g. a Good Right Now
+          // ActionCard's own activityId), never derived/guessed here.
+          // Omitted (undefined) for every non-catalog-backed caller, which
+          // JSON.stringify drops from the request body entirely -- the
+          // server then persists activityId = null, exactly as intended.
+          activityId,
+          activeWindow: activeWindowForLog,
+          logMinuteOfDay: calculatedMinute,
+          logTimestamp: targetDate.toISOString(),
+          notes: notes ? String(notes).trim() || undefined : undefined,
+          durationMinutes,
+          logSource: finalLogSource,
+          activitySignificance: inferredSignificance,
+          clientRequestId,
+        };
+        dispatchBody = payload as HabitLogPayload;
+        operationId = clientRequestId;
+      }
+      const payload = dispatchBody;
+      const clientRequestId = operationId;
+      const opBase = {
+        clientRequestId,
+        account: binding.account,
+        activityTitle: payload.activityTitle,
+        activityId: (payload as { activityId?: string }).activityId,
+        logSource: payload.logSource,
+        at: retryOf?.at ?? Date.now(),
+        body: payload,
+      };
+      // R15: the operation is known BEFORE the first dispatch (its durable anchor is the outbox record written by
+      // submitActivityLog's enqueue, in the same transaction as the claim).
+      putOperation({ ...opBase, status: 'pending', dispatched: retryOf?.dispatched ?? false });
+      operation?.onOperation?.(clientRequestId);
 
       const optimisticEntry: LoggedEntryItem = {
         id: tempId,
-        activityTitle,
-        activeWindow: activeWindowForLog,
-        loggedAt: targetDate,
-        logMinuteOfDay: calculatedMinute,
-        durationMinutes,
-        notes: notes ? String(notes).trim() : null,
-        logSource: finalLogSource,
-        activitySignificance: inferredSignificance,
-      };
-
-      // 1. Optimistic UI Update
-      setLogEntries((prev) => [optimisticEntry, ...prev]);
-
-      const payload = {
-        activityTitle,
-        // Prospective Canonical Activity Identity V1 -- only the value
-        // explicitly propagated by the caller (e.g. a Good Right Now
-        // ActionCard's own activityId), never derived/guessed here.
-        // Omitted (undefined) for every non-catalog-backed caller, which
-        // JSON.stringify drops from the request body entirely -- the
-        // server then persists activityId = null, exactly as intended.
-        activityId,
-        activeWindow: optimisticEntry.activeWindow,
-        logMinuteOfDay: calculatedMinute,
-        logTimestamp: targetDate.toISOString(),
-        notes: optimisticEntry.notes || undefined,
-        durationMinutes,
-        logSource: finalLogSource,
-        activitySignificance: inferredSignificance,
+        // Same identity as its outbox entry, so a reload-reconstruction never
+        // shows it twice while it is being sent.
         clientRequestId,
+        activityTitle: payload.activityTitle,
+        activeWindow: payload.activeWindow,
+        loggedAt: new Date(payload.logTimestamp),
+        logMinuteOfDay: payload.logMinuteOfDay,
+        durationMinutes: payload.durationMinutes,
+        notes: payload.notes ?? null,
+        logSource: payload.logSource,
+        activitySignificance: payload.activitySignificance,
       };
 
-      // Good Right Now / Log Activity Failure State Correctness V1 -- the
-      // fetch call itself is the ONLY thing wrapped in try/catch. A thrown
-      // exception here means no HTTP response was ever received (DNS
-      // failure, connection reset, genuinely offline) -- the server's
-      // outcome is truly ambiguous, which is the one legitimate case for
-      // the offline queue. A non-2xx response, by contrast, IS a
-      // definitive answer from the server and is handled below, outside
-      // this catch, never queued as if it were a connectivity problem.
-      let res: Response;
+      // 1. Optimistic UI Update (a Retry reuses the operation's existing row)
+      setLogEntries((prev) => (prev.some((item) => item.clientRequestId === clientRequestId) ? prev : [optimisticEntry, ...prev]));
+      const isMine = (item: LoggedEntryItem) => item.id === tempId || item.clientRequestId === clientRequestId;
+
+      // AURA-ANDROID-REL-04 IR-01 -- through the account boundary
+      // (lib/activitySync.ts): refused without a verified account or during
+      // a sign-out; the request carries the expected account; a network
+      // failure queues the entry for THIS account only while it is current.
+      let outcome: Awaited<ReturnType<typeof submitActivityLog>>;
       try {
-        res = await fetch('/api/habit-logs', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        });
-      } catch {
-        // Pending Activity Reload Visibility V1 -- clientRequestId is
-        // stamped here (it already exists as a local variable, generated
-        // above) so this live, in-session pending entry carries the same
-        // identity a reload-reconstructed one does. loadUserDataAndLogs's
-        // own merge needs this to tell a genuinely-still-queued pending
-        // row apart from a stale one whose replay was permanently
-        // rejected (4xx) and already removed from the queue -- without
-        // it, a permanently-failed entry could never be told apart from
-        // a real one and would linger here forever instead of being
-        // correctly cleared, regressing PR #86's own invariant.
-        setLogEntries((prev) => prev.map((item) => (item.id === tempId ? { ...item, syncStatus: 'pending', clientRequestId } : item)));
-        const rawQueue = localStorage.getItem('offline_habit_queue');
-        const queue = rawQueue ? JSON.parse(rawQueue) : [];
-        queue.push({ ...payload, tempId });
-        localStorage.setItem('offline_habit_queue', JSON.stringify(queue));
+        // R17 (39260 G8): a NEW operation (not a Retry, not a separate entry) carries its activity, so the claiming
+        // transaction evaluates THE recovery decision itself -- independent of this page's projection having loaded.
+        outcome = await submitActivityLog(payload, tempId, undefined, binding, retryOf ? { explicitRetry: true } : operation?.separate ? {} : { newOperation: { activityTitle, ...(activityId ? { activityId } : {}) } });
+      } catch (err) {
+        // runActivityOperation refused BEFORE anything was stored (no verified account / transition).
+        if (!retryOf) setLogEntries((prev) => prev.filter((item) => item.id !== tempId));
+        putOperation({ ...opBase, status: retryOf ? retryOf.status : 'failed', dispatched: retryOf?.dispatched ?? false });
+        if (err instanceof AccountUnavailableError) throw err;
+        throw new Error('Unable to log this activity.');
+      }
+      if (outcome.kind === 'recovery-required') {
+        // R17: nothing was stored or sent. The candidate operation is withdrawn and the durable open operation (from
+        // the same transaction's decision) is offered for recovery under ITS original id.
+        setLogEntries((prev) => prev.filter((item) => item.id !== tempId));
+        dropOperation(clientRequestId);
+        const open = storedOperationOf(outcome.operation);
+        applyStoredOperations(binding.account, [open], beginOperationsRead());
+        const shown = operationsRef.current[open.clientRequestId];
+        operation?.onOperation?.(open.clientRequestId);
+        throw new ActivityRecoveryRequiredError(open.clientRequestId, shown?.activityTitle ?? activityTitle, open.retryable);
+      }
+      if (outcome.kind === 'not-stored' && outcome.reason === 'offline') {
+        // R18 (online-first): confirmed offline before dispatch -- nothing was stored or sent. A new activity is not
+        // recorded; a Retry leaves its operation exactly as it was (still unresolved, same id and body).
+        if (retryOf) putOperation(retryOf);
+        else { setLogEntries((prev) => prev.filter((item) => item.id !== tempId)); dropOperation(clientRequestId); }
+        throw new Error(OFFLINE_MESSAGE);
+      }
+      const status: OperationStatus = operationStatusOf(outcome);
+      const dispatched = (retryOf?.dispatched ?? false) || outcome.kind === 'queued' || (outcome.kind === 'outcome-unknown' && outcome.reason === 'unverified-response');
+      const serverLog = outcome.kind === 'confirmed' || outcome.kind === 'already-recorded' ? outcome.serverLog : undefined;
+      putOperation({ ...opBase, status, dispatched, ...(serverLog ? { serverLog } : {}) });
+
+      // R14/R15: the server holds this exact request (a validated receipt or a validated answer): a success.
+      if (outcome.kind === 'already-recorded' || outcome.kind === 'confirmed') {
+        setLogEntries((prev) =>
+          prev.map((item) =>
+            isMine(item)
+              ? serverLog
+                ? {
+                    ...item,
+                    id: serverLog.id,
+                    loggedAt: new Date(serverLog.logTimestamp),
+                    // Insights Correctness + Historical Integrity V1 / Insights Timezone Consistency V1 -- the server
+                    // computes the authoritative window and minute-of-day for the actual logTimestamp.
+                    activeWindow: serverLog.activeWindow ?? item.activeWindow,
+                    logMinuteOfDay: serverLog.logMinuteOfDay ?? item.logMinuteOfDay,
+                    syncStatus: undefined,
+                  }
+                : { ...item, syncStatus: 'pending', clientRequestId }
+              : item
+          )
+        );
+        if (outcome.kind === 'already-recorded') void loadUserDataAndLogs();
+        // Your Day Ghost Activities + Logged Activity Requires Refresh V1 / New Aura Home V1 -- a confirmed log can
+        // change today's agenda and guidance; refreshed only after a CONFIRMED success.
+        loadMyDay();
+        loadGuidance();
+        return 'confirmed';
+      }
+      // R13/R15: queued, or unresolved -- keep the row pending under the SAME request id (it syncs if it was
+      // queued; it is never released by a list) -- never invite a duplicate re-entry.
+      if (status === 'pending' || status === 'unresolved') {
+        // Pending Activity Reload Visibility V1 -- clientRequestId is stamped
+        // so loadUserDataAndLogs's merge can tell this still-queued pending
+        // row apart from one whose replay was permanently rejected.
+        setLogEntries((prev) => prev.map((item) => (isMine(item) ? { ...item, syncStatus: 'pending', clientRequestId } : item)));
+        if (status === 'unresolved') return 'unresolved';
+        if (outcome.kind === 'account-changed') throw new AccountUnavailableError('stale');
+        if (outcome.kind === 'upgrade-required') throw new Error(UPGRADE_MESSAGE);
         return 'pending';
       }
 
-      if (!res.ok) {
-        // Good Right Now / Log Activity Failure State Correctness V1 -- ANY
-        // HTTP response, 4xx or 5xx alike, is a definitive server answer,
-        // never an "offline" condition. Roll the optimistic entry back out
-        // entirely (no lingering false-success state) and reject so the
-        // caller's own catch path -- already written in every one of
-        // GoodRightNowCard/Timeline/PastActivityModal, previously
-        // unreachable because this function never used to reject --
-        // actually runs. A 4xx would fail identically on every retry (bad
-        // request/auth/unknown activity); a 5xx deserves a visible,
-        // explicitly-retryable failure, not a silent invisible queue entry.
-        setLogEntries((prev) => prev.filter((item) => item.id !== tempId));
-        throw new Error(`Unable to log this activity (server responded ${res.status}).`);
-      }
-
-      const serverLog = await res.json();
-      setLogEntries((prev) =>
-        prev.map((item) =>
-          item.id === tempId
-            ? {
-                ...item,
-                id: serverLog.id,
-                loggedAt: new Date(serverLog.logTimestamp || serverLog.createdAt),
-                // Insights Correctness + Historical Integrity V1 -- the
-                // optimistic entry's own activeWindowForLog is at best a
-                // same-day guess (today's live activeType for a
-                // backdated log); the server now always computes the
-                // real, historically-correct window for the actual
-                // logTimestamp (apps/web/lib/historicalActivityWindow.ts).
-                // Sync it here so a backdated entry's displayed window
-                // (and everything InsightsView derives from it) reflects
-                // the authoritative value, not the optimistic guess.
-                activeWindow: serverLog.activeWindow ?? item.activeWindow,
-                // Insights Timezone Consistency V1 -- same reasoning as
-                // activeWindow above: the optimistic calculatedMinute is
-                // browser-local, the server now always derives the real
-                // Timing-Location minute-of-day for the actual
-                // logTimestamp (apps/web/app/api/habit-logs/route.ts).
-                logMinuteOfDay: serverLog.logMinuteOfDay ?? item.logMinuteOfDay,
-                syncStatus: undefined,
-              }
-            : item
-        )
-      );
-      // Your Day Ghost Activities + Logged Activity Requires Refresh V1 --
-      // a confirmed server-side log can change today's agenda (a linked
-      // Plan flips to COMPLETED, or a bare log becomes a new
-      // COMPLETED_ACTIVITY row), but myDay state is a separate snapshot
-      // from logEntries and was never re-fetched here. Reuses the exact
-      // same onCreated -> onMyDayChanged -> loadMyDay() pattern Plan
-      // creation (MyDayStoryCard) and Day Builder Add (DayBuilderCard)
-      // already use, and only fires after a CONFIRMED success -- never on
-      // the pending/failure paths above, so a failed or merely-queued log
-      // never makes Your Day look like it succeeded.
-      loadMyDay();
-      // New Aura Home V1 -- a confirmed log can also change what Plans/
-      // intent exist for today, which GET /api/daily-assistant/guidance
-      // depends on; refreshed alongside loadMyDay() above, same
-      // confirmed-success-only discipline.
-      loadGuidance();
-      return 'confirmed';
+      // Good Right Now / Log Activity Failure State Correctness V1 -- a DEFINITIVE answer: roll the optimistic entry
+      // back and reject so the caller's own catch path runs.
+      setLogEntries((prev) => prev.filter((item) => !isMine(item)));
+      if (outcome.kind === 'rejected') throw new Error(`Unable to log this activity (server responded ${outcome.status}).`);
+      if (outcome.kind === 'not-stored' && outcome.reason === 'discarded') throw new Error("This activity was discarded on this device when you signed out, so it won't be sent.");
+      if (outcome.kind === 'not-stored' && outcome.reason === 'not-committed') throw new Error("This activity wasn't saved. You can log it again.");
+      if (outcome.kind === 'not-stored') throw new Error("This device couldn't keep this activity safely, so it wasn't sent. Try again in a moment.");
+      // R9: storage could not be read, so the activity's eligibility was not established: nothing was stored or sent.
+      if (outcome.kind === 'storage-unavailable') throw new Error("Aura couldn't safely read this device's storage, so this activity wasn't saved or sent. Try again in a moment.");
+      // account-changed (not kept): the ORIGINAL account's operation.
+      throw new AccountUnavailableError('stale');
     },
-    [activeType, loadMyDay, loadGuidance]
+    [activeType, applyStoredOperations, beginOperationsRead, dropOperation, loadMyDay, loadGuidance, loadUserDataAndLogs, putOperation]
   );
 
+  // R15 -- "Check again": re-establishes one operation's outcome from evidence (durable storage first, then the
+  // authenticated GET bound by the same row rules). Without an id it re-reads the account's operations (e.g. after
+  // an unreadable store blocked new operations).
+  const handleCheckActivity = useCallback(
+    async (clientRequestId?: string): Promise<OperationStatus> => {
+      const binding = captureAccountBinding();
+      const op = clientRequestId ? operationsRef.current[clientRequestId] : undefined;
+      if (!op || !op.body) {
+        const { stamp, stored } = await readOperationsFenced(binding.account);
+        applyStoredOperations(binding.account, stored, stamp);
+        void loadUserDataAndLogs();
+        const again = clientRequestId ? operationsRef.current[clientRequestId] : undefined;
+        return again ? again.status : stored === null ? 'unresolved' : 'confirmed';
+      }
+      // R18: READ-ONLY -- the decision's outcome plus the server's read; nothing is sent, persisted or removed.
+      const result = await checkActivityOperation({ account: op.account, clientRequestId: op.clientRequestId, body: op.body }, undefined, binding, { dispatched: op.dispatched });
+      const status = operationStatusOf(result);
+      const serverLog = result.kind === 'already-recorded' || result.kind === 'confirmed' ? result.serverLog : undefined;
+      const note = result.kind === 'outcome-unknown' && result.reason === 'server-has-it' && op.retryable !== false
+        ? 'Aura found this activity on your account. Select Retry to finish — it won’t be saved twice.'
+        : result.kind === 'outcome-unknown' && result.reason === 'conflict' ? 'This device holds conflicting copies of this entry, so Aura won’t send it.' : undefined;
+      putOperation({ ...op, status, note, ...(serverLog ? { serverLog } : {}) });
+      if (status === 'confirmed' && serverLog) {
+        setLogEntries((prev) => prev.map((item) => (item.clientRequestId === op.clientRequestId ? { ...item, id: serverLog.id, activeWindow: serverLog.activeWindow ?? item.activeWindow, logMinuteOfDay: serverLog.logMinuteOfDay ?? item.logMinuteOfDay, syncStatus: undefined } : item)));
+        loadMyDay();
+      } else if (status === 'failed' || status === 'discarded') {
+        setLogEntries((prev) => prev.filter((item) => item.clientRequestId !== op.clientRequestId));
+      }
+      return status;
+    },
+    [applyStoredOperations, loadMyDay, loadUserDataAndLogs, putOperation, readOperationsFenced]
+  );
+
+  // AURA-ANDROID-REL-04 -- signed out only once the server has removed the
+  // session cookie (see lib/signOut.ts); a failed request says so instead.
   const handleLogout = useCallback(async () => {
-    await fetch('/api/auth/logout', { method: 'POST' });
-    setUser(null);
+    // Signed-out, unconfirmed and account-changed outcomes change the account
+    // epoch, which remounts this dashboard for the next state.
+    const result = await performSignOut({
+      fetch: (url, init) => fetch(url, init),
+      confirm: (message) => window.confirm(message),
+    });
+    // R4: every outcome states whether sign-out completed (lib/signOut.ts signOutOutcomeMessage).
+    const note = signOutOutcomeMessage(result);
+    if (note) window.alert(note);
   }, []);
 
   // My Day Timing Location Change Refresh V1 -- LocationPicker only ever
@@ -1817,6 +2013,20 @@ export default function DashboardPage() {
     setTodayReflection({ outputLevel, followedGuidance });
   }, []);
 
+  if (sessionUnverified && user !== null) {
+    // I6 recovery path: never shown as signed out, never as the old account.
+    return (
+      <main style={{ minHeight: '100vh', background: 'var(--as-bg, #020617)', color: 'var(--as-text)', display: 'flex', flexDirection: 'column', gap: 12, alignItems: 'center', justifyContent: 'center', padding: 24, textAlign: 'center' }}>
+        <p role="alert" style={{ maxWidth: 360 }}>
+          Aura couldn&apos;t confirm which account is signed in. Anything you logged on this device is kept.
+        </p>
+        <button type="button" onClick={() => { setSessionUnverified(false); setUser(undefined); loadUserDataAndLogs(); }} style={{ padding: '10px 18px', borderRadius: 8, border: '1px solid var(--as-border)', background: 'var(--as-surface)', color: 'var(--as-text)' }}>
+          Retry
+        </button>
+      </main>
+    );
+  }
+
   if (user === undefined) {
     return (
       <main style={{ minHeight: '100vh', background: 'var(--as-bg, #020617)', color: 'var(--as-text-muted)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -1870,6 +2080,62 @@ export default function DashboardPage() {
         boxSizing: 'border-box',
       }}
     >
+      {queueUnavailable && (
+        <div role="status" data-queue-state="unavailable" style={{ width: '100%', maxWidth: 560, marginBottom: 12, padding: 12, borderRadius: 10, border: '1px solid var(--as-border)', background: 'var(--as-surface)', fontSize: 13 }}>
+          Aura couldn&apos;t read this device&apos;s unsynced activity, so it may not be shown here. Nothing was removed and nothing is sent automatically; it will appear again once the device storage can be read.
+        </div>
+      )}
+      {operationsUnreadable && (
+        // AURA-ANDROID-REL-04 R15 -- whether an earlier activity operation is still unresolved cannot be established:
+        // new activity logging is blocked (never a replacement id) until the operations can be read again.
+        <div role="status" data-operation-state="unverified" style={{ width: '100%', maxWidth: 560, marginBottom: 12, padding: 12, borderRadius: 10, border: '1px solid var(--as-border)', background: 'var(--as-surface)', fontSize: 13 }}>
+          {UNVERIFIED_ACTIVITY_MESSAGE} New activity logging is paused on this device until Aura can check.{' '}
+          <button type="button" onClick={() => { void handleCheckActivity().catch(() => undefined); }} style={{ marginLeft: 6, textDecoration: 'underline', background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', padding: 0, fontSize: 13 }}>
+            Check again
+          </button>
+        </div>
+      )}
+      {unresolvedOperations(operations).filter((op) => op.account === user.id).length > 0 && (
+        // AURA-ANDROID-REL-04 R16 (39258 G6) -- the shared recovery action, on EVERY surface and after any remount,
+        // navigation or restart (the projection is read from durable storage): each unresolved operation keeps its
+        // original id; Check again / Retry act on exactly that operation.
+        <div role="status" data-operation-state="unresolved-list" style={{ width: '100%', maxWidth: 560, marginBottom: 12, padding: 12, borderRadius: 10, border: '1px solid var(--as-border)', background: 'var(--as-surface)', fontSize: 13 }}>
+          {UNVERIFIED_ACTIVITY_MESSAGE}
+          <ul style={{ margin: '6px 0 0', paddingLeft: 18 }}>
+            {unresolvedOperations(operations).filter((op) => op.account === user.id).map((op) => (
+              <li key={op.clientRequestId} data-operation-id={op.clientRequestId}>
+                {op.activityTitle}{' '}{op.note ? <span data-operation-note="true">{op.note} </span> : null}
+                <button type="button" onClick={() => { void handleCheckActivity(op.clientRequestId).catch(() => undefined); }} style={{ background: 'none', border: 'none', color: 'inherit', textDecoration: 'underline', cursor: 'pointer', padding: 0, fontSize: 13 }}>Check again</button>
+                {/* R17 (39260 G7): Retry only where the recovery decision established one payload for this id. */}
+                {op.retryable === false ? (
+                  <span data-operation-conflict="true"> · This device holds conflicting copies of this entry, so Aura won&apos;t send it.</span>
+                ) : (
+                  <>{' · '}<button type="button" onClick={() => { void handleLogActivity(op.activityTitle, undefined, undefined, undefined, undefined, undefined, undefined, op.activityId, { retryOf: op.clientRequestId }).catch(() => undefined); }} style={{ background: 'none', border: 'none', color: 'inherit', textDecoration: 'underline', cursor: 'pointer', padding: 0, fontSize: 13 }}>Retry</button></>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {pausedCount > 0 && (
+        // AURA-ANDROID-REL-04 (R8) -- this account's activity from a retired pre-release queue format (or an
+        // entry that can't be reconciled): kept on this device, NOT pending sync, never sent automatically.
+        <div role="status" data-queue-state="paused" style={{ width: '100%', maxWidth: 560, marginBottom: 12, padding: 12, borderRadius: 10, border: '1px solid var(--as-border)', background: 'var(--as-surface)', fontSize: 13 }}>
+          Sync paused — legacy activity could not be safely reconciled. {pausedCount === 1 ? '1 activity log' : `${pausedCount} activity logs`} for this account {pausedCount === 1 ? 'is' : 'are'} kept on this device but won&apos;t be sent automatically. Signing out lets you remove {pausedCount === 1 ? 'it' : 'them'}.
+        </div>
+      )}
+      {legacyCount > 0 && (
+        // AURA-ANDROID-REL-04 (R3/R4) -- pre-update offline logs have NO recorded
+        // account. They stay quarantined: never synced, never assigned to any
+        // account, and their contents are never shown. R4: no removal action --
+        // the shared legacy array may still be written by an older Aura tab, so
+        // destructive cleanup is deferred (lib/offlineHabitQueue.ts).
+        <div role="status" style={{ width: '100%', maxWidth: 560, marginBottom: 12, padding: 12, borderRadius: 10, border: '1px solid var(--as-border)', background: 'var(--as-surface)', fontSize: 13 }}>
+          <p style={{ margin: '0 0 8px' }}>
+            This device holds {legacyCount === 1 ? '1 activity log' : `${legacyCount} activity logs`} from an earlier version of Aura that {legacyCount === 1 ? "isn't" : "aren't"} linked to any account, so {legacyCount === 1 ? 'it' : 'they'} can&apos;t be synced. {legacyCount === 1 ? 'It stays' : 'They stay'} on this device and {legacyCount === 1 ? 'is' : 'are'} never shown or sent.
+          </p>
+        </div>
+      )}
       {/* Real-Time Solar Phase Shift Toast Banner */}
       <WindowShiftToast activeWindowName={activeType} />
 
@@ -1948,6 +2214,8 @@ export default function DashboardPage() {
             personalContext={personalContext}
             todayReflection={todayReflection}
             onLogActivity={handleLogActivity}
+            operations={operations}
+            onCheckActivity={handleCheckActivity}
             onSubmitReflection={handleSubmitReflection}
             onNextShiftClick={() => setHomeTimelineFocusKey(Date.now())}
             focusTimelineKey={homeTimelineFocusKey}
@@ -2007,6 +2275,8 @@ export default function DashboardPage() {
             logEntries={logEntries}
             loggedActivitiesToday={loggedActivitiesToday}
             onLogActivity={handleLogActivity}
+            operations={operations}
+            onCheckActivity={handleCheckActivity}
             onPlanActivity={handleOpenPlan}
             onAskAuraClick={() => setActiveTab('ask')}
           />
@@ -2123,6 +2393,8 @@ export default function DashboardPage() {
             logEntries={logEntries}
             userLocation={{ latitude: user.latitude, longitude: user.longitude, timezone: user.timezone }}
             onLogActivity={handleLogActivity}
+            operations={operations}
+            onCheckActivity={handleCheckActivity}
             onBack={() => setActiveTab('you')}
           />
         )}

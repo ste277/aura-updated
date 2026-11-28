@@ -1,0 +1,33 @@
+$ npx ts-node --project tsconfig.jsdom-tests.json test/homeIntent1AskAuraHandoffComponent.test.ts
+# job=math-core-tests step=Run Home Ask Aura handoff component lifecycle test env={}
+OK   1. resolveHomeAskAuraSubmission accepts genuinely non-empty Home input
+OK   1. mounting AskAuraView with a Home handoff triggers exactly one real fetch to /api/ask-aura
+OK   2. the exact typed text (only outer whitespace trimmed) reaches the real fetch body unchanged
+OK   3. the real consumption effect calls onHandoffConsumed exactly once for a single handoff
+OK   3. the real effect triggered exactly one real fetch call
+OK   4. five rerenders with the identical handoff object trigger no additional fetch calls
+OK   4. five rerenders with the identical handoff object trigger no additional onHandoffConsumed calls
+OK   5. a second, distinct-key handoff with IDENTICAL text is admitted and sent again
+OK   5. both calls carried the same, correctly-preserved text
+OK   5. onHandoffConsumed fired once per distinct handoff (twice total), never coalesced
+OK   6. a manually typed Enter starts one real, still-pending fetch call
+OK   6. a handoff arriving while busy is NOT yet marked consumed (no silent loss)
+OK   6. a handoff arriving while busy does NOT fire a second fetch call while the first is still pending
+OK   6. once the manual request finishes, the retained handoff is automatically processed (second fetch fires)
+OK   6. once processed, onHandoffConsumed fires exactly once for the retained handoff
+OK   6. the retained handoff's own text reaches the second fetch call unchanged
+OK   7. the request started before unmount
+OK   7. resolving the request AFTER unmount throws no error and logs no React warning
+OK   8a. the fresh instance's own real result rendered
+OK   8a. the old, unmounted instance's late-resolving response never rendered anywhere (no cross-mount bleed)
+OK   8b. a stale generation (1) is rejected once generation 2 is current
+OK   8b. the current generation (2) is accepted when it is still current
+OK   8b. an unmounted component is rejected even if its generation is still current
+OK   9. a real whitespace-only Enter submission triggers no fetch call
+OK   9. the real submit button is disabled for whitespace-only input
+OK   10. empty Home input never resolves as submittable (the old button's unconditional-navigation bug cannot reoccur via this contract)
+OK   10. non-empty Home input resolves as submittable
+
+ALL HOME INTENT 1 ASK AURA HANDOFF COMPONENT CHECKS PASSED
+
+# exit=0 signal=

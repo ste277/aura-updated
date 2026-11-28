@@ -1,0 +1,35 @@
+$ npx ts-node test/decisionEvidenceArchitecture.test.ts
+# job=math-core-tests step=Run decision evidence architecture test env={}
+OK   DecisionEvidence exists as its own exported type in its own module, distinct from DecisionFacts (which keeps its name and contract)
+OK   READONLY CONTRACT: the evidence interface has readonly members and the nested evidence types are `Readonly<...>` of the existing contracts
+OK   the module documents the DecisionFacts / DecisionEvidence distinction (transport vs immutable policy authority)
+OK   GENERIC LOCATION: the type lives in a generic Decision Intelligence module (apps/web/lib/decisionEvidence.ts) and is built by the generic preparation module, not by any Goal-specific file
+OK   DEEP FREEZE: the outer evidence object and each nested evidence object are frozen (three `Object.freeze` sites: outer, recurrence copy, opportunity copy)
+OK   FIELD PARITY: the evidence copies exactly the seven recurrence and twelve opportunity contract fields declared in decisionFacts.ts (no field added, dropped or renamed -- drift in either file fails here)
+OK   BY VALUE: the copies are built field by field -- no spread of the source, and no source object (or nested part of it) is returned or retained
+OK   ABSENCE STAYS ABSENCE: no category is manufactured -- an absent category adds no key, and facts with no category return undefined
+OK   NO RUNTIME IMPORTS and NO DB: the evidence module imports only types (no db, pg, pool, orchestrator) and has no async code, query or transaction
+OK   NO DB in the preparation function: `prepareDecisionEvidence` is synchronous and issues no query, transaction or write (zero queries, zero writes)
+OK   NO GOAL-SOURCE VOCABULARY: neither the evidence module nor the evidence-preparation function mentions Goals, manual/automatic origin, demand ids or provenance (source neutrality: there is no source parameter and no source branch)
+OK   NO PRESSURE / POLICY VOCABULARY: the evidence module and its preparation function contain no pressure, priority, score, ranking, promotion, urgency, winner, importance, deadline, flexibility, contention, capacity or target-date concept (evidence is data only)
+OK   the builder takes the facts and nothing else: no clock, no id, no request in its signature
+OK   SINGLE PREPARATION SITE: `buildDecisionEvidence(` is called in exactly one production place -- the preparation function
+OK   ONLY THE PREPARATION STAGE AND THE UNWIRED PRESSURE DERIVER KNOW EVIDENCE: the only production files mentioning DecisionEvidence are the evidence module, the preparation module, the orchestrator that invokes the stage, and the P2b pure pressure deriver (a type-only reader that nothing calls)
+OK   ORDER AT THE P1 PREPARATION BOUNDARY: duration resolution, then fact preparation, then evidence preparation, all before the first `constructDay` call
+OK   NO REBUILD DURING REPLENISHMENT OR ATTACHMENT: the evidence stage is invoked exactly once in the orchestrator, outside the replenishment loop, and attachment still reuses the prepared facts only
+OK   the facts handed to the evidence stage are the SAME intent inputs the preparer received (`preparationIntents`), so the evidence and the preparation cannot disagree
+OK   NOT PASSED TO THE CONSTRUCTOR: the orchestrator holds the evidence in one local (`decisionEvidenceByIntentId`) that is referenced exactly twice -- its declaration and (O5 P3b) ONE write-only hand-off to the diagnostics entry point, after preparation and before construction; it is never read, passed to the Constructor, spread or attached
+OK   every `constructDay` call (first run and replenishment re-runs) receives no evidence: its arguments contain no evidence reference
+OK   CONSTRUCTOR, COMPARATOR, PLACEMENT, CAPACITY, ACCEPTANCE, SIGNING, ROUTES, PROVIDERS and RECOMPOSITION: none of them references DecisionEvidence (the read set of evidence is empty)
+OK   PRECEDENCE COMPARATOR UNREAD: `compareByOverloadPrecedence` (dayConstructor.ts / dayIntent.ts) and the placement ranking take no evidence parameter and mention none
+OK   SIGNING CONTRACT UNCHANGED: signing is over the proposed items (user, window, item facts) and never over decision facts or evidence
+OK   ATTACHMENT CONTRACT UNCHANGED: `attachPreparedDecisionFacts` and the preparer type are untouched, and the prepared facts are still attached as the exact prepared object
+OK   FAIL-OPEN PRESERVED: preparation failure handling is unchanged (`prepareDecisionFactsFailOpen` still catches, warns once and returns no facts) and the evidence function is itself fail-open per intent
+OK   NO SNAPSHOT WORK: no REPEATABLE READ, shared scheduling-context transaction, snapshot timestamp or read-phase executor was introduced in the evidence or preparation modules
+OK   the P1 preparer still performs exactly its one range load and one projection per candidate: `createDecisionFactPreparer` is unchanged in shape (no evidence in its input or output)
+OK   NO SCHEMA CHANGE: the Prisma schema and every migration directory's own contents mention no Decision Evidence (count-independent -- holds regardless of how many unrelated migrations exist)
+OK   the unit test makes no snapshot, race-freedom or active-policy claim in any assertion label
+OK   the unit test covers: strict-mode writes, provider/DecisionFacts/opportunity mutation, outer and every nested field, readonly types (@ts-expect-error), cross-candidate isolation, reused source, source neutrality, absence, fail-open, one build per candidate through replenishment, output and token identity, scarce LOW candidate
+ALL DECISION EVIDENCE ARCHITECTURE CHECKS PASSED
+
+# exit=0 signal=

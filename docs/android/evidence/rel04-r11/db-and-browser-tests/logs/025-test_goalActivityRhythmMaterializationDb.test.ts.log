@@ -1,0 +1,50 @@
+$ npx ts-node test/goalActivityRhythmMaterializationDb.test.ts
+# job=day-constructor-acceptance-db-tests step=Run Goal activity rhythm materialization DB test env={}
+OK   47. first Rhythm occurrence: SAVED
+OK   47. exactly ONE GoalActivityOccurrence row exists
+OK   47. the occurrence points to the new plan
+OK   47. GoalActivity.plannedActivityId points to the new plan
+OK   47. no additional occurrences were created
+OK   48. second Rhythm occurrence (completed = 1, committed = 0, remaining = 2): SAVED
+OK   48. exactly TWO occurrences exist total
+OK   48. O1 still points to P1 (now LOGGED)
+OK   48. O2 points to P2 (UPCOMING)
+OK   48. GoalActivity now points to P2
+OK   49. setup: first of 2/week SAVED
+OK   49. setup: second of 2/week SAVED
+OK   49. a THIRD occurrence in the same week FAILS the whole transaction (capacity exhausted)
+OK   49. no third PlannedActivity was created for this intent
+OK   49. no third occurrence was created
+OK   49. GoalActivity pointer was not mutated by the failed attempt
+OK   50. a new week resets capacity -- one new occurrence allowed with no debt/rollover from the exhausted prior week
+OK   50. three occurrences total now exist for this GoalActivity (2 prior week + 1 new week)
+OK   51. planning again after a SKIP succeeds (skip does not consume/carry capacity)
+OK   51. O1/P1 remains historical SKIPPED, untouched
+OK   51. O2/P2 was created as a genuinely NEW occurrence
+OK   52. setup: Rhythm occurrence created for the Move test
+OK   52. the SAME occurrence id persists across the Move
+OK   52. the occurrence now points to the successor plan B
+OK   52. GoalActivity pointer also moved to B (existing G2.2.3 repoint, unaffected)
+OK   52. the original plan A remains MOVED (historical, untouched)
+OK   52. still exactly ONE occurrence row (no O2 created by the Move)
+OK   53. fixture: the fixed clock is 10:00 Asia/Kolkata on 2026-09-30 and the Move destination (+15 min, 10 min long, 2 min buffer) ends before that local midnight
+OK   53. setup: Rhythm occurrence created for the Recomposition Move test
+OK   53. fixture: the acceptance was judged at the fixed clock (read through deps.readClock), not the wall clock
+OK   53. the Recomposition acceptance itself succeeded
+OK   53. the SAME occurrence id persists across the Recomposition Move
+OK   53. the occurrence now points to the successor plan
+OK   53. still exactly ONE occurrence row (no second occurrence created)
+OK   54. User B cannot plan User A's Rhythm GoalActivity -- the whole transaction FAILS
+OK   54. no occurrence was created for User A's GoalActivity by User B's attempt
+OK   54. User A's GoalActivity remains unlinked/SUGGESTED, untouched
+OK   55. exactly ONE of the two concurrent requests for 1/week succeeds, the other deterministically fails (never both succeeding)
+OK   55. exactly ONE occurrence exists after both concurrent attempts resolve (durable, not a timing-luck artifact)
+OK   56. first attempt SAVES
+OK   56. an identical retry (same clientRequestId) returns ALREADY_ACCEPTED, never a second materialization
+OK   56. exactly ONE occurrence exists after the retry (the EXISTING PlanCreationIdempotency replay check, reused verbatim, prevents a duplicate)
+OK   57. mixed NONE + N_PER_WEEK request SAVES both
+OK   57. the finite activity derives PLANNED, no occurrence row created for it
+OK   57. the Rhythm activity got exactly one occurrence
+ALL GOAL ACTIVITY RHYTHM MATERIALIZATION DB CHECKS PASSED
+
+# exit=0 signal=

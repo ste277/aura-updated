@@ -1,0 +1,35 @@
+$ npx ts-node test/goalRhythmWeeklyProposal.test.ts
+# job=math-core-tests step=Run Goal Rhythm weekly proposal test env={}
+OK   1. three remaining + three suitable distinct days -> three proposals
+OK   1. requestedCount equals min(target cap, remaining)
+OK   1. no shortfallReason when fully satisfied
+OK   2. fewer suitable days than requested -> exactly as many proposals as exist
+OK   2. an honest shortfall reason is returned
+OK   3. weekly target already satisfied -> NOT_ELIGIBLE
+OK   3. no search is even attempted once demand is satisfied
+OK   4. a date already carrying a live occurrence is never re-proposed
+OK   4. the remaining suitable (uncommitted) date is still proposed
+OK   5. a completed session today is counted against remaining demand
+OK   5. requestedCount is capped at MAX_WEEKLY_RHYTHM_PROPOSALS, not the raw remaining count
+OK   5. today is excluded from new proposals once already completed today
+OK   6. same-date raw candidates collapse to at most one per date
+OK   7. rank-first distinct-day picks the top day-A candidate, never both day-A slots
+OK   7. and still reaches the distinct day-B candidate rather than stopping at day A
+OK   8. identical input produces identical output across repeated calls
+OK   9. the date range starts today and ends this local week's own Sunday, never next week
+OK   10. a DST-transition date range does not throw
+OK   10. and still resolves two distinct civil dates across the transition
+OK   11. a GoalActivity id this user's own discovery query never returned is rejected -> NOT_ELIGIBLE
+OK   12. a GoalActivity absent from the eligible-discovery rows is rejected -> NOT_ELIGIBLE
+OK   13. [STRUCTURAL] the service module contains no write call
+OK   13. [STRUCTURAL] the route contains no write call
+OK   14. a timing-search failure resolves to SEARCH_FAILED, never a fabricated proposal
+OK   15. every OK result is explicitly non-committable
+OK   15. [STRUCTURAL] this module never imports the preview-signing module and never assigns an acceptanceToken field
+OK   negative control A -- a satisfied target genuinely yields NOT_ELIGIBLE (this is what check 3 depends on)
+OK   negative control B -- real dedup collapses same-date raw candidates to one
+OK   negative control B -- (for contrast) the undeduped alternative would wrongly keep both
+
+ALL GOAL RHYTHM WEEKLY PROPOSAL CHECKS PASSED
+
+# exit=0 signal=

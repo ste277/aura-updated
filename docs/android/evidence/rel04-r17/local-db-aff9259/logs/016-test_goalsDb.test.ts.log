@@ -1,0 +1,47 @@
+$ npx ts-node test/goalsDb.test.ts
+# job=day-constructor-acceptance-db-tests step=Run Goals DB test env={}
+OK   A. plain Goal is created with status ACTIVE, no target date
+OK   A. plain Goal generates zero activities
+OK   B/16(civil-date). Goal.targetDate round-trips through Postgres as the exact "YYYY-MM-DD" string given -- never shifted by the reading process's local timezone (this is the real bug test/goalsDb.test.ts caught during PR A's own validation: node-postgres's default date parser reads a DATE column at LOCAL midnight, not UTC -- fixed via an explicit ::text cast in every Goal query, see db.ts's GOAL_COLUMNS)
+OK   D. templated Goal creates exactly the given activities, all SUGGESTED
+OK   AA(happy path only). Goal + its template activities all share the same goalId, created in one atomic call -- NOTE: this alone only proves the happy-path shape, not that a failure actually rolls back; see the failure-injection check immediately below for that
+OK   AA(failure-injection). createGoalWithActivities throws when a later activity insert violates a real constraint (NOT NULL on title)
+OK   AA(failure-injection). the Goal row itself was rolled back too, not left behind as a partial commit
+OK   AA(failure-injection). the EARLIER, already-succeeded first activity insert was also rolled back (real transactional atomicity, not best-effort cleanup)
+OK   E. a Goal created with activities: [] (no template match) has zero GoalActivity rows, never a guessed one
+OK   F. manual GoalActivity is created under the right Goal
+OK   G. manual GoalActivity accepts a null activityId
+OK   G. manual GoalActivity persists a supplied activityId verbatim
+OK   addGoalActivity returns null when the parent Goal does not exist (ownership-checked first, never inserts blind)
+OK   I. dismiss sets status to DISMISSED
+OK   J. dismissing an already-dismissed activity is idempotent (no error, stays DISMISSED)
+OK   M. a GoalActivity linked to an UPCOMING PlannedActivity derives PLANNED
+OK   N. after logging the linked Plan, the GoalActivity derives COMPLETED
+OK   AE. hard-deleting the linked PlannedActivity SetNulls GoalActivity.plannedActivityId (FK behavior, not app code)
+OK   AE. after SetNull, the GoalActivity derives back to SUGGESTED (never a dangling/broken reference)
+OK   O. a GoalActivity linked to a CANCELLED PlannedActivity derives back to SUGGESTED (available to plan again, no relink code needed)
+OK   24. replanning: relinking the SAME GoalActivity to a new Plan is a plain UPDATE (cardinality allows it once the old link is superseded)
+OK   R. archive sets status ARCHIVED and stamps archivedAt
+OK   S. archiving an already-archived Goal is idempotent (status stays ARCHIVED)
+OK   S. repeat archive does not overwrite the original archivedAt (COALESCE)
+OK   16. list defaults exclude the now-archived Goal
+OK   16. ?status=ARCHIVED returns the archived Goal
+OK   T. a Goal with no linked PlannedActivity has no retained linkage
+OK   T. deleteGoal succeeds (DELETED) when no PlannedActivity linkage is retained
+OK   T. the deleted Goal is truly gone
+OK   U. goalHasRetainedPlanLinkage is true once a GoalActivity is linked
+OK   U. deleteGoal rejects with HAS_HISTORY while the linkage is retained, never silently deletes it
+OK   U. the Goal still exists after a rejected delete
+OK   linkage blocks delete before the linked Plan is removed
+OK   once the linked PlannedActivity is hard-deleted (SetNull, unchanged mechanism), goalHasRetainedPlanLinkage reports false again
+OK   the Goal is now eligible for hard deletion again -- no durable "ever scheduled" tombstone blocks it
+OK   V. cross-user Goal read is rejected (returns null, not another user's row)
+OK   W. cross-user archive is rejected (returns null, no mutation)
+OK   X. cross-user delete is rejected (NOT_FOUND, not HAS_HISTORY -- existence is never leaked)
+OK   X. cross-user delete performed no mutation -- the goal still exists for its real owner
+OK   Y. cross-user activity creation is rejected (returns null, ownership-checked before insert)
+OK   Z. cross-user dismissal is rejected (returns null, no mutation)
+OK   Z. the real owner's activity is unaffected by the rejected cross-user dismissal
+ALL GOALS DB CHECKS PASSED
+
+# exit=0 signal=

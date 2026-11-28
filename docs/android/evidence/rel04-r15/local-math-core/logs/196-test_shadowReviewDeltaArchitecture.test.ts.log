@@ -1,0 +1,21 @@
+$ npx ts-node test/shadowReviewDeltaArchitecture.test.ts
+# job=math-core-tests step=Run shadow review delta architecture test env={}
+=== the real tree conforms ===
+OK   THE REAL PRODUCTION TREE HAS ZERO SHADOW-REVIEW-DELTA ARCHITECTURE VIOLATIONS (572 files scanned)
+=== the rules ===
+OK   CONFINEMENT: the builder is imported and CALLED only by the SHADOW execution boundary; the Preview response boundary and the client-side response parser may import the payload TYPE only (to type what they capture/validate), never the function
+OK   TYPE-ONLY IMPORTS: exactly the three reviewed type-only imports, no value import, no real call into the Constructor/selector/gate/materializer/mint/search possible
+OK   NO NEW SCHEDULING INTERPRETATION: the changed items come only from the authority's own promoted/relocated/displacedOwnerIds/candidateIntentId fields, never a sort/min/max/comparison over instants
+OK   CLOSED ITEM SCHEMA, NO POLICY / SECOND-RUN / PRIVATE VOCABULARY
+OK   PURE AND FAIL-CLOSED: no database/clock/randomness/logging/environment; the whole function is one try, and any failure yields undefined, never a throw or a partial payload
+=== mutations (in-memory; the real tree is untouched) ===
+OK   MUTATION: another module calls or imports the builder -> detected
+OK   MUTATION: a value import is added (e.g. the real selector) -> detected
+OK   MUTATION: the payload starts reading a second-derivation field instead of the authority's own -> detected
+OK   MUTATION: a policy/second-run/private identifier appears -> detected
+OK   MUTATION: a database/clock/log call, or the function stops being one fail-closed try -> detected
+OK   MUTATION: the boundary stops calling it, or calls it twice -> detected
+OK   the mutations were applied to in-memory copies only: the real tree still has zero violations afterwards
+ALL SHADOW REVIEW DELTA ARCHITECTURE CHECKS PASSED
+
+# exit=0 signal=

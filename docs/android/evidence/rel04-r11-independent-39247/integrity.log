@@ -1,0 +1,30 @@
+7cf8faf1dbfa90fc18a118f99c490b1cf06ce1994fd28240ad7da36d8d021bf3 apps/web/lib/offlineHabitQueue.ts
+fc75da09a3893c6e9cfa414823fa384063c97f1aa7075dbc0ddc7fd5043e512e apps/web/lib/signOut.ts
+bcf78bfe4b668f50e4ecc9b72117104df67795a58ad2bb8633c0c0dcf22ae96a apps/web/lib/activitySync.ts
+9aa02af5b43a88ff22ca99085009942608cb7658752ace7511cc9ab6ea10ff38 test/rel04R11StructuralQueue.test.ts
+a990b4f45537a7d04e95f0719c9d1452a60a1475906aa51e4439a95458d40ffc test/fixtures/rel04-r10-head/offlineHabitQueue.ts.txt
+bcf78bfe4b668f50e4ecc9b72117104df67795a58ad2bb8633c0c0dcf22ae96a test/fixtures/rel04-r10-head/activitySync.ts.txt
+47cd86e587c17a7cd83e7c385cb5b1662a145f543690212c306ea66b48c083d5 test/fixtures/rel04-r10-head/signOut.ts.txt
+044f2224ca9b936633b0835e79cdb53386c00265be212a512f27aeff0b4d7ff9 docs/android/evidence/rel04-r10-independent-39244/SHA256SUMS
+38ce047be741235eae1c86e8974c3d5db851cbfec27d2a79722f1e220c0d4af1 docs/android/evidence/rel04-r11/README.md
+61854e4267bac618e463669be3e9e5c666e462973118770e450212222f1ac825 docs/android/evidence/rel04-r11/CI_STABILITY_NOTE_45870363531.md
+9db9796785365ad867fca9aa7a15120fe31d7cb962ad11d10fd07c472f8f735b docs/android/evidence/rel04-r11/ci-45870363531/SHA256SUMS
+77d365dd87c085be96e01bfa8c723aaf82093cca14f0001d04b4eb54767ff007 docs/android/evidence/rel04-r11/math-core-tests/manifest.json
+1ab2814addc027956185bd551e8818f7c13595ad9f0e9df79e67c77bbbf97530 docs/android/evidence/rel04-r11/db-and-browser-tests/manifest.json
+b447ac6c7713d69e34a0aa003220dffa1efe705ea97a6d77ec90b0521146e04f docs/android/evidence/rel04-r11/typecheck/typecheck.log
+6190e2adf90289ce7be613e1ee756514951c3b0dd984abd4cb65a305151a4322 docs/android/evidence/rel04-r11/math-core-tests/logs/248-test_rel04R11StructuralQueue.test.ts.log
+2942d4884afb6c5c173adbc0e9febd66df326d703985892f1c3fe4da0e3b07b9 docs/android/evidence/rel04-r11/review-r10-edge.on-4a37173.log
+3739379e1e504e0d6f2784f07cb1c06e0279c1615099414be1dc0cdf7ed53df8 docs/android/evidence/rel04-r11/review-r10-edge.on-r11.log
+32e838b8e932f3e57cafa197df347b80ee058fb6b3138da3849d686d72332acd docs/android/evidence/rel04-r11/review-rel04R9Independent.on-r11.log
+07a726dc8ca5f5c43408a1df9c5761088722c22d0a31fb07266833093544445e docs/android/evidence/rel04-r11/review-r10-browser.on-r11.log
+Preserved manifest source renamed: review-r10-browser.ts -> review-r10-browser.ts.txt
+Preserved manifest source renamed: review-r10-edge.ts -> review-r10-edge.ts.txt
+docs/android/evidence/rel04-r10-independent-39244 27 hashes confirmed
+docs/android/evidence/rel04-r11/ci-45870363531 5 hashes confirmed
+Historical module verified offlineHabitQueue
+Historical module verified activitySync
+Historical module verified signOut
+math-core-tests 252 checksums and workflow commands {('math-core-tests', 0): 252}
+NONZERO day-constructor-acceptance-db-tests npx ts-node test/multiOccurrenceRhythmMoveCapacityDb.test.ts 1 None
+db-and-browser-tests 78 checksums and workflow commands {('rel04-chromium-multitab', 0): 1, ('rel04-next-app-rendering', 0): 1, ('day-constructor-acceptance-db-tests', 0): 75, ('day-constructor-acceptance-db-tests', 1): 1}
+Final scope: 347 documentation and evidence files. Runtime scope: queue and signOut only. DB test blob and pinned excerpt match.

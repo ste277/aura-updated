@@ -1,0 +1,66 @@
+$ npx ts-node test/pa3bSolarWindowsTimezoneFix.test.ts
+# job=math-core-tests step=Run PA-3B solar windows timezone fix test env={}
+OK   India: 2026-06-21 06:00 Asia/Kolkata -> 2026-06-21T00:30:00.000Z
+OK   Nepal: 2026-06-21 06:00 Asia/Kathmandu -> 2026-06-21T00:15:00.000Z
+OK   New York winter: 2026-01-15 06:00 America/New_York (EST, UTC-5) -> 2026-01-15T11:00:00.000Z
+OK   New York summer: 2026-07-15 06:00 America/New_York (EDT, UTC-4) -> 2026-07-15T10:00:00.000Z
+OK   Deterministic: repeated calls with identical inputs produce identical sunrise instant
+OK   New Delhi 2026-06-15 sunrise resolves to a valid, non-NaN instant
+OK   Process-TZ invariance: TZ=UTC sunrise (2026-06-14T23:51:00.000Z) matches TZ=Asia/Kolkata (2026-06-14T23:51:00.000Z)
+OK   Process-TZ invariance: TZ=America/New_York sunrise (2026-06-14T23:51:00.000Z) matches TZ=Asia/Kolkata (2026-06-14T23:51:00.000Z)
+OK   Corrected New Delhi sunrise under every process TZ is the independently-expected instant (2026-06-14T23:51:00.000Z)
+OK   America/New_York spring-forward day (2026-03-08) 06:00 is already EDT (past the 02:00->03:00 jump)
+OK   America/New_York fall-back day (2026-11-01) 06:00 is already EST (past the 02:00->01:00 repeat)
+OK   Nonexistent local time (spring-forward gap) resolves deterministically without throwing
+OK   Sunrise local clock time in Asia/Kolkata is still 05:21 (unchanged astronomical formula) -- got 05:21
+OK   (F) formatLocalICSDate reads back the correct target-TZ wall-clock time (expected 20260621T060000, got 20260621T060000)
+OK   (G) Kiritimati day preservation under TZ=UTC: intended date 2026-06-16 stays 2026-06-16 (got noon=2026-06-15T22:00:00.000Z, re-extracted=2026-06-16)
+OK   (G) Kiritimati noon anchor under TZ=UTC is the independently-expected UTC instant (2026-06-15T22:00:00.000Z)
+OK   (G) Kiritimati day preservation under TZ=Asia/Kolkata: intended date 2026-06-16 stays 2026-06-16 (got noon=2026-06-15T22:00:00.000Z, re-extracted=2026-06-16)
+OK   (G) Kiritimati noon anchor under TZ=Asia/Kolkata is the independently-expected UTC instant (2026-06-15T22:00:00.000Z)
+OK   (G) Kiritimati day preservation under TZ=America/New_York: intended date 2026-06-16 stays 2026-06-16 (got noon=2026-06-15T22:00:00.000Z, re-extracted=2026-06-16)
+OK   (G) Kiritimati noon anchor under TZ=America/New_York is the independently-expected UTC instant (2026-06-15T22:00:00.000Z)
+OK   Pacific/Pago_Pago (UTC-11, no DST): 2026-06-21 06:00 -> 2026-06-21T17:00:00.000Z
+OK   Australia/Adelaide summer/ACDT (UTC+10:30): 2026-01-15 06:00 -> 2026-01-14T19:30:00.000Z
+OK   Australia/Adelaide winter/ACST (UTC+9:30): 2026-07-15 06:00 -> 2026-07-14T20:30:00.000Z
+OK   (I) America/New_York spring-forward 2026-03-08: before/after requests resolve to the same target day (2026-03-08 / 2026-03-08)
+OK   (I) America/New_York spring-forward 2026-03-08: all 7 event categories are request-time-independent (TZ-F1-01 regression) -- mismatches: []
+OK   (I) America/New_York spring-forward 2026-03-08: sunrise matches the independently-captured fixture (expected 2026-03-08T11:19:00.000Z, got 2026-03-08T11:19:00.000Z)
+OK   (I) America/New_York spring-forward 2026-03-08: sunset matches the independently-captured fixture (expected 2026-03-08T22:56:00.000Z, got 2026-03-08T22:56:00.000Z)
+OK   (I) America/New_York spring-forward 2026-03-08: offset at sunrise/Brahma-start/solar-noon/sunset all equal (-240, -240, -240, -240) -- verified, not assumed
+OK   (I) America/New_York fall-back 2026-11-01: before/after requests resolve to the same target day (2026-11-01 / 2026-11-01)
+OK   (I) America/New_York fall-back 2026-11-01: all 7 event categories are request-time-independent (TZ-F1-01 regression) -- mismatches: []
+OK   (I) America/New_York fall-back 2026-11-01: sunrise matches the independently-captured fixture (expected 2026-11-01T11:24:00.000Z, got 2026-11-01T11:24:00.000Z)
+OK   (I) America/New_York fall-back 2026-11-01: sunset matches the independently-captured fixture (expected 2026-11-01T21:55:00.000Z, got 2026-11-01T21:55:00.000Z)
+OK   (I) America/New_York fall-back 2026-11-01: offset at sunrise/Brahma-start/solar-noon/sunset all equal (-300, -300, -300, -300) -- verified, not assumed
+OK   (I) Australia/Adelaide spring-forward 2026-10-04: before/after requests resolve to the same target day (2026-10-04 / 2026-10-04)
+OK   (I) Australia/Adelaide spring-forward 2026-10-04: all 7 event categories are request-time-independent (TZ-F1-01 regression) -- mismatches: []
+OK   (I) Australia/Adelaide spring-forward 2026-10-04: sunrise matches the independently-captured fixture (expected 2026-10-03T20:18:00.000Z, got 2026-10-03T20:18:00.000Z)
+OK   (I) Australia/Adelaide spring-forward 2026-10-04: sunset matches the independently-captured fixture (expected 2026-10-04T08:51:00.000Z, got 2026-10-04T08:51:00.000Z)
+OK   (I) Australia/Adelaide spring-forward 2026-10-04: offset at sunrise/Brahma-start/solar-noon/sunset all equal (630, 630, 630, 630) -- verified, not assumed
+OK   (I) Australia/Adelaide fall-back 2026-04-05: before/after requests resolve to the same target day (2026-04-05 / 2026-04-05)
+OK   (I) Australia/Adelaide fall-back 2026-04-05: all 7 event categories are request-time-independent (TZ-F1-01 regression) -- mismatches: []
+OK   (I) Australia/Adelaide fall-back 2026-04-05: sunrise matches the independently-captured fixture (expected 2026-04-04T20:59:00.000Z, got 2026-04-04T20:59:00.000Z)
+OK   (I) Australia/Adelaide fall-back 2026-04-05: sunset matches the independently-captured fixture (expected 2026-04-05T08:38:00.000Z, got 2026-04-05T08:38:00.000Z)
+OK   (I) Australia/Adelaide fall-back 2026-04-05: offset at sunrise/Brahma-start/solar-noon/sunset all equal (570, 570, 570, 570) -- verified, not assumed
+OK   America/St_Johns winter/NST (UTC-3:30): 2026-01-15 06:00 -> 2026-01-15T09:30:00.000Z
+OK   America/St_Johns summer/NDT (UTC-2:30): 2026-07-15 06:00 -> 2026-07-15T08:30:00.000Z
+OK   Pacific/Chatham summer/CHDT (UTC+13:45): 2026-01-15 06:00 -> 2026-01-14T16:15:00.000Z
+OK   Pacific/Chatham winter/CHST (UTC+12:45): 2026-07-15 06:00 -> 2026-07-14T17:15:00.000Z
+OK   (I) America/St_Johns spring-forward 2026-03-08 (half-hour-offset zone): before/after requests resolve to the same target day (2026-03-08 / 2026-03-08)
+OK   (I) America/St_Johns spring-forward 2026-03-08 (half-hour-offset zone): all 7 event categories are request-time-independent (TZ-F1-01 regression) -- mismatches: []
+OK   (I) America/St_Johns spring-forward 2026-03-08 (half-hour-offset zone): sunrise matches the independently-captured fixture (expected 2026-03-08T09:58:00.000Z, got 2026-03-08T09:58:00.000Z)
+OK   (I) America/St_Johns spring-forward 2026-03-08 (half-hour-offset zone): sunset matches the independently-captured fixture (expected 2026-03-08T21:26:00.000Z, got 2026-03-08T21:26:00.000Z)
+OK   (I) America/St_Johns spring-forward 2026-03-08 (half-hour-offset zone): offset at sunrise/Brahma-start/solar-noon/sunset all equal (-150, -150, -150, -150) -- verified, not assumed
+OK   (K) Brahma Muhurtham DTSTART;TZID=America/New_York:20260308T054300 is the correct EDT (post-transition) local wall time (expected 20260308T054300, got 20260308T054300)
+OK   (K) Brahma Muhurtham DTEND;TZID=America/New_York:20260308T063100 is the correct EDT local wall time (expected 20260308T063100, got 20260308T063100)
+OK   (K) Brahma Muhurtham duration is exactly 48 minutes across the DST-transition day (got 48)
+OK   (K) Abhijit Muhurtham DTSTART;TZID=America/New_York:20260308T124400 / DTEND;TZID=America/New_York:20260308T133000 are both EDT local wall times (expected 20260308T124400 / 20260308T133000, got 20260308T124400 / 20260308T133000)
+
+PA-3B-R4 DST-transition section: 29 passed, 0 failed.
+ALL PA-3B-R4 DST TRANSITION CHECKS PASSED
+
+56 passed, 0 failed.
+ALL PA-3B SOLAR WINDOWS TIMEZONE FIX CHECKS PASSED
+
+# exit=0 signal=

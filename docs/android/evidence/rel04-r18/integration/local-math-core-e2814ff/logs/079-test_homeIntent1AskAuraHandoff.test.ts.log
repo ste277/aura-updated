@@ -1,0 +1,31 @@
+$ npx ts-node test/homeIntent1AskAuraHandoff.test.ts
+# job=math-core-tests step=Run Home Ask Aura handoff test env={}
+OK   1. [STRUCTURAL] Home renders a real <TextInput>, not a decorative <button>, for the Ask Aura entry point
+OK   2a. [STRUCTURAL] the input carries the exact placeholder "What would you like to do?"
+OK   2b. [STRUCTURAL] a real <FieldLabel htmlFor="home-ask-aura-input"> association exists (not placeholder-only)
+OK   3/4a. [STRUCTURAL] the input's onKeyDown('Enter') calls handleHomeAskAuraSubmit
+OK   3/4b. [STRUCTURAL] the submit button onClick calls the SAME handleHomeAskAuraSubmit (not a second, independently wired handler)
+OK   5a. an empty string does not submit
+OK   5b. a whitespace-only string does not submit
+OK   5c. genuinely non-empty text (after trimming) does submit
+OK   6a. leading/trailing whitespace is trimmed, nothing else
+OK   6b. createAskAuraHandoff carries the exact text through verbatim (casing/punctuation untouched)
+OK   7a. a fresh handoff (never consumed before) is admitted
+OK   7b. [STRUCTURAL] the one-shot effect calls the EXISTING handleSend(pendingHandoffRequest!.text) -- no new fetch/parser call site
+OK   7c. [STRUCTURAL] no new fetch() call site was introduced in AskAuraView.tsx (still exactly 4, all pre-existing)
+OK   8. a new handoff is admitted the first time it is checked
+OK   9. five subsequent rerenders with the SAME handoff never re-admit it
+OK   10. navigating to another tab and back (pending object unchanged) does not replay
+OK   11. returning to Home and back to Ask Aura (pending object unchanged) does not replay
+OK   12. [STRUCTURAL + REASONED] pendingAskAuraHandoff is plain in-memory useState with no persistence call anywhere near it (localStorage/sessionStorage/cookie) -- a refresh naturally discards it, nothing to replay
+OK   13a. two createAskAuraHandoff calls with identical text get DIFFERENT keys
+OK   13b. the first is admitted
+OK   13c. the second, distinct (even if textually identical) request is ALSO admitted afterward
+OK   14. a rapid second submit call (reading the already-cleared input) sends exactly one handoff, not two
+OK   15. [STRUCTURAL] the existing error fallback message is unchanged, now guarded by isCurrent() (mountedRef AND request-generation, not removed/weakened)
+OK   16. [STRUCTURAL] Home's new submit handler body contains no fetch()/write call -- only validates, clears local input state, and calls onAskAuraSubmit (a navigation hand-off, not a write)
+OK   17. [STRUCTURAL] the "Ideas" PROMPT_CHIPS still call onPlanClick?.(chip) directly and unchanged, as the separate explicit Plan-navigation path
+OK   18. [STRUCTURAL] handleHomeAskAuraSubmit creates a handoff and navigates to 'ask' -- never an unconditional 'plan' redirect
+ALL HOME INTENT 1 ASK AURA HANDOFF CHECKS PASSED
+
+# exit=0 signal=

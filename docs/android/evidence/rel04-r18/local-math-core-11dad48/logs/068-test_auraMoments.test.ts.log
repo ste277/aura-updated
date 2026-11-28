@@ -1,0 +1,38 @@
+$ npx ts-node test/auraMoments.test.ts
+# job=math-core-tests step=Run Aura Moment test env={}
+OK   generatePublicMomentToken produces a non-empty string
+OK   generatePublicMomentToken produces a reasonably long, high-entropy token (24 bytes base64url ~= 32 chars)
+OK   generatePublicMomentToken is URL-safe (base64url charset only, no +/=)
+OK   generatePublicMomentToken produces a DIFFERENT token on each call (not derived from fixed input)
+OK   generatePublicMomentToken is not decodable as JSON (not "Base64-encoded JSON as the token")
+OK   resolvePublicOrigin prefers x-forwarded-host/proto over nextUrl (reverse-proxy safe)
+OK   resolvePublicOrigin falls back to the host header when no x-forwarded-host
+OK   resolvePublicOrigin uses http for a bare localhost host with no forwarded proto
+OK   buildMomentShareUrl builds a /moment/<token> URL under the resolved origin
+OK   buildMomentShareUrl never encodes any profile data into the URL -- it is exactly origin + /moment/ + the opaque token
+OK   defaultExpiresAt is exactly 7 days after endAt
+OK   isMomentExpired is false when expiresAt is in the future
+OK   isMomentExpired is true when expiresAt is in the past
+OK   isMomentExpired is false when expiresAt is null (no expiry set)
+OK   explanationSnapshotFor(griha-pravesh, SHARED) mentions "both", not a specific relationship word
+OK   explanationSnapshotFor(griha-pravesh, GENERAL) and (PERSONAL) are each distinct, non-empty strings
+OK   explanationSnapshotFor never says "Muhurtham" for an EVERYDAY activity (brief section 14/18)
+OK   explanationSnapshotFor for an EVERYDAY activity is distinct wording from a CEREMONIAL one
+OK   PublicAuraMoment DTO has EXACTLY the allow-listed keys (no accidental extra fields)
+OK   PublicAuraMoment DTO exposes locationName (safe -- same tier as activityTitle)
+OK   PublicAuraMoment DTO never contains a latitude/longitude field name
+OK   PublicAuraMoment DTO planningMode is derived from the activity catalog (griha-pravesh is CEREMONIAL), never the internal AuraMomentSource
+OK   PublicAuraMoment DTO never contains the internal id
+OK   PublicAuraMoment DTO never contains ownerUserId
+OK   PublicAuraMoment DTO never echoes back the publicToken itself
+OK   PublicAuraMoment DTO never contains savedPersonId (only the safe display name)
+OK   PublicAuraMoment DTO never contains the previous moment's internal id (only the safe boolean hasSuccessor)
+OK   PublicAuraMoment DTO never contains the linked plan's internal id (Aura Reminders V1 dedup linkage)
+OK   PublicAuraMoment DTO never contains any birth/natal field name at all
+OK   PublicAuraMoment DTO does carry the safe display fields the brief explicitly allows
+OK   PublicAuraMoment DTO carries the recipient's own preference (safe -- it is their own input) and the hasSuccessor flag passed in
+OK   PublicAuraMoment DTO dates are ISO strings, not raw Date objects (JSON-safe)
+
+ALL AURA MOMENT CHECKS PASSED
+
+# exit=0 signal=

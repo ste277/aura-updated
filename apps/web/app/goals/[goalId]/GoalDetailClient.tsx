@@ -1,4 +1,5 @@
 'use client';
+import { AccountScoped } from '../../../components/AccountScoped';
 
 import React, { useEffect, useState } from 'react';
 import { colors, spacing, typography } from '../../../components/theme';
@@ -603,4 +604,13 @@ function GoalLifecycleActions({ goal }: { goal: GoalDetailView['goal'] }) {
       )}
     </div>
   );
+}
+
+/**
+ * AURA-ANDROID-REL-04 IR-01 (R5) -- the route's client entry: nothing is
+ * mounted (or fetched) until the client has verified which account is signed
+ * in; the server page carries no account-derived data.
+ */
+export function GoalDetailScoped({ goalId }: { goalId: string }) {
+  return <AccountScoped verified>{(account) => <GoalDetailClient goalId={goalId} authenticated={account !== null} />}</AccountScoped>;
 }

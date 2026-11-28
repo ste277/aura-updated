@@ -1,0 +1,40 @@
+$ npx ts-node test/insightsAlignmentSafeguards.test.ts
+# job=math-core-tests step=Run INS-01 alignment insight safeguards test env={}
+OK   T0. thresholds are 30 overall and 10 per group
+OK   E1. no observations -> INSUFFICIENT, neutral text, no number
+OK   E2. 29 days (15/14) -> INSUFFICIENT
+OK   E3. 30 days (15/15) -> AVAILABLE
+OK   E4. 49 days but only 9 followed -> INSUFFICIENT (per-group minimum)
+OK   E5. 49 days but only 9 other -> INSUFFICIENT
+OK   E6. exactly 10 / 20 -> AVAILABLE
+OK   E7. empty comparison group (45/0) -> INSUFFICIENT, never a one-sided number
+OK   E8. a would-be positive and a would-be negative result are held back by the same rule
+OK   R1. positive: 1.0 vs 0.5 -> about 50 points higher
+OK   R2. negative: 0 vs 0.5 -> about 50 points lower (never clamped)
+OK   R3. neutral: equal averages -> "about the same", difference 0
+OK   R4. a 5-point raw difference rounds to 5; a smaller one would read "about the same"
+OK   R5. no "-0" from rounding
+OK   R6. unequal groups (10 vs 40) use per-group means: 100 points higher
+OK   R7. sample sizes are stated for each group
+OK   R8. method explains scoring, grouping, window and thresholds
+OK   R9. every result carries the non-causal caveat
+OK   R10. no causal or evaluative wording (because/caused/leads to/improve/better/worse/Panchang/%)
+OK   R11. insufficient copy matches the agreed neutral text
+OK   D1. unrecognised/missing mood values are excluded, not scored as Low
+OK   D2. a duplicate day counts once (first row kept)
+OK   D3. unchanged "followed" rule: aligned > friction logs counts as followed; a tie does not
+OK   D4. pure: same input gives the same output
+OK   S1. the route computes the comparison only through computeAlignmentComparison (no inline score loop)
+OK   S2. scoring unchanged: PEAK_FLOW 1, MODERATE 0.5, LOW 0
+OK   S3. "followed" rule unchanged: followedGuidance OR aligned > friction
+OK   S4. the route still classifies logs with the shared classifyInsightsWindow taxonomy
+OK   S5. Home no longer renders the comparison text or receives the insight
+OK   S6. Home is not handed the insight by page.tsx (only Insights is)
+OK   S7. Insights shows sample sizes, caveat and method; no "pts" headline number
+OK   S8. the check-in buttons on Home are unchanged (Low / Balanced / Strong)
+OK   S9. no new migration (re-baselined by AURA-REM-01: only its own additive 0054 heartbeat migration is allowed)
+OK   S10. module is pure (no db/fetch/Date.now)
+
+ALL INS-01 ALIGNMENT SAFEGUARD CHECKS PASSED
+
+# exit=0 signal=

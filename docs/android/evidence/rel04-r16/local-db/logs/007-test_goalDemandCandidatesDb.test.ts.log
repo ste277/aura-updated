@@ -1,0 +1,32 @@
+$ npx ts-node test/goalDemandCandidatesDb.test.ts
+# job=day-constructor-acceptance-db-tests step=Run Goal demand candidates DB test env={}
+OK   1. a SUGGESTED N_PER_WEEK activity with no prior occurrences is returned
+OK   2. setup: first occurrence SAVED (now UPCOMING)
+OK   3. an activity with a live UPCOMING commitment and remaining numeric capacity (3-0-1=2) is still offered, with remainingThisWeek correctly reduced to 2
+OK   4. after LOGGING the commitment, the activity is eligible again with remainingThisWeek reduced to 2 (3 - 1 completed)
+OK   5. a SKIPPED occurrence frees its capacity back to full (remainingThisWeek 2, not 1)
+OK   6. a CANCELLED occurrence frees its capacity back to full (remainingThisWeek 2, not 1)
+OK   7. a Moved-then-Logged occurrence counts as exactly ONE completion (remainingThisWeek 1 of 2), never two
+OK   8a. same week as the completion: 1/week exhausted, excluded
+OK   8b. a new week resets capacity -- eligible again with full remainingThisWeek 1, no debt carried
+OK   9a. planning for Sunday itself: the Sunday completion exhausts THIS week -> excluded
+OK   9b. planning for the very next day (Monday, crossing the week boundary): eligible again, full capacity
+OK   10. multiple Goals -> eligible activities from BOTH Goals are returned together, ineligible one excluded, no cross-Goal grouping
+OK   11. a GoalActivity belonging to an ARCHIVED Goal is excluded
+OK   12. a DISMISSED GoalActivity is excluded
+OK   13. a Rhythm NONE (finite) GoalActivity is excluded from Goal-demand entirely
+OK   14a. User A never receives User B's GoalActivity
+OK   14b. User B correctly receives their OWN GoalActivity
+OK   15. a user with zero GoalActivities at all gets a successful, empty result
+OK   16. three repeated loader calls create ZERO new GoalActivityOccurrence/PlannedActivity/GoalActivityExecution rows
+OK   17a. exactly ONE discovery query call for this whole request, independent of candidate count
+OK   17b. exactly ONE batched facts query call for this whole request, independent of candidate count
+OK   17c. every batch-created activity is present in that single result
+OK   18. repeated calls against unchanged state return candidates in the identical order
+OK   19a. the raw discovery query never returns the DISMISSED activity from check 12
+OK   19b. the raw discovery query never returns the ARCHIVED-Goal activity from check 11
+OK   19c. the raw discovery query never returns the Rhythm NONE activity from check 13
+OK   19d. the raw discovery query DOES return an activity with a live UPCOMING commitment (Multi-Occurrence Rhythm PR 2 -- capacity, not this query, now decides)
+ALL GOAL DEMAND CANDIDATES DB CHECKS PASSED
+
+# exit=0 signal=

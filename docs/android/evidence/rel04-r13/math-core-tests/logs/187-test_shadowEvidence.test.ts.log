@@ -1,0 +1,56 @@
+$ npx ts-node test/shadowEvidence.test.ts
+# job=math-core-tests step=Run shadow evidence test env={}
+=== Part 1: the funnel through the real SHADOW boundary -- a directed ACCEPT ===
+OK   ONE aggregate observation is emitted for the eligible SHADOW run
+OK   POSITIVE PRESSURE: both intents carry LAST_KNOWN_OPPORTUNITY -> pressured bucket TWO
+OK   REAL CONTENTION: the candidate P lost to the owner O in the P3a trace -> exactly ONE pressured intent was contended (the loser; the owner is not a loser)
+OK   PROMOTION PREPARED: one PromotionInput, one observation, generation READY, one P4b3 ACCEPT, no reject / unavailable
+OK   SELECTOR APPLY -> GATE MATERIALIZABLE -> MATERIALIZER READY -> INVARIANTS PASS (the real P4c1 / P4c2a / P4c3 and the invariant check ran on this run), no technical failure
+OK   SHADOW IS INERT: the returned result IS the baseline object of this run (identity), equals a plain orchestration, and is NOT the materialized day (the owner is still at 10:00 and P still Deferred)
+OK   the sink payload is frozen
+OK   independently: the real materializer builds P@10:30 with O relocated to 15:00 for this very run (the different day the evidence discarded)
+OK   and deriveShadowEvidence over that run yields exactly the same categories as the boundary emitted
+=== Part 2: every other funnel outcome ===
+OK   NO POSITIVE PRESSURE ON THE CANDIDATE: P has no pressure -> no promotion input, observations 0, selector NO_ACCEPT, nothing downstream evaluated
+OK   PRESSURE BUT NO CONTENTION: both pressured, none contended, no promotion -> NO_ACCEPT (pressure is not contention)
+OK   MULTIPLE_ACCEPTS: two ACCEPTs, the selector refuses to rank (MULTIPLE_ACCEPTS), the gate / materializer / invariants are NOT evaluated, the baseline is returned
+OK   REAL P4b3 REJECT: the typed reason is preserved in the existing `rejected` map (OWNER_WOULD_BE_UNPLACED), the selector is NO_ACCEPT, nothing downstream runs, the baseline is returned
+OK   TYPED GENERATION UNAVAILABLE: counted under its exact reason (NO_ACTIONABLE_PROMOTION_SLOT) in the existing map, no counterfactual, selector NO_ACCEPT, baseline returned
+OK   A GENERATION THROW is a typed technical reason (GENERATION_FAILED), the selector reports INCOMPLETE_OBSERVATION (the failure could hide an ACCEPT), the baseline is returned
+OK   GATE FAILURE: another Deferred item -> selector APPLY, gate DEFERRED_DIAGNOSTIC_UNRESOLVED, the materializer is NOT applied (NOT_EVALUATED), invariants NOT_EVALUATED, baseline returned
+OK   BASELINE_PROVENANCE_MISMATCH: run A's authority with run B's (structurally identical but foreign) baseline -> materializer BASELINE_PROVENANCE_MISMATCH, counted distinctly (never folded into a generic failure), no invariant run, no exception, the baseline is returned
+OK   the P4c4a provenance guard is unchanged: a CLONED baseline of the very same run is also a mismatch (identity, not structure)
+OK   a not-READY baseline with a READY run fails closed as GATE_FAILED (never a pass, never a throw)
+OK   a run that is not READY is not eligible: every stage NOT_EVALUATED, no failure
+=== Part 3: the invariant check ===
+OK   the bystander scenario still has exactly one real ACCEPT and a READY materialization (bystanders: N flexible, F fixed)
+OK   the real materialization passes every invariant (PASS)
+OK   FAIL FIXED_ITEM_MOVED: a FIXED placement was moved
+OK   FAIL UNRELATED_ITEM_MOVED: a non-owner flexible item was moved
+OK   FAIL OWNER_MISSING: a baseline Proposed intent disappeared (and was replaced, so the count is unchanged)
+OK   FAIL PROPOSED_COUNT_REDUCED: fewer Proposed items than the baseline
+OK   FAIL UNAUTHORIZED_DISPLACEMENT: an extra item that is neither a baseline item nor the promoted candidate
+OK   the promoted candidate missing (count equal to the baseline) is a reduced count against baseline + 1 and never passes
+OK   FAIL BASELINE_PROVENANCE_INVALID: a cloned baseline is not the baseline bound to the authority (the P4c4a same-run guarantee holds inside the verifier too)
+OK   FAIL CHECK_FAILED: a malformed materialized result never passes and never throws (a missing authority is BASELINE_PROVENANCE_INVALID)
+OK   SYNTHETIC INVARIANT FAILURE through the boundary: UNRELATED_ITEM_MOVED is emitted (not suppressed, not folded into PASS), the baseline is returned, the failure category is a policy-independent bounded value
+OK   NO PRODUCTION PATH CAN FORGE AUTHORITY: with a forged accepted look-alike (a spread copy of a real authority) the verifier reports BASELINE_PROVENANCE_INVALID, and the evidence derivation never accepts an observation without its minted authority (INCOMPLETE_OBSERVATION)
+OK   and the authority of an ACCEPT is still resolvable only from the real observation (the linked authority, unchanged by this slice)
+=== Part 4: failure isolation; OFF does no evidence work ===
+OK   AN INJECTED OBSERVABILITY EXCEPTION: the baseline is returned unchanged, ONE line is still emitted with the bounded technical-failure category EVIDENCE_FAILED and no error text, and the existing policy metrics are intact
+OK   a hostile run object never makes the derivation throw (bounded category only)
+OK   a materializer defect is isolated: MATERIALIZER_FAILED, invariants NOT_EVALUATED, baseline returned
+OK   OFF DOES NO EVIDENCE WORK: nothing derived, nothing emitted, the plain result and the identical load / search counts of a plain orchestration
+OK   no settings at all behaves as OFF
+OK   NO SECOND CONSTRUCTOR / SEARCH / QUERY: SHADOW with the full evidence funnel performs exactly the searches and loads of a plain orchestration
+=== Part 5: privacy, cardinality, latency, performance ===
+OK   NO PRIVATE OR HIGH-CARDINALITY CONTENT: no intent id (O, P, N, X, Y ...), no title, no instant, no placement, no id-like or time-like string anywhere in the emitted lines
+OK   EXACT SCHEMA, CLOSED VOCABULARY: only the reviewed keys, count buckets from four values, evidence from the closed categories
+OK   bucketOfCount is a total, bounded function: negatives / NaN / Infinity -> ZERO, 0 -> ZERO, 1 -> ONE, 2 -> TWO, 3 / 12 / 10^9 -> THREE_PLUS
+OK   LATENCY: the existing P4b5 latency (start -> before the evidence work, 960 ms) is LT_1000_MS and the SHADOW-attributable overhead (baseline hand-off -> evidence done, 50 ms) is LT_250_MS -- two independent buckets; the overhead excludes the baseline orchestration and the existing latency excludes the evidence work; neither claims a threshold
+OK   a broken clock makes both latency buckets UNKNOWN and changes nothing else (evidence still derived, baseline returned)
+     informational: evidence derivation 0.035 ms per run; one shadow-composed orchestration 2.749 ms (in-memory fakes; no database)
+OK   PERFORMANCE IS BOUNDED BY CONSTRUCTION: the derivation is at most one selector pass, one gate, one materialization and one invariant check (no loop over searches, no re-run) -- measured, not thresholded
+ALL SHADOW EVIDENCE CHECKS PASSED
+
+# exit=0 signal=

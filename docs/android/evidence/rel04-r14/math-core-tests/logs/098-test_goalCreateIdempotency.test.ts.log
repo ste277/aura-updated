@@ -1,0 +1,24 @@
+$ npx ts-node test/goalCreateIdempotency.test.ts
+# job=math-core-tests step=Run Goal create idempotency test env={}
+OK   deterministic: the same (userId, clientRequestId) always derives the identical id
+OK   user-salted: two different users supplying the IDENTICAL clientRequestId never collide
+OK   request-distinct: two different clientRequestIds for the SAME user never collide
+OK   non-empty, string result
+OK   match: identical title/targetDate/activities (omitted completion/rhythm normalize to DONE/NONE, matching the persisted defaults)
+OK   match: identical with targetDate set and zero activities
+OK   match: explicit DURATION completion + N_PER_WEEK rhythm compared correctly
+OK   mismatch: different title
+OK   mismatch: different targetDate
+OK   mismatch: different activity count
+OK   mismatch: renamed activity title
+OK   mismatch: different activityId
+OK   mismatch: different completion target value
+OK   mismatch: different Rhythm (NONE vs N_PER_WEEK)
+OK   mismatch: reordered otherwise-identical activities (order-sensitive, fail closed)
+OK   mismatch: same completion kind/targetValue, different unit
+OK   duplicate multiplicity: [A, A] does NOT match [A] (fewer rows than submitted)
+OK   duplicate multiplicity: [A] does NOT match [A, A] (more existing rows than submitted)
+OK   duplicate multiplicity: [A, A] genuinely MATCHES [A, A] (duplicates preserved as equal, not destroyed)
+ALL GOAL CREATE IDEMPOTENCY CHECKS PASSED
+
+# exit=0 signal=

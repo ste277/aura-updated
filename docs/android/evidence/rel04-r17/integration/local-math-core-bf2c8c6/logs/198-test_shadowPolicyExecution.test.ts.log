@@ -1,0 +1,101 @@
+$ npx ts-node test/shadowPolicyExecution.test.ts
+# job=math-core-tests step=Run shadow policy execution test env={}
+=== Part 1: mode parsing -- OFF by default, exactly SHADOW selects SHADOW ===
+OK   every missing, empty, misspelled, other-case, unknown or non-string value is OFF -- including ACTIVE (no such mode exists)
+OK   exactly SHADOW (surrounding whitespace ignored) selects SHADOW
+OK   THE SERVER ENVIRONMENT IS THE ONLY SOURCE: unset -> OFF (the default), SHADOW -> SHADOW, garbage -> OFF; the default sink is the server log sink; no database is read
+OK   CLIENT INPUT CANNOT SELECT A MODE: a body carrying shadowPolicyMode / mode / policyMode ACTIVE / counterfactual flags parses to a request that contains none of them
+OK   a request body asking for SHADOW / ACTIVE under a server OFF runs ZERO shadow work (no composer call, no generator call) and answers exactly the plain response
+=== Part 2: OFF -- zero shadow work, byte-identical to pre-P4b5 ===
+OK   OFF (every scenario): a composer that THROWS IF CALLED is never invoked (count 0), no sink call, and the status, body and signature equal the response with no settings at all
+OK   OFF adds no load, search or preparation: the counters equal the response with no settings (shadow work, preparation and observation emission are all zero)
+=== Part 3: SHADOW parity -- the baseline response is unchanged whatever the shadow decides ===
+OK   SHADOW parity (accept): HTTP status, body (preview items, signed tokens) are byte-identical to OFF; exactly one metrics record was emitted
+OK   SHADOW parity (loss): HTTP status, body (preview items, signed tokens) are byte-identical to OFF; exactly one metrics record was emitted
+OK   SHADOW parity (timing): HTTP status, body (preview items, signed tokens) are byte-identical to OFF; exactly one metrics record was emitted
+OK   SHADOW parity (multi): HTTP status, body (preview items, signed tokens) are byte-identical to OFF; exactly one metrics record was emitted
+OK   SHADOW parity (none): HTTP status, body (preview items, signed tokens) are byte-identical to OFF; exactly one metrics record was emitted
+OK   SHADOW ACCEPT: one observation, ACCEPT counted -- and the response is still the plain baseline
+OK   SHADOW REJECT (owner loss): REJECT counted by its exact typed reason
+OK   SHADOW REJECT (owner timing): REJECT counted by its exact typed reason
+OK   SHADOW MULTI-PROMOTION: all observations are counted (an ACCEPT does not stop or select anything) while the response is still ONE baseline
+OK   SHADOW with NO PromotionInputs: a valid READY observation of zero (not an error)
+OK   SHADOW with a baseline run that is not READY: the response equals OFF, and only a run-level category (RUN_NOT_READY, no fabricated counts) is observed
+OK   SHADOW GENERATION UNAVAILABLE: counted by its exact reason, no acceptance counts, response byte-identical to OFF
+OK   SHADOW ACCEPTANCE UNAVAILABLE: counted by its exact reason (distinct from generation unavailable), response byte-identical to OFF
+=== Part 4: failure isolation -- fail-open relative to Plan Day ===
+OK   POST-BASELINE SHADOW FAILURE (the composer throws after the baseline exists): the already-computed baseline is served -- status, body and signature equal OFF -- WITHOUT a rerun (one load, one set of searches); a generic TECHNICAL_FAILURE category with no error text is observed
+OK   SINK THROW: the baseline response is unchanged (the sink was reached once and its failure discarded)
+OK   a settings object whose sink accessor throws is discarded too: the baseline response is unchanged
+OK   TIMER FAILURE cannot fail Plan Day: the response is unchanged and the latency is simply UNKNOWN
+OK   the latency bucket is a coarse category from the injected MONOTONIC source (observability only: the response is not a function of it)
+OK   PRE-BASELINE FAILURE: a database error inside the baseline orchestration yields the SAME generic HTTP 500 status and body under SHADOW as under OFF, the orchestration ran exactly ONCE in both (no rerun because SHADOW is enabled), and nothing is observed as ACCEPT
+OK   a composer that throws BEFORE any baseline result exists is, structurally, a baseline failure: it surfaces as the plain failure (HTTP 500) and NOTHING is re-run (zero loads here: the stand-in never started one)
+=== Part 4b: the ABSOLUTE EXECUTION INVARIANT -- the baseline runs AT MOST ONCE per request, whatever fails ===
+OK   INVARIANT (OFF): the baseline orchestration ran at most ONCE (blocking 1, duration 1, facts 1); the second-invocation sentinel never fired; the response is byte-identical to OFF
+OK   INVARIANT (OFF (settings present)): the baseline orchestration ran at most ONCE (blocking 1, duration 1, facts 1); the second-invocation sentinel never fired; the response is byte-identical to OFF
+OK   INVARIANT (SHADOW healthy (ACCEPT + REJECT + ...)): the baseline orchestration ran at most ONCE (blocking 1, duration 1, facts 1); the second-invocation sentinel never fired; the response is byte-identical to OFF
+OK   INVARIANT (SHADOW composer throws after the baseline): the baseline orchestration ran at most ONCE (blocking 1, duration 1, facts 1); the second-invocation sentinel never fired; the response is byte-identical to OFF
+OK   INVARIANT (SHADOW composer throws before any baseline): the baseline orchestration ran at most ONCE (blocking 0, duration 0, facts 0); the second-invocation sentinel never fired; the response is the plain failure (500)
+OK   INVARIANT (SHADOW sink throws): the baseline orchestration ran at most ONCE (blocking 1, duration 1, facts 1); the second-invocation sentinel never fired; the response is byte-identical to OFF
+OK   INVARIANT (SHADOW timer throws): the baseline orchestration ran at most ONCE (blocking 1, duration 1, facts 1); the second-invocation sentinel never fired; the response is byte-identical to OFF
+OK   INVARIANT (SHADOW hostile settings): the baseline orchestration ran at most ONCE (blocking 1, duration 1, facts 1); the second-invocation sentinel never fired; the response is byte-identical to OFF
+OK   INVARIANT (OFF, BASELINE FAILURE): the failing baseline ran exactly ONCE and no second invocation was attempted; status 500 -- the same for OFF and SHADOW
+OK   INVARIANT (SHADOW, BASELINE FAILURE): the failing baseline ran exactly ONCE and no second invocation was attempted; status 500 -- the same for OFF and SHADOW
+OK   a baseline failure maps to the IDENTICAL status and body under OFF and SHADOW
+OK   INVARIANT (SHADOW ACCEPT): at most one baseline run and a response byte-identical to OFF
+OK   INVARIANT (SHADOW REJECT): at most one baseline run and a response byte-identical to OFF
+OK   INVARIANT (SHADOW REJECT (timing)): at most one baseline run and a response byte-identical to OFF
+OK   INVARIANT (SHADOW no promotions): at most one baseline run and a response byte-identical to OFF
+OK   INVARIANT (SHADOW generation unavailable): at most one baseline run and a response byte-identical to OFF
+OK   INVARIANT (SHADOW acceptance unavailable): at most one baseline run and a response byte-identical to OFF
+=== Part 5: ONE orchestration -- identical load / search counts for OFF and SHADOW ===
+     accept  OFF {"blocking":1,"duration":1,"search":3,"availability":0,"facts":1}  SHADOW {"blocking":1,"duration":1,"search":3,"availability":0,"facts":1}
+     loss    OFF {"blocking":1,"duration":1,"search":10,"availability":0,"facts":1}  SHADOW {"blocking":1,"duration":1,"search":10,"availability":0,"facts":1}
+     timing  OFF {"blocking":1,"duration":1,"search":3,"availability":0,"facts":1}  SHADOW {"blocking":1,"duration":1,"search":3,"availability":0,"facts":1}
+     multi   OFF {"blocking":1,"duration":1,"search":9,"availability":0,"facts":1}  SHADOW {"blocking":1,"duration":1,"search":9,"availability":0,"facts":1}
+     none    OFF {"blocking":1,"duration":1,"search":2,"availability":0,"facts":1}  SHADOW {"blocking":1,"duration":1,"search":2,"availability":0,"facts":1}
+OK   QUERY / SEARCH / PREPARATION DELTA = 0: per scenario the blocker, duration, availability and fact loads and every timing search are IDENTICAL for OFF and SHADOW (one orchestration, never two)
+OK   SHADOW calls the composition exactly once per request and (healthy path) nothing else orchestrates
+OK   NO BACKGROUND WORK: the single metrics record exists when the response resolves and nothing is emitted afterwards (no unawaited promise, queue or timer)
+=== Part 6: minimal observation; nothing leaks into the response ===
+OK   THE EXACT SINK SCHEMA: { mode, run, observations, generationReady, generationUnavailable{reason:n}, accepted, rejected{reason:n}, acceptanceUnavailable{reason:n}, latency, pressured, pressuredContested, evidence{selector,gate,materializer,invariant,failure}, shadowOverheadLatency } -- nothing else
+OK   NO IDENTIFIERS, TEXT, INSTANTS OR PLACEMENTS: no user, intent, owner, candidate, goal, activity or plan identifier; no title; no timestamp; no placement -- every key is a fixed vocabulary word or a typed reason, every value a small count or a closed category
+OK   LOW CARDINALITY: every key is from a fixed vocabulary and every value is a small count or a closed category (nested maps are keyed by typed reasons only)
+OK   THE SINK PAYLOAD IS FROZEN and shares nothing with the composition (it is derived from outcomes and typed reasons only)
+OK   NO RESPONSE LEAK: the HTTP result has only { httpStatus, body }; the body carries no shadow, counterfactual, promotion, policy or decision field
+OK   summarizeShadowPolicyRun reads only outcomes and typed reasons: an unavailable run carries no fabricated counts
+=== Part 7: default server sink and latency evidence (informational) ===
+OK   THE DEFAULT SERVER SINK writes exactly ONE structured aggregate line per SHADOW request and nothing under OFF; the line is the minimal metrics plus a fixed event tag
+     latency (multi-promotion fixture, 40 runs, fake in-memory deps, whole preview incl. signing): OFF median 3.32 ms p95 3.50 ms | SHADOW median 3.56 ms p95 3.79 ms | added orchestrations 0, added searches 0, added queries 0
+OK   the latency evidence was measured (informational: no timing assertion; the work added is pure in-memory composition over one run)
+ALL SHADOW EXECUTION CHECKS PASSED
+day-constructor/preview: unexpected failure Error: database unavailable
+    at Object.loadBlockingPlans (/Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/android-rel-04-app/test/shadowPolicyExecution.test.ts:60:88)
+    at runOrchestration (/Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/android-rel-04-app/apps/web/lib/dayConstructorOrchestrator.ts:895:10)
+    at orchestrateConstructDay (/Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/android-rel-04-app/apps/web/lib/dayConstructorOrchestrator.ts:769:10)
+    at orchestrateConstructDayWithShadowPolicy (/Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/android-rel-04-app/apps/web/lib/shadowPolicyExecution.ts:183:80)
+    at runDayConstructorPreview (/Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/android-rel-04-app/apps/web/lib/dayConstructorPreviewRequest.ts:351:63)
+    at processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async handleDayConstructorPreviewRequest (/Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/android-rel-04-app/apps/web/lib/dayConstructorPreviewRequest.ts:473:20)
+    at async /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/android-rel-04-app/test/shadowPolicyExecution.test.ts:191:49
+day-constructor/preview: unexpected failure Error: database unavailable
+    at Object.loadBlockingPlans (/Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/android-rel-04-app/test/shadowPolicyExecution.test.ts:60:88)
+    at runOrchestration (/Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/android-rel-04-app/apps/web/lib/dayConstructorOrchestrator.ts:895:10)
+    at runTraced (/Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/android-rel-04-app/apps/web/lib/dayConstructorOrchestrator.ts:827:24)
+    at orchestrateConstructDayWithDiagnostics (/Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/android-rel-04-app/apps/web/lib/dayConstructorOrchestrator.ts:798:24)
+    at preparePromotionInputs (/Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/android-rel-04-app/apps/web/lib/promotionInputPreparation.ts:85:67)
+    at observeShadowPolicy (/Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/android-rel-04-app/apps/web/lib/shadowPolicyObservation.ts:90:48)
+    at orchestrateConstructDayWithShadowPolicy (/Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/android-rel-04-app/apps/web/lib/shadowPolicyExecution.ts:190:22)
+    at runDayConstructorPreview (/Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/android-rel-04-app/apps/web/lib/dayConstructorPreviewRequest.ts:351:63)
+    at processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async handleDayConstructorPreviewRequest (/Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/android-rel-04-app/apps/web/lib/dayConstructorPreviewRequest.ts:473:20)
+day-constructor/preview: unexpected failure Error: threw before any baseline existed
+    at observe (/Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/android-rel-04-app/test/shadowPolicyExecution.test.ts:195:98)
+    at orchestrateConstructDayWithShadowPolicy (/Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/android-rel-04-app/apps/web/lib/shadowPolicyExecution.ts:190:22)
+    at runDayConstructorPreview (/Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/android-rel-04-app/apps/web/lib/dayConstructorPreviewRequest.ts:351:63)
+    at processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async handleDayConstructorPreviewRequest (/Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/android-rel-04-app/apps/web/lib/dayConstructorPreviewRequest.ts:473:20)
+    at async /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/android-rel-04-app/test/shadowPolicyExecution.test.ts:195:19
+
+# exit=0 signal=

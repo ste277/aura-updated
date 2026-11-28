@@ -1,0 +1,69 @@
+$ npx ts-node test/shadowPressureArchitecture.test.ts
+# job=math-core-tests step=Run shadow pressure architecture test env={}
+=== the real tree conforms ===
+OK   THE REAL PRODUCTION TREE HAS ZERO SHADOW-STAGE ARCHITECTURE VIOLATIONS (584 production files scanned)
+=== allowlists: producers, consumers, reachability ===
+OK   the shadow vocabulary exists in exactly five production files: the stronger-than-pressure helper, the pure evaluator, the diagnostics boundary and -- since O5 P4a, naming only the shared comparator primitive and its facts type -- the two promotion-input modules
+OK   ZERO PRODUCTION CONSUMERS: nothing imports the diagnostics boundary and nothing calls `observeShadowPressure` -- it is not wired into the normal preview (there is no durable telemetry sink yet, so real shadow incidence is unknown)
+OK   the helper is imported only by the evaluator, the boundary and (O5 P4a) the two promotion-input modules; the evaluator only by the boundary
+OK   the orchestrator's diagnostics entry point is called by exactly two production modules, the shadow boundary and (O5 P4a) the promotion preparation boundary
+OK   NOT A POLICY CONSUMER: no active comparator, Constructor, placement, capacity, replenishment, preview, signing, acceptance, persistence, Recomposition, Move, route, schema or migration mentions the shadow stage
+OK   NO PERSISTENCE: the Prisma schema and every migration directory's own contents mention no shadow stage; no migration was added (count-independent)
+OK   ACTIVE COMPARATOR UNTOUCHED AND UNREAD: dayIntent.ts (the hashed precedence code) does not name the shadow stage, and the helper is the only shadow-stage caller of `compareByOverloadPrecedence` (O5 P4b2: the pure local counterfactual generator also calls it, to reproduce the Constructor's neutral owner order -- it is not a shadow-stage module)
+=== the evaluator: derived pressure + trace + final result, nothing else ===
+OK   IMPORTS: types from the Constructor result, the P3a trace and the pressure module, and the stronger-than-pressure helper -- no value import of the Constructor, no database, no deriver
+OK   PRESSURE AUTHORITY: it accepts ALREADY-DERIVED pressure (`pressureByIntentId: ReadonlyMap<string, DecisionPressure>`) -- it never derives pressure and never names DecisionFacts, DecisionEvidence or any raw recurrence / opportunity field
+OK   CONTENTION AUTHORITY: contention is read only from the P3a trace events (loser and owner ids); there is no overlap algorithm, no interval geometry, no round, no capacity, no Deferred-reason inference
+OK   FINAL RESULT AUTHORITY: only which intents are finally Proposed or Deferred is read (`proposedItems` / `deferredItems` intent ids)
+OK   VALUE vs PRESSURE SEPARATION: the evaluator, which reads pressure, names no importance, deadline, original order, target date, timing fit, candidate, capacity or window -- and no source concept, title, activity or Goal
+OK   PURE: no async, await, Promise, timer, database, clock, Date, randomness, environment, console, logging or telemetry
+OK   NO CONSTRUCTION, NO COUNTERFACTUAL, NO SECOND PASS, NO POLICY: it calls no Constructor / orchestrator function, builds no schedule, promotes / replaces / ranks nothing and carries no score or "would / should win", "incorrect" or "missed" vocabulary
+OK   TAXONOMY: exactly the eight aggregate classifications, the four per-owner comparisons and the three incomplete reasons -- all string enums, no numeric field and no score
+OK   THE GATES RUN IN THE DOCUMENTED ORDER: id problems, then pressure, then final state, then contention, then final owners, then anomaly > block > missing facts > eligible
+OK   OWNERS ARE 0..N AND NEVER COLLAPSED: owners are collected from every trace event of the loser (a Map keyed by owner id, counted once each), mapped one comparison per owner, and the aggregate reads ALL final owners (`.some` over the final-owner set) -- no `[0]`, `.slice(0, 1)`, `.find` or single-owner shortcut
+OK   HISTORICAL vs FINAL OWNERS: owner final state comes from the FINAL result (`proposedSet`), every owner is compared (history kept) but only FINAL owners decide the aggregate
+OK   OUTPUT IS DETACHED AND FROZEN: every observation, owner comparison, array and the evaluation are `Object.freeze`d at creation; nothing returned aliases an input
+=== the stronger-than-pressure helper: exactly deadline-today, importance, deadline ===
+OK   IT DELEGATES to the Constructor's own comparator (exactly one call, no copy of the deadline / importance logic) with originalOrder neutralised on BOTH sides
+OK   ORIGINALORDER IS NOT READ: the only occurrence is the literal `originalOrder: 0` neutralising both shells (no property read, no parameter, no field of the facts)
+OK   NO PRESSURE, NO TIMING, NO CAPACITY, NO FACTS: the helper names no DecisionPressure, evidence, facts, timing fit, candidate, window or capacity (and no I/O, clock or environment)
+OK   the helper's only import is the Constructor's own comparator and the DayIntent type from dayIntent.ts; the comparison direction is the comparator's own (negative = A_STRONGER)
+=== the diagnostics boundary: derive after construction, fail open, nothing back into construction ===
+OK   IT DERIVES PRESSURE IN EXACTLY ONE PLACE, over the immutable evidence handed out by the orchestrator, strictly AFTER the Constructor result exists (the only `await` is the orchestration; derivation, projection and evaluation follow it)
+OK   PRESSURE AUTHORITY: it passes the evidence it was handed to `deriveDecisionPressure` and nothing else -- it reads no DecisionFacts, no raw recurrence / opportunity field and no evidence member itself
+OK   FAIL OPEN: the derivation, projection and evaluation run inside a try block whose catch returns the SAME Constructor result with shadow `UNAVAILABLE / EVALUATION_FAILED` (no logging, no rethrow); a not-READY run returns `UNAVAILABLE / RUN_NOT_READY`
+OK   NO CLIENT INPUT, NO NEW QUERY, NO WRITE, NO TELEMETRY: the boundary takes only the orchestrator's own request and deps; it imports no database module, writes nothing, logs nothing and sends nothing (real shadow incidence is therefore UNKNOWN)
+OK   VALUE vs PRESSURE SEPARATION in the boundary too: it projects the stronger-than-pressure facts through the helper and names no importance, deadline, original order or target date itself (the planning date arrives from the orchestrator as `planningDate`)
+=== the orchestrator: one write-only hand-off, after preparation, before construction ===
+OK   THE HAND-OFF: `EvidenceHandOff` is a private interface with exactly three optional members -- the evidence (P3b), since O5 P4b1 the immutable construction basis and, since O5 P4b1b, the baseline placements, whose own guards are constructionBasisArchitecture.test.ts and baselinePlacementsArchitecture.test.ts; the evidence member is assigned exactly once, immediately after the evidence stage and before the first `constructDay({`, and is read only by the diagnostics entry point AFTER `runTraced` returns
+OK   THE CONSTRUCTOR NEVER SEES EVIDENCE: neither `constructDay({...})` call mentions evidence, the hand-off, pressure or shadow (their keys are unchanged); the normal entry point passes no hand-off (`runOrchestration(request, deps, constructDay)`)
+OK   the orchestrator names neither the shadow stage nor pressure; it still has no pressure, score or policy concept (the P0c / P2a guards also hold)
+OK   the preview boundary never calls the diagnostics entry points: since O5 P4b5 `dayConstructorPreviewRequest.ts` makes its ONE orchestration through the server-controlled shadow execution boundary (OFF = the plain `orchestrateConstructDay` call), never `orchestrateConstructDayWith*` / `observeShadow*` directly
+=== MUTATIONS OF THE GUARD: each violation class, injected into the real tree, is detected ===
+OK   MUTATION: the evaluator reads raw recurrence / opportunity facts -> detected
+OK   MUTATION: the evaluator imports / reads DecisionEvidence or DecisionFacts -> detected
+OK   MUTATION: the evaluator derives pressure itself (a second derivation authority) -> detected
+OK   MUTATION: the evaluator uses timingFit / candidate order / importance / original order / deadline / capacity -> detected
+OK   MUTATION: a Goal / manual / automatic source branch in the evaluator -> detected
+OK   MUTATION: the evaluator runs the Constructor / reconstructs geometry / reads rounds (counterfactual, second pass, own overlap algorithm) -> detected
+OK   MUTATION: a score, a "would win" / "should replace" / "promote" vocabulary in the evaluator -> detected
+OK   MUTATION: a clock, log or async in the evaluator -> detected
+OK   MUTATION: the stronger-than-pressure helper reads timingFit, or originalOrder as a stronger dimension -> detected
+OK   MUTATION: the helper names pressure (value merged into the pressure authority) or re-implements the comparison -> detected
+OK   MUTATION: the diagnostics boundary runs a second construction (a counterfactual / pressure-aware pass) -> detected
+OK   MUTATION: the boundary reads raw facts, names a value signal, logs, or touches the database -> detected
+OK   MUTATION: a production consumer of the shadow boundary (a new module calling `observeShadowPressure`, i.e. any policy or preview consumer) -> detected
+OK   MUTATION: the active comparator file reads the shadow stage / the helper -> detected
+OK   MUTATION: the shadow output exposed in the preview, signing, acceptance, Move, Recomposition or the DB layer (persistence) -> detected
+OK   MUTATION: the Constructor, orchestrator, placement or capacity names shadow / pressure -> detected
+OK   MUTATION: a new module imports the helper or the evaluator (an unauthorized consumer) -> detected
+OK   MUTATION: a new caller of the diagnostics entry point outside the shadow boundary -> detected
+OK   the mutations were applied to in-memory copies only: the real tree still has zero violations afterwards
+=== wiring and honest scope ===
+OK   both shadow suites run in the required PURE job (math-core-tests = "Ephemeris / panchang tests"); there is no database suite for the P3b shadow stage (its real-pipeline fixtures need no database); the only shadow database suite is the O5 P4b5 production-snapshot parity test of the execution boundary
+OK   the behavior suite asserts scheduling / classification invariants only: no heap layout, query plan, timer, randomness or wall-clock reading
+OK   no assertion label claims a candidate would / should win, was wrongly decided, should be promoted, that policy is active, that the reads are snapshot-consistent, or that P4 is ready
+OK   P2D RETAINED: the evidence and preparation modules still hold no REPEATABLE READ / snapshot machinery -- shadow is observation only, which keeps this acceptable, and it authorizes nothing about active policy (P4 still needs the coherent snapshot)
+ALL SHADOW PRESSURE ARCHITECTURE CHECKS PASSED
+
+# exit=0 signal=

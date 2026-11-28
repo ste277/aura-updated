@@ -1,0 +1,25 @@
+$ npx ts-node --project tsconfig.jsdom-tests.json test/signOutRel04.test.ts
+# job=math-core-tests step=Run REL-04 sign-out test env={"TS_NODE_COMPILER_OPTIONS":"{\"jsx\":\"react-jsx\"}"}
+OK   exact acknowledgement (200, JSON, loggedOut:true) -> signed-out
+OK   logout is requested with redirect:"error" (a redirect can never count as success)
+OK   204 No Content: not accepted; reconciled (session still A) -> failed, A kept
+OK   200 with loggedOut:"true" (string): not accepted; reconciled (session still A) -> failed, A kept
+OK   200 text/html: not accepted; reconciled (session still A) -> failed, A kept
+OK   200 marked redirected: not accepted; reconciled (session still A) -> failed, A kept
+OK   200 malformed JSON: not accepted; reconciled (session still A) -> failed, A kept
+OK   200 JSON body under a non-JSON media type containing "application/json": not accepted; reconciled (session still A) -> failed, A kept
+OK   200 application/json-seq: not accepted; reconciled (session still A) -> failed, A kept
+OK   200 array body: not accepted; reconciled (session still A) -> failed, A kept
+OK   HTTP 503 is ambiguous: reconciled with a fresh session answer before A resumes
+OK   HTTP 503 after the session actually ended -> signed-out-unconfirmed (never restored as A)
+OK   strict media type helper
+OK   lost answer, session gone -> signed-out-unconfirmed
+OK   lost answer, session now B -> account-changed to B
+OK   wording: 1 owned
+OK   wording (R5): OWNED entries only; already-dispatched ones named as possibly SENT; removal not promised before the outcome
+OK   wording (R5): unreadable storage says entries will be KEPT (what actually happens), never that they will be removed
+OK   wording: nothing pending -> no question
+
+19 passed, 0 failed
+
+# exit=0 signal=

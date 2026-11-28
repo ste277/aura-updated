@@ -1,0 +1,59 @@
+$ npx ts-node --project tsconfig.jsdom-tests.json test/signInResendChangeEmailJsdom.test.ts
+# job=math-core-tests step=Run sign-in resend / change-email component test (AURA-READY-03-F2) env={}
+OK   A1. uses the existing POST /api/auth/request-link endpoint
+OK   A2. success -> SENT with the dev-only code; no link when the server sends none
+OK   A3. body is just the email when there is no guest token
+OK   A4. guest flow forwards its guest state token; production response {sent:true} -> SENT
+OK   A5. 429 -> RATE_LIMITED with the server's own message
+OK   A6. provider failure (502) -> FAILED with the server message
+OK   A7. network failure -> FAILED with the offline message (never an unhandled rejection)
+OK   A8. client cooldown is 30 s
+OK   B1. code screen shows "Sent to first@…"
+OK   B1. Resend code and Change email are both present
+OK   B1. both actions are at least 44 px tall (mobile touch target)
+OK   B2. resend is disabled during the cooldown and shows the seconds left
+OK   B2. clicking during the cooldown sends nothing
+OK   B3. after the cooldown "Resend code" is enabled
+OK   B3. three rapid clicks -> exactly one request
+OK   B3. while in flight the button reads "Sending…" and is disabled
+OK   B3. Change email is locked while a resend is in flight
+OK   B3. resend went to the same address
+OK   B3. success message names the address and asks for the newest code
+OK   B3. the stale typed code is cleared and the new dev code is shown
+OK   B3. cooldown restarts after a send
+OK   B4. rate limit: the server's message is shown as an alert
+OK   B4. rate limit: resend paused again (no hammering the quota)
+OK   B4. rate limit: still on the code screen, previous dev code kept
+OK   B5. provider failure message shown
+OK   B5. offline failure message shown, button usable again after the cooldown
+OK   B6. Change email returns to email entry
+OK   B6. pending verification cleared: no code input, no dev code, no "Sent to", no old messages
+OK   B6. the previous address is prefilled for easy correction
+OK   B7. the new code was requested for second@
+OK   B7. code screen shows the new address and a fresh, empty code input
+OK   B7. a fresh cooldown starts for the new address
+OK   B7. verify-code is sent for second@ (never the previous first@)
+OK   B8. wrong code: server error shown, not signed in (reconciled: still signed out)
+OK   B8. correct code: onLoggedInCheck fires once
+OK   B9. only request-link, verify-code and the confirming session read were requested (no /api/auth/verify link)
+OK   B9. no sign-in link is rendered when the server returns only a code
+OK   C1. guest flow renders SignInCodeActions on its code step
+OK   C2. guest resend reuses the same guest state token and the sent-to address
+OK   C3. guest verify-code uses sentTo, never the editable email field
+OK   C4. guest Change email clears sentTo, code, dev extras, error and returns to EMAIL
+OK   C5. LoginScreen verify-code uses sentTo (via verifySignInCode, AURA-ANDROID-REL-04 R2)
+OK   C6. no screen builds or calls a magic link itself
+OK   C7. messages never depend on account existence (no exists/newUser/isRegistered branching)
+OK   C8. request-link server route untouched by this change (quota 3 per 10 min still defined there)
+
+45 checks
+All sign-in resend / change-email checks passed.
+request-link failed: TypeError: Failed to fetch
+    at /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/android-rel-04-app/test/signInResendChangeEmailJsdom.test.ts:80:17
+    at processTicksAndRejections (node:internal/process/task_queues:104:5)
+request-link failed: TypeError: Failed to fetch
+    at /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/android-rel-04-app/test/signInResendChangeEmailJsdom.test.ts:152:15
+(node:50266) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+# exit=0 signal=

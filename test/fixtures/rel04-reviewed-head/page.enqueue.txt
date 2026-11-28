@@ -1,0 +1,4 @@
+        const rawQueue = localStorage.getItem('offline_habit_queue');
+        const queue = rawQueue ? JSON.parse(rawQueue) : [];
+        queue.push({ ...payload, tempId });
+        localStorage.setItem('offline_habit_queue', JSON.stringify(queue));

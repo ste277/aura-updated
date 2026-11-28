@@ -1,0 +1,28 @@
+$ npx ts-node test/weeklyPlanReviewClientDb.test.ts
+# job=day-constructor-acceptance-db-tests step=Run Weekly plan review client DB test env={}
+OK   precondition: zero PlannedActivity rows exist before any acceptance
+OK   1. the real weekly-proposal endpoint, parsed through this UI's own real response parser, returns a usable proposal
+OK   1. every projected draft starts PENDING, ready for the review screen
+OK   2. selectSessionsPendingSubmission includes every freshly-proposed (PENDING) session
+OK   2. the real weekly-accept endpoint, parsed through this UI's own real response parser, reports a genuine ACCEPTED outcome
+OK   2. applyAcceptanceSummaryToDrafts correctly locks the accepted session in the UI's own state
+OK   2. a REAL PlannedActivity row was created in the database by this exact UI-driven request
+OK   2. the UI's own draft now carries the real, authoritative plannedActivityId from the database
+OK   3. the real row is now CANCELLED, with its original start/end untouched (the existing cancel flow's own, unmodified behavior)
+OK   4. [HGR3-C-R1] a stale retry of the original acceptanceId correctly fails -- never silently "re-accepted" against the cancelled row
+OK   4. the UI's own reconciliation correctly surfaces this as a FAILED draft (COMMITMENT_NO_LONGER_LIVE), never a false ACCEPTED/ALREADY_ACCEPTED
+OK   4. the stale retry created ZERO additional rows (still exactly 1, still CANCELLED)
+OK   5. [HGR3-C-R1] a fresh weekly-proposal call, generated through the SAME real UI path, is eligible again now that the cancellation freed this week's demand
+OK   6. a genuinely new confirmation uses a DIFFERENT acceptanceId than the original (the real lifecycle contract: fresh id per new decision)
+OK   6. [HGR3-C-R1] the fresh, explicitly-approved re-booking succeeds -- the user CAN rebook the identical slot with a new confirmation
+OK   6. a GENUINELY NEW live row now exists, with a DIFFERENT id than the original cancelled row
+OK   6. exactly one of the two rows is UPCOMING (the new booking) and the original remains CANCELLED, untouched
+OK   7. retrying the NEW identity resolves ALREADY_ACCEPTED, pointing at the real new row -- never a duplicate
+OK   7. the UI's own reconciliation correctly re-locks the session with the SAME real plannedActivityId as before
+OK   7. retrying the new identity created ZERO additional rows (still exactly 2 total)
+OK   8. setup: a real proposal for the isolated second user/GoalActivity returns at least one suitable session
+FAIL 8. setup: the constructed second instant genuinely falls on the SAME local date as the first (a real, valid same-date pair)
+
+SOME WEEKLY PLAN REVIEW CLIENT DB CHECKS FAILED
+
+# exit=1 signal=

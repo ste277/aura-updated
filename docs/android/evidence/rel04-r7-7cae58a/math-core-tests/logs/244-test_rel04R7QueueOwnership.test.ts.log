@@ -1,0 +1,56 @@
+$ npx ts-node --project tsconfig.jsdom-tests.json test/rel04R7QueueOwnership.test.ts
+# job=math-core-tests step=Run REL-04 R7 queue ownership test (every supported format; R6 head 13d773e vs current) env={"TS_NODE_COMPILER_OPTIONS":"{\"jsx\":\"react-jsx\"}"}
+OK   fixture rel04-r1-head/offlineHabitQueue.ts.txt == d09449b apps/web/lib/offlineHabitQueue.ts
+OK   fixture rel04-r2-head/offlineHabitQueue.ts.txt == db8607e apps/web/lib/offlineHabitQueue.ts
+OK   fixture rel04-r3-head/offlineHabitQueue.ts.txt == b323d2a apps/web/lib/offlineHabitQueue.ts
+OK   fixture rel04-r5-head/offlineHabitQueue.ts.txt == a3a02b8 apps/web/lib/offlineHabitQueue.ts
+OK   fixture rel04-r6-head/offlineHabitQueue.ts.txt == 13d773e apps/web/lib/offlineHabitQueue.ts
+OK   fixture rel04-r6-head/activitySync.ts.txt == 13d773e apps/web/lib/activitySync.ts
+OK   fixture rel04-r6-head/signOut.ts.txt == 13d773e apps/web/lib/signOut.ts
+O1 R6: {"ok":false,"legS":{"sharedId":true,"a0":1,"b0":0,"aReplayed":1,"aRows":1,"b1":1,"bDiscarded":1,"aMarkerKept":false,"aResurrected":1},"legD":{"aDiscarded":1,"bReplayed":1,"bRows":1,"aDiscardedReplayed":1,"aRowsAfterDiscard":1}}
+OK   O1 R6 HEAD: the actual R3 migrator gives both accounts' aura_q4 entries the SAME recordId (shared legacy identity)
+OK   O1 R6 HEAD reproduces: account B's readable queue reports ZERO entries while A's record holds the shared id
+OK   O1 R6 HEAD reproduces: B's discard replaces A's settlement marker (no marker of A remains)
+OK   O1 R6 HEAD reproduces: A's original source (cleanup failed) is RESURRECTED after that
+OK   O1 R6 HEAD reproduces: A's explicitly DISCARDED activity is replayed and creates a server row
+O1 R7: {"ok":true,"legS":{"sharedId":true,"a0":1,"b0":1,"aReplayed":1,"aRows":1,"b1":1,"bDiscarded":1,"aMarkerKept":true,"aResurrected":0},"legD":{"aDiscarded":1,"bReplayed":1,"bRows":1,"aDiscardedReplayed":0,"aRowsAfterDiscard":0}}
+OK   O1 CORRECTED: identical R3 ids for two accounts -> two independent records; B reads its own entry (A 1, B 1)
+OK   O1 CORRECTED: A's settlement (server row for A) and B's discard are independent; A's marker is KEPT
+OK   O1 CORRECTED: A's re-read source (cleanup failed) is matched to A's marker: NOT resurrected
+OK   O1 CORRECTED: A's explicitly discarded activity NEVER replays (no server row for A); B's own entry is sent once
+O2 R1 offline_habit_queue_v2 (R1 enqueueOwned) R6: {"ok":true,"legS":{"sharedId":false,"a0":1,"b0":1,"aReplayed":1,"aRows":1,"b1":1,"bDiscarded":1,"aMarkerKept":true,"aResurrected":0},"legD":{"aDiscarded":1,"bReplayed":1,"bRows":1,"aDiscardedReplayed":0,"aRowsAfterDiscard":0}} 
+O2 R1 offline_habit_queue_v2 (R1 enqueueOwned) R7: {"ok":true,"legS":{"sharedId":false,"a0":1,"b0":1,"aReplayed":1,"aRows":1,"b1":1,"bDiscarded":1,"aMarkerKept":true,"aResurrected":0},"legD":{"aDiscarded":1,"bReplayed":1,"bRows":1,"aDiscardedReplayed":0,"aRowsAfterDiscard":0}}
+OK   O2 R1 offline_habit_queue_v2 (R1 enqueueOwned): two accounts, identical crid + payload -> independent records, reads, settlement, discard; no resurrection; discarded activity never replays
+O2 R2 aura_q3 (R2 enqueueOwned) R6: {"ok":true,"legS":{"sharedId":false,"a0":1,"b0":1,"aReplayed":1,"aRows":1,"b1":1,"bDiscarded":1,"aMarkerKept":true,"aResurrected":0},"legD":{"aDiscarded":1,"bReplayed":1,"bRows":1,"aDiscardedReplayed":0,"aRowsAfterDiscard":0}} 
+O2 R2 aura_q3 (R2 enqueueOwned) R7: {"ok":true,"legS":{"sharedId":false,"a0":1,"b0":1,"aReplayed":1,"aRows":1,"b1":1,"bDiscarded":1,"aMarkerKept":true,"aResurrected":0},"legD":{"aDiscarded":1,"bReplayed":1,"bRows":1,"aDiscardedReplayed":0,"aRowsAfterDiscard":0}}
+OK   O2 R2 aura_q3 (R2 enqueueOwned): two accounts, identical crid + payload -> independent records, reads, settlement, discard; no resurrection; discarded activity never replays
+O2 R3 aura_q4 random id (R3 enqueueOwned) R6: {"ok":true,"legS":{"sharedId":false,"a0":1,"b0":1,"aReplayed":1,"aRows":1,"b1":1,"bDiscarded":1,"aMarkerKept":true,"aResurrected":0},"legD":{"aDiscarded":1,"bReplayed":1,"bRows":1,"aDiscardedReplayed":0,"aRowsAfterDiscard":0}} 
+O2 R3 aura_q4 random id (R3 enqueueOwned) R7: {"ok":true,"legS":{"sharedId":false,"a0":1,"b0":1,"aReplayed":1,"aRows":1,"b1":1,"bDiscarded":1,"aMarkerKept":true,"aResurrected":0},"legD":{"aDiscarded":1,"bReplayed":1,"bRows":1,"aDiscardedReplayed":0,"aRowsAfterDiscard":0}}
+OK   O2 R3 aura_q4 random id (R3 enqueueOwned): two accounts, identical crid + payload -> independent records, reads, settlement, discard; no resurrection; discarded activity never replays
+O2 R3 aura_q4 shared migrated id (R3 migrator) R6: {"ok":false,"legS":{"sharedId":true,"a0":1,"b0":0,"aReplayed":1,"aRows":1,"b1":1,"bDiscarded":1,"aMarkerKept":false,"aResurrected":1},"legD":{"aDiscarded":1,"bReplayed":1,"bRows":1,"aDiscardedReplayed":1,"aRowsAfterDiscard":1}} 
+O2 R3 aura_q4 shared migrated id (R3 migrator) R7: {"ok":true,"legS":{"sharedId":true,"a0":1,"b0":1,"aReplayed":1,"aRows":1,"b1":1,"bDiscarded":1,"aMarkerKept":true,"aResurrected":0},"legD":{"aDiscarded":1,"bReplayed":1,"bRows":1,"aDiscardedReplayed":0,"aRowsAfterDiscard":0}}
+OK   O2 R3 aura_q4 shared migrated id (R3 migrator): two accounts, identical crid + payload -> independent records, reads, settlement, discard; no resurrection; discarded activity never replays
+O2 matrix:
+  R1 offline_habit_queue_v2 (R1 enqueueOwned): R6 isolated | R7 isolated
+  R2 aura_q3 (R2 enqueueOwned): R6 isolated | R7 isolated
+  R3 aura_q4 random id (R3 enqueueOwned): R6 isolated | R7 isolated
+  R3 aura_q4 shared migrated id (R3 migrator): R6 DEFECT | R7 isolated
+OK   O2 the matrix detects the R6 defect for the shared-id format (R3 migrated aura_q4) and passes every format after correction
+OK   O3 R5 IndexedDB state: the owner-less marker of A is honoured (settled entry not recreated), A's owner-less pending record is kept AS IS (no duplicate), both sources retired
+OK   O3 R5 pending record replays once for A and settles under A's account-scoped marker
+OK   O3 R6 IndexedDB state with two records of one logical entry (R6 stored 2) is kept (no destructive normalization), presented once and sent ONCE
+OK   O3 mixed-format sources of the same entries (R1 v2 + R2 q3 + R3 q4) create ONE record per logical entry; every source retired
+OK   O3 R3 localStorage marker of A is honoured for A only: A's settled entry not recreated, B's identical entry migrated for B
+OK   O4 R6-damaged marker (A's decision overwritten by B): A's entry is KEPT and SHOWN but HELD -- not a replay group, not claimable, not replayed (no second row)
+OK   O4 the held entry is counted at sign-out and the confirmed discard removes it under A's own marker; the remaining source is then matched to it (not recreated)
+OK   O5 B's discard/settlement of A's recordId is refused (foreign), A's record intact, no marker written
+OK   O5 every marker written is account-scoped (key = account + recordId) and names its account
+OK   O6 an interrupted migration reports unreadable and keeps both sources; repeated migration then yields exactly one record per account
+OK   O6 unreadable storage: both accounts reported unreadable; every marker and pending record kept
+OK   O7 concurrent migration/reads by two tabs for two accounts: 3 + 3 records, each read sees only its account
+OK   O7 concurrent replay (A) and discard (B): A sent 3 (3 rows), B discarded 3; 6 markers, each of its own account
+OK   O7 after switching to B, re-appearing sources of both accounts are matched to their own markers: nothing replayed, nothing recreated
+
+35 passed, 0 failed
+
+# exit=0 signal=

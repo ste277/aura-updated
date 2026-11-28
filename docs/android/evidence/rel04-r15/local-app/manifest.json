@@ -1,0 +1,80 @@
+{
+  "head": "e6a6a6678bf6300362e15cf398343a246807a7e2",
+  "codeTreeClean": true,
+  "node": "v26.5.0",
+  "startedAt": "2026-11-27T17:06:32.400Z",
+  "jobs": [
+    "rel04-next-app-rendering"
+  ],
+  "extraEnvKeys": [
+    "DATABASE_URL"
+  ],
+  "commands": [
+    {
+      "n": 1,
+      "job": "rel04-next-app-rendering",
+      "name": "Run REL-04 Next.js app rendering test (builds the app)",
+      "run": "npx ts-node test/rel04R5NextAppRendering.test.ts",
+      "env": {},
+      "exit": 0,
+      "signal": null,
+      "ms": 35320,
+      "log": "logs/001-test_rel04R5NextAppRendering.test.ts.log",
+      "logSha256": "ed6c2f498ebe113e73f860003f08a1eb99987e519ec053ed879727e2bfdea2b0"
+    },
+    {
+      "n": 2,
+      "job": "rel04-next-app-rendering",
+      "name": "Run HabitLog idempotency + R15 row-binding DB test",
+      "run": "npx ts-node test/habitLogIdempotencyDb.test.ts",
+      "env": {},
+      "exit": 0,
+      "signal": null,
+      "ms": 2163,
+      "log": "logs/002-test_habitLogIdempotencyDb.test.ts.log",
+      "logSha256": "8fe60f15fcca3ae57c9cd231c3d761aeea7eed90a890e75a6d68c45677839202"
+    },
+    {
+      "n": 3,
+      "job": "rel04-next-app-rendering",
+      "name": "Run REL-04 R15 operation contract Home test (production build, two real Chromium tabs, PostgreSQL)",
+      "run": "npx ts-node test/rel04ActivityOperationHomeChromiumDb.test.ts",
+      "env": {
+        "REL04_SKIP_BUILD": "1"
+      },
+      "exit": 0,
+      "signal": null,
+      "ms": 15411,
+      "log": "logs/003-test_rel04ActivityOperationHomeChromiumDb.test.ts.log",
+      "logSha256": "cdb5b1141ad6f483f02b1ecf1add1271a7ed5f4d0fd791bebff9020df80bc782"
+    }
+  ],
+  "skipped": [
+    {
+      "job": "rel04-next-app-rendering",
+      "name": "Install root deps",
+      "run": "npm install"
+    },
+    {
+      "job": "rel04-next-app-rendering",
+      "name": "Install web deps",
+      "run": "npm install"
+    },
+    {
+      "job": "rel04-next-app-rendering",
+      "name": "Apply the complete migration chain to a fresh database",
+      "run": "npx prisma migrate deploy"
+    },
+    {
+      "job": "rel04-next-app-rendering",
+      "name": "Install Chromium for Playwright",
+      "run": "npx playwright install --with-deps chromium"
+    }
+  ],
+  "finishedAt": "2026-11-27T17:07:25.297Z",
+  "summary": {
+    "run": 3,
+    "passed": 3,
+    "failed": []
+  }
+}

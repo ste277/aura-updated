@@ -1,0 +1,51 @@
+$ npx ts-node test/decisionSchedulingContext.test.ts
+# job=math-core-tests step=Run decision scheduling context test env={}
+=== strict-mode precondition ===
+OK   this file runs in strict mode: a write to a frozen object THROWS
+=== the context is detached, deep-frozen and independently owned ===
+OK   the context has exactly the three authority groups and nothing derived: recurrence, durationSources, opportunity (no pressure, evidence, classification, promotion or contention)
+OK   DEEP FREEZE: the context and every nested object and array are frozen; a write at any depth throws
+OK   DATE OWNERSHIP: no Date (and no object shared with the input rows) is reachable from the context -- instants are ISO strings, every row is a copy
+OK   INDEPENDENT OF THE SOURCE ROWS: mutating the rows / Dates the loader read after the context was created changes nothing in it
+OK   a missing activity identity is normalised to null, never undefined
+=== derivations: fresh objects, the same meaning as the live inputs, no live read ever ===
+OK   OPPORTUNITY PLANS: every plan overlapping the requested [from, to) comes back (the 22:00Z plan that ends 01:00Z on the 9th overlaps the range start; the one that starts at 23:00Z on the 11th overlaps its end), as fresh Date-bearing objects on every call
+OK   HALF-OPEN [from, to): a plan that ends exactly at the range start (the first plan ends 01:00Z) and one that starts exactly at its end (the second starts 12:00Z) are excluded
+OK   a plan range the snapshot did not cover FAILS (never a live read, never a guess): a request starting before or ending after the snapshot range rejects
+OK   AVAILABILITY: the configured flag and the five weekday periods come back as fresh objects equal to what was read
+OK   a context that read no availability / plans (no recurrence candidate) answers neither: both reject
+OK   DURATION CONTEXT: derived from the snapshot rows it equals an independent assembly of the stored preferences (a retired activity id is omitted) and the behavioral typical duration (three consistent logs -> median 45)
+OK   RECURRENCE CANDIDATES: fresh copies on every call, in the order read
+OK   RHYTHM OCCURRENCE FACTS: only the requested activities, shaped by the one shared pure mapping (local date in the user's timezone, LOGGED completed)
+OK   SAME DEMAND AS THE LIVE INPUTS: `loadEligibleGoalDemand` over the context-backed deps equals the result over deps serving the very same rows (the eligibility and counting code is untouched; only the row source differs)
+=== the loader: ONE snapshot, a fixed statement set, constant in the candidate count, nothing after it ends ===
+OK   ONE SNAPSHOT AND A FIXED STATEMENT SET: exactly one snapshot, seven statements in the documented order (candidates, occurrences, preferences, habit logs, availability flag, availability periods, plans)
+OK   QUERY BOUND: 2 candidates and 9 candidates issue exactly the same statements in one snapshot each (the occurrence read is ONE batched query; no per-candidate query or transaction)
+OK   NOTHING RUNS AFTER THE SNAPSHOT: every statement was issued while the snapshot was open, and the copy-and-freeze happens after it ended
+OK   NO CANDIDATE -> NO OPPORTUNITY READS: only the candidates, preferences and habit logs are read (3 statements); the context has no opportunity part
+OK   THE PLAN RANGE IS THE OPPORTUNITY HORIZON in the user's timezone: the planning date's local start through the local start of the day after its week's end (Asia/Kolkata: Fri 00:00 IST .. Mon 00:00 IST)
+OK   the context is independent of the rows the executor returned (mutating them afterwards changes nothing)
+OK   PARTIAL READ FAILURE: when any statement fails the acquisition rejects with no context at all (the first reads are discarded)
+OK   the loader runs the snapshot callback exactly once per evaluation even on failure (no retry loop, no second snapshot)
+=== the preview boundary: one context per evaluation; a failed context means NO evidence, never the live reads ===
+OK   ONE CONTEXT PER EVALUATION: three candidates cause exactly one context acquisition, and it happens BEFORE the Constructor's own reads (context, then blockers)
+OK   NO MIXING: with a binding supplied the independent live providers are never called (no live decision-facts read, no live availability / plan read), and the live duration read is replaced by the snapshot's (zero live duration calls)
+OK   EVIDENCE FROM THE SNAPSHOT ONLY: all three candidates have evidence; the duration is the snapshot's stored preference (25, RESOLVED) and the supply comes from the snapshot's availability and plans
+OK   NO MIXED-SNAPSHOT FALLBACK (critical): when the context cannot be acquired the preview still succeeds (HTTP 200, READY) but there is NO decision evidence, and the independent live providers (decision facts, availability, plans) were NOT used as a substitute and nothing is labelled authoritative
+OK   in that case the Constructor keeps its own live duration / blocker inputs exactly as a request with no evidence provider (one live duration read, one blocker read)
+OK   WITHOUT a binding the legacy path behaves exactly as before (the live providers ARE used) -- the composition is the control the DB suite compares against
+OK   FACT FAILURE stays fail-open: a context that loads but whose facts cannot be derived yields a normal preview with no recurrence facts (and so no evidence) -- nothing is guessed
+ALL DECISION SCHEDULING CONTEXT CHECKS PASSED
+day-constructor/preview: coherent scheduling context unavailable, continuing without decision evidence Error: snapshot unavailable
+    at /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/android-rel-04-app/test/decisionSchedulingContext.test.ts:160:145
+    at Object.loadContext (/Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/android-rel-04-app/test/decisionSchedulingContext.test.ts:153:176)
+    at runDayConstructorPreview (/Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/android-rel-04-app/apps/web/lib/dayConstructorPreviewRequest.ts:324:41)
+    at /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/android-rel-04-app/test/decisionSchedulingContext.test.ts:160:52
+    at processTicksAndRejections (node:internal/process/task_queues:104:5)
+day-constructor/preview: decision facts unavailable, continuing without Error: facts boom
+    at Object.decisionFactsFromContext (/Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/android-rel-04-app/test/decisionSchedulingContext.test.ts:166:192)
+    at runDayConstructorPreview (/Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/android-rel-04-app/apps/web/lib/dayConstructorPreviewRequest.ts:332:59)
+    at processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/android-rel-04-app/test/decisionSchedulingContext.test.ts:166:23
+
+# exit=0 signal=

@@ -1,0 +1,92 @@
+$ npx ts-node --project tsconfig.jsdom-tests.json test/myPeopleR4Db.test.ts
+# job=day-constructor-acceptance-db-tests step=Run AURA-MP-1 R4 form contract and chart preservation DB test env={}
+OK   ENABLED Add: relationship is "Not specified" (no PARTNER); timezone and location not pre-selected
+OK   ENABLED Add: timezone list offers Etc/UTC but not the bare UTC (which the API refuses with coordinates)
+OK   ENABLED Add: relationship options are legacy + My People
+OK   ENABLED Add: name only, relationship untouched -> payload exactly [name], 201, persisted relationship OTHER (API default), no chart
+OK   ENABLED Add: birth details without city or coordinates, relationship untouched -> payload exactly [name + trio], persisted OTHER, no city/coords
+OK   ENABLED Add: explicit relationship PARTNER -> sent and persisted
+OK   ENABLED Add: explicit relationship SPOUSE -> sent and persisted
+OK   ENABLED Add: explicit relationship FAMILY -> sent and persisted
+OK   ENABLED Add: explicit relationship FRIEND -> sent and persisted
+OK   ENABLED Add: explicit relationship OTHER -> sent and persisted
+OK   ENABLED Add: explicit relationship PARENT -> sent and persisted
+OK   ENABLED Add: explicit relationship CHILD -> sent and persisted
+OK   ENABLED Add: explicit relationship SIBLING -> sent and persisted
+OK   ENABLED Add: city with coordinates (Mumbai) -> its coordinates + Asia/Kolkata persisted
+OK   ENABLED Add: custom (user) city -> its own coordinates and timezone persisted
+OK   ENABLED Add: Etc/UTC without a location -> 201, Etc/UTC persisted
+OK   ENABLED Add: Mumbai then Etc/UTC (the offered UTC) -> 201, no 400, Etc/UTC + Mumbai coordinates persisted
+OK   ENABLED Add: representative non-default zone (Australia/Adelaide, half-hour offset) persisted exactly
+OK   ENABLED Add: date only -> refused before any request, nothing persisted
+OK   ENABLED Add: date + time, no timezone -> refused before any request, nothing persisted
+OK   ENABLED Add: timezone only -> refused before any request, nothing persisted
+OK   ENABLED Add: location only -> refused before any request, nothing persisted
+OK   ENABLED Edit reopen: coordinates without a city are shown as a SAVED location; timezone, relationship, date and time shown as saved
+OK   ENABLED Edit coords-no-city: only birth TIME: payload keys exactly [birthDate, birthLatitude, birthLongitude, birthTime, birthTimezone], 200, persisted change exactly [birthTime]
+OK   ENABLED Edit coords-no-city: only birth DATE: payload keys exactly [birthDate, birthLatitude, birthLongitude, birthTime, birthTimezone], 200, persisted change exactly [birthDate]
+OK   ENABLED Edit coords-no-city: only TIMEZONE: payload keys exactly [birthDate, birthLatitude, birthLongitude, birthTime, birthTimezone], 200, persisted change exactly [birthTimezone]
+OK   ENABLED Edit coords-no-city: rename only: payload keys exactly [name], 200, persisted change exactly [name]
+OK   ENABLED Edit coords-no-city: no-change save: no request sent, record identical
+OK   ENABLED Edit reopen after edits: coordinates still shown as saved; edited date/time/timezone shown
+OK   ENABLED Edit unlisted city: only birth TIME: payload keys exactly [birthCityName, birthDate, birthLatitude, birthLongitude, birthTime, birthTimezone], 200, persisted change exactly [birthTime]
+OK   ENABLED Edit unlisted city: only TIMEZONE: payload keys exactly [birthCityName, birthDate, birthLatitude, birthLongitude, birthTime, birthTimezone], 200, persisted change exactly [birthTimezone]
+OK   ENABLED Edit unlisted city: relationship only (PARENT -> CHILD): payload keys exactly [relationshipType], 200, persisted change exactly [relationshipType]
+OK   ENABLED Edit unlisted city: explicit city change -> Mumbai: payload keys exactly [birthCityName, birthDate, birthLatitude, birthLongitude, birthTime, birthTimezone], 200, persisted change exactly [birthCityName, birthLatitude, birthLongitude, birthTimezone]
+OK   ENABLED Edit city: explicit clearing ("No location") clears city AND coordinates, keeps the chart: payload keys exactly [birthDate, birthTime, birthTimezone], 200, persisted change exactly [birthCityName, birthLatitude, birthLongitude]
+OK   ENABLED Edit coords-no-city: explicit coordinate clearing ("No location"): payload keys exactly [birthDate, birthTime, birthTimezone], 200, persisted change exactly [birthLatitude, birthLongitude]
+OK   ENABLED Edit no-location chart: only birth TIME (stays without location): payload keys exactly [birthDate, birthTime, birthTimezone], 200, persisted change exactly [birthTime]
+OK   ENABLED Edit no-location chart: no-change save: no request sent, record identical
+OK   ENABLED Edit saved UTC: the saved zone is shown (never silently changed)
+OK   ENABLED Edit saved UTC: only birth TIME -> UTC kept, no location: payload keys exactly [birthDate, birthTime, birthTimezone], 200, persisted change exactly [birthTime]
+OK   ENABLED Edit saved UTC + a location -> refused before any request with an actionable message; nothing changed
+OK   ENABLED Edit name-only person: add birth details without a location: payload keys exactly [birthDate, birthTime, birthTimezone], 200, persisted change exactly [birthDate, birthTime, birthTimezone]
+OK   ENABLED Edit: clearing only the birth time is refused before any request
+OK   ENABLED Edit: notes and interests survived every editor operation
+OK   DISABLED Add: relationship is "Not specified" (no PARTNER); timezone and location not pre-selected
+OK   DISABLED Add: timezone list offers Etc/UTC but not the bare UTC (which the API refuses with coordinates)
+OK   DISABLED Add: relationship options are legacy only
+OK   DISABLED Add: name only -> refused in the UI, nothing sent or persisted
+OK   DISABLED Add: birth details without city or coordinates, relationship untouched -> payload exactly [name + trio], persisted OTHER, no city/coords
+OK   DISABLED Add: explicit relationship PARTNER -> sent and persisted
+OK   DISABLED Add: explicit relationship SPOUSE -> sent and persisted
+OK   DISABLED Add: explicit relationship FAMILY -> sent and persisted
+OK   DISABLED Add: explicit relationship FRIEND -> sent and persisted
+OK   DISABLED Add: explicit relationship OTHER -> sent and persisted
+OK   DISABLED Add: city with coordinates (Mumbai) -> its coordinates + Asia/Kolkata persisted
+OK   DISABLED Add: custom (user) city -> its own coordinates and timezone persisted
+OK   DISABLED Add: Etc/UTC without a location -> 201, Etc/UTC persisted
+OK   DISABLED Add: Mumbai then Etc/UTC (the offered UTC) -> 201, no 400, Etc/UTC + Mumbai coordinates persisted
+OK   DISABLED Add: representative non-default zone (Australia/Adelaide, half-hour offset) persisted exactly
+OK   DISABLED Add: date only -> refused before any request, nothing persisted
+OK   DISABLED Add: date + time, no timezone -> refused before any request, nothing persisted
+OK   DISABLED Add: timezone only -> refused before any request, nothing persisted
+OK   DISABLED Add: location only -> refused before any request, nothing persisted
+OK   DISABLED Edit reopen: coordinates without a city are shown as a SAVED location; timezone, relationship, date and time shown as saved
+OK   DISABLED Edit coords-no-city: only birth TIME: payload keys exactly [birthDate, birthLatitude, birthLongitude, birthTime, birthTimezone], 200, persisted change exactly [birthTime]
+OK   DISABLED Edit coords-no-city: only birth DATE: payload keys exactly [birthDate, birthLatitude, birthLongitude, birthTime, birthTimezone], 200, persisted change exactly [birthDate]
+OK   DISABLED Edit coords-no-city: only TIMEZONE: payload keys exactly [birthDate, birthLatitude, birthLongitude, birthTime, birthTimezone], 200, persisted change exactly [birthTimezone]
+OK   DISABLED Edit coords-no-city: rename only: payload keys exactly [name], 200, persisted change exactly [name]
+OK   DISABLED Edit coords-no-city: no-change save: no request sent, record identical
+OK   DISABLED Edit reopen after edits: coordinates still shown as saved; edited date/time/timezone shown
+OK   DISABLED Edit unlisted city: only birth TIME: payload keys exactly [birthCityName, birthDate, birthLatitude, birthLongitude, birthTime, birthTimezone], 200, persisted change exactly [birthTime]
+OK   DISABLED Edit unlisted city: only TIMEZONE: payload keys exactly [birthCityName, birthDate, birthLatitude, birthLongitude, birthTime, birthTimezone], 200, persisted change exactly [birthTimezone]
+OK   DISABLED Edit unlisted city: relationship only (PARENT -> FAMILY, legacy): payload keys exactly [relationshipType], 200, persisted change exactly [relationshipType]
+OK   DISABLED Edit unlisted city: explicit city change -> Mumbai: payload keys exactly [birthCityName, birthDate, birthLatitude, birthLongitude, birthTime, birthTimezone], 200, persisted change exactly [birthCityName, birthLatitude, birthLongitude, birthTimezone]
+OK   DISABLED Edit city: explicit clearing ("No location") clears city AND coordinates, keeps the chart: payload keys exactly [birthDate, birthTime, birthTimezone], 200, persisted change exactly [birthCityName, birthLatitude, birthLongitude]
+OK   DISABLED Edit coords-no-city: explicit coordinate clearing ("No location"): payload keys exactly [birthDate, birthTime, birthTimezone], 200, persisted change exactly [birthLatitude, birthLongitude]
+OK   DISABLED Edit no-location chart: only birth TIME (stays without location): payload keys exactly [birthDate, birthTime, birthTimezone], 200, persisted change exactly [birthTime]
+OK   DISABLED Edit no-location chart: no-change save: no request sent, record identical
+OK   DISABLED Edit saved UTC: the saved zone is shown (never silently changed)
+OK   DISABLED Edit saved UTC: only birth TIME -> UTC kept, no location: payload keys exactly [birthDate, birthTime, birthTimezone], 200, persisted change exactly [birthTime]
+OK   DISABLED Edit saved UTC + a location -> refused before any request with an actionable message; nothing changed
+OK   DISABLED Edit name-only person: add birth details without a location: payload keys exactly [birthDate, birthTime, birthTimezone], 200, persisted change exactly [birthDate, birthTime, birthTimezone]
+OK   DISABLED Edit: clearing only the birth time is refused before any request
+OK   DISABLED Edit: notes and interests survived every editor operation
+OK   No implicit PARTNER: only explicitly chosen people are PARTNER
+OK   No implicit Chennai location anywhere
+(R4 suite: 85 checks)
+
+ALL MY PEOPLE R4 DB CHECKS PASSED
+
+# exit=0 signal=

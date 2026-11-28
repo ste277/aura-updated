@@ -1,0 +1,41 @@
+$ npx ts-node --project tsconfig.jsdom-tests.json test/ios02LocationErrorsAndPrivacy.test.ts
+# job=math-core-tests step=Run IOS-02 location errors and privacy test env={"TS_NODE_COMPILER_OPTIONS":"{\"jsx\":\"react-jsx\"}"}
+OK   A1 iOS kCLErrorDomain 0 (location unknown) -> unavailable
+OK   A2 iOS kCLErrorDomain 1 (denied) -> permission_permanently_denied (iOS never re-prompts)
+OK   A3 iOS kCLErrorDomain 2 (network) -> unavailable
+OK   A4 other kCLErrorDomain codes stay generic (unexpected)
+OK   A5 localized iOS text still classifies (only the kCLErrorDomain token + code are matched)
+OK   A6 Android/M2-D classification table unchanged
+OK   B1 iOS permanent-denial copy names the Settings app and offers manual entry
+OK   B2 iOS copy never implies an in-app button ("Open Settings" / "tap")
+OK   B3 Android and web keep the existing shared copy
+OK   B4 every other kind is identical on iOS (only the permanent-denial wording differs)
+OK   B5 iOS copy meets the M2-D message rules (concise, actionable, no digits / raw text)
+OK   C1 iOS location unknown -> "couldn't determine your location" (not the generic message)
+OK   C2 ...raw native error never shown
+OK   C3 ...manual-city fallback still available
+OK   C4 ...no city lookup attempted on failure
+OK   C5 iOS denied mid-request -> iOS Settings guidance
+OK   C6 ...no Open Settings button on iOS
+OK   C7 iOS permission denied -> iOS wording, no button, no acquisition
+OK   C8 resume while still denied: permission re-checked only -- no request, no acquisition, message kept
+OK   C9 resume after enabling in iOS Settings: error cleared, retry prompt shown, still no automatic request/acquisition
+OK   C10 retry after returning works (one acquisition, one lookup)
+OK   C11 resume with no error showing never touches Geolocation
+OK   C12 Android permanent denial unchanged: shared copy + Open Settings button
+OK   C13 Android Open Settings still opens once
+OK   D1 iOS: progress message at 10 s; second tap joined (one native request)
+OK   D2 iOS: timeout message at 30 s
+OK   E1 one lookup, method POST
+OK   E2 URL is exactly /api/location/reverse (no query string)
+OK   E3 no request URL anywhere contains a coordinate or lat/lng parameter
+OK   E4 JSON body carries exactly { latitude, longitude } as numbers
+OK   E5 lookup requested with cache: no-store
+OK   E6 503 (provider not configured) -> city-lookup message + manual fallback
+OK   F1 LocationPicker no longer builds a ?lat=&lng= URL
+OK   F2 LocationPicker never logs (no console.* calls)
+OK   Z no React warnings / console errors
+
+35 passed, 0 failed
+
+# exit=0 signal=

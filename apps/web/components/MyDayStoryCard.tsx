@@ -16,6 +16,7 @@ import { RELATIONSHIP_ICON, SavedPersonRow } from './PeopleView';
 import { trackEvent } from '../lib/trackEvent';
 import { colors, spacing, radius, typography } from './theme';
 import { PrimaryButton, SecondaryButton, TextButton, ActivityChip, StatusBadge, type StatusTone } from './ui';
+import { captureAccountBinding, type AccountBinding } from '../lib/accountBoundFetch';
 
 /**
  * My Day V1 -- the Daily Story narrative card + inline intention-discovery
@@ -126,7 +127,7 @@ export function MyDayStoryCard({
   const [error, setError] = useState('');
   // AURA-HPG5-V2-I2 (R1-05) -- the refused save: the exact candidate whose
   // payload was rejected, and the conflict the server named (or null).
-  const [overlap, setOverlap] = useState<{ candidate: TimingCandidate; conflict: PlanOverlapConflictView | null; proposed: { title: string; plannedStartAt: string; plannedEndAt: string } } | null>(null);
+  const [overlap, setOverlap] = useState<{ candidate: TimingCandidate; conflict: PlanOverlapConflictView | null; proposed: { title: string; plannedStartAt: string; plannedEndAt: string }; binding?: AccountBinding } | null>(null);
   const overlapHeadingRef = useRef<HTMLDivElement | null>(null);
   // Synchronous double-submit guard (state updates are async; a second click
   // in the same tick must never send a second POST).
@@ -280,13 +281,16 @@ export function MyDayStoryCard({
   // inside the save transaction instead of being saved over silently. Only an
   // explicit "Save anyway" re-sends the SAME candidate's payload with ALLOW.
   // Never retried automatically.
-  const saveCandidate = async (target: TimingCandidate, overlapPolicy: 'ALLOW' | 'REJECT_ACTIVE_OVERLAP') => {
+  const saveCandidate = async (target: TimingCandidate, overlapPolicy: 'ALLOW' | 'REJECT_ACTIVE_OVERLAP', originalBinding?: AccountBinding) => {
     if (savingRef.current) return;
     savingRef.current = true;
     setPhase('CREATING');
     setError('');
     try {
-      await saveUpcomingPlanFromCandidate(target, selectedDurationMinutes, { overlapPolicy });
+      // AURA-ANDROID-REL-04 IR-01 (R2/R3) -- bound at the first tap; an
+      // explicit "Save anyway" re-sends for that ORIGINAL account.
+      const binding = originalBinding ?? captureAccountBinding();
+      await saveUpcomingPlanFromCandidate(target, selectedDurationMinutes, { overlapPolicy, binding });
       // Product Journey / E2E Hardening V1 (brief section 26) -- the
       // My Day intention flow's own doc comment already claimed this
       // reuses PLAN_RESULT_SELECTED "via the existing reused APIs", but
@@ -302,7 +306,7 @@ export function MyDayStoryCard({
       setPhase('DONE');
     } catch (err) {
       if (err instanceof PlanOverlapSaveError) {
-        setOverlap({ candidate: target, conflict: err.conflict, proposed: { title: err.proposed.title, plannedStartAt: err.proposed.plannedStartAt, plannedEndAt: err.proposed.plannedEndAt } });
+        setOverlap({ candidate: target, conflict: err.conflict, proposed: { title: err.proposed.title, plannedStartAt: err.proposed.plannedStartAt, plannedEndAt: err.proposed.plannedEndAt }, binding: err.binding });
         setPhase('CONFLICT');
       } else {
         setError('Could not add this to your day. Try again.');
@@ -324,7 +328,7 @@ export function MyDayStoryCard({
       setOverlap(null);
       return;
     }
-    await saveCandidate(overlap.candidate, 'ALLOW');
+    await saveCandidate(overlap.candidate, 'ALLOW', overlap.binding);
   };
 
   // "Choose another time": a fresh search for the same activity -- the

@@ -1,0 +1,55 @@
+$ npx ts-node test/opportunityDecisionFactsArchitecture.test.ts
+# job=math-core-tests step=Run opportunity decision facts architecture test env={}
+OK   enrichment imports exactly the generic facts types, the O1 engine and the O2 adapter
+OK   enrichment takes only TYPES from decisionFacts (no runtime coupling)
+OK   enrichment never imports or mentions Goal, GoalActivity, Rhythm, Candidate A, or the provider (comments included)
+OK   enrichment never mentions a requirement count (target/completed/committed/remaining)
+OK   enrichment is not named for a source: the module and its exports carry no goal/rhythm vocabulary
+OK   enrichment reproduces no O1 logic (no availability/blocker subtraction, no day-state or coverage math, no contiguous fit)
+OK   enrichment reproduces no O2 logic (no availability resolution, timezone conversion, DST handling, plan filtering or blocker lifecycle)
+OK   enrichment does no week or date arithmetic of its own (the period end is taken as given)
+OK   enrichment calls the projection exactly once per candidate and the range loader exactly once per call
+OK   the range load happens OUTSIDE the per-candidate loop (no candidate-linear loading)
+OK   enrichment: no clock, no randomness, no process/env, no database or network, no write verbs
+OK   enrichment is read-only: no function in it is named for a write
+OK   the horizon producer is a single replaceable function (recurrence is the first producer, not the owner)
+OK   OpportunityDecisionFacts has exactly the eight original factual fields (unchanged order) followed by the four additive P0b fields, none optional
+OK   durationBasis is REQUIRED on the fact and carries exactly RESOLVED | GENERIC_FALLBACK
+OK   the enrichment always sets durationBasis from the candidate and never defaults it to RESOLVED
+OK   durationBasis is derived from the SAME resolution that produced the duration: the orchestrator reads the resolution's own generic-fallback warning, and the preparation maps it to GENERIC_FALLBACK / RESOLVED (O5 P1: the derivation moved before the Constructor)
+OK   demand/supply separation: the opportunity fact repeats no requirement field
+OK   no shortfall, deficit, pressure, classification, scarcity, risk or last-chance field anywhere in the facts, the enrichment or the preparation glue
+OK   DecisionFacts carries opportunity as one optional entry beside recurrence
+OK   decisionFacts.ts is still source-blind: no imports, no source/goal/rhythm vocabulary, no calculation
+OK   the candidate-local overlap limitation is documented beside the contract
+OK   terminology: no unqualified "current period" wording remains in decisionFacts.ts (the period contains the planning date)
+OK   compareByOverloadPrecedence never reads opportunity facts
+OK   compareCandidatesForPlacement never reads opportunity facts
+OK   evaluateCandidate never reads opportunity facts
+OK   dayConstructor.ts, dayCapacity.ts and the orchestrator never mention opportunity facts at all
+OK   dayIntent.ts only carries the generic decisionFacts field (no opportunity vocabulary)
+OK   acceptance (dayConstructorAcceptance.ts) never trusts, requires or persists opportunity facts
+OK   acceptance persistence (dayConstructorAcceptancePersistence.ts) never trusts, requires or persists opportunity facts
+OK   preview integrity/signing (dayConstructorPreviewIntegrity.ts) never trusts, requires or persists opportunity facts
+OK   accept route never trusts, requires or persists opportunity facts
+OK   goal-demand provenance authorization never trusts, requires or persists opportunity facts
+OK   acceptance body builder (acceptConstructedDay.ts) never trusts, requires or persists opportunity facts
+OK   nothing in db.ts persists opportunity facts (no opportunity columns or fields)
+OK   no schema field stores opportunity facts
+OK   the request parser never reads opportunity, supply or period values from the body
+OK   attachment uses only the resolved intents and the prepared facts, matched by the server-owned requestedIntentId (never the raw body, never a title)
+OK   O5 P1: facts are PREPARED strictly BEFORE the first constructDay call and after the intents were resolved (prepared is not consumed)
+OK   the Constructor input is built from the intents AS RESOLVED (provider facts only): the prepared facts never enter intentsForConstructDay (they are referenced three times: prepared, read by the P2a evidence stage, attached to the metadata)
+OK   the prepared facts are attached once, after construction, from the same object (no second computation in the orchestrator or the handler)
+OK   the orchestration request is given only provider facts, never opportunity facts; the preview boundary only supplies the generic preparer
+OK   preparation failure is isolated (try/catch, continue without facts) so construction never depends on it
+OK   the range deps are bound to the AUTHENTICATED user in the boundary (not from the request)
+OK   the Goal provider produces no opportunity facts and never imports the enrichment, O1 or O2
+OK   the preview handler stays source-blind (no goal/rhythm vocabulary after O4)
+OK   the enrichment is invoked only by the generic fact-preparation module (O5 P1: it moved from the preview handler)
+OK   no component, page or route wires the LIVE range loaders to a user any more (the preview route binds the coherent scheduling snapshot instead)
+OK   opportunity facts are never read by any component/page (no new user-facing surface)
+OK   the only readers of viableDays/unknownDays outside the engine are the types module, the enrichment, the P2a evidence copy (copies by value, interprets nothing) and the unwired P2b pressure deriver (reads immutable evidence only)
+ALL OPPORTUNITY DECISION FACTS ARCHITECTURE CHECKS PASSED
+
+# exit=0 signal=

@@ -1,0 +1,25 @@
+$ npx ts-node test/hpgFix01TitlePersistence.test.ts
+# job=math-core-tests step=Run HPG-FIX-01 activity title persistence test env={}
+OK   typed title is the saved plan title (not the inferred "Focused work")
+OK   typed title is trimmed
+OK   Google Calendar link carries the typed title
+OK   no title argument -> inferred label (unchanged legacy behaviour)
+OK   blank title -> inferred label
+OK   whitespace-only title -> inferred label
+OK   null title -> inferred label
+OK   icon still follows the inferred classification
+OK   accent still follows the inferred classification
+OK   candidate key (dedupe identity) is unaffected by the typed title
+OK   start/end/score/window unchanged
+OK   resolveCandidatePlanTitle prefers the typed title
+OK   resolveCandidatePlanTitle falls back to the inferred label
+OK   Find a Time save passes taskTitle
+OK   Check a Time save passes checkTaskTitle
+OK   Check a Time "better nearby" save passes checkTaskTitle
+OK   Compare save passes compareTaskTitle
+OK   no result card renders the raw inferred activityType as its title
+OK   no Plan with Aura save path omits the user title
+
+hpgFix01TitlePersistence: all checks passed
+
+# exit=0 signal=

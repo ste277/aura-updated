@@ -32,7 +32,7 @@ async function advance(seconds: number) {
   await act(async () => { await new Promise((r) => setTimeout(r, 1100)); });
 }
 
-const res = (status: number, body: unknown) => ({ ok: status >= 200 && status < 300, status, json: async () => body });
+const res = (status: number, body: unknown) => ({ ok: status >= 200 && status < 300, status, headers: new Headers({ 'content-type': 'application/json' }), json: async () => body });
 
 const { requestSignInCode, RESEND_COOLDOWN_SECONDS, SIGN_IN_OFFLINE_MESSAGE } = require('../apps/web/lib/signInCode');
 const { LoginScreen } = require('../apps/web/components/LoginScreen');
@@ -175,15 +175,21 @@ const PROVIDER_MSG = "Our email provider isn't responding right now. Please try 
   // B8. Existing code sign-in: a wrong code shows the server error; the right one signs in.
   f.resolve(6, res(401, { error: 'That code is not valid. Check the email or request a new one.' }));
   await flush();
-  check('B8. wrong code: server error shown, not signed in', /That code is not valid/.test(text()) && loggedIn === 0);
+  // AURA-ANDROID-REL-04 (R3): any sign-in error is reconciled with a fresh session read first.
+  f.resolve(7, res(200, { user: null }));
+  await flush(); await flush();
+  check('B8. wrong code: server error shown, not signed in (reconciled: still signed out)', /That code is not valid/.test(text()) && loggedIn === 0 && f.calls[7]?.url === '/api/auth/session');
   await click(btn(/^Sign in$/)!);
-  f.resolve(7, res(200, { ok: true }));
+  f.resolve(8, res(200, { ok: true, userId: 'u-second' }));
   await flush();
+  // AURA-ANDROID-REL-04 (R2): the sign-in is confirmed with a fresh session read for that account.
+  f.resolve(9, res(200, { user: { id: 'u-second' } }));
+  await flush(); await flush();
   check('B8. correct code: onLoggedInCheck fires once', loggedIn === 1);
 
   // B9. No magic-link regression: only request-link and verify-code were called.
   const urls = new Set(f.calls.map((c) => c.url));
-  check('B9. only /api/auth/request-link and /api/auth/verify-code were ever requested (no /api/auth/verify link)', [...urls].every((u) => u === '/api/auth/request-link' || u === '/api/auth/verify-code'));
+  check('B9. only request-link, verify-code and the confirming session read were requested (no /api/auth/verify link)', [...urls].every((u) => u === '/api/auth/request-link' || u === '/api/auth/verify-code' || u === '/api/auth/session'));
   check('B9. no sign-in link is rendered when the server returns only a code', !h.container.querySelector('a[href*="/api/auth/verify"]'));
   await h.unmount();
 
@@ -197,9 +203,9 @@ const PROVIDER_MSG = "Our email provider isn't responding right now. Please try 
   const helper = read('apps/web/lib/signInCode.ts');
   check('C1. guest flow renders SignInCodeActions on its code step', /<SignInCodeActions[\s\S]*?onChangeEmail=\{handleChangeEmail\}/.test(guest));
   check('C2. guest resend reuses the same guest state token and the sent-to address', /requestCode=\{\(\) => requestSignInCode\(\{ email: sentTo, guestStateToken \}\)\}/.test(guest));
-  check('C3. guest verify-code uses sentTo, never the editable email field', /JSON\.stringify\(\{ email: sentTo, code \}\)/.test(guest) && !/JSON\.stringify\(\{ email, code \}\)/.test(guest));
+  check('C3. guest verify-code uses sentTo, never the editable email field', /verifySignInCode\(\{ email: sentTo, code \}\)/.test(guest) && !/verifySignInCode\(\{ email, code \}\)/.test(guest) && !/JSON\.stringify\(\{ email, code \}\)/.test(guest));
   check('C4. guest Change email clears sentTo, code, dev extras, error and returns to EMAIL', /handleChangeEmail = \(\) => \{[\s\S]*?setSentTo\(null\)[\s\S]*?setCode\(''\)[\s\S]*?setDevLoginUrl\(null\)[\s\S]*?setDevLoginCode\(null\)[\s\S]*?setError\(''\)[\s\S]*?setSignupStep\('EMAIL'\)/.test(guest));
-  check('C5. LoginScreen verify-code uses sentTo', /JSON\.stringify\(\{ email: sentTo, code \}\)/.test(login));
+  check('C5. LoginScreen verify-code uses sentTo (via verifySignInCode, AURA-ANDROID-REL-04 R2)', /verifySignInCode\(\{ email: sentTo, code \}\)/.test(login));
   check('C6. no screen builds or calls a magic link itself', ![guest, login, actions, helper].some((s) => /\/api\/auth\/verify\?|createMagicLinkToken/.test(s)));
   check('C7. messages never depend on account existence (no exists/newUser/isRegistered branching)', ![login, actions, helper].some((s) => /\bexists\b|newUser|isRegistered|accountExists/.test(s)));
   check('C8. request-link server route untouched by this change (quota 3 per 10 min still defined there)', /RATE_LIMIT_MAX_REQUESTS = 3/.test(read('apps/web/app/api/auth/request-link/route.ts')));

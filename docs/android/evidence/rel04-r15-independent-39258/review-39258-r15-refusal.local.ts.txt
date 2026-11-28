@@ -1,0 +1,36 @@
+import { Device, addUser, openTab, payload, queueDump, logsOf, closeAllTabs, clearQueueDb } from './rel04AccountIsolationHarness';
+
+const owner = 'review-r15-refusal-owner';
+const dev = new Device();
+addUser(owner, 'review-r15-refusal@example.invalid');
+
+async function main() {
+  for (const mode of ['direct', 'replay']) {
+    closeAllTabs();
+    await clearQueueDb();
+    dev.signIn(owner);
+    const t = openTab('review-refusal-' + mode);
+    await t.acct.fetchVerifiedSession(dev.fetch as any);
+    const q = t.q;
+    const id = 'unsupported-json-' + mode;
+    const body = payload('Original activity', id);
+    let intercepted = 0;
+    const fallback = async (input: string, opts: any) => {
+      if (input === '/api/habit-logs' && opts?.method === 'POST') {
+        intercepted++;
+        const r = new Response(JSON.stringify({ error: 'JSON gateway fallback' }), { status: 429, headers: { 'content-type': 'application/json' } });
+        Object.defineProperty(r, 'url', { value: 'https://synthetic.example.invalid/api/habit-logs' });
+        return r;
+      }
+      return dev.fetch(input, opts);
+    };
+    if (mode === 'replay') await q.enqueueOwned({ ...body, tempId: 'first', ownerUserId: owner });
+    const reply = mode === 'replay' ? await t.sync.replayOfflineQueue(fallback as any) : await t.sync.submitActivityLog(body, 'first', fallback as any);
+    const sameIdRetry = await t.sync.submitActivityLog(body, 'retry', dev.fetch as any);
+    const state = await queueDump();
+    const rows = logsOf(owner);
+    console.log(JSON.stringify({ mode, intercepted, reply, sameIdRetry, routedPosts: dev.count('POST', '/api/habit-logs'), rows, state }));
+    if (intercepted === 1 && state.tombstones.some((t: any) => t.receipt?.kind === 'rejected') && state.records.length === 0 && rows.length === 0) process.exitCode = 1;
+  }
+}
+main().catch(e => { console.error(e); process.exitCode = 2; }).finally(() => closeAllTabs());

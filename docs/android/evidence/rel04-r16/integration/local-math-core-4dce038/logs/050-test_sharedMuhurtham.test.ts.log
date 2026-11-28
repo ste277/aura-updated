@@ -1,0 +1,37 @@
+$ npx ts-node test/sharedMuhurtham.test.ts
+# job=math-core-tests step=Run Shared Muhurtham test env={}
+OK   blendSharedDelta reduces to a plain average when both deltas are equal (balanced case behaves like average)
+OK   blendSharedDelta is NOT a simple average when deltas diverge -- it leans toward the weaker (lower) delta
+OK   blendSharedDelta never goes below the weaker delta itself (does not overshoot past the floor)
+OK   A concrete case: (9.5, 4.0) -- naive average is 6.75; blendSharedDelta pulls further toward the weaker value than that
+OK   SHARED with no user personalContext returns typed USER_PROFILE_INCOMPLETE, not a silent GENERAL/PERSONAL fallback
+OK   USER_PROFILE_INCOMPLETE names the minimum required fields
+OK   SHARED with no partner resolved returns typed SAVED_PERSON_PROFILE_INCOMPLETE
+OK   SHARED with a partner context lacking natalNakshatraIndex is still treated as incomplete
+OK   SHARED with a complete user profile and complete partner returns status OK
+OK   SHARED scope field is always "SHARED"
+OK   SHARED result carries only { id, name } for the SavedPerson, never birth data
+OK   SHARED result never serializes a birthDate/birthTime/birthTimezone/birthLatitude/birthLongitude field anywhere
+OK   Every SHARED date carries independent taraBala factors for user and person
+OK   user.factors.taraBala matches getTaraBala() called directly for the user's own natal index (reused, not re-derived)
+OK   person.factors.taraBala matches getTaraBala() called directly for the partner's own natal index, independently
+OK   Across a 30-day range, at least one date has DIFFERENT Tara Bala status between user and person (independent evaluation, not synastry)
+OK   Neither participant's reasons ever reference the other person's natal data (no cross-reading -- factor is always PERSONAL, never a synastry code)
+OK   No SHARED best/alternate window ever carries a FRICTION_WINDOW_BLOCKED conflict (hard blocks are personalContext-independent)
+OK   Every SHARED date exists as a GENERAL date too (SHARED never surfaces a date GENERAL would have excluded)
+OK   Every SHARED date's generalScore matches GENERAL's own score for that date exactly (same candidate window, not re-derived)
+OK   sharedScore never simply equals (user.score + person.score) / 2 for a date where the two diverge
+OK   Every date with a CAUTION Tara on either side is rated MIXED_SHARED_FIT (lowest participant fit influences the label)
+OK   Across a 30-day range, both MIXED_SHARED_FIT and a stronger rating are observed
+OK   balance is 10 (perfectly even) whenever both participants have the same Tara status and roughly the same personal delta
+OK   Regression fixture: 2026-09-17 generally outscores 2026-10-31
+OK   Regression fixture: 2026-09-17 has a CAUTION Tara for both the user and the partner
+OK   Regression fixture: 2026-10-31 has a SUPPORT Tara for both the user and the partner
+OK   Regression fixture: SHARED flips this -- 2026-10-31 outranks 2026-09-17 in sharedScore despite a lower general score
+OK   Regression fixture: the rating itself differs qualitatively (MIXED vs STRONG), not just a marginal score wobble
+OK   SHARED re-ranks relative to GENERAL for the same activity/range/pair (genuine re-ranking, not just a label change)
+OK   Provenance carries all three methodology identifiers separately, never merged
+
+ALL SHARED MUHURTHAM CHECKS PASSED
+
+# exit=0 signal=

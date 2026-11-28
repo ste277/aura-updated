@@ -215,7 +215,7 @@ function PendingActivityRow({ item, timezone }: { item: PendingActivityPresentat
       <span aria-hidden="true" style={{ fontSize: 15, textAlign: 'center' }}>⏳</span>
       <span style={{ minWidth: 0, display: 'flex', alignItems: 'center', gap: spacing.sm, flexWrap: 'wrap' }}>
         <span style={{ ...typography.bodyStrong, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.activityTitle}</span>
-        <StatusBadge label="Pending sync" tone="caution" />
+        <StatusBadge label="Not confirmed" tone="caution" />
       </span>
       <span style={{ textAlign: 'right', flexShrink: 0 }}>
         <div style={{ ...typography.meta, color: colors.textMuted }}>{time}</div>

@@ -1,0 +1,23 @@
+$ npx ts-node test/planGoalActivityLinkDb.test.ts
+# job=day-constructor-acceptance-db-tests step=Run plan goal-activity link DB test env={}
+OK   1. valid, owned, SUGGESTED goalActivityId -> 200 OK, plan created
+OK   1. GoalActivity.plannedActivityId now points at the new plan
+OK   2. ordinary plan creation (no goalActivityId) still works exactly as before
+OK   3. a plain catalog-activity plan (HPG1 identity, no Goal) still works unchanged
+OK   4. linking succeeds for the SPECIFIC goalActivityId requested (goalA2's own "Duplicate Title")
+OK   4. the OTHER goal activity sharing the same title (goalA's own) was NOT linked -- no title-based cross-resolution
+OK   5. omitting goalActivityId entirely behaves exactly like passing none
+OK   6. empty-string goalActivityId -> treated as no Goal link, plan still created
+OK   7. a nonexistent/malformed goalActivityId -> 400, request rejected
+OK   7. no orphan PlannedActivity was created when the Goal link failed
+OK   8. userB referencing userA's own GoalActivity id -> 400, rejected (ownership enforced server-side)
+OK   8. no PlannedActivity row was created for userB from this rejected attempt
+OK   8. userA's own GoalActivity linkage from check 1 is untouched by userB's rejected attempt
+OK   9. a GoalActivity already linked to a LIVE (UPCOMING) plan cannot be relinked to a different new plan
+OK   10. a GoalActivity linked only to a CANCELLED plan CAN be relinked to a fresh plan (same rule Day Constructor already relies on)
+OK   11. activityId (catalog) and goalActivityId (Goal) can both be supplied together, independently, without collision
+OK   11. the Goal link was ALSO correctly established alongside the independent catalog activityId
+OK   12. a real CATALOG activityId string, passed as goalActivityId, does not resolve to any GoalActivity row -- rejected, not silently accepted as if interchangeable
+ALL HPG2 GOAL-ACTIVITY LINK CHECKS PASSED
+
+# exit=0 signal=

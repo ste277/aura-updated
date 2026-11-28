@@ -1,0 +1,31 @@
+$ npx ts-node test/missedRecoveryDb.test.ts
+# job=day-constructor-acceptance-db-tests step=Run Missed recovery DB test env={}
+OK   3/4/63. an elapsed plan is persisted as plain UPCOMING (MISSED is derived only) and Home derives it as recoverable
+OK   63/8. MISSED -> Done through Home -> POST log: the elapsed UPCOMING plan is LOGGED (no clock-time rejection); only the log route was called
+OK   9. completion timestamp semantics preserved: loggedAt is the server execution time (now), NOT a reconstructed planned end/start
+OK   51/66. Done follows the existing HabitLog semantics: exactly one HabitLog, linked to the plan
+OK   24. Done projection: Completed, not Missed, no recovery controls
+OK   63/11. MISSED -> Skip through Home -> POST skip: the elapsed UPCOMING plan is SKIPPED with skippedAt set; only the skip route was called
+OK   11/66. Skip creates zero HabitLogs and no completion
+OK   25. Skip projection: Skipped, no recovery controls
+OK   63/13. MISSED -> Move through Home -> POST move: A MOVED, a NEW UPCOMING successor B at exactly the requested instant with the original duration, linked back to A; only the move route was called
+OK   13/66. Move creates zero HabitLogs
+OK   26. Move projection: A no longer appears as recoverable MISSED (hidden); B (future) is not missed
+OK   29/62. STALE authoritative data (A still elapsed UPCOMING) + the confirmed Move: A is still not recoverable
+OK   3/63. no persisted MISSED status exists after every recovery path ran
+OK   64. Capture MISSED -> Done: the plan is LOGGED and the Capture derives COMPLETED (existing log semantics)
+OK   64. Capture MISSED -> Skip: the plan is SKIPPED and the Capture derives OPEN again (existing Skip derivation); no completion, no HabitLog
+OK   64. Capture MISSED -> Move: A MOVED, B UPCOMING, the Capture points at B and stays PLANNED (not completed)
+OK   65. GoalActivity MISSED -> Done: the plan is LOGGED and the GoalActivity derives COMPLETED
+OK   65. GoalActivity MISSED -> Skip: the plan is SKIPPED and the GoalActivity returns to SUGGESTED (existing Skip derivation)
+OK   65. GoalActivity MISSED -> Move: A MOVED, B UPCOMING, the GoalActivity points at B and stays PLANNED
+OK   42. an elapsed plan that crossed midnight (starts the previous UTC day) can be logged (absolute instants, no minute-of-day rule)
+OK   67. Done vs Skip on an elapsed plan (4 rounds, two Home sessions): each round ends in exactly ONE terminal state with matching HabitLog/successor evidence (outcomes seen: SKIPPED/LOGGED)
+OK   67. Done vs Move on an elapsed plan (4 rounds, two Home sessions): each round ends in exactly ONE terminal state with matching HabitLog/successor evidence (outcomes seen: LOGGED)
+OK   67. Skip vs Move on an elapsed plan (4 rounds, two Home sessions): each round ends in exactly ONE terminal state with matching HabitLog/successor evidence (outcomes seen: SKIPPED)
+OK   67. Move vs Move on an elapsed plan (4 rounds, two Home sessions): each round ends in exactly ONE terminal state with matching HabitLog/successor evidence (outcomes seen: MOVED)
+OK   20/61. Done + Skip + Move from one Home session for the same elapsed plan: one lifecycle request, the others BUSY, one terminal state
+OK   65. "Skip all missed" batch: every eligible plan reaches SKIPPED (including the one already resolved by another device, via the idempotent skip -- never an error that would abort the remaining items), and every linked GoalActivity returns to SUGGESTED, zero new HabitLogs
+ALL MISSED RECOVERY DB CHECKS PASSED
+
+# exit=0 signal=

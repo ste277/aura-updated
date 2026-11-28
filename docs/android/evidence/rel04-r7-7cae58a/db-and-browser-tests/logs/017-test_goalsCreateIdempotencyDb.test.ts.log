@@ -1,0 +1,65 @@
+$ npx ts-node test/goalsCreateIdempotencyDb.test.ts
+# job=day-constructor-acceptance-db-tests step=Run Goals create idempotency DB test env={}
+=== SEQUENTIAL REPLAY ===
+OK   sequential: first request succeeds
+OK   sequential: exactly 1 Goal after first request
+OK   sequential: exactly 2 GoalActivities after first request
+OK   sequential: replay also returns 200 with the SAME Goal id
+OK   sequential: replay creates NO new Goal (still exactly 1)
+OK   sequential: replay creates NO new GoalActivity rows (still exactly 2)
+=== CONCURRENT REPLAY ===
+OK   concurrent: both requests succeed (200, a real Goal id each)
+OK   concurrent: both requests resolve to the IDENTICAL Goal id
+OK   concurrent: exactly ONE Goal row exists in the database (real concurrency, not sequential)
+OK   concurrent: exactly ONE GoalActivity set exists (no duplicate activities from the race)
+=== CONCURRENCY STRESS SANITY (multiple independent id pairs, raced together) ===
+OK   stress: all 10 concurrent requests (5 pairs) succeeded
+OK   stress: pair 0 resolved to the identical Goal id
+OK   stress: pair 0 got its OWN title, never a sibling pair's
+OK   stress: pair 1 resolved to the identical Goal id
+OK   stress: pair 1 got its OWN title, never a sibling pair's
+OK   stress: pair 2 resolved to the identical Goal id
+OK   stress: pair 2 got its OWN title, never a sibling pair's
+OK   stress: pair 3 resolved to the identical Goal id
+OK   stress: pair 3 got its OWN title, never a sibling pair's
+OK   stress: pair 4 resolved to the identical Goal id
+OK   stress: pair 4 got its OWN title, never a sibling pair's
+OK   stress: exactly 5 distinct Goal ids total (one per logical clientRequestId, never 10, never fewer)
+OK   stress: exactly 5 Goal rows actually persisted
+=== PAYLOAD MISMATCH ===
+OK   mismatch setup: first request succeeds
+OK   mismatch: a materially different request under the SAME clientRequestId is rejected (409)
+OK   mismatch: response carries the IDEMPOTENCY_CONFLICT code
+OK   mismatch: no second Goal was created
+OK   mismatch: the ORIGINAL Goal is never silently mutated
+=== CROSS-USER ISOLATION ===
+OK   cross-user: both users succeed independently with the identical literal clientRequestId
+OK   cross-user: two DISTINCT Goal ids (no collision across users)
+OK   cross-user: User A got User A's own title back, never User B's
+OK   cross-user: User B got User B's own title back, never User A's
+OK   cross-user: User A replaying the shared id returns User A's OWN Goal, never leaks User B's
+=== FAILURE RECOVERY (retry after a validation failure is never poisoned) ===
+OK   failure recovery: the invalid-activityId attempt is rejected (4xx)
+OK   failure recovery: zero Goal created by the failed attempt
+OK   failure recovery: a valid retry under the SAME clientRequestId succeeds cleanly (never permanently rejected)
+OK   failure recovery: exactly ONE Goal exists after the retry
+=== REVIEWED ACTIVITIES REPLAY ===
+OK   reviewed replay setup: first request succeeds with exactly 2 activities
+OK   reviewed replay: same Goal id returned
+OK   reviewed replay: no duplicate GoalActivity rows (still exactly 2)
+OK   reviewed replay: renamed title + preserved activityId + Rhythm intact
+OK   reviewed replay: freeform MEASURED_TARGET completion intact
+=== ZERO ACTIVITIES REPLAY ===
+OK   zero-activity replay setup: first request creates a Goal with zero activities
+OK   zero-activity replay: same Goal id, still zero activities, no template expansion
+OK   zero-activity replay: zero GoalActivity rows exist for this Goal
+=== LEGACY MODE IS ALSO PROTECTED ===
+OK   legacy mode setup: first legacy-template request succeeds
+OK   legacy mode: replay returns the SAME Goal id (idempotency protects legacy template creation too)
+OK   legacy mode: no duplicate GoalActivity from the legacy replay
+=== OMITTED clientRequestId (unchanged legacy behavior) ===
+OK   omitted clientRequestId: two identical requests create TWO separate Goals (no idempotency applied -- exact pre-B3.1 behavior)
+OK   omitted clientRequestId: both succeed independently
+ALL GOALS CREATE IDEMPOTENCY CHECKS PASSED
+
+# exit=0 signal=

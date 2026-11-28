@@ -1,0 +1,19 @@
+$ npx ts-node --project tsconfig.jsdom-tests.json test/rel04ReviewedHeadReproduction.test.ts
+# job=math-core-tests step=Run REL-04 reviewed-head reproduction test (IR-01) env={"TS_NODE_COMPILER_OPTIONS":"{\"jsx\":\"react-jsx\"}"}
+OK   fixture habit-logs route == a54daf6 apps/web/app/api/habit-logs/route.ts
+OK   fixture signOut == a54daf6 apps/web/lib/signOut.ts
+OK   fixture logout route == a54daf6 apps/web/app/api/auth/logout/route.ts
+OK   fixture syncOfflineLogs block is verbatim in a54daf6 app/page.tsx
+OK   fixture enqueue block is verbatim in a54daf6 app/page.tsx
+OK   R1 REVIEWED HEAD: defect reproduces -- A's queued activity is stored under B
+OK   R1 CORRECTED HEAD: B's replay sends nothing; nothing of A's stored under B
+OK   R1 CORRECTED SERVER: an out-of-date client replaying under B is refused (unbound -> 503 upgrade, entry kept), nothing stored under B
+OK   R2 REVIEWED HEAD: sign-out did not stop the running replay
+OK   R2 REVIEWED HEAD: defect reproduces -- A's remaining items stored under B after B signed in
+OK   R2 CORRECTED HEAD: replay aborted by the sign-out; nothing stored under B
+OK   R3 REVIEWED SERVER: a write meant for A is accepted under B's session
+OK   R3 CORRECTED SERVER: the same write is refused (409) and nothing is stored
+
+13 passed, 0 failed
+
+# exit=0 signal=

@@ -1,0 +1,43 @@
+$ npx ts-node test/locationPickerSmartSelection.test.ts
+# job=math-core-tests step=Run LocationPicker smart selection test env={}
+OK   geolocation is requested ONLY from the button's onClick (requestCurrentLocation), never from a useEffect/mount effect
+OK   getCurrentPosition is called exactly twice in the whole file -- once for native (Capacitor Geolocation, requestCurrentLocationNative) and once for web (navigator.geolocation, requestCurrentLocation), AURA-MOBILE-01-M2-B/AND-03's native/web split, never a third/stray call site
+OK   no coordinates are saved automatically on a GPS fix, on EITHER the native or web path -- the result lands in `pending` state via the one shared resolveGpsCoordinates helper, never calls onChanged/PATCH directly from either platform's success path
+OK   neither GPS caller (requestCurrentLocation, the web path, or requestCurrentLocationNative) calls onChanged/PATCH directly itself -- both only ever reach resolveGpsCoordinates, so a future edit can't bypass the pending-confirmation step on just one platform
+OK   both the native and web GPS paths route through the one shared resolveGpsCoordinates helper (no second/competing coordinate-to-pending translation)
+OK   no coordinates are saved automatically on a search result click -- clicking a result sets `pending`, never calls onChanged/PATCH directly
+OK   supersedeGpsOp itself never saves (no onChanged/PATCH/fetch in its body)
+OK   unsupported browser (no navigator.geolocation) is handled with a distinct, actionable message
+OK   insecure context (HTTP, not HTTPS) is handled with its own distinct message before even checking geolocation support
+OK   PERMISSION_DENIED is handled with a message that offers search/manual as a next step (never a dead end)
+OK   TIMEOUT is handled with its own distinct message
+OK   getCurrentPosition is called with an explicit timeout (never left to the browser's own default, which can be unbounded)
+OK   reverse-geocode failure after a successful GPS fix is handled distinctly from a GPS error itself (couldn't identify your location, try searching)
+OK   confirmPendingResult is the ONE function that calls PATCH /api/users/location for a geocoded result -- both GPS and search results set `pending` and wait for it
+OK   the confirm button is the only caller of confirmPendingResult (no auto-invoke anywhere else)
+OK   confirmPendingResult only calls onChanged from its res.ok branch -- a failed confirm never claims success (same PR #88 confirmed-save boundary the existing handlers preserve)
+OK   the "Back" button clears `pending` without ever calling onChanged -- backing out of a GPS/search result changes nothing
+OK   a confirm failure is rendered with role="alert" (screen-reader-friendly, same convention as the existing custom-form error)
+OK   exactly THREE inline PATCH /api/users/location call sites remain in this file (curated select, custom form, confirmPendingResult) -- confirmCurrentLocation now delegates to the shared helper instead of a fourth inline call
+OK   confirmCurrentLocation calls the shared submitLocationConfirmation helper, not its own inline fetch (Location PR9 -- one implementation, not a second)
+OK   LocationPicker.tsx imports submitLocationConfirmation from the shared lib/locationConfirmation module
+OK   `pending` state is never persisted (no localStorage/sessionStorage) -- a refresh before confirming genuinely discards the unconfirmed candidate, it is not silently re-offered as if it were saved
+OK   the browser's own local timezone (Intl.DateTimeFormat().resolvedOptions().timeZone) is never read anywhere in this file -- the GPS/search timezone always comes from the provider's own response, never assumed to match the browser
+OK   low-confidence search results and low-accuracy GPS fixes are both disclosed distinctly before the user confirms
+OK   search is debounced (a setTimeout-based delay), never fired on every keystroke
+OK   the debounce timer is cleared on unmount/requery (no leaked timers, no stale search firing after the component is gone)
+OK   a query under 2 characters never calls the search API (avoids firing on a single keystroke)
+OK   OpenCage/OpenStreetMap attribution is present near the search results, satisfying the free-tier provider terms (this PR's own decision memo)
+OK   no birth-location field is ever read or written anywhere in this file
+OK   the curated <select> dropdown (handleSelectChange) is still present, still the Advanced-options path, still saves immediately on a real change
+OK   the manual custom-location form (handleCustomSubmit) is still present, still reachable via the curated dropdown's "Other" option
+OK   the curated+manual paths are now behind a collapsed "Advanced options" disclosure, not the first thing shown (ticket: "No coordinates required from ordinary users")
+OK   the primary GPS button and the confirm button both meet the 44px touch-target minimum
+OK   the search input has an associated, non-visually-hidden label (accessible form label)
+OK   OnboardingJourney.tsx (onboarding) renders THIS SAME LocationPicker component
+OK   YouView.tsx (Settings) renders THIS SAME LocationPicker component
+OK   no second/competing location-selection component was introduced (no "SmartLocationPicker"/"GeoLocationPicker"-named file)
+
+ALL LOCATIONPICKER SMART SELECTION CHECKS PASSED
+
+# exit=0 signal=

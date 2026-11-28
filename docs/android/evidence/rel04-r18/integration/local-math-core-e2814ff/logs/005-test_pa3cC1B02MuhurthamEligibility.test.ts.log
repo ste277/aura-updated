@@ -1,0 +1,31 @@
+$ npx ts-node test/pa3cC1B02MuhurthamEligibility.test.ts
+# job=math-core-tests step=Run PA-3C-C1B-02 Muhurtham eligibility test env={}
+OK   A1. A Chaturmas-season candidate at a polar (70N) location returns UNAVAILABLE, not ELIGIBLE or INELIGIBLE
+OK   A2. UNAVAILABLE carries eligible: false (never true -- an unevaluated candidate must never look confirmed-eligible)
+OK   A3. UNAVAILABLE carries the CHATURMAS_UNAVAILABLE reason
+OK   A4. The identical candidate at an ordinary (Delhi) location does NOT return UNAVAILABLE
+OK   A5. Existing INELIGIBLE/CHATURMAS behavior unchanged (Delhi, 2026-09-01, inside Chaturmas)
+OK   A6. Existing ELIGIBLE behavior unchanged (Delhi, outside Chaturmas)
+OK   A7. An activity with no periodRules reports ELIGIBLE unconditionally, even at a polar location (no ceremonial check to be unavailable)
+OK   B1. findMuhurthams: a 10-day Chaturmas-season search at a polar location returns zero dates (never a fabricated favorable Muhurtham)
+OK   B2. findMuhurthams: evaluatedDateCount still reports all 10 requested dates
+OK   B3. findMuhurthams: unavailableDateCount reports all 10 as unavailable (not silently zero)
+OK   B4. A non-Marriage activity (no periodRules) still reports unavailableDateCount at a polar location -- the whole-date solar-window computation fails independently of any ceremonial rule
+OK   B5. An ordinary (non-polar) search reports unavailableDateCount === 0
+OK   B6. findPersonalMuhurthams: PERSONAL_PROFILE_INCOMPLETE still returned first when the profile is missing (unaffected by this change)
+OK   B7. findSharedMuhurthams: USER_PROFILE_INCOMPLETE still returned first when the profile is missing (unaffected by this change)
+OK   C1. GENERAL scope at a polar instant returns status UNAVAILABLE, never a fabricated eligible/ineligible result
+OK   C2. UNAVAILABLE outcome carries a reason code
+OK   C3. GENERAL scope at an ordinary instant still returns status OK (unaffected by this change)
+OK   D1. ceremonialPeriods.ts imports SolarNoEventError
+OK   D2. ceremonialPeriods.ts catches SolarNoEventError specifically around findChaturmasWindow (never a bare catch)
+OK   D3. ceremonialPeriods.ts does not catch-all and return UNAVAILABLE for any other error (the catch re-throws unmatched errors)
+OK   D4. muhurthamFinder.ts's evaluateMuhurthamCandidate can return the 'UNAVAILABLE' sentinel
+OK   D5. findBestWindowsForDate wraps computeAssistantWindows in a narrow SolarNoEventError catch
+OK   D6. unavailableDateCount is tracked and returned from all three finder entry points
+OK   D7. askAuraOrchestrator.ts's buildMuhurthamCheckResponse explicitly handles outcome.status === 'UNAVAILABLE' before reading outcome.eligible/window/activity
+
+24 passed, 0 failed.
+ALL PA-3C-C1B-02 CHECKS PASSED
+
+# exit=0 signal=

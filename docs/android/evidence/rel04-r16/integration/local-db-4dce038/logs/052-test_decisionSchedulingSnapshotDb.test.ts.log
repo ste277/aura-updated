@@ -1,0 +1,52 @@
+$ npx ts-node test/decisionSchedulingSnapshotDb.test.ts
+# job=day-constructor-acceptance-db-tests step=Run decision scheduling snapshot DB test env={}
+=== the two real database states, and what each evaluation must say ===
+OK   S0 (nothing committed): both candidates have 3 remaining occurrences, a KNOWN_FEASIBLE planning day and no later viable day -> LAST_KNOWN_OPPORTUNITY
+OK   S1 (the concurrent commit is in): R1 has 2 remaining occurrences and the day is KNOWN_INFEASIBLE for BOTH candidates (the whole day is committed) -> NONE
+=== CONTROL: the LEGACY composition (independent reads) observes a state that never existed ===
+OK   LEGACY SKEW: with a real concurrent commit between the recurrence read and the plan read, R1's evidence says "remaining=3;start=KNOWN_INFEASIBLE;afterStartViable=0" -- 3 occurrences remain (S0's demand) beside a fully blocked day (S1's supply)
+OK   that evidence matches NEITHER real database state (S0 is remaining=3 + FEASIBLE, S1 is remaining=2 + INFEASIBLE): the immutable evidence faithfully froze an internally inconsistent view, and its pressure is NONE although S0 said LAST_KNOWN_OPPORTUNITY
+=== P2d: the SAME concurrent commit, at EVERY point of the snapshot, never produces a mixed view ===
+OK   the snapshot issues a fixed, small set of statements (candidates, occurrences, preferences, habit logs, availability flag, availability periods, plans) -- 7 here
+[info] k=0:S1 k=1:S0 k=2:S0 k=3:S0 k=4:S0 k=5:S0 k=6:S0 k=7:S0
+OK   COHERENT AT EVERY COMMIT POINT: a concurrent commit after the 1st .. 7th statement (after the snapshot exists) is invisible to the WHOLE evaluation -- both candidates' evidence is deeply equal to S0; a commit before the first statement (the snapshot not yet taken) is seen by ALL of it -- deeply equal to S1
+OK   SAME SNAPSHOT FOR EVERY CANDIDATE: at no commit point does one candidate see the old shared state and another the new one
+=== REPEATABLE READ is what is actually emitted, and a later evaluation sees the commit ===
+OK   ACTUAL ISOLATION: inside the snapshot `transaction_isolation` is "repeatable read"; a plan committed by another connection AFTER the snapshot exists is NOT visible to the next read of the same transaction (count 0 then 0), and IS visible to a NEW snapshot (1)
+OK   CONTROL: under the default isolation (READ COMMITTED) the same second read DOES see the concurrent commit (0 then 1) -- the repeatable-read behavior above is real, not an artifact
+OK   NEXT EVALUATION SEES THE COMMIT (no stale cross-request cache): an evaluation started before the commit says S0 for both candidates, and the very next evaluation says S1 for both
+=== the snapshot executor: read-only, bounded, and it does not outlive the snapshot ===
+OK   READ-ONLY BY CONSTRUCTION: a write statement and a multi-statement text are rejected before reaching the driver, and the executor is unusable once the snapshot has ended (the transaction client never escapes)
+=== query bound: constant in the number of candidates; one snapshot per evaluation ===
+OK   QUERY BOUND: 2 candidates and 6 candidates cost exactly the same: 7 statements in 1 snapshot (O(1) in the candidate count -- the occurrence read is one batched query, there is no per-candidate transaction or query)
+OK   all six candidates of the one evaluation have evidence from the same snapshot (identical shared supply view)
+OK   with no recurrence candidate at all the snapshot reads only the candidates, the preferences and the habit logs (3 statements) -- availability and plans are not read when no opportunity evidence can exist
+=== no contract change: the preview body and signed tokens are identical to the legacy composition when nothing is concurrent ===
+OK   PREVIEW AND TOKEN IDENTITY: the full preview body (constructed day, resolved intents, every signed acceptance token) is byte-identical between the legacy and the P2d composition, and so is each candidate's evidence
+OK   the preview carries no snapshot, context, pressure or shadow field
+=== the reads mean exactly what they meant: overnight, half-open, lifecycle, duration sources, timezone / DST ===
+OK   OVERNIGHT BLOCKER: a plan that STARTS the day before the horizon and runs into it is in the snapshot (canonical overlap read, not a start-scoped one) and the evidence equals the legacy composition
+OK   HALF-OPEN [start, end): a plan ending exactly at the horizon start and one starting exactly at its end are NOT in the snapshot
+OK   LIFECYCLE: a CANCELLED plan is not read; a LOGGED plan is read (the lifecycle adapter decides) -- and the evidence equals the legacy composition
+OK   DURATION SOURCES FROM THE SNAPSHOT: a stored preference (25) outranks the catalog default (15) for R1 and leaves R2 on its default, exactly as the live duration context resolves it
+OK   behavioral duration FROM THE SNAPSHOT: three consistent logs resolve R1 to the median (45), as the live path does
+OK   NON-UTC + DST WEEK (America/Los_Angeles, planning Friday 2026-10-30, horizon through Sunday 2026-11-01 the fall-back day): the evidence is deeply equal to the legacy composition
+OK   the Asia/Kolkata fixtures above and this America/Los_Angeles one both use the user's own timezone for the week, the horizon and the plan range (the snapshot range equals the adapter's own bounds)
+=== failure: no partial context, and never a fallback to the live reads ===
+OK   PARTIAL READ FAILURE: when the 3rd statement fails the whole acquisition rejects (the transaction rolls back); no context holding the first two reads is ever returned
+OK   NO MIXED-SNAPSHOT FALLBACK: when the context cannot be acquired the preview still succeeds (READY) but there is NO decision evidence at all -- the old independent live reads are not used as a substitute and nothing is labelled authoritative
+OK   the connection pool is healthy after the rolled-back snapshot (the connection was released)
+ALL DECISION SCHEDULING SNAPSHOT DB CHECKS PASSED
+day-constructor/preview: coherent scheduling context unavailable, continuing without decision evidence Error: simulated read failure
+    at Object.query (/Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/android-rel-04-app/test/decisionSchedulingSnapshotDb.test.ts:315:169)
+    at listUserActivityPreferenceRows (/Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/android-rel-04-app/apps/web/lib/db.ts:3050:33)
+    at /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/android-rel-04-app/apps/web/lib/decisionSchedulingContextLoader.ts:65:64
+    at processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async withRepeatableReadSnapshot (/Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/android-rel-04-app/apps/web/lib/db.ts:96:16)
+    at async loadDecisionSchedulingContext (/Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/android-rel-04-app/apps/web/lib/decisionSchedulingContextLoader.ts:62:17)
+    at async runDayConstructorPreview (/Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/android-rel-04-app/apps/web/lib/dayConstructorPreviewRequest.ts:324:17)
+    at async handleDayConstructorPreviewRequest (/Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/android-rel-04-app/apps/web/lib/dayConstructorPreviewRequest.ts:473:20)
+    at async previewCoherent (/Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/android-rel-04-app/test/decisionSchedulingSnapshotDb.test.ts:120:17)
+    at async main (/Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/android-rel-04-app/test/decisionSchedulingSnapshotDb.test.ts:318:21)
+
+# exit=0 signal=

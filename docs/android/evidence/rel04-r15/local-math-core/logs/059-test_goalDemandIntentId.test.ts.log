@@ -1,0 +1,33 @@
+$ npx ts-node test/goalDemandIntentId.test.ts
+# job=math-core-tests step=Run Goal demand intent id test env={}
+OK   1. encode canonical id
+OK   4. same date/id -> deterministic (same output across repeated calls)
+OK   5. different date -> distinct id
+OK   6. different GoalActivity -> distinct id
+OK   2. decode canonical id
+OK   3. encode/decode round-trip reproduces the exact original string
+OK   17. decoding then re-encoding never normalizes/alters the identity
+OK   7. an ordinary id -> NOT_GOAL_DEMAND
+OK   7b. a manual Goal row id -> NOT_GOAL_DEMAND (this module never reinterprets the manual scheme)
+OK   7c. a Quick Pick row id -> NOT_GOAL_DEMAND
+OK   7d. a Capture row id -> NOT_GOAL_DEMAND
+OK   8. empty string -> NOT_GOAL_DEMAND (does not claim the reserved namespace)
+OK   8b. the bare prefix with no colon at all -> NOT_GOAL_DEMAND (does not match the reserved `goal-demand:` namespace exactly)
+OK   9. "goal-demand:" alone -> INVALID
+OK   10. missing date ("goal-demand::ga-1") -> INVALID
+OK   11. invalid date syntax ("goal-demand:not-a-date:ga-1") -> INVALID
+OK   12. missing GoalActivity id ("goal-demand:2026-10-06:") -> INVALID
+OK   13. extra component ("goal-demand:2026-10-06:ga-1:extra") -> INVALID
+OK   14. a malformed reserved-prefix id is NEVER classified NOT_GOAL_DEMAND (cannot downgrade/bypass provenance validation)
+OK   15. a canonical, real calendar date is accepted
+OK   16a. an impossible calendar date (2026-02-30, no such day) -> INVALID, not silently clamped
+OK   16b. an impossible calendar date (2026-13-01, no such month) -> INVALID
+OK   16c. an impossible calendar date (2026-04-31, April has 30 days) -> INVALID
+OK   16d. a real leap-day date (2028-02-29) is accepted
+OK   16e. a non-leap-year Feb 29 (2026-02-29, 2026 is not a leap year) -> INVALID
+OK   18a. goalDemandIntentId.ts imports exactly one module (the pure date-validity helper)
+OK   18b. goalDemandIntentId.ts never imports pg/db.ts/React/next/Constructor in real code
+OK   18c. the one real dependency (localDate.ts) is itself zero-import (confirmed transitively pure)
+ALL GOAL DEMAND INTENT ID CHECKS PASSED
+
+# exit=0 signal=

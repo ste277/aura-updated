@@ -1,0 +1,17 @@
+$ npx ts-node test/hpgFix01DailyOccupancyDb.test.ts
+# job=day-constructor-acceptance-db-tests step=Run HPG-FIX-01 daily occupancy DB test env={}
+OK   setup: move to Wednesday succeeded (origin MOVED, successor UPCOMING on Wednesday)
+OK   1. UPCOMING occupies its day
+OK   1. LOGGED (completed) occupies its day
+OK   1. SKIPPED does not occupy
+OK   1. CANCELLED does not occupy
+OK   1. MOVED: destination day occupied, origin day freed
+OK   2. occupancy hint agrees with checkDailyOccurrenceEligibility for every activity x day
+OK   3. user-scoped: another user's activity/occurrence is never reported
+OK   4. read model (real deps): Tuesday flagged for UPCOMING and LOGGED activities
+OK   4. read model (real deps): Tuesday not flagged for SKIPPED / CANCELLED / MOVED-away
+OK   5. root-cause pin: rhythm facts carry the WEEK start, not the session day (so they cannot answer "which day")
+
+hpgFix01DailyOccupancyDb: all checks passed
+
+# exit=0 signal=

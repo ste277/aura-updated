@@ -1,0 +1,23 @@
+$ npx ts-node test/goalDemandCandidates.test.ts
+# job=math-core-tests step=Run Goal demand candidates test env={}
+OK   1. zero rows -> OK with an empty candidate list (never conflated with failure)
+OK   2. discovery-query failure -> LOAD_FAILED, distinguishable from a genuine empty result
+OK   3. facts-query failure -> LOAD_FAILED, never silently treated as zero facts
+OK   4. 0 completed + 0 committed of 3/week -> remainingThisWeek 3
+OK   5. 1 completed + 1 committed of 3/week -> remainingThisWeek 1
+OK   6. 1 completed + 2 committed of 3/week -> exhausted, excluded from candidates
+OK   7. Sunday planning date: a Sunday completion exhausts THIS week -> excluded
+OK   8. Monday (Tomorrow, crossing into next week) planning date: the prior Sunday completion does NOT carry over -> eligible again
+OK   9. a row carrying no real N_PER_WEEK rhythm is excluded even if the discovery query somehow returned one
+OK   10. output order is a stable goalActivityId sort, independent of input/row order
+OK   11. ordering is deterministic across repeated calls with the same input
+OK   12. all three Goal Activities across both Goals are returned together, no cross-Goal grouping/suppression
+OK   13. the complete factual set is returned with no implicit cap (9 eligible in, 9 out)
+OK   14. candidate carries exactly the agreed contract fields with correct values
+OK   15. excludeGoalDemandByActivityIds removes exactly the named ids (array input)
+OK   16. excludeGoalDemandByActivityIds removes exactly the named ids (Set input)
+OK   17. excludeGoalDemandByActivityIds with no ids to exclude is a pure pass-through (same length, same order)
+OK   18. excludeGoalDemandByActivityIds performs no mutation of its input array
+ALL GOAL DEMAND CANDIDATES CHECKS PASSED
+
+# exit=0 signal=

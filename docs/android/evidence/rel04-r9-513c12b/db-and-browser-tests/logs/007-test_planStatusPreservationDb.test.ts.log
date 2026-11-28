@@ -1,0 +1,29 @@
+$ npx ts-node test/planStatusPreservationDb.test.ts
+# job=day-constructor-acceptance-db-tests step=Run plan status preservation DB test env={}
+OK   19. mapPlanRow preserves UPCOMING -> UPCOMING
+OK   19. mapPlanRow preserves LOGGED -> LOGGED
+OK   19. mapPlanRow preserves CANCELLED -> CANCELLED
+OK   19. mapPlanRow preserves SKIPPED -> SKIPPED
+OK   19/6. an absent status (legacy row/fixture) is UPCOMING
+OK   20. an unknown runtime status fails loudly rather than defaulting to UPCOMING
+OK   20. the mapper has no `=== 'LOGGED' ? 'LOGGED' : 'UPCOMING'` collapse and uses an exhaustive never check
+OK   10. presentation: only UPCOMING is actionable, only LOGGED is completed; CANCELLED/SKIPPED are neither
+OK   10/11. the Plan tab lists come from the presentation predicates (correctness does not rely on a pre-mapper filter)
+OK   24. handleLogPlan refuses LOGGED/CANCELLED/SKIPPED/MOVED rows
+OK   26/6. normal creation: POST creates UPCOMING -> mapped UPCOMING -> actionable (unchanged behavior)
+OK   27/7/13. normal Log: the log result maps LOGGED and is the completed representation
+OK   16-18/14/15. clientRequestId + SKIPPED: replay returns the SAME plan with its current persisted status SKIPPED
+OK   14/15. clientRequestId + SKIPPED: mapPlanRow (the saveUpcomingPlanFromCandidate / Plan-tab-save mapping) preserves SKIPPED, never UPCOMING
+OK   23. clientRequestId + SKIPPED: replay mutates nothing (status, skippedAt, updatedAt unchanged), creates no HabitLog and no second plan
+OK   16-18/14/15. clientRequestId + CANCELLED: replay returns the SAME plan with its current persisted status CANCELLED
+OK   14/15. clientRequestId + CANCELLED: mapPlanRow (the saveUpcomingPlanFromCandidate / Plan-tab-save mapping) preserves CANCELLED, never UPCOMING
+OK   23. clientRequestId + CANCELLED: replay mutates nothing (status, skippedAt, updatedAt unchanged), creates no HabitLog and no second plan
+OK   16-18/14/15. guestToken + SKIPPED: replay returns the SAME plan with its current persisted status SKIPPED
+OK   14/15. guestToken + SKIPPED: mapPlanRow (the saveUpcomingPlanFromCandidate / Plan-tab-save mapping) preserves SKIPPED, never UPCOMING
+OK   23. guestToken + SKIPPED: replay mutates nothing (status, skippedAt, updatedAt unchanged), creates no HabitLog and no second plan
+OK   16-18/14/15. guestToken + CANCELLED: replay returns the SAME plan with its current persisted status CANCELLED
+OK   14/15. guestToken + CANCELLED: mapPlanRow (the saveUpcomingPlanFromCandidate / Plan-tab-save mapping) preserves CANCELLED, never UPCOMING
+OK   23. guestToken + CANCELLED: replay mutates nothing (status, skippedAt, updatedAt unchanged), creates no HabitLog and no second plan
+ALL STATUS PRESERVATION CHECKS PASSED
+
+# exit=0 signal=

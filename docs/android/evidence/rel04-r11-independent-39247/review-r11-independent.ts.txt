@@ -1,0 +1,242 @@
+import assert = require('node:assert/strict');
+import { addUser, clearQueueDb, closeAllTabs, Device, idbFault, logsOf, openTab, payload, queueDump, resetStore, storage, WEB } from './rel04AccountIsolationHarness';
+
+const A = 'independent-r11-a';
+const B = 'independent-r11-b';
+addUser(A, 'independent-r11-a@example.invalid');
+addUser(B, 'independent-r11-b@example.invalid');
+const f = require(require.resolve('fake-indexeddb', { paths: [WEB] }));
+const route = '/api/habit-logs';
+const q3 = (owner: string, id: string) => 'aura_q3:' + owner + ':' + id;
+const body = (id: string, title = 'reviewed activity') => payload(title, id);
+const item = (id: string, owner = A, title?: string) => ({ ...body(id, title), ownerUserId: owner, tempId: 'tmp' });
+const row = (recordId: string, id: string, owner = A, title?: string) => ({ recordId, ownerUserId: owner, clientRequestId: id, item: item(id, owner, title), fmt: 'r8', queuedAt: Date.now() });
+type Tab = ReturnType<typeof openTab>;
+let sequence = 0;
+async function fresh() {
+  closeAllTabs(); resetStore(); storage.clear();
+  storage.fail = { get: false, set: false, remove: false };
+  idbFault.open = false; idbFault.read = false; idbFault.write = false;
+  await clearQueueDb();
+  return new Device();
+}
+async function signIn(dev: Device, owner = A) {
+  dev.signIn(owner);
+  const t = openTab('r11-independent-' + sequence++);
+  await t.acct.fetchVerifiedSession(dev.fetch);
+  return t;
+}
+const submit = (t: Tab, dev: Device, id: string, title?: string) => t.sync.submitActivityLog(body(id, title), 'tmp', dev.fetch);
+const so = (t: Tab, dev: Device, beforeAck?: () => Promise<unknown>) => t.so.performSignOut({
+  confirm: () => true,
+  fetch: async (url: unknown, init: any) => {
+    if (String(url) === '/api/auth/logout') await beforeAck?.();
+    return dev.fetch(url, init);
+  },
+});
+const rows = (owner = A) => logsOf(owner).map((l: any) => [l.clientRequestId, l.activityTitle]);
+const report = (id: string, data: unknown) => console.log(id, JSON.stringify(data));
+const decisions = async () => (await queueDump()).tombstones.map((d: any) => [d.ownerUserId, d.clientRequestId, d.decision, d.possiblySent ?? null]);
+async function put(t: Tab, rec: any) {
+  const db = await t.q.__openQueueDbForTests();
+  const tx = db.transaction('records', 'readwrite');
+  tx.objectStore('records').put(rec);
+  await new Promise<void>((resolve, reject) => {
+    tx.oncomplete = () => resolve();
+    tx.onabort = () => reject(tx.error);
+  });
+}
+async function snapshot(t: Tab) {
+  const s = await t.q.readOwnedQueue(A);
+  if (!s.ok) throw Error('Snapshot unexpectedly unreadable');
+  return s;
+}
+function wait<T>() {
+  let resolve!: (value: T) => void;
+  const reached = new Promise<T>((r) => { resolve = r; });
+  return { resolve, reached };
+}
+function afterReplayRead(replace: (db: IDBDatabase) => void) {
+  const original = f.IDBIndex.prototype.getAll;
+  f.IDBIndex.prototype.getAll = function (...args: unknown[]) {
+    const req = original.apply(this, args);
+    if (this.name === 'owner' && this.objectStore.transaction.mode === 'readonly') {
+      f.IDBIndex.prototype.getAll = original;
+      req.addEventListener('success', () => replace(this.objectStore.transaction.db));
+    }
+    return req;
+  };
+  return () => { f.IDBIndex.prototype.getAll = original; };
+}
+function onFirstDecisionRead(effect: () => void) {
+  const original = f.IDBObjectStore.prototype.get;
+  f.IDBObjectStore.prototype.get = function (...args: unknown[]) {
+    const req = original.apply(this, args);
+    if (this.name === 'tombstones' && this.transaction.mode === 'readwrite') {
+      f.IDBObjectStore.prototype.get = original;
+      req.addEventListener('success', effect);
+    }
+    return req;
+  };
+  return () => { f.IDBObjectStore.prototype.get = original; };
+}
+function delayNextWriteCompletion() {
+  const original = f.IDBDatabase.prototype.transaction;
+  const held = wait<() => void>();
+  f.IDBDatabase.prototype.transaction = function (...args: unknown[]) {
+    const tx = original.apply(this, args);
+    if (tx.mode === 'readwrite') {
+      f.IDBDatabase.prototype.transaction = original;
+      tx.addEventListener('complete', (event: Event) => {
+        const completion = tx.oncomplete;
+        assert.equal(typeof completion, 'function');
+        tx.oncomplete = null;
+        held.resolve(() => completion.call(tx, event));
+      });
+    }
+    return tx;
+  };
+  return { reached: held.reached, restore: () => { f.IDBDatabase.prototype.transaction = original; } };
+}
+function loseNextWriteAcknowledgement(failReconciliation = false) {
+  const original = f.IDBDatabase.prototype.transaction;
+  f.IDBDatabase.prototype.transaction = function (...args: unknown[]) {
+    const tx = original.apply(this, args);
+    if (tx.mode === 'readwrite') {
+      f.IDBDatabase.prototype.transaction = original;
+      tx.addEventListener('complete', () => {
+        if (failReconciliation) idbFault.read = true;
+        tx.onerror?.(new Event('error'));
+      });
+    }
+    return tx;
+  };
+  return () => { f.IDBDatabase.prototype.transaction = original; idbFault.read = false; };
+}
+
+async function main() {
+  for (const newOwner of [A, B]) {
+    const dev = await fresh();
+    const t = await signIn(dev);
+    await put(t, row('reused-record', 'old-request'));
+    const restore = afterReplayRead((db) => {
+      db.transaction('records', 'readwrite').objectStore('records').put(row('reused-record', 'replacement', newOwner));
+    });
+    let postedClaim: unknown;
+    const result = await t.sync.replayOfflineQueue(async (url: unknown, init: any) => {
+      if (String(url) === route) postedClaim = (await queueDump()).claims.map((c: any) => [c.ownerUserId, c.clientRequestId]);
+      return dev.fetch(url, init);
+    }).finally(restore);
+    report('N1 replay record replaced after snapshot', { newOwner, result, postedClaim, rowsA: rows(), rowsB: rows(B), decisions: await decisions(), remaining: (await queueDump()).records.map((r: any) => [r.ownerUserId,r.clientRequestId]) });
+  }
+
+  for (const mode of ['direct', 'replay']) {
+    const dev = await fresh();
+    const t = await signIn(dev);
+    if (mode === 'replay') await put(t, row('before-local-conflict', 'late-retired'));
+    const key = q3(A, 'late-retired');
+    let injected = false;
+    const restore = onFirstDecisionRead(() => { injected = true; storage.setItem(key, JSON.stringify(item('late-retired', B))); });
+    const result = await (mode === 'direct' ? submit(t, dev, 'late-retired') : t.sync.replayOfflineQueue(dev.fetch)).finally(restore);
+    assert(injected);
+    report('N2 retired contradiction arrives inside claim transaction', { mode, result, rowsA: rows(), rowsB: rows(B), retiredCopyRemains: storage.data.has(key), decisions: await decisions() });
+  }
+
+  {
+    const dev = await fresh();
+    const t = await signIn(dev);
+    const gate = dev.hold('POST', route, 'after');
+    const request = submit(t, dev, 'settlement-original');
+    await gate.arrived;
+    const rec = (await queueDump()).records[0];
+    await put(t, { ...rec, item: { ...rec.item, ownerUserId: B } });
+    gate.release();
+    const result = await request;
+    report('N3 definitive response after copy becomes contradictory', { result: result.kind, rowsA: rows(), rowsB: rows(B), contradictoryCopyRemains: (await queueDump()).records.length === 1, decisions: await decisions() });
+  }
+
+  for (const type of ['readable-nested-id', 'missing-record-id-after-colon', 'outer-owner-absent']) {
+    const dev = await fresh();
+    const t = await signIn(dev);
+    const id = 'incomplete-member';
+    const key = 'aura_q4:' + A + ':' + id + (type === 'missing-record-id-after-colon' ? ':' : '');
+    if (type === 'outer-owner-absent') {
+      const { ownerUserId: _missing, ...withoutOwner } = row('unowned-outer', id);
+      await put(t, withoutOwner);
+    } else {
+      storage.setItem(key, type === 'readable-nested-id' ? JSON.stringify(item(id)) : '{bad');
+    }
+    const before = await snapshot(t);
+    const signout = await so(t, dev);
+    const atDiscard = await decisions();
+    const after = await signIn(dev);
+    const resubmit = await submit(after, dev, id);
+    report('N4 incomplete storage identity', { type, paused: before.paused, candidates: before.quarantined.map((q) => q.blocked), signout: signout.owned, atDiscard, rawLeft: storage.data.has(key), physicalRecords: (await queueDump()).records.length, submit: resubmit.kind, rowsA: rows() });
+  }
+
+  for (const added of ['new-key-same-id', 'contradiction-same-record']) {
+    const dev = await fresh();
+    const t = await signIn(dev);
+    await put(t, row('confirmed-copy', 'confirmed'));
+    const key = q3(A, 'confirmed');
+    const signout = await so(t, dev, async () => {
+      // Add a second, valid IndexedDB copy of the *confirmed* identity as a control.
+      await put(t, row('second-copy', 'confirmed'));
+      if (added === 'new-key-same-id') storage.setItem(key, JSON.stringify(item('confirmed')));
+      else await put(t, { ...row('confirmed-copy', 'confirmed'), item: item('confirmed', B) });
+    });
+    const a = await signIn(dev);
+    const retry = await submit(a, dev, 'confirmed');
+    report('N5 physical survivor after confirmed discard', { added, owned: signout.owned, message: t.so.signOutOutcomeMessage(signout), records: (await queueDump()).records.map((r: any) => [r.recordId,r.item.ownerUserId]), rawLeft: storage.data.has(key), decisions: await decisions(), retry: retry.kind, rowsA: rows() });
+  }
+
+  for (const mode of ['direct', 'replay']) {
+    const dev = await fresh();
+    const sender = await signIn(dev);
+    const logoutTab = await signIn(dev);
+    if (mode === 'replay') await put(sender, row('claimed-copy', 'claim-before-signout'));
+    const hold = delayNextWriteCompletion();
+    const sending = mode === 'direct' ? submit(sender, dev, 'claim-before-signout') : sender.sync.replayOfflineQueue(dev.fetch);
+    const release = await hold.reached;
+    const callsBefore = dev.count('POST', route);
+    const signedOut = await so(logoutTab, dev);
+    assert.equal(signedOut.outcome, 'signed-out');
+    const b = await signIn(dev, B);
+    release();
+    hold.restore();
+    const delayed = await sending;
+    const postsAfterOldLease = dev.count('POST', route);
+    const healthy = await submit(b, dev, 'b-after-switch');
+    const a = await signIn(dev);
+    const rp = await a.sync.replayOfflineQueue(dev.fetch);
+    report('C1 sign-out and switch after committed claim, before HTTP', { mode, callsBefore, postsAfterOldLease, delayed, signedOut: signedOut.owned, healthy: healthy.kind, replayAfterAReauth: rp.attempted, rowsA: rows(), rowsB: rows(B) });
+  }
+
+  for (const phase of ['before', 'after'] as const) {
+    const dev = await fresh();
+    const sender = await signIn(dev);
+    const logoutTab = await signIn(dev);
+    const held = dev.hold('POST', route, phase);
+    const sending = submit(sender, dev, 'transmitted-before-signout');
+    await held.arrived;
+    const postsBefore = dev.count('POST', route);
+    const signedOut = await so(logoutTab, dev);
+    const senderResult = await sending;
+    held.release();
+    const postsAfter = dev.count('POST', route);
+    report('C2 already initiated HTTP during sign-out', { phase, postsBefore, postsAfter, sender: senderResult.kind, signout: signedOut.owned, decisions: await decisions(), rowsA: rows(), rowsB: rows(B) });
+  }
+
+  for (const failRead of [false, true]) {
+    const dev = await fresh();
+    const t = await signIn(dev);
+    await put(t, row('idb-only-ack', 'idb-only'));
+    const snap = await snapshot(t);
+    const restore = loseNextWriteAcknowledgement(failRead);
+    const outcome = await t.q.discardOwned(A, snap, { tab: 'testing' }).finally(restore);
+    const retry = await submit(t, dev, 'idb-only');
+    report('N6 lost acknowledgement with no retired copy', { failRead, outcome, records: (await queueDump()).records.length, decisions: await decisions(), retry: retry.kind, rowsA: rows() });
+  }
+}
+main().catch((e) => { console.error(e); process.exitCode = 1; });
+

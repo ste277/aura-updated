@@ -1,0 +1,46 @@
+$ npx ts-node test/goalTemplateCompletion.test.ts
+# job=math-core-tests step=Run Goal template completion test env={}
+OK   25. every GOAL_TEMPLATES activity across all 4 categories resolves to a valid CompletionRequirement (DONE or explicit)
+OK   25. exactly 8 template activities exist across all 4 categories (3 GET_FITTER + 1 MEDITATE_REGULARLY + 3 FINISH_PROJECT + 1 STUDY_CONSISTENTLY)
+OK   25. exactly ONE template activity carries a non-DONE requirement (G3.4's own audit found exactly one deterministic, explicit case)
+OK   26. GET_FITTER "Go for a run" has no completionRequirement (DONE by omission)
+OK   26. FINISH_PROJECT activities all remain DONE (no explicit quantity in any of their titles)
+OK   26. STUDY_CONSISTENTLY "Study session" remains DONE -- no invented 30-minute target
+OK   27. MEDITATE_REGULARLY "Meditate 10 minutes" resolves to DURATION targetValue=10
+OK   27. DURATION requirement carries no persisted unit (implicit minutes)
+OK   27. formatGoalActivityCompletion(requirement, null) -> "10 min" (no execution yet)
+OK   27. formatGoalActivityCompletion(requirement, 10) -> "10 min" (actual matches target, compact form)
+OK   27. formatGoalActivityCompletion(requirement, 5) -> "5 / 10 min" (actual differs, shown factually)
+OK   28. no MEASURED_TARGET mapping exists in any current template -- G3.4's audit found insufficient deterministic evidence for one, so none was manufactured
+OK   31. POST /api/goals only calls resolveGoalTemplateActivities when body.templateCategory is present and valid -- never derived from body.title
+OK   31. route.ts never passes body.title into resolveGoalTemplateActivities/isGoalTemplateCategory
+OK   31. an omitted/absent templateCategory leaves activities as the empty array (never a guessed template)
+OK   32. route.ts contains no keyword/regex match against body.title for template selection (no .includes(/.match(/RegExp against title)
+OK   32. goals.ts contains no LLM/embedding/fuzzy-matching CODE reference anywhere (doc-comment prose discussing what was NOT added is excluded)
+OK   32. route.ts contains no LLM/embedding/fuzzy-matching CODE reference anywhere
+OK   33. validateCompletionRequirement rejects DURATION with targetValue <= 0
+OK   33. validateCompletionRequirement rejects MEASURED_TARGET missing unit
+OK   33. goals.ts defines no second/weaker completion validator of its own (no "validateGoalTemplate"/"validateTemplateCompletion" function)
+OK   39. GOAL_TEMPLATES itself owns completionRequirement (an inline field on each template activity definition, not a second disconnected lookup table)
+OK   39. goals.ts reuses the canonical CompletionRequirement type via a type-only import (never redefines DONE/DURATION/MEASURED_TARGET as its own union)
+OK   39. completionRequirement is never derived from findActivityIntent/catalog metadata (no defaultDurationMinutes CODE reference in goals.ts -- doc-comment prose explaining why it must never be used is excluded)
+OK   39. resolveGoalTemplateActivities passes completionRequirement straight from the static table, never computed from the resolved activityId/catalog entry
+OK   39. createGoalWithActivities's own INSERT still targets the completion columns exactly as G3.4 left them (completionRequirement was already accepted/persisted since G2.1 -- zero new write path added by G3.4; Rhythm R5 only appended its own trailing columns, never touching these)
+OK   39. db.ts gained no new SQL UPDATE targeting existing GoalActivity completion columns (no backfill of historical rows)
+OK   39. GoalActivity model carries the three pre-existing completion columns and no new fourth one (completionSource/completionHistory/etc.)
+OK   39. route.ts gained no new public API field for completion (server-owned template resolution, never client-supplied)
+OK   39. GOAL_TEMPLATES itself carries no Rhythm/RRULE/day-frequency field (scoped to GoalTemplateActivityDefinition + GOAL_TEMPLATES' own declarations -- Candidate B3's unrelated ReviewedGoalActivityInput.rhythm field elsewhere in the file is excluded)
+OK   39. GOAL_TEMPLATES contains no day-accumulation concept (dayBucket/dailyTarget/accumulat)
+OK   39. GOAL_TEMPLATES contains no CHECKLIST kind
+OK   39. goals.ts contains no progress-write/history concept (executionHistory/weeklyTotal/allExecutions)
+OK   39. goals.ts contains no streak/score/gamification CODE concept (its own pre-existing, unrelated GoalProgress doc-comment prose -- "never a score, never persisted" -- is excluded)
+OK   39. CreateGoalModal (GoalsListClient.tsx) gained no completion-type selector/target field/unit field/duration field
+OK   39. HomeDashboard.tsx unchanged by G3.4 (no GOAL_TEMPLATES/resolveGoalTemplateActivities reference)
+OK   39. HomeTimeline.tsx unchanged by G3.4 (no GOAL_TEMPLATES/resolveGoalTemplateActivities reference)
+OK   39. GoalDetailClient.tsx unchanged by G3.4 (no GOAL_TEMPLATES/resolveGoalTemplateActivities reference -- no special template knowledge)
+OK   39. dayConstructorOrchestrator.ts unchanged by G3.4 (no GOAL_TEMPLATES/resolveGoalTemplateActivities reference)
+OK   39. planMove.ts unchanged by G3.4 (no GOAL_TEMPLATES/resolveGoalTemplateActivities reference)
+OK   39. route.ts calls no Constructor/orchestrator function during Goal creation (goal creation stays planning-free)
+ALL GOAL TEMPLATE COMPLETION CHECKS PASSED
+
+# exit=0 signal=

@@ -20,6 +20,7 @@
  * database (CI's postgres service, or an isolated local cluster).
  */
 import { POST as plansRoute } from '../apps/web/app/api/plans/route';
+import { boundHeaders } from './rel04BoundTestHeaders';
 import { PATCH as rhythmRoute } from '../apps/web/app/api/goals/[goalId]/activities/[goalActivityId]/rhythm/route';
 import { GET as goalDetailRoute } from '../apps/web/app/api/goals/[goalId]/route';
 import { upsertUserByEmail, createGoalWithActivities, beginTransaction } from '../apps/web/lib/db';
@@ -40,7 +41,7 @@ const TZ = 'Asia/Kolkata';
 function fakeRequest(token: string | undefined, body: unknown): any {
   return {
     cookies: { get: (n: string) => (token !== undefined && n === 'as_session' ? { value: token } : undefined) },
-    headers: new Headers(),
+    headers: boundHeaders(token),
     nextUrl: new URL('http://localhost/api/test'),
     json: async () => body,
   };

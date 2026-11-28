@@ -7,6 +7,7 @@ import android.os.Bundle;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.Window;
+import android.webkit.CookieManager;
 import androidx.activity.OnBackPressedCallback;
 import androidx.core.graphics.Insets;
 import androidx.core.view.ViewCompat;
@@ -110,6 +111,34 @@ public class MainActivity extends BridgeActivity {
             return WindowInsetsCompat.CONSUMED;
         });
         ViewCompat.requestApplyInsets(webView);
+    }
+
+    /**
+     * AURA-ANDROID-REL-04 (fresh-process session state; IR-04): ask the WebView to persist
+     * its cookie store whenever the app leaves the foreground. Chromium writes cookie
+     * changes to disk lazily (batched), so a sign-in or sign-out followed quickly by the
+     * process being killed could leave the previous cookie on disk. CookieManager.flush()
+     * blocks while it writes the cookies the WebView holds AT THAT MOMENT (it may perform
+     * I/O on this thread); it is still BEST-EFFORT, not a durability guarantee: a kill
+     * before or during onPause, or a Set-Cookie (e.g. a delayed logout response) that
+     * arrives after this flush, is not covered, and nothing here confirms the write
+     * reached storage. Session safety does
+     * not depend on it: the server-side account boundary and the sign-out transition do
+     * (lib/accountSession.ts, lib/expectedAccount.ts). Device acceptance D-S2 checks the
+     * real behaviour. flush() only writes; it changes no cookie.
+     */
+    @Override
+    public void onPause() {
+        super.onPause();
+        flushCookies();
+    }
+
+    static void flushCookies() {
+        try {
+            CookieManager.getInstance().flush();
+        } catch (RuntimeException e) {
+            // No WebView provider (being updated or disabled): nothing to persist.
+        }
     }
 
     @Override

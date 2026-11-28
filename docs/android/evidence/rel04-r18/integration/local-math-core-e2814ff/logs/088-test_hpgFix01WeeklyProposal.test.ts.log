@@ -1,0 +1,23 @@
+$ npx ts-node test/hpgFix01WeeklyProposal.test.ts
+# job=math-core-tests step=Run HPG-FIX-01 weekly proposal validity test env={}
+OK   1. an already-started time is never proposable
+OK   1. a start exactly at now is not proposable (acceptance uses start <= now)
+OK   1. future candidates kept in original ranking order
+OK   1. overlap with an active UPCOMING plan is excluded
+OK   1. overlap with a LOGGED (completed) plan is excluded, same as the constructor
+OK   1. SKIPPED / CANCELLED / MOVED plans never block
+OK   1. a plan ending exactly at the candidate start does not overlap (half-open)
+OK   1. outside configured availability is excluded; inside is kept
+OK   1. unconfigured availability imposes no boundary (same as acceptance)
+OK   2. staging repro: no proposal for today (completed session already that day)
+OK   2. staging repro: no elapsed or overlapping time proposed
+OK   2. staging repro: the valid Sunday slot is still proposed
+OK   2. fewer valid days than remaining -> honest shortfall
+OK   2. day occupancy comes from the session day, not the week-start fact
+OK   2. no session today and no conflicts -> today and Sunday both proposed
+OK   2. existing-plan load failure -> SEARCH_FAILED, never unfiltered proposals
+OK   2. configured availability respected end to end
+
+hpgFix01WeeklyProposal: all checks passed
+
+# exit=0 signal=

@@ -1,0 +1,70 @@
+$ npx ts-node --project tsconfig.jsdom-tests.json test/rel04R16OperationCorrection.test.ts
+# job=math-core-tests step=Run REL-04 R16 operation-contract correction test (39258 G4-G6 witnesses on e6a6a66 vs current; negative controls) env={"TS_NODE_COMPILER_OPTIONS":"{\"jsx\":\"react-jsx\"}"}
+OK   fixture rel04-r15-head/offlineHabitQueue.ts.txt == e6a6a66 apps/web/lib/offlineHabitQueue.ts
+OK   fixture rel04-r15-head/activitySync.ts.txt == e6a6a66 apps/web/lib/activitySync.ts
+OK   fixture rel04-r15-head/habitLogSyncPolicy.ts.txt == e6a6a66 apps/web/lib/habitLogSyncPolicy.ts
+OK   fixture rel04-r15-head/signOut.ts.txt == e6a6a66 apps/web/lib/signOut.ts
+OK   fixture rel04-r15-head/pendingReplayReconciliation.ts.txt == e6a6a66 apps/web/lib/pendingReplayReconciliation.ts
+G4 {"R15":{"op":"confirmed","reply":"already-recorded","posts":0,"rows":0,"copies":1},"R16":{"op":"unresolved","reply":"outcome-unknown","posts":0,"rows":0,"copies":1}}
+OK   W G4 -- R15 (negative control) reproduces: a receipt whose row contradicts the intent -> operation "confirmed", already-recorded, 0 POSTs, 0 rows
+OK   W G4 -- R16: the same marker proves nothing -> operation unresolved, outcome-unknown, 0 POSTs, 0 rows, the copy preserved
+OK   G4 v2 receipt, matching ids, contradictory title: no success on ANY consumer (authority unverified, operation unresolved, submit outcome-unknown, recovery upgrade false); 0 POSTs; copy preserved
+OK   G4 v2 receipt, matching ids, contradictory timestamp: no success on ANY consumer (authority unverified, operation unresolved, submit outcome-unknown, recovery upgrade false); 0 POSTs; copy preserved
+OK   G4 v2 receipt, matching ids, contradictory duration: no success on ANY consumer (authority unverified, operation unresolved, submit outcome-unknown, recovery upgrade false); 0 POSTs; copy preserved
+OK   G4 v2 receipt, matching ids, contradictory source: no success on ANY consumer (authority unverified, operation unresolved, submit outcome-unknown, recovery upgrade false); 0 POSTs; copy preserved
+OK   G4 v2 receipt, matching ids, contradictory significance: no success on ANY consumer (authority unverified, operation unresolved, submit outcome-unknown, recovery upgrade false); 0 POSTs; copy preserved
+OK   G4 v2 receipt, matching ids, contradictory notes: no success on ANY consumer (authority unverified, operation unresolved, submit outcome-unknown, recovery upgrade false); 0 POSTs; copy preserved
+OK   G4 v2 receipt, matching ids, contradictory activity id: no success on ANY consumer (authority unverified, operation unresolved, submit outcome-unknown, recovery upgrade false); 0 POSTs; copy preserved
+OK   G4 v2 receipt, matching ids, incomplete: no notes field: no success on ANY consumer (authority unverified, operation unresolved, submit outcome-unknown, recovery upgrade false); 0 POSTs; copy preserved
+OK   G4 v2 receipt, matching ids, incomplete: no activityId field: no success on ANY consumer (authority unverified, operation unresolved, submit outcome-unknown, recovery upgrade false); 0 POSTs; copy preserved
+OK   G4 v2 receipt, matching ids, incomplete: no logSource: no success on ANY consumer (authority unverified, operation unresolved, submit outcome-unknown, recovery upgrade false); 0 POSTs; copy preserved
+OK   G4 v2 receipt, matching ids, incomplete: no durationMinutes: no success on ANY consumer (authority unverified, operation unresolved, submit outcome-unknown, recovery upgrade false); 0 POSTs; copy preserved
+OK   G4 v2 receipt, matching ids, malformed: duration as a string: no success on ANY consumer (authority unverified, operation unresolved, submit outcome-unknown, recovery upgrade false); 0 POSTs; copy preserved
+OK   G4 v2 receipt, matching ids, malformed: unparseable timestamp: no success on ANY consumer (authority unverified, operation unresolved, submit outcome-unknown, recovery upgrade false); 0 POSTs; copy preserved
+OK   G4 v2 receipt, matching ids, malformed: row is an array: no success on ANY consumer (authority unverified, operation unresolved, submit outcome-unknown, recovery upgrade false); 0 POSTs; copy preserved
+OK   G4 v2 receipt, matching ids, malformed: row missing: no success on ANY consumer (authority unverified, operation unresolved, submit outcome-unknown, recovery upgrade false); 0 POSTs; copy preserved
+OK   G4 v2 receipt, matching ids, record id mismatch (row id != serverRecordId): no success on ANY consumer (authority unverified, operation unresolved, submit outcome-unknown, recovery upgrade false); 0 POSTs; copy preserved
+OK   G4 control: a COMPLETE v2 receipt bound to the exact intent establishes success (already-recorded with its row; 0 POSTs); the same receipt as v1 does not
+G5-direct {"R15":{"reply":"rejected","intercepted":1,"kept":0,"rejected":true,"again":"rejected","rowsAfter":0},"R16":{"reply":"outcome-unknown","intercepted":1,"kept":1,"rejected":false,"again":"confirmed","rowsAfter":1}}
+OK   W G5 direct -- R15 (negative control) reproduces: a JSON 429 settles a DURABLE rejection and deletes the copy; the same-id retry never reaches the writer (0 rows)
+OK   W G5 direct -- R16: the JSON 429 leaves it unresolved, the copy and id KEPT, no rejection recorded; the same-id retry reaches the writer -> confirmed, 1 row
+G5-replay {"R15":{"reply":{"removed":1,"unverified":0},"intercepted":1,"kept":0,"rejected":true,"again":"rejected","rowsAfter":0},"R16":{"reply":{"removed":0,"unverified":1},"intercepted":1,"kept":1,"rejected":false,"again":"confirmed","rowsAfter":1}}
+OK   W G5 replay -- R15 (negative control) reproduces: a JSON 429 settles a DURABLE rejection and deletes the copy; the same-id retry never reaches the writer (0 rows)
+OK   W G5 replay -- R16: the JSON 429 leaves it unresolved, the copy and id KEPT, no rejection recorded; the same-id retry reaches the writer -> confirmed, 1 row
+OK   G5 direct JSON 429 "Temporary rate limit": unresolved (outcome-unknown), copy + id kept (pending), nothing recorded; the later same-id replay reaches the writer -> 1 row
+OK   G5 replay JSON 429 "Temporary rate limit": unresolved (removed 0), copy + id kept (pending), nothing recorded; the later same-id replay reaches the writer -> 1 row
+OK   G5 direct JSON 429 gateway fallback: unresolved (outcome-unknown), copy + id kept (pending), nothing recorded; the later same-id replay reaches the writer -> 1 row
+OK   G5 replay JSON 429 gateway fallback: unresolved (removed 0), copy + id kept (pending), nothing recorded; the later same-id replay reaches the writer -> 1 row
+OK   G5 direct JSON 404 "User not found.": unresolved (outcome-unknown), copy + id kept (pending), nothing recorded; the later same-id replay reaches the writer -> 1 row
+OK   G5 replay JSON 404 "User not found.": unresolved (removed 0), copy + id kept (pending), nothing recorded; the later same-id replay reaches the writer -> 1 row
+OK   G5 direct JSON 400 "Unknown activity." (cannot be re-derived locally): unresolved (outcome-unknown), copy + id kept (pending), nothing recorded; the later same-id replay reaches the writer -> 1 row
+OK   G5 replay JSON 400 "Unknown activity." (cannot be re-derived locally): unresolved (removed 0), copy + id kept (pending), nothing recorded; the later same-id replay reaches the writer -> 1 row
+OK   G5 direct JSON 400 "Missing required fields." for a body WITH a title: unresolved (outcome-unknown), copy + id kept (pending), nothing recorded; the later same-id replay reaches the writer -> 1 row
+OK   G5 replay JSON 400 "Missing required fields." for a body WITH a title: unresolved (removed 0), copy + id kept (pending), nothing recorded; the later same-id replay reaches the writer -> 1 row
+OK   G5 direct JSON 400 "logTimestamp must be a valid date." for a VALID timestamp: unresolved (outcome-unknown), copy + id kept (pending), nothing recorded; the later same-id replay reaches the writer -> 1 row
+OK   G5 replay JSON 400 "logTimestamp must be a valid date." for a VALID timestamp: unresolved (removed 0), copy + id kept (pending), nothing recorded; the later same-id replay reaches the writer -> 1 row
+OK   G5 direct JSON 422 unknown error: unresolved (outcome-unknown), copy + id kept (pending), nothing recorded; the later same-id replay reaches the writer -> 1 row
+OK   G5 replay JSON 422 unknown error: unresolved (removed 0), copy + id kept (pending), nothing recorded; the later same-id replay reaches the writer -> 1 row
+OK   G5 direct JSON 400 without an error string: unresolved (outcome-unknown), copy + id kept (pending), nothing recorded; the later same-id replay reaches the writer -> 1 row
+OK   G5 replay JSON 400 without an error string: unresolved (removed 0), copy + id kept (pending), nothing recorded; the later same-id replay reaches the writer -> 1 row
+after-send {"r":"not-stored","posts":19,"copies":1,"decisions":0}
+OK   G5 a body the route would refuse definitively is never re-dispatched after a possible earlier send (its stored copy is damaged -> paused: not-stored); nothing is settled and the copy is kept
+OK   N9 consuming a receipt WITHOUT the row binder is detected (the G4 check fails: already-recorded with 0 rows)
+OK   N10a the R15 refusal rule in the decoder is detected (decoded rejected; R16 decodes unverified)
+OK   N10b the full R15 refusal path (decoder rule + permissive rejected receipt) is detected by the G5 check (copy deleted: 0 left, rejection recorded)
+OK   N12 letting an INVALID receipt settle (deletion without authority) is detected (the copy is deleted)
+OK   G4 bypass review: settlement with an invalid receipt removes NOTHING and writes no decision (R16)
+G6 negative control (shared recovery contract disabled) {"opened":true,"firstUnresolved":true,"original":true,"noticeOnReturn":true,"blocked":false,"afterReentry":{"rows":2,"ids":2},"recovered":false,"afterRecovery":{"rows":2,"ids":2,"originalKept":true}}
+OK   N11 disabling the shared recovery contract is detected: the identical Calendar re-entry after remount sends a second request and creates a fresh-id duplicate (2 rows, 2 ids)
+G6 remount {"opened":true,"firstUnresolved":true,"original":true,"noticeOnReturn":true,"blocked":true,"afterReentry":{"rows":1,"ids":1},"recovered":true,"afterRecovery":{"rows":1,"ids":1,"originalKept":true}}
+OK   G6 Calendar remount (navigate away and back): the unresolved operation is shown on return; the identical re-entry is WITHHELD (no POST) with THAT operation's recovery offered -- 1 row, 1 id
+OK   G6 Calendar remount: "Retry that entry" resumes the ORIGINAL id -> still 1 row, 1 id
+G6 separate {"opened":true,"firstUnresolved":true,"original":true,"noticeOnReturn":true,"blocked":true,"afterReentry":{"rows":1,"ids":1},"recovered":true,"afterRecovery":{"rows":2,"ids":2,"originalKept":true}}
+OK   G6 a deliberately SEPARATE identical activity stays possible: "Save as a separate activity" creates a second operation and row (2 rows, 2 ids; the original kept)
+G6 restart {"opened":true,"firstUnresolved":true,"original":true,"noticeOnReturn":false,"blocked":true,"afterReentry":{"rows":1,"ids":1},"recovered":true,"afterRecovery":{"rows":1,"ids":1,"originalKept":true}}
+OK   G6 restart (page remounted: memory gone, durable store kept; every answer still unverifiable): the identical re-entry is withheld (no POST, 1 row); Retry resumes the original id -> 1 row, 1 id
+OK   G6 one shared recovery contract: page.tsx handleLogActivity is the single gate (true); Home, Timeline and Past Activity consume its error (true); no view-specific reconciliation (true); the queued operation (queued) is restart-visible
+
+56 passed, 0 failed
+
+# exit=0 signal=

@@ -1,0 +1,12 @@
+$ npx ts-node test/dayActivitySuggestions.test.ts
+# job=math-core-tests step=Run day activity suggestions test env={}
+OK   getGoodForDayCategories does not throw and returns an array
+OK   Returns at most 4 categories (scannable cap)
+OK   Every returned category has a non-empty icon/label/activityId
+OK   Categories are sorted by score descending
+OK   Every returned score meets the existing Aura Fit BEST threshold (>= 80)
+OK   "Learning" score matches evaluateActivityFit()'s own best-of-day score (no new formula)
+
+ALL DAY ACTIVITY SUGGESTIONS CHECKS PASSED
+
+# exit=0 signal=

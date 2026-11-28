@@ -1,0 +1,71 @@
+$ npx ts-node test/weeklyPlanReviewClient.test.ts
+# job=math-core-tests step=Run Weekly plan review client test env={}
+OK   1. zero remaining -> no weekly review offered
+OK   1. exactly one remaining -> no weekly review offered (keeps the single Plan it action)
+OK   1. two remaining -> weekly review offered
+OK   1. three remaining -> weekly review offered
+OK   2. projects every proposal item into a draft, order-preserving
+OK   2. every new draft starts PENDING and not adjusted
+OK   2. carries start/end/durationMinutes/score/label/reasons verbatim, never re-derived
+OK   3. ACCEPTED is locked
+OK   3. ALREADY_ACCEPTED is locked
+OK   3. PENDING is not locked
+OK   3. FAILED is not locked
+OK   4. omits locked (ACCEPTED/ALREADY_ACCEPTED) sessions from a submission
+OK   4. includes PENDING and FAILED sessions (both retryable)
+OK   4. preserves exact start/end, never re-derives them
+OK   5. a real ACCEPTED outcome is matched by exact (localDate,start,end), never by array position
+OK   5. a real ALREADY_ACCEPTED outcome is matched the same way
+OK   5. a FAILED outcome (no start/end in the response) is matched via the request's OWN same-order copy of that session's key, not localDate alone
+OK   5. a draft with no matching outcome in the summary is left completely unchanged
+OK   5. [negative-control-equivalent] a SUCCESS for a DIFFERENT exact instant on the same date never overwrites an unrelated draft
+OK   5b. two same-date FAILURES remain individually attributable -- the first keeps its own reason, never the second's
+OK   5b. ...and the second keeps ITS own reason, never the first's
+OK   5b. a partial success sharing a date with a failure reconciles the success correctly
+OK   5b. ...and the failure correctly, on the OTHER draft, never the successful one's reason
+OK   5c. siblingLocalDatesExcluding excludes only the given index
+OK   5c. hasDateCollision is true when the candidate date matches a sibling
+OK   5c. hasDateCollision is false for a genuinely free date
+OK   5c. hasDateCollision is false for a draft's OWN current date once excluded (adjusting onto its own unchanged date is never a false collision)
+OK   5c. hasDuplicateActiveLocalDates is false for an all-distinct batch
+OK   5c. hasDuplicateActiveLocalDates is true once two active drafts share a date
+OK   5c. a removed sibling (simply absent from the array, never merely flagged) cannot cause a false collision
+OK   5c. collision detection includes LOCKED siblings (an already-ACCEPTED date is just as real a collision as a pending one)
+OK   6. real structured reasons are formatted into real English prose via the SHARED formatMuhurtaReason
+OK   6. never re-sorts: the engine's own first reason stays first
+OK   6. caps at 3 -- the engine's own top-reasons convention, never all of them
+OK   6. no reasons -> no explanation lines (never fabricated)
+OK   7. day label is formatted from the civil date at local noon UTC -- immune to any timezone shifting it a day
+OK   7. time label respects the GIVEN timezone, not the test runner's own local timezone
+OK   7. a different timezone for the SAME instant produces a different time label
+OK   8. a known closed failure code maps to a specific, human message
+OK   8. COMMITMENT_NO_LONGER_LIVE is marked correctable (adjust to a different time rebooks normally)
+OK   8. ACCEPTANCE_IDENTITY_CONFLICT is NOT presented as adjustable (closing/reopening is the real fix)
+OK   8. an unrecognized/unexpected reason string falls back to a safe default rather than throwing or leaking it
+OK   8. a missing reason also falls back to the safe default
+OK   9. request body carries goalActivityId/acceptanceId/sessions exactly as given
+OK   10. a real OK body with a proposals array parses as OK
+OK   10. NOT_ELIGIBLE parses as NOT_ELIGIBLE
+OK   10. SEARCH_FAILED parses as SEARCH_FAILED
+OK   10. a non-200 with no recognized body shape parses as HTTP_ERROR
+OK   10. a 200 with no recognized body shape parses as UNKNOWN_RESPONSE, never silently OK
+OK   11. a real acceptance response body parses as OK with the real sessions array carried through
+OK   11. a non-200 with no recognized body shape parses as HTTP_ERROR
+OK   11. a 200 with no recognized body shape parses as UNKNOWN_RESPONSE
+OK   12. FIND adjustment request scopes dateRange to exactly ONE day, never a new multi-day search
+OK   12. FIND adjustment request uses the real activityId when present, never a taskTitle fallback in that case
+OK   12. FIND adjustment request falls back to taskTitle only when activityId is null
+OK   12. CHECK adjustment request carries mode CHECK and the exact candidateStart given, never re-derived
+OK   13. carries the real candidate's start/end/score/label/reasons verbatim, never re-derived
+OK   13. marks the draft as adjusted (never claims this was Aura's original top pick)
+OK   13. resets outcome back to PENDING, clearing any prior failure, so it can be resubmitted
+OK   13. updates localDate to the adjusted day
+OK   14. [STRUCTURAL] the proposal fetch function calls ONLY the read-only weekly-proposal endpoint
+OK   14. [STRUCTURAL] the ONE write-capable call in this file targets weekly-accept, and only inside submitWeeklyAcceptance
+OK   14. [STRUCTURAL] this file never calls encodeGoalDemandIntentId or any server-only persistence function directly
+OK   14. [STRUCTURAL] acceptanceId is never generated in this file (owned by the modal, per this file's own header comment)
+OK   14. [STRUCTURAL] explanation rendering reuses the real, shared formatMuhurtaReason -- never a second formatter
+
+ALL WEEKLY PLAN REVIEW CLIENT CHECKS PASSED
+
+# exit=0 signal=

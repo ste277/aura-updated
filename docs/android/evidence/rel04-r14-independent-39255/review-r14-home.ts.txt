@@ -1,0 +1,161 @@
+import assert = require('node:assert/strict');
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
+import path = require('node:path');
+const WEB=path.resolve('apps/web');
+const connection=process.env.DATABASE_URL;
+assert.equal(connection,'postgresql://r14audit@127.0.0.1:55482/audit_r14');
+assert.equal(process.env.AURA_DATABASE_URL,connection);
+assert.equal(process.env.AUTH_SECRET,'r14-isolated-only-local-development-secret-984535781');
+const pg=new (require(require.resolve('pg',{paths:[WEB]})).Pool)({connectionString:connection});
+const Prisma=require(require.resolve('@prisma/client',{paths:[WEB]})).PrismaClient;
+const prisma=new Prisma({datasources:{db:{url:connection}}});
+const auth=require(path.join(WEB,'lib/auth'));
+const {chromium}=require('@playwright/test');
+const origin='http://127.0.0.1:38843';
+const wait=()=>{let open!:()=>void; const seen=new Promise<void>(resolve=>{open=resolve});return {open,seen}};
+async function main(){
+  const app=spawn('./node_modules/.bin/next',['start','-p','38843','-H','127.0.0.1'],{cwd:WEB,env:process.env,stdio:['ignore','inherit','inherit']});
+  let browser:any;
+  try{
+    let ready=false;
+    for(let i=0;i<100&&!ready;i++){await new Promise(r=>setTimeout(r,150));try{ready=(await fetch(origin+'/api/health')).ok}catch{}}
+    assert(ready);
+    browser=await chromium.launch();
+    for(const mode of ['settled-before','settled-during','uncertain-stale-read']){
+      const email='r14-home-'+mode+'-'+Date.now()+'@example.invalid';
+      const user=await prisma.user.create({data:{email,cityName:'Chennai',latitude:13.08,longitude:80.27,timezone:'Asia/Kolkata',onboardingResolvedAt:new Date()}});
+      const rows=async()=> (await pg.query('select id,"userId","clientRequestId","activityTitle","logTimestamp", "durationMinutes", "logSource" from "HabitLog" where "userId"=$1 order by id',[user.id])).rows;
+      const ctx=await browser.newContext({serviceWorkers:'block',timezoneId:'Asia/Kolkata'});
+      await ctx.addCookies([{name:'as_session',value:auth.createSessionToken(user.id,email),url:origin}]);
+      const a=await ctx.newPage(), b=await ctx.newPage();
+      const fixtureTime=Date.parse('2026-11-27T06:35:00.000Z');
+      await a.clock.setFixedTime(new Date(fixtureTime));
+      const ap:any[]=[],bp:any[]=[];
+      for(const [p,out] of [[a,ap],[b,bp]]){
+        p.on('request',(r:any)=>{if(r.method()==='POST'&&new URL(r.url()).pathname==='/api/habit-logs')out.push({account:r.headers()['x-aura-expected-account'],body:r.postDataJSON()})});
+        p.on('pageerror',(e:Error)=>console.log('browser page error',e.message));
+      }
+      const staleStarted=wait(),staleRelease=wait();
+      if(mode==='uncertain-stale-read'){
+        await a.route('**/api/habit-logs',async (r:any)=>{
+          if(r.request().method()!=='GET')return r.continue();
+          const response=await r.fetch();
+          const payload=await response.json();
+          if(!Array.isArray(payload)||payload.length!==0)return r.fulfill({response});
+          staleStarted.open();
+          await staleRelease.seen;
+          await r.fulfill({response});
+        });
+      }
+      await a.goto(origin);
+      const start=a.locator('button').filter({hasText:/^Start now$/}).first();
+      try{await start.waitFor({timeout:15000})}
+      catch(e){console.log('Home diagnostic',mode,(await a.locator('body').innerText()).slice(0,1600));throw e}
+      console.log('Home started',mode);
+      if(mode==='uncertain-stale-read')await staleStarted.seen;
+      await a.evaluate((failDecision:boolean)=>{
+        const w=window as any;
+        const orig=IDBDatabase.prototype.transaction;
+        IDBDatabase.prototype.transaction=function(this:IDBDatabase,...args:any[]){
+          const tx=(orig as any).apply(this,args) as IDBTransaction;
+          if(tx.mode==='readwrite'&&tx.objectStoreNames.contains('records')){
+            IDBDatabase.prototype.transaction=orig;
+            tx.addEventListener('complete',()=>{
+              const reject=tx.onerror;
+              tx.oncomplete=null;
+              w.releaseReviewAck=()=>{
+                if(failDecision){
+                  const before=IDBObjectStore.prototype.get;
+                  IDBObjectStore.prototype.get=function(this:IDBObjectStore,...args:any[]){
+                    if(this.name==='tombstones'&&this.transaction.mode==='readonly'){
+                      IDBObjectStore.prototype.get=before;
+                      w.reviewDecisionReadFailed=true;
+                      throw new Error('Synthetic one-shot decision read failure');
+                    }
+                    return (before as any).apply(this,args);
+                  };
+                }
+                reject?.call(tx,new Event('error'));
+              };
+            });
+          }
+          return tx;
+        };
+      },mode==='uncertain-stale-read');
+      await start.click();
+      await a.getByRole('button',{name:'Start now for 30 minutes',exact:true}).first().click();
+      await a.waitForFunction(()=>typeof (window as any).releaseReviewAck==='function');
+      console.log('Home queue commit intercepted',mode);
+      const inspect=async(p:any)=>p.evaluate(async()=>new Promise((resolve,reject)=>{
+        const req=indexedDB.open('aura-offline',2);
+        req.onerror=()=>reject(req.error);
+        req.onsuccess=()=>{
+          const db=req.result;
+          const t=db.transaction(['records','claims','tombstones'],'readonly');
+          const pairs=['records','claims','tombstones'].map(name=>[name,t.objectStore(name).getAll()] as const);
+          t.oncomplete=()=>{const data=Object.fromEntries(pairs.map(([name,r])=>[name,r.result]));db.close();resolve(data)};
+        };
+      }));
+      const initial=await inspect(a);
+      const oldId=initial.records[0].clientRequestId;
+      assert.equal(initial.records[0].ownerUserId,user.id);
+      const finishResponse=wait(), serverAccepted=wait();
+      if(mode==='settled-during'){
+        await b.route('**/api/habit-logs',async (r:any)=>{
+          if(r.request().method()!=='POST')return r.continue();
+          const response=await r.fetch();
+          assert(response.ok());
+          serverAccepted.open();
+          await finishResponse.seen;
+          await r.fulfill({response});
+        });
+      }
+      await b.goto(origin);
+      await b.getByText('Good Right Now',{exact:false}).first().waitFor({timeout:10000});
+      await b.waitForTimeout(350);
+      await b.evaluate(()=>{const now=Date.now.bind(Date);Date.now=()=>now()+61_000;window.dispatchEvent(new Event('online'))});
+      if(mode==='settled-during'){
+        await Promise.race([serverAccepted.seen,new Promise((_,reject)=>setTimeout(()=>reject(new Error('No replay POST')),10000))]);
+        assert.equal((await rows()).length,1);
+        assert.equal((await inspect(a)).tombstones.length,0);
+      }else{
+        let accepted=false;
+        for(let n=0;n<80&&!accepted;n++){
+          accepted=(await inspect(a)).tombstones.some((x:any)=>x.clientRequestId===oldId&&x.serverOutcome==='accepted');
+          if(!accepted)await a.waitForTimeout(125);
+        }
+        assert(accepted,JSON.stringify({mode,ap,bp,local:await inspect(a),db:await rows()}));
+      }
+      await a.evaluate(()=>(window as any).releaseReviewAck());
+      if(mode==='settled-during'){
+        await a.getByText('Saved offline · will sync',{exact:false}).first().waitFor({timeout:10000});
+        finishResponse.open();
+      }
+      if(mode==='uncertain-stale-read'){
+        await a.waitForFunction(()=>Boolean((window as any).reviewDecisionReadFailed));
+        await a.getByText('Saved offline · will sync',{exact:false}).first().waitFor({timeout:10000});
+        staleRelease.open();
+        await a.waitForTimeout(700);
+        const retryVisible=await start.isVisible();
+        if(retryVisible){
+          await start.click();
+          const posted=a.waitForResponse((r:any)=>r.request().method()==='POST'&&r.url().endsWith('/api/habit-logs'),{timeout:5000}).catch(()=>undefined);
+          await a.getByRole('button',{name:'Start now for 30 minutes',exact:true}).first().click();
+          await posted;
+        }
+        console.log('uncertain stale GET UI',JSON.stringify({mode,retryVisible,rows:await rows(),postsA:ap,postsB:bp}));
+      }else{
+        await a.waitForTimeout(750);
+        console.log('real Home F1 control',JSON.stringify({mode,firstClaim:initial.claims[0],postsA:ap,postsB:bp,pg:await rows(),final:await inspect(a),retryVisible:await start.isVisible(),error:await a.getByText("Couldn't log. Try again.",{exact:false}).count()}));
+      }
+      await ctx.close();
+    }
+  }finally{
+    if(browser)await browser.close();
+    app.kill('SIGTERM');
+    await prisma.$disconnect(); await pg.end();
+  }
+}
+main().catch(e=>{console.error(e);process.exitCode=1});
+

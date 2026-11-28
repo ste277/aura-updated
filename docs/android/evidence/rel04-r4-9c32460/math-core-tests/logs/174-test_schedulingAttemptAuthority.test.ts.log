@@ -1,0 +1,60 @@
+$ npx ts-node test/schedulingAttemptAuthority.test.ts
+# job=math-core-tests step=Run scheduling attempt authority test env={}
+=== Part 1: the P3a observation point -- the candidate's OWN timing fit, descriptive only ===
+OK   THE SOURCE IS THE CANDIDATE ITSELF: each P contention event carries exactly the `timingFit` of the candidate that attempted that interval (GOOD for 10:00, BEST for 10:30) -- read at the rejection point, not recomputed or joined
+OK   a candidate with NO timing fit yields an event with NO `timingFit` key (absent, never a guess), and a FIXED target (no candidate exists) carries none
+OK   EMISSION UNCHANGED: the same candidates with and without timing fits yield the identical event sequence by event identity (same count, owners, intervals, rounds) -- only the descriptive payload differs
+OK   CONSTRUCTOR BEHAVIOR UNCHANGED: the traced result equals the plain `constructDay` result byte-for-byte (the payload is observational and write-only)
+OK   the event contract is the old one plus the optional descriptive field: exactly loserIntentId, winnerIntentId, attemptedStart, attemptedEnd, winnerStart, winnerEnd, round, timingFit; the key set is detached strings (no Date, no candidate)
+OK   CANDIDATE ORDER AUDIT: two attempts with equal timingFit and equal start place the SAME interval with the SAME fit, so `candidateOrder` can only label which duplicate was chosen -- it is not carried
+=== Part 2: directed fixtures on the REAL orchestrator ===
+OK   GOOD VS BEST (neutral ranking): P attempted GOOD@10:00 (trace order first) and BEST@11:30 (second); the authority carries both exact fits
+OK   TRACE ORDER != NEUTRAL RANKING: the real `compareCandidatesForPlacement`, fed from the authority payload alone, ranks BEST@11:30 FIRST although the trace discovered GOOD@10:00 first
+OK   the promotion contention view carries the same fits, per authorized owner (A for 10:00, B for 11:30)
+OK   P MISSING-INTERMEDIATE REGRESSION: 10:00 is NOT in P's initial list (10:30 only) and NOT in its final list (empty), and IS in the scheduling attempt authority with its exact fit (GOOD) against B
+OK   INITIAL-ONLY OWNER: B's 11:30 is available from the basis INITIAL list and not from its final list; B's terminal 10:00 is available from the basis FINAL list -- the attempts supplement, they do not replace, the basis
+OK   UNION DEDUP: B's 11:30 appears in the basis (initial) AND as an attempt, with the same (start, timingFit) identity -- one scheduling choice, not two
+OK   DIRECTED COUNTEREXAMPLE REPRODUCED (real orchestrator): X@13:00, Y@10:00, O@11:00 placed; P Deferred; P's authorized owners are X, Y and O
+OK   MISSING FROM BASIS: O's 09:30 is ABSENT from O's initialCandidates (13:30) and from O's finalCandidates (11:00) -- it lived only in an intermediate replenishment list
+OK   OWNER INTERMEDIATE SURVIVES: the scheduling attempt authority contains O @ 09:30-10:30 carrying the EXACT fit O had when attempting it (GOOD) and the historical provenance Y -- owner relocation authority no longer depends on the lost list
+OK   NOT RESTRICTED TO P's OWNERS: O's own attempts are kept whatever owner they lost to (here Y and X), because their future availability is recomputed against the counterfactual placements
+OK   SUFFICIENCY ON THE DIRECTED CASE: initial UNION final leaves O UNPLACED (the P4b2-R gap); initial UNION final UNION attempts reproduces the FULL-HISTORY best neutral result, O @ 09:30
+=== Part 3: semantics ===
+OK   IDENTICAL SLOT, MULTIPLE OWNERS: ONE attempted candidate conflicting with A and B is ONE scheduling attempt (one slot, one fit) listing BOTH conflicting owners -- no relationship is lost
+OK   the promotion contention view expands that one slot to one record per authorized owner (A and B), both with the same interval and fit -- a consumer groups them as one slot
+OK   ORIGIN PARITY: a candidate from the basis and the same candidate from an attempt rank identically (same position under the real comparator) in any input order -- origin is never a ranking dimension
+OK   OWNER PRESSURE PARITY: with owners pressured (LAST_KNOWN_OPPORTUNITY) vs not (NONE) the run-level attempts and the contention view are byte-identical -- pressure never reaches the attempts
+OK   RAW TRACE ORDER INDEPENDENCE: permuting the event order leaves the SET of attempts (intent, interval, fit, owner set) and the neutral ranking by `compareCandidatesForPlacement` unchanged -- only the order of discovery moves
+OK   INVALID timingFit (runtime payload not one of BEST / GOOD / WORKABLE / CAUTION) -> UNAVAILABLE / CAPTURE_FAILED (fail closed, never repaired)
+OK   INVALID DATE (unparseable instant, or start >= end) -> CAPTURE_FAILED
+OK   UNKNOWN INTENT (attempting intent or conflicting owner not in the same run's basis) -> UNAVAILABLE / INCONSISTENT_INPUT
+OK   basis not READY -> RUN_NOT_READY; a throwing source -> CAPTURE_FAILED; the empty trace is a valid READY authority with no attempts
+OK   NORMALIZATION: identical slots across owners and rounds merge (owners unioned in order of first appearance); slots differing in timingFit stay DISTINCT; a FIXED-style event without a fit is its own slot
+OK   SINGLE SOURCE: the promotion contention view equals the run-level attempts of P filtered to the authorized owners and expanded per owner (start, end, fit all identical) -- there is no second semantic projection of the raw trace
+OK   DETACHED: none of the 15 attempt objects / Dates / arrays is reachable from the trace, the basis or the placements
+OK   the contention view's Dates are FRESH copies, not aliases of the run-level attempt Dates (mutating one world cannot reach the other)
+OK   DEEP FREEZE: the outcome, authority, attempts array, every attempt, every owner list and every Date is frozen; writes throw -- and the freeze is NOT claimed to protect a Date's time value
+OK   SOURCE MUTATION (test only): changing the source trace strings after projection leaves the attempt authority byte-identical
+=== Part 4: same-run composition, typed pairs, failure isolation ===
+OK   ONE RUN: the boundary performs exactly the normal run's timing searches and loader calls (no second orchestration, search, Constructor pass or read) and its Constructor result is identical to the normal orchestration
+OK   RUN-LEVEL SHAPE: exactly { status, constructionBasis, baselinePlacements, schedulingAttempts, promotions, funnel (O5 SHADOW EVIDENCE: three counts, no identifier) } -- the basis and the placements appear ONCE, at run level, and every pair is exactly { input, contention }
+OK   SAME RUN: the basis, placements, attempts and every pair describe the same baseline (placements are the plain result's Proposed items; attempt and pair intents are basis intents)
+OK   ID CROSS-CHECK: for every pair whose contention is READY, authority.candidateIntentId equals input.candidateIntentId
+OK   P4a / P4a2 UNCHANGED: `promotion` is still { status: PREPARED, inputs } with the same input; the outer shape is exactly { result, promotion, run }
+OK   MIDDLE FAILURE ALIGNMENT: three pairs in input order P1, P2, P3; P1 and P3 READY with their OWN candidate ids, P2 UNAVAILABLE / CAPTURE_FAILED -- nothing shifted or compacted
+OK   the surviving pairs are byte-identical to the unfailed run's, the PromotionInput outcome and the Constructor result are untouched, and the run-level attempts are unaffected
+OK   NORMAL PATH and DIAGNOSTICS ENTRY: zero scheduling-attempt projections and zero normalizations (only the internal promotion boundary does the work)
+OK   the promotion boundary projects the run-level attempts ONCE (which normalizes internally) and the single PromotionInput's contention view calls the SAME exported normalization once more from outside: one shared function, no second semantic path
+OK   FAILURE ISOLATION: a throwing attempt projection makes ONLY `schedulingAttempts` UNAVAILABLE / CAPTURE_FAILED -- the PromotionInput outcome, the pairs, the basis, the placements and the Constructor result are untouched
+OK   a not-READY run yields run UNAVAILABLE / RUN_NOT_READY (no partial authority), exactly like no inputs
+=== Part 5: FULL-HISTORY ORACLE property sweep (scratch instrumentation; the history is an oracle only) ===
+     sweep: {"runs":1100,"multiRoundRuns":341,"promotionInputs":1093,"pAttempts":2047,"ownersExamined":2127,"fullHistoryCandidates":9349,"attemptAuthorityCandidates":9349,"intermediateOnlyCandidates":460,"missingFutureAuthority":0,"usefulIntermediateOnly":0,"rankingMismatches":0,"fitMismatch":0,"simulations":1895,"outcomeDiffAuthorityVsFull":0,"traceFirstNotRankFirst":145,"multiSlotInputs":703,"eventsNotInAttempts":0,"attemptsNotFromEvents":0}
+OK   COMPLETENESS (the principal P4b2b proof): over 1100 deterministic runs (341 multi-round), 9349 candidates of the FULL-HISTORY oracle (460 intermediate-only): ZERO statically-valid candidate is missing from initial UNION final UNION attempts
+OK   SUFFICIENCY (owner relocation): over 1895 counterfactual simulations (2127 displaced owners, 1093 PromotionInputs, 2047 P slots) the future authority set reproduces the FULL-HISTORY best neutral result under the real comparator in every case: ZERO outcome differences
+OK   SOUNDNESS AND COMPLETENESS vs the raw trace: every P3a (loser, interval, fit, owner) is in the attempts and every attempt-owner pair comes from a real event: zero missing, zero invented
+OK   RANKING FAITHFULNESS: the fit every attempt carries equals the fit the oracle recorded for that start (zero mismatches), and P's slot ranking from the authority payload equals the oracle ranking (zero mismatches)
+OK   TRACE ORDER IS NOT A RANKING: among 703 inputs with several usable P slots, the first-discovered slot differed from the comparator's best 145 times -- so a ranking taken from trace order would have been wrong
+OK   the intermediate-only candidates are real but, in random runs, rarely decisive (initial UNION final alone would differ in 0 simulations); the directed counterexample in Part 2 is the committed case where they are decisive
+ALL SCHEDULING ATTEMPT AUTHORITY CHECKS PASSED
+
+# exit=0 signal=

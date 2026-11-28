@@ -1,0 +1,44 @@
+$ npx ts-node test/pendingActivityVisualConsistency.test.ts
+# job=math-core-tests step=Run pending activity visual consistency test env={}
+OK   the canonical LoggedEntryItem type (CalendarViewSection.tsx) still declares syncStatus?: 'pending'
+OK   CalendarViewSection's individual log row was located
+OK   the row conditionally renders StatusBadge label="Pending sync" tone="caution" for a pending entry
+OK   the row still renders the plain green ✓ for the non-pending (confirmed) branch
+OK   the confirmed ✓ is no longer rendered unconditionally (it is inside the ternary's else branch, not a bare sibling)
+OK   Timeline's "Logged Badges" block was located
+OK   the pill list checks log.syncStatus === 'pending' per entry
+OK   a pending entry renders StatusBadge label="Pending sync" tone="caution"
+OK   a confirmed entry still renders the plain ✓ pill unchanged
+OK   windowLogs declaration was located
+OK   a per-window pending count is derived from windowLogs via log.syncStatus
+OK   the rendered count shows "{confirmed} logged · {pending} pending sync" when pending exists
+OK   the rendered count falls back to the simple "{N} logged" form when nothing is pending
+OK   Timeline still declares its own local pendingLogged state (untouched, per-instructions)
+OK   Timeline still declares its own local optimisticLogged state (untouched, per-instructions)
+OK   InsightsView no longer independently declares its own LoggedEntryItem interface
+OK   InsightsView imports the canonical LoggedEntryItem from CalendarViewSection
+OK   the analytics useMemo was located
+OK   confirmedLogEntries is derived once, filtering out syncStatus === 'pending'
+OK   the analytics useMemo references the raw logEntries prop exactly once (only to define confirmedLogEntries) -- every calculation uses confirmedLogEntries
+OK   totalActivities uses confirmedLogEntries (evidence excludes pending)
+OK   observations map uses confirmedLogEntries (evidence excludes pending)
+OK   30-day heatmap dayLogs uses confirmedLogEntries (evidence excludes pending)
+OK   past7Logs (7-day alignment) uses confirmedLogEntries (evidence excludes pending)
+OK   time-of-day pattern counts uses confirmedLogEntries (evidence excludes pending)
+OK   streak loggedDaysSet uses confirmedLogEntries (evidence excludes pending)
+OK   This Month monthEntries uses confirmedLogEntries (evidence excludes pending)
+OK   window breakdown forEach uses confirmedLogEntries (evidence excludes pending)
+OK   resolvedDurations uses confirmedLogEntries (evidence excludes pending)
+OK   the Recent Activity Trail section was located
+OK   the Recent Activity Trail still maps over the full, unfiltered logEntries (not confirmedLogEntries)
+OK   a pending entry in the trail is visibly labeled via StatusBadge label="Pending sync"
+OK   handleLogActivity in page.tsx is unchanged: still returns Promise<'confirmed' | 'pending'>
+OK   handleLogActivity still sets syncStatus: 'pending' only from the fetch-exception (network failure) branch
+OK   handleLogActivity still clears syncStatus on confirmed success
+OK   offline-queue replay still classifies via classifyHabitLogSyncOutcome (lib/activitySync.ts, called from page.tsx)
+OK   page.tsx still generates clientRequestId once per log attempt (PR #86 idempotency untouched; AURA-MOBILE-01-M2-B/AND-01: generateClientRequestId(), not crypto.randomUUID() directly, which throws outside a secure context)
+OK   Plan logging (handlePlanLogged) remains separate and untouched in page.tsx
+
+ALL PENDING ACTIVITY VISUAL CONSISTENCY CHECKS PASSED
+
+# exit=0 signal=

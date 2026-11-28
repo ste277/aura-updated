@@ -1,0 +1,59 @@
+$ npx ts-node test/dailyRhythmScheduling.test.ts
+# job=math-core-tests step=Run Daily Rhythm scheduling test env={}
+OK   WORK (task-1) -> WORK
+OK   WORK (task-2) -> WORK
+OK   FOCUS (task-4) -> WORK
+OK   FOCUS (deep-work) -> WORK
+OK   ROUTINE (task-5) -> WORK
+OK   WORKOUT (workout) -> PERSONAL
+OK   SPIRITUAL (meditation) -> PERSONAL
+OK   MICRO_BREAK (tea-break) -> FLEXIBLE_BREAK
+OK   REST (task-6, brief rest) -> FLEXIBLE_BREAK
+OK   REST (task-7, light stretch) -> FLEXIBLE_BREAK
+OK   REST override (quiet-time, 45min unstructured downtime) -> PERSONAL, not the category default
+OK   SOCIAL (walk-together, a 45min two-person activity, NOT forced into FLEXIBLE_BREAK by name) -> PERSONAL
+OK   LEARNING (learning) -> PERSONAL (DR2's own "personal learning" example)
+OK   RELATIONSHIP (marriage) -> PERSONAL
+OK   unresolvable activityId -> null (unknown, retains previous behavior)
+OK   undefined activityId -> null
+OK   every real catalog category currently in use resolves to a real behavior (no silent gap)
+OK   both null -> unconfigured
+OK   both set -> configured
+OK   2026-09-21 is a Monday (weekday 1), confirmed via isConfiguredWorkday against [1]
+OK   2026-09-19 (Saturday) is not a workday when workDays = [1,2,3,4,5]
+OK   Monday IS a workday when workDays = [1,2,3,4,5]
+OK   an empty workDays set -> never a workday
+OK   work window start resolves to the correct UTC instant for Asia/Kolkata 10:00 (04:30 UTC)
+OK   work window end resolves to the correct UTC instant for Asia/Kolkata 18:00 (12:30 UTC)
+OK   pre-DST New York 10:00 resolves to 15:00 UTC (UTC-5)
+OK   post-DST New York 10:00 resolves to 14:00 UTC (UTC-4) -- the timezone offset genuinely shifted, not hardcoded
+OK   unconfigured preferences -> candidates returned completely unchanged
+OK   a non-workday (Saturday) -> unchanged behavior, even for a PERSONAL activity at a clock time matching the work window
+OK   WORK activity during work hours -> candidates unchanged (remains eligible)
+OK   FLEXIBLE_BREAK during work hours -> candidates unchanged (no work-hour penalty)
+OK   unknown activity (no activityId) -> candidates unchanged (retains previous behavior)
+OK   PERSONAL activity: when an outside-work candidate exists, ONLY outside-work candidates are returned (the 4:41pm one is filtered out)
+OK   PERSONAL activity: no suitable outside-work candidate -> falls back to the full original set, never an empty result
+OK   a PERSONAL candidate spanning the entire working window is treated as overlapping (filtered out when a genuine outside-work option exists)
+OK   a PERSONAL candidate that only partially overlaps the work boundary is still treated as "during work" (falls back when it is the only option)
+OK   a candidate ending exactly at the work-start boundary (touching, half-open) is treated as outside, preferred over the inside-work option
+OK   applyDailyRhythmPreference is deterministic: identical input yields identical output across repeated calls
+OK   PERSONAL placed outside work -> PERSONAL_OUTSIDE_WORK_HOURS
+OK   PERSONAL placed during work (fallback) -> PERSONAL_DURING_WORK_HOURS_FALLBACK
+OK   FLEXIBLE_BREAK placed during work -> FLEXIBLE_BREAK_DURING_WORK_HOURS
+OK   FLEXIBLE_BREAK placed outside work -> null (nothing noteworthy to say)
+OK   WORK activity -> always null (no DR2 explanation for V1)
+OK   unconfigured -> null
+OK   non-workday -> null
+OK   unknown activity -> null
+OK   DAILY_RHYTHM_EXPANDED_SEARCH_LIMIT is a small, fixed, bounded constant (greater than the engine default of 3, nowhere near "unbounded")
+OK   14. PERSONAL activity, configured workday, Daily Rhythm configured -> search limit widened to exactly DAILY_RHYTHM_EXPANDED_SEARCH_LIMIT
+OK   8. a WORK activity gets the widened search on a configured workday (re-baselined by AURA-PREF-01: work activities now prefer working hours)
+OK   9. a FLEXIBLE_BREAK activity never gets a widened search
+OK   10. a non-workday (Saturday) never gets a widened search, even for a PERSONAL activity
+OK   11. unconfigured preferences never get a widened search
+OK   an unknown/unresolvable activity never gets a widened search
+
+ALL DAILY RHYTHM SCHEDULING CHECKS PASSED
+
+# exit=0 signal=

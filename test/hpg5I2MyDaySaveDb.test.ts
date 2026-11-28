@@ -13,6 +13,7 @@
  * apart from the date (the My Day FIND body itself is pinned by the jsdom suite).
  */
 import { upsertUserByEmail, beginTransaction } from '../apps/web/lib/db';
+import { boundHeaders, bindTestAccount } from './rel04BoundTestHeaders';
 import { createSessionToken } from '../apps/web/lib/auth';
 import { localDateTimeToUTC, getDatePartsInTimezone, addDaysToDateStr } from '../apps/web/lib/timezone';
 import { POST as plansRoute } from '../apps/web/app/api/plans/route';
@@ -51,7 +52,7 @@ const routes: Record<string, (req: any) => Promise<Response>> = { '/api/plans': 
   if (!route || (opts?.method ?? 'GET').toUpperCase() !== 'POST') throw new Error(`unrouted ${url}`);
   const body = JSON.parse(opts.body);
   const token = currentToken;
-  return route({ cookies: { get: (n: string) => (token !== undefined && n === 'as_session' ? { value: token } : undefined) }, json: async () => body, headers: new Headers() });
+  return route({ cookies: { get: (n: string) => (token !== undefined && n === 'as_session' ? { value: token } : undefined) }, json: async () => body, headers: boundHeaders(token) });
 };
 
 const today = getDatePartsInTimezone(TZ, new Date()).dateStr;
@@ -72,12 +73,12 @@ async function main() {
   const ids = [A.id, B.id, C.id];
   const rows = async (id: string) => sql(`SELECT id, title, "plannedStartAt", "plannedEndAt", "activityId" FROM "PlannedActivity" WHERE "userId" = $1 ORDER BY "createdAt"`, [id]);
   const competitor = async (token: string, title: string, start: string, end: string) => {
-    currentToken = token;
+    currentToken = token; bindTestAccount(currentToken);
     const r = await (global as any).fetch('/api/plans', { method: 'POST', body: JSON.stringify({ title, activityType: title, plannedStartAt: start, plannedEndAt: end, durationMinutes: Math.round((new Date(end).getTime() - new Date(start).getTime()) / 60000), windowType: 'NEUTRAL' }) });
     return r.status;
   };
   const myDayFind = async (token: string) => {
-    currentToken = token;
+    currentToken = token; bindTestAccount(currentToken);
     const r = await (global as any).fetch('/api/timing-search', { method: 'POST', body: JSON.stringify({ mode: 'FIND', activityId: 'workout', durationMinutes: 45, horizon: 'TOMORROW', limit: 3 }) });
     return r.json();
   };
@@ -89,7 +90,7 @@ async function main() {
     check('recommendation is valid when made: overlaps no existing plan', (await rows(A.id)).length === 0);
     check('competing plan created after the recommendation (another tab/device)', (await competitor(A.token, 'Dentist', pick.start, pick.end)) === 200);
     const beforeStale = (await rows(A.id)).length;
-    currentToken = A.token;
+    currentToken = A.token; bindTestAccount(currentToken);
     let caught: any = null;
     try {
       await saveUpcomingPlanFromCandidate(pick, 45, { overlapPolicy: 'REJECT_ACTIVE_OVERLAP' });
@@ -106,14 +107,14 @@ async function main() {
     check('Choose another time: a fresh FIND excludes the competing plan', rec2.candidates.length > 0 && rec2.candidates.every((c: any) => !overlaps(c.start, c.end, pick.start, pick.end)));
 
     // ---- 3. explicit Save anyway: same payload, ALLOW -> exactly one row ----
-    currentToken = A.token;
+    currentToken = A.token; bindTestAccount(currentToken);
     const saved = await saveUpcomingPlanFromCandidate(pick, 45, { overlapPolicy: 'ALLOW' });
     const afterAnyway = await rows(A.id);
     check('Save anyway (ALLOW) writes exactly one plan at the refused time', afterAnyway.length === beforeStale + 1 && saved.plannedStartAt === pick.start);
     check('identity unchanged vs. the legacy My Day save: no goal occurrence created', Number((await sql(`SELECT count(*)::int n FROM "GoalActivityOccurrence" WHERE "userId" = $1`, [A.id]))[0].n) === 0);
 
     // ---- 4. legacy (no option) callers unchanged ----
-    currentToken = A.token;
+    currentToken = A.token; bindTestAccount(currentToken);
     const legacyStart = at(D1, '21:00').toISOString();
     const legacyEnd = at(D1, '21:45').toISOString();
     await competitor(A.token, 'Call', legacyStart, legacyEnd);
@@ -128,7 +129,7 @@ async function main() {
     // ---- 5. concurrency: two tabs, both REJECT, same slot ----
     const raceStart = at(D1, '06:00').toISOString();
     const raceEnd = at(D1, '06:45').toISOString();
-    currentToken = B.token;
+    currentToken = B.token; bindTestAccount(currentToken);
     const results = await Promise.allSettled([
       saveUpcomingPlanFromCandidate({ ...pick, start: raceStart, end: raceEnd }, 45, { overlapPolicy: 'REJECT_ACTIVE_OVERLAP' }),
       saveUpcomingPlanFromCandidate({ ...pick, start: raceStart, end: raceEnd }, 45, { overlapPolicy: 'REJECT_ACTIVE_OVERLAP' }),
@@ -141,17 +142,17 @@ async function main() {
     // ---- 6. plan changed between recommendation and save ----
     const moveTarget = (await rows(B.id))[0];
     await sql(`UPDATE "PlannedActivity" SET status = 'CANCELLED' WHERE id = $1`, [moveTarget.id]);
-    currentToken = B.token;
+    currentToken = B.token; bindTestAccount(currentToken);
     const intoFreed = await saveUpcomingPlanFromCandidate({ ...pick, start: raceStart, end: raceEnd }, 45, { overlapPolicy: 'REJECT_ACTIVE_OVERLAP' });
     check('blocking plan cancelled after the recommendation -> REJECT save succeeds', !!intoFreed?.id);
 
     // ---- 7. cross-user isolation ----
-    currentToken = C.token;
+    currentToken = C.token; bindTestAccount(currentToken);
     const cSaved = await saveUpcomingPlanFromCandidate(pick, 45, { overlapPolicy: 'REJECT_ACTIVE_OVERLAP' });
     check("another user's plans never block or appear in a My Day save", !!cSaved?.id && (await rows(C.id)).length === 1);
 
     // ---- 8. expired / invalid session ----
-    currentToken = 'not-a-real-session';
+    currentToken = 'not-a-real-session'; bindTestAccount(currentToken);
     let authErr: any = null;
     try {
       await saveUpcomingPlanFromCandidate({ ...pick, start: at(D1, '12:00').toISOString(), end: at(D1, '12:45').toISOString() }, 45, { overlapPolicy: 'REJECT_ACTIVE_OVERLAP' });
@@ -161,7 +162,7 @@ async function main() {
     check('invalid session: generic failure (not a conflict), nothing written for anyone', authErr instanceof Error && !(authErr instanceof PlanOverlapSaveError) && (await rows(C.id)).length === 1);
 
     // ---- 9. malformed overlapPolicy reaching the server ----
-    currentToken = C.token;
+    currentToken = C.token; bindTestAccount(currentToken);
     let badErr: any = null;
     try {
       await saveUpcomingPlanFromCandidate({ ...pick, start: at(D1, '13:00').toISOString(), end: at(D1, '13:45').toISOString() }, 45, { overlapPolicy: 'reject' as any });

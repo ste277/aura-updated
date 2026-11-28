@@ -1,0 +1,71 @@
+$ npx ts-node test/goalCreateReplayOrderingDb.test.ts
+# job=day-constructor-acceptance-db-tests step=Run Goal create replay ordering DB test env={}
+   [info] replay-load plan under ballast: no Hash Right Join on this server; the order-independent assertions below still hold
+=== creation order is durable: strictly increasing createdAt, and every read returns request order ===
+OK   [2 activities (canonical + canonical)] created (200) and the response lists the activities in request order
+OK   [2 activities (canonical + canonical)] DURABLE ORDER: 2 persisted activities carry 2 distinct strictly increasing createdAt values, in request order
+OK   [2 activities (canonical + canonical)] no createdAt is in the future and the spread is at most 1 ms (the last activity keeps the transaction instant)
+OK   [2 activities (canonical + canonical)] the replay-load query returns request order (under the ballast plan)
+OK   [2 activities (canonical + canonical)] IDENTICAL REPLAY succeeds: 200, the same Goal id, the same 2 activities, no duplicates
+OK   [2 activities (canonical + canonical)] a REORDERED replay is still a conflict (order stays meaningful and fail-closed): 409 IDEMPOTENCY_CONFLICT
+OK   [3 activities (mixed canonical + freeform)] created (200) and the response lists the activities in request order
+OK   [3 activities (mixed canonical + freeform)] DURABLE ORDER: 3 persisted activities carry 3 distinct strictly increasing createdAt values, in request order
+OK   [3 activities (mixed canonical + freeform)] no createdAt is in the future and the spread is at most 2 ms (the last activity keeps the transaction instant)
+OK   [3 activities (mixed canonical + freeform)] the replay-load query returns request order (under the ballast plan)
+OK   [3 activities (mixed canonical + freeform)] IDENTICAL REPLAY succeeds: 200, the same Goal id, the same 3 activities, no duplicates
+OK   [3 activities (mixed canonical + freeform)] a REORDERED replay is still a conflict (order stays meaningful and fail-closed): 409 IDEMPOTENCY_CONFLICT
+OK   [5 activities (freeform only)] created (200) and the response lists the activities in request order
+OK   [5 activities (freeform only)] DURABLE ORDER: 5 persisted activities carry 5 distinct strictly increasing createdAt values, in request order
+OK   [5 activities (freeform only)] no createdAt is in the future and the spread is at most 4 ms (the last activity keeps the transaction instant)
+OK   [5 activities (freeform only)] the replay-load query returns request order (under the ballast plan)
+OK   [5 activities (freeform only)] IDENTICAL REPLAY succeeds: 200, the same Goal id, the same 5 activities, no duplicates
+OK   [5 activities (freeform only)] a REORDERED replay is still a conflict (order stays meaningful and fail-closed): 409 IDEMPOTENCY_CONFLICT
+OK   [5 activities (canonical + completion requirements + rhythm)] created (200) and the response lists the activities in request order
+OK   [5 activities (canonical + completion requirements + rhythm)] DURABLE ORDER: 5 persisted activities carry 5 distinct strictly increasing createdAt values, in request order
+OK   [5 activities (canonical + completion requirements + rhythm)] no createdAt is in the future and the spread is at most 4 ms (the last activity keeps the transaction instant)
+OK   [5 activities (canonical + completion requirements + rhythm)] the replay-load query returns request order (under the ballast plan)
+OK   [5 activities (canonical + completion requirements + rhythm)] IDENTICAL REPLAY succeeds: 200, the same Goal id, the same 5 activities, no duplicates
+OK   [5 activities (canonical + completion requirements + rhythm)] a REORDERED replay is still a conflict (order stays meaningful and fail-closed): 409 IDEMPOTENCY_CONFLICT
+=== rewriting the rows must not change the answer (physical order is NOT asserted) ===
+OK   after the rewrites the authoritative load still returns request order (it is a function of createdAt, id -- not of physical layout)
+OK   after the rewrites the identical replay still succeeds (200, same Goal)
+OK   after the rewrites a reordered replay is still 409 IDEMPOTENCY_CONFLICT
+=== maximum reviewed size: 20 activities ===
+OK   20 ACTIVITIES: created (200) and exactly 20 GoalActivity rows persisted
+OK   20 ACTIVITIES: the persisted order is exactly the request order 0..19, and so is the authoritative load
+OK   20 ACTIVITIES: createdAt is strictly increasing in request order (20 distinct instants)
+OK   20 ACTIVITIES: the spread is exactly 19 ms (max - min), the documented bound (the last activity keeps the transaction instant, each earlier one is 1 ms before the next)
+OK   20 ACTIVITIES: NO FUTURE TIMESTAMP -- no activity createdAt exceeds the creation transaction's own instant (the Goal row's now()), and the last activity equals it exactly
+OK   20 ACTIVITIES: IDENTICAL REPLAY succeeds -- 200, the same Goal id, 20 activities, one Goal, still exactly 20 GoalActivity rows
+OK   20 ACTIVITIES: a REORDERED replay (two activities swapped) is 409 IDEMPOTENCY_CONFLICT
+OK   20 ACTIVITIES: an activity added LATER through the existing production path (addGoalActivity) sorts after all 20 originals
+OK   MAXIMUM CONTRACT: 20 remains the API safety maximum -- a 21-activity request is rejected (400) with nothing written
+=== duplicate-looking activities are not collapsed ===
+OK   three identical activities persist as three rows with three distinct creation instants (nothing collapsed)
+OK   their identical replay succeeds (same Goal, still 3 rows)
+OK   a replay with one duplicate fewer is a conflict
+=== real differences still conflict (idempotency semantics unchanged) ===
+OK   a different activity TITLE -> 409 IDEMPOTENCY_CONFLICT
+OK   a different activityId (canonical vs freeform) -> 409 IDEMPOTENCY_CONFLICT
+OK   a different activityId (canonical vs another canonical) -> 409 IDEMPOTENCY_CONFLICT
+OK   a different COMPLETION requirement (value) -> 409 IDEMPOTENCY_CONFLICT
+OK   a different COMPLETION requirement (kind) -> 409 IDEMPOTENCY_CONFLICT
+OK   a different RHYTHM (target) -> 409 IDEMPOTENCY_CONFLICT
+OK   a different RHYTHM (kind) -> 409 IDEMPOTENCY_CONFLICT
+OK   an extra activity -> 409 IDEMPOTENCY_CONFLICT
+OK   a missing activity -> 409 IDEMPOTENCY_CONFLICT
+OK   a different Goal TITLE -> 409 IDEMPOTENCY_CONFLICT
+OK   a different targetDate -> 409 IDEMPOTENCY_CONFLICT
+OK   the identical request is still an idempotent replay after all those conflicts (nothing was written by them)
+=== single activity, zero activities, user isolation ===
+OK   ONE activity: created, identical replay succeeds, reordering is moot
+OK   ZERO activities: created, identical replay succeeds
+OK   USER ISOLATION: the same clientRequestId for another user creates that user's own Goal (no conflict, no cross-user replay)
+=== exact-timestamp ties (rows that predate the fix) get a deterministic total order ===
+OK   the fixture really has three rows with the exact same createdAt
+OK   TOTAL ORDER: the load returns the tied rows ordered by id, identically on 10 reads, regardless of their physical (insertion) order
+=== LEGACY DEBT (characterization only -- #201 does not repair historical rows) ===
+OK   LEGACY DEBT: for a historical Goal with tied createdAt, the replay outcome is DETERMINISTIC (decided by id order), but it is not the original request order: replaying the original order (Zed, Alpha) gives a false 409, replaying id order (Alpha, Zed) gives 200
+ALL GOAL CREATE REPLAY ORDERING DB CHECKS PASSED
+
+# exit=0 signal=

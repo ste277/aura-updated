@@ -1,0 +1,26 @@
+$ npx ts-node test/planGoalActivityArchivedLifecycleDb.test.ts
+# job=day-constructor-acceptance-db-tests step=Run plan goal-activity archived lifecycle DB test env={}
+OK   1. ACTIVE Goal: plan creation succeeds (200)
+OK   1. ACTIVE Goal: the GoalActivity is linked to the new plan
+OK   2. ARCHIVED Goal: request rejected with 400
+OK   2. ARCHIVED Goal: error names the real reason (GOAL_NOT_ACTIVE-style, not the generic link-failed message)
+OK   2. ARCHIVED Goal: no new PlannedActivity row was committed (the insert that happened before the check was rolled back)
+OK   2. ARCHIVED Goal: the GoalActivity remains unlinked
+OK   3. Goal archived between selection and save: rejected, not silently linked
+OK   3. Goal archived between selection and save: the GoalActivity remains unlinked
+OK   4. concurrent archive: archiveGoal itself succeeds
+OK   4. concurrent archive: when the archive wins the race, the request is rejected and no Goal-derived planning state is committed
+OK   4b. with a head start, the plan request wins the race: link legitimately succeeds (serialized before the archive)
+OK   5. cross-user GoalActivity id: rejected with 400 (not GOAL_NOT_ACTIVE -- still the generic link-failed/ownership path)
+OK   5. cross-user GoalActivity id: the real owner's GoalActivity remains unlinked
+OK   6. invalid GoalActivity id: rejected with 400
+OK   setup: an unrelated, valid Goal-linked plan exists before the failing attempt
+OK   7. failed link (archived Goal) rolls back: request rejected
+OK   7. failed link rolls back completely: no new PlannedActivity row persisted
+OK   8. the EARLIER, unrelated, already-valid GoalActivity link is completely untouched by the later failed attempt
+OK   9. an ordinary plan (no goalActivityId at all) is created normally
+OK   10. lockGoalParentLifecycleForPlanning: an ACTIVE Goal reports its GoalActivity as owned AND active
+OK   10. lockGoalParentLifecycleForPlanning: after archiving, the SAME GoalActivity is owned but no longer active -- the exact Day-Constructor contract this fix reuses, unmodified
+ALL HPG2 ARCHIVED-GOAL LIFECYCLE FIX CHECKS PASSED
+
+# exit=0 signal=

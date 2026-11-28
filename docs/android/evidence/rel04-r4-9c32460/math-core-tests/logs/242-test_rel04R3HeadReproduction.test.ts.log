@@ -1,0 +1,26 @@
+$ npx ts-node --project tsconfig.jsdom-tests.json test/rel04R3HeadReproduction.test.ts
+# job=math-core-tests step=Run REL-04 R3-head (b323d2a) reproduction test env={"TS_NODE_COMPILER_OPTIONS":"{\"jsx\":\"react-jsx\"}"}
+OK   fixture accountSession.ts.txt == b323d2a apps/web/lib/accountSession.ts
+OK   fixture offlineHabitQueue.ts.txt == b323d2a apps/web/lib/offlineHabitQueue.ts
+OK   fixture activitySync.ts.txt == b323d2a apps/web/lib/activitySync.ts
+OK   fixture signOut.ts.txt == b323d2a apps/web/lib/signOut.ts
+OK   fixture accountRoutePolicy.ts.txt == b323d2a apps/web/lib/accountRoutePolicy.ts
+OK   fixture middleware.ts.txt == b323d2a apps/web/middleware.ts
+OK   fixture edgeSession.ts.txt == b323d2a apps/web/lib/edgeSession.ts
+OK   fixture AccountScoped.tsx.txt == b323d2a apps/web/components/AccountScoped.tsx
+OK   X1 R3 HEAD: first verification answers Bob, yet the page rendered for Alice keeps showing Alice's server props (reloads: 0)
+OK   X1 CORRECTED: see rel04R4SsrAgreementJsdom S1-S6 (gated until the first verification agrees; disagreement reloads without showing the props)
+OK   X2 R3 HEAD: a settlement landing between the migration's tombstone check and its write is UNDONE (record recreated: 1)
+OK   X2 CORRECTED: see rel04R3QueueAuth Q6/Q7, rel04R4QueueIntegrity M2, rel04Chromium CH8 (check and write in ONE IndexedDB transaction)
+OK   X3 R3 HEAD: a record discarded after the replay's "still queued" check is STILL SENT (1 send, stored 1)
+OK   X3 CORRECTED: the same interleaving at the current head -- the claim transaction (after the last await) finds it gone, never sent
+OK   X4 R3 HEAD: discard reports 2 removed, but an old writer active at the time puts them back (["a","b","c"])
+OK   X4 CORRECTED: no destructive cleanup of the shared array at all (rel04R3QueueAuth Q8, rel04R4QueueIntegrity L1, rel04Chromium CH9)
+OK   X5 R3 HEAD: legacy entries WERE removed, but the message says "nothing was removed" (legacy left: false)
+OK   X5 CORRECTED: owned and legacy reported separately from observed counts (rel04R4QueueIntegrity S1/S2)
+OK   X6 R3 HEAD: /api/users/export is EXEMPT; a headerless link download passes with whatever cookie is current (exempt)
+OK   X6 CORRECTED: account-scoped -- headerless refused (503), a stated other account refused (409); bound in-app download (rel04R4SsrAgreementJsdom D1-D6)
+
+20 passed, 0 failed
+
+# exit=0 signal=

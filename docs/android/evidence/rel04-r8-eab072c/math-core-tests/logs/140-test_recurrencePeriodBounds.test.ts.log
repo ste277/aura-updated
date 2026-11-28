@@ -1,0 +1,81 @@
+$ npx ts-node test/recurrencePeriodBounds.test.ts
+# job=math-core-tests step=Run recurrence period bounds test env={}
+OK   bounds 2026-10-05: Monday maps to its own week -> 2026-10-05..2026-10-11
+OK   bounds 2026-10-06: Tuesday -> 2026-10-05..2026-10-11
+OK   bounds 2026-10-07: midweek (Wednesday) -> 2026-10-05..2026-10-11
+OK   bounds 2026-10-11: Sunday belongs to the week that STARTED the previous Monday -> 2026-10-05..2026-10-11
+OK   bounds 2026-10-12: the next Monday starts a new week (end is never "next Monday") -> 2026-10-12..2026-10-18
+OK   bounds 2026-04-30: week crossing a month end (Apr -> May) -> 2026-04-27..2026-05-03
+OK   bounds 2026-05-03: month-crossing week: the Sunday side -> 2026-04-27..2026-05-03
+OK   bounds 2026-12-31: week crossing a year end (Dec -> Jan) -> 2026-12-28..2027-01-03
+OK   bounds 2027-01-01: year-crossing week: the January side -> 2026-12-28..2027-01-03
+OK   bounds 2025-01-01: year-crossing week starting in the previous year -> 2024-12-30..2025-01-05
+OK   bounds 2024-02-29: leap day (2024-02-29) week -> 2024-02-26..2024-03-03
+OK   bounds 2024-03-01: leap-day week: the March side -> 2024-02-26..2024-03-03
+OK   bounds 2028-02-29: leap day (2028-02-29, a Tuesday) -> 2028-02-28..2028-03-05
+OK   bounds 2026-02-28: non-leap February end rolls to 03-01, never 02-29 -> 2026-02-23..2026-03-01
+OK   property sweep over 1461 consecutive dates (2023-2026): Monday start, Sunday inclusive end, 6 days apart, period contains the date
+OK   contract: the emitted fact has exactly period, periodStartDate, periodEndDate, targetPerPeriod, completedInPeriod, committedInPeriod, remainingInPeriod (in that order)
+OK   contract: bounds are plain civil-date strings (not Date/instants)
+OK   period consistency: periodStartDate <= planning date <= periodEndDate
+OK   fact consistency: remainingInPeriod = max(0, target - completed - committed)
+OK   UTC Monday: planning date 2026-10-05 in 2026-10-05..2026-10-11
+OK   UTC Monday: exactly 7 distinct consecutive civil dates, Monday..Sunday
+OK   UTC Monday: single authority -- counts over the emitted bounds (1 completed, 1 committed) match canonical eligibility exactly
+OK   UTC Sunday 23:59:59: planning date 2026-10-11 in 2026-10-05..2026-10-11
+OK   UTC Sunday 23:59:59: exactly 7 distinct consecutive civil dates, Monday..Sunday
+OK   UTC Sunday 23:59:59: single authority -- counts over the emitted bounds (1 completed, 1 committed) match canonical eligibility exactly
+OK   UTC next Monday 00:00:00: planning date 2026-10-12 in 2026-10-12..2026-10-18
+OK   UTC next Monday 00:00:00: exactly 7 distinct consecutive civil dates, Monday..Sunday
+OK   UTC next Monday 00:00:00: single authority -- counts over the emitted bounds (1 completed, 1 committed) match canonical eligibility exactly
+OK   positive offset: UTC Sunday is already local Monday (Asia/Kolkata): planning date 2026-10-12 in 2026-10-12..2026-10-18
+OK   positive offset: UTC Sunday is already local Monday (Asia/Kolkata): exactly 7 distinct consecutive civil dates, Monday..Sunday
+OK   positive offset: UTC Sunday is already local Monday (Asia/Kolkata): single authority -- counts over the emitted bounds (1 completed, 1 committed) match canonical eligibility exactly
+OK   positive offset: UTC Sunday is already local Monday (Asia/Kolkata): UTC date 2026-10-11 and local date 2026-10-12 are in different weeks; bounds follow the LOCAL date, not the UTC date
+OK   negative offset: UTC Monday is still local Sunday (America/Los_Angeles): planning date 2026-10-11 in 2026-10-05..2026-10-11
+OK   negative offset: UTC Monday is still local Sunday (America/Los_Angeles): exactly 7 distinct consecutive civil dates, Monday..Sunday
+OK   negative offset: UTC Monday is still local Sunday (America/Los_Angeles): single authority -- counts over the emitted bounds (1 completed, 1 committed) match canonical eligibility exactly
+OK   negative offset: UTC Monday is still local Sunday (America/Los_Angeles): UTC date 2026-10-12 and local date 2026-10-11 are in different weeks; bounds follow the LOCAL date, not the UTC date
+OK   year boundary (Pacific/Auckland, UTC Dec 31 is local Jan 1): planning date 2027-01-01 in 2026-12-28..2027-01-03
+OK   year boundary (Pacific/Auckland, UTC Dec 31 is local Jan 1): exactly 7 distinct consecutive civil dates, Monday..Sunday
+OK   year boundary (Pacific/Auckland, UTC Dec 31 is local Jan 1): single authority -- counts over the emitted bounds (1 completed, 1 committed) match canonical eligibility exactly
+OK   leap day (Europe/London): planning date 2024-02-29 in 2024-02-26..2024-03-03
+OK   leap day (Europe/London): exactly 7 distinct consecutive civil dates, Monday..Sunday
+OK   leap day (Europe/London): single authority -- counts over the emitted bounds (1 completed, 1 committed) match canonical eligibility exactly
+OK   DST start week, spring forward Sunday (America/New_York 2026-03-08): planning date 2026-03-08 in 2026-03-02..2026-03-08
+OK   DST start week, spring forward Sunday (America/New_York 2026-03-08): exactly 7 distinct consecutive civil dates, Monday..Sunday
+OK   DST start week, spring forward Sunday (America/New_York 2026-03-08): single authority -- counts over the emitted bounds (1 completed, 1 committed) match canonical eligibility exactly
+OK   DST start week, just before the 02:00 gap (America/New_York): planning date 2026-03-08 in 2026-03-02..2026-03-08
+OK   DST start week, just before the 02:00 gap (America/New_York): exactly 7 distinct consecutive civil dates, Monday..Sunday
+OK   DST start week, just before the 02:00 gap (America/New_York): single authority -- counts over the emitted bounds (1 completed, 1 committed) match canonical eligibility exactly
+OK   DST end week, fall back Sunday (America/New_York 2026-11-01): planning date 2026-11-01 in 2026-10-26..2026-11-01
+OK   DST end week, fall back Sunday (America/New_York 2026-11-01): exactly 7 distinct consecutive civil dates, Monday..Sunday
+OK   DST end week, fall back Sunday (America/New_York 2026-11-01): single authority -- counts over the emitted bounds (1 completed, 1 committed) match canonical eligibility exactly
+OK   DST start Sunday (Australia/Sydney 2026-10-04): planning date 2026-10-04 in 2026-09-28..2026-10-04
+OK   DST start Sunday (Australia/Sydney 2026-10-04): exactly 7 distinct consecutive civil dates, Monday..Sunday
+OK   DST start Sunday (Australia/Sydney 2026-10-04): single authority -- counts over the emitted bounds (1 completed, 1 committed) match canonical eligibility exactly
+OK   DST start week (Europe/London 2026-03-29): planning date 2026-03-29 in 2026-03-23..2026-03-29
+OK   DST start week (Europe/London 2026-03-29): exactly 7 distinct consecutive civil dates, Monday..Sunday
+OK   DST start week (Europe/London 2026-03-29): single authority -- counts over the emitted bounds (1 completed, 1 committed) match canonical eligibility exactly
+OK   positive offset: UTC Sunday 2026-10-11 20:00Z is Monday 10-12 01:30 IST -> week 10-12..10-18 (UTC-date derivation would give 10-05..10-11)
+OK   negative offset: UTC Monday 2026-10-12 03:00Z is Sunday 10-11 20:00 PDT -> week 10-05..10-11 (UTC-date derivation would give 10-12..10-18)
+OK   UTC is a valid planning zone: 23:59:59 Sunday -> 10-05..10-11
+OK   UTC: 00:00:00 the next Monday -> 10-12..10-18
+OK   DST week (NY spring forward Sun 2026-03-08): bounds are the civil Monday 03-02 .. Sunday 03-08, not a 7x24h UTC span
+OK   DST week (NY fall back Sun 2026-11-01): 10-26..11-01
+OK   cross-user: the same instant yields each user's OWN local week (Kolkata 10-12..10-18, Los Angeles 10-05..10-11), no leakage
+OK   multiple goals: every eligible recurrence fact carries the same week bounds
+OK   math unchanged: ga-a (target 2, 1 completed) -> 1 remaining; ga-b (target 5, 1 committed, last-week completion ignored) -> 4; ga-c untouched -> 7
+OK   non-recurrent (rhythmKind null) receives no recurrence period facts
+OK   zero remaining: an exhausted activity stays excluded upstream -- no fact, no bounds
+OK   query count unchanged: one discovery + one batched facts call for the whole request
+OK   recurrence math is byte-identical to the pre-O3 shape once the two bound fields are removed
+OK   translate: year-crossing planning date yields 2026-12-28..2027-01-03
+OK   translate: no candidates -> no facts (and no bound computation)
+OK   provider failure: a failed Goal-demand load still yields NO facts (bound derivation adds no new failure mode)
+OK   an intent-less request performs zero queries and emits nothing
+OK   forged client bounds / counts / timezone are ignored: the emitted fact is server-derived (2026-10-05..2026-10-11, target 3)
+OK   forged client bounds with NO provider: the intent carries no facts at all (the forged values are never authoritative)
+ALL RECURRENCE PERIOD BOUNDS CHECKS PASSED
+
+# exit=0 signal=

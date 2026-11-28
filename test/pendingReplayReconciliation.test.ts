@@ -161,25 +161,29 @@ check(
 // Timeline.tsx -- pendingLogged reconciliation wiring.
 // ============================================================
 
+// R15 (39257, 39256 option B) supersedes the R14-era pin here; see the R15 handover's adjusted-assertion list.
 check(
-  "Timeline.tsx imports resolvePendingActivityStatus from the new self-contained pendingReplayReconciliation.ts (not offlineHabitQueue.ts, which still imports the .tsx-declared LoggedEntryItem and would force a new tsconfig.json exclusion for any .ts test importing it)",
-  /import \{ resolvePendingActivityStatus \} from '\.\.\/lib\/pendingReplayReconciliation';/.test(timelineSource)
+  "Timeline.tsx imports the R15 ID-keyed operation helpers from the self-contained pendingReplayReconciliation.ts (not offlineHabitQueue.ts) and no longer uses resolvePendingActivityStatus to release anything",
+  /import \{ isOpen, UNVERIFIED_ACTIVITY_MESSAGE, [^}]*\} from '\.\.\/lib\/pendingReplayReconciliation';/.test(timelineSource) && !/resolvePendingActivityStatus/.test(timelineSource)
 );
 
+// R15 (39257, 39256 option B) supersedes the R14-era pin here; see the R15 handover's adjusted-assertion list.
 check(
-  'Timeline.tsx has a useEffect keyed on [logEntries] that filters pendingLogged down to titles resolvePendingActivityStatus still reports \'pending\'',
-  /useEffect\(\(\) => \{\s*setPendingLogged\(\(prev\) => \{[\s\S]*?resolvePendingActivityStatus\(logEntries, title\) === 'pending'[\s\S]*?\}, \[logEntries\]\);/.test(timelineSource)
+  'Timeline.tsx releases pendingLogged only from the ID-keyed operation projection (useEffect keyed on [operations, timelineOps]; title -> request id), never from logEntries',
+  /useEffect\(\(\) => \{\s*if \(!operations\) return;[\s\S]*?const op = operations\[crid\];\s*if \(!op \|\| isOpen\(op\)\) continue;[\s\S]*?\}, \[operations, timelineOps\]\);/.test(timelineSource)
 );
 
+// R15 (39257, 39256 option B) supersedes the R14-era pin here; see the R15 handover's adjusted-assertion list.
 check(
-  'Timeline.tsx still renders "Pending" vs "Logged" off pendingLogged (unchanged copy/logic, only the staleness fixed)',
+  'Timeline.tsx still renders "Pending" vs "Logged" off pendingLogged (R15: an operation still open in the projection also renders "Pending", e.g. after a remount)',
   /pendingLogged\.includes\(cardTitleNorm\)/.test(timelineSource) &&
-    /pendingLogged\.includes\(card\.title\.toLowerCase\(\)\) \? 'Pending' : 'Logged'/.test(timelineSource)
+    /pendingLogged\.includes\(card\.title\.toLowerCase\(\)\) \|\| openOperationTitles\.has\(card\.title\.toLowerCase\(\)\) \? 'Pending' : 'Logged'/.test(timelineSource)
 );
 
+// R15 (39257, 39256 option B) supersedes the R14-era pin here; see the R15 handover's adjusted-assertion list.
 check(
-  "Timeline.tsx's onLogActivity return type is unchanged (still Promise<'confirmed' | 'pending'>) -- no clientRequestId threaded back to this call site",
-  /\) => Promise<'confirmed' \| 'pending'>;/.test(timelineSource)
+  "Timeline.tsx's onLogActivity resolves to the shared ActivityLogResult and threads the operation request (its request id comes back through onOperation)",
+  /operation\?: ActivityOperationRequest\s*\) => Promise<ActivityLogResult>;/.test(timelineSource)
 );
 
 // ============================================================
@@ -188,9 +192,10 @@ check(
 
 const homeDashboardSource = fs.readFileSync('apps/web/components/HomeDashboard.tsx', 'utf8');
 
+// R15 (39257, 39256 option B) supersedes the R14-era pin here; see the R15 handover's adjusted-assertion list.
 check(
-  'HomeDashboard.tsx imports resolvePendingActivityStatus from pendingReplayReconciliation.ts',
-  /import \{ resolvePendingActivityStatus \} from '\.\.\/lib\/pendingReplayReconciliation';/.test(homeDashboardSource)
+  'HomeDashboard.tsx imports the R15 ID-keyed operation helpers from pendingReplayReconciliation.ts and no longer uses resolvePendingActivityStatus',
+  /import \{ findAttachableOperation, UNVERIFIED_ACTIVITY_MESSAGE, [^}]*\} from '\.\.\/lib\/pendingReplayReconciliation';/.test(homeDashboardSource) && !/resolvePendingActivityStatus/.test(homeDashboardSource)
 );
 
 check(
@@ -208,20 +213,25 @@ check(
   /function GoodRightNowCard\(\{[\s\S]*?logEntries,[\s\S]*?\}: \{[\s\S]*?logEntries\?: LoggedEntryItem\[\];/.test(homeDashboardSource)
 );
 
+// R15 (39257, 39256 option B) supersedes the R14-era pin here; see the R15 handover's adjusted-assertion list.
 check(
-  "GoodRightNowCard has a reconciliation useEffect keyed on [logEntries, status, planTitle] that only acts while status === 'pending'",
-  /useEffect\(\(\) => \{\s*if \(status !== 'pending'\) return;\s*const resolved = resolvePendingActivityStatus\(logEntries \?\? \[\], planTitle\.trim\(\)\.toLowerCase\(\)\);/.test(homeDashboardSource)
+  "GoodRightNowCard follows ITS operation by request id (39255 G3: a title-inferred 'gone' reset it to idle and invited a fresh-id duplicate)",
+  /const operation = operationId \? operations\?\.\[operationId\] : undefined;/.test(homeDashboardSource) &&
+    /useEffect\(\(\) => \{\s*if \(!operation \|\| status === 'loading'\) return;\s*if \(operation\.status === 'confirmed'\) \{/.test(homeDashboardSource)
 );
 
+// R15 (39257, 39256 option B) supersedes the R14-era pin here; see the R15 handover's adjusted-assertion list.
 check(
-  "GoodRightNowCard's reconciliation effect sets status 'logged' (with a loggedAtLabel) on 'confirmed', and 'idle' (not 'error', not stuck) on 'gone' -- converging with PR #91's existing permanent-failure behavior instead of inventing a new failure state",
-  /if \(resolved === 'confirmed'\) \{\s*setStatus\('logged'\);\s*setLoggedAtLabel\(/.test(homeDashboardSource) &&
-    /\} else if \(resolved === 'gone'\) \{[\s\S]{0,500}setStatus\('idle'\);/.test(homeDashboardSource)
+  "GoodRightNowCard: confirmed -> 'logged' (with a loggedAtLabel); pending / unresolved keep the identity; only a definitive failure or a durable discard returns it to 'idle' (never a title-inferred 'gone')",
+  /if \(operation\.status === 'confirmed'\) \{\s*if \(status !== 'logged'\) \{ setStatus\('logged'\); setLoggedAtLabel\(/.test(homeDashboardSource) &&
+    /\} else if \(operation\.status === 'unresolved'\) \{[\s\S]{0,200}\} else if \(status === 'pending' \|\| status === 'unresolved'\) \{[\s\S]{0,300}setStatus\('idle'\);/.test(homeDashboardSource) &&
+    !/resolved === 'gone'/.test(homeDashboardSource)
 );
 
+// R15 (39257, 39256 option B) supersedes the R14-era pin here; see the R15 handover's adjusted-assertion list.
 check(
-  "HomeDashboard.tsx's onLogActivity return type is unchanged (still Promise<'confirmed' | 'pending'>) -- pinned the same way habitLogActivityIdentity.test.ts already pins it",
-  /\) => Promise<'confirmed' \| 'pending'>;/.test(homeDashboardSource)
+  "HomeDashboard.tsx's onLogActivity resolves to the shared ActivityLogResult and takes the operation request (pinned the same way habitLogActivityIdentity.test.ts pins it)",
+  /operation\?: ActivityOperationRequest\s*\) => Promise<ActivityLogResult>;/.test(homeDashboardSource)
 );
 
 // ============================================================
@@ -236,20 +246,30 @@ check(
   /<HomeDashboard[\s\S]*?logEntries=\{logEntries\}/.test(pageSource)
 );
 
+// R15 (39257, 39256 option B) supersedes the R14-era pin here; see the R15 handover's adjusted-assertion list.
 check(
-  "page.tsx's handleLogActivity is unchanged: still returns Promise<'confirmed' | 'pending'>",
-  /\): Promise<'confirmed' \| 'pending'> => \{/.test(pageSource)
+  "page.tsx's handleLogActivity resolves to the shared ActivityLogResult ('confirmed' | 'pending' | 'unresolved')",
+  /operation\?: ActivityOperationRequest\s*\): Promise<ActivityLogResult> => \{/.test(pageSource)
 );
 
+// AURA-ANDROID-REL-04 R18 (39265, online-first) supersedes the syncOfflineLogs pin: automatic replay is deferred, so
+// page.tsx has no replay effect; another tab's settlement still re-reads the account's operations (read-only).
 check(
-  'syncOfflineLogs still unconditionally calls loadUserDataAndLogs() after every replay attempt (success or permanent failure), and loadMyDay() only when anyConfirmed -- the exact pre-existing refresh path this fix reuses, not a new one',
-  /loadUserDataAndLogs\(\);\s*if \(anyConfirmed\) loadMyDay\(\);/.test(pageSource)
+  'page.tsx triggers no automatic replay (online-first: no syncOfflineLogs, no "online" listener); another tab\'s settlement still re-reads the operations via loadUserDataAndLogs()',
+  !/syncOfflineLogs|replayOfflineQueue|addEventListener\('online'/.test(pageSource) && /onOperationsChanged\(verifiedUserId, \(\) => \{ if \(active\) loadUserDataAndLogs\(\); \}\)/.test(pageSource)
 );
 
+// R15 (39257, 39256 option B) supersedes the R14-era pin here; see the R15 handover's adjusted-assertion list.
 check(
-  'syncOfflineLogs still classifies each replayed item via classifyHabitLogSyncOutcome and still rewrites the queue to hold only what remains genuinely retry-worthy -- queue retry classification/persistence untouched',
-  /const outcome = classifyHabitLogSyncOutcome\(res\.status\);/.test(pageSource) &&
-    /localStorage\.setItem\('offline_habit_queue', JSON\.stringify\(remaining\)\);/.test(pageSource)
+  'replay classifies each answer with THE shared decoder (status alone never settles), keeps retry-worthy and unverified answers (claim released), and settles exactly the claimed identity with its validated receipt',
+  (() => {
+    const src = fs.readFileSync('apps/web/lib/activitySync.ts', 'utf8');
+    const classify = src.indexOf("const decoded = await __decoder.decode(res, expectationOf(token, lease.account, body), () => lease.isCurrent(), UPGRADE_REQUIRED_CODE);\n      if (decoded.kind === 'upgrade')");
+    const keepRetry = src.indexOf("if (decoded.kind === 'retry') { await releaseClaim(token); continue; }", classify);
+    const keepUnverified = src.indexOf("if (decoded.kind === 'unverified') { await releaseClaim(token);", keepRetry);
+    const removeSettled = src.indexOf("const r = await settleRecords([token.recordId ?? head.recordId], token, { owner: lease.account, receipt });", keepUnverified);
+    return classify > 0 && keepRetry > classify && keepUnverified > keepRetry && removeSettled > keepUnverified && !/removeOwnedEntries|setItem\(|localStorage/.test(src);
+  })()
 );
 
 // ============================================================

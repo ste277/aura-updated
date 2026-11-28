@@ -1,0 +1,82 @@
+$ npx ts-node test/goalDecompositionPlanningHandoffDb.test.ts
+# job=day-constructor-acceptance-db-tests step=Run Goal decomposition planning handoff DB test env={"TS_NODE_COMPILER_OPTIONS":"{\"jsx\":\"react\"}"}
+=== B1: MATCH ===
+OK   B1: "Get fitter" matches GET_FITTER via the real matcher
+=== TEMPLATE RESOLUTION ===
+OK   template: resolves the canonical 3 GET_FITTER activities
+=== B2: PROPOSAL + REVIEW ===
+OK   B2: reconciling the title produces the real template rows (never hardcoded)
+OK   B2 review: exactly 2 rows remain (one removed)
+OK   B2 review: renamed row keeps the ORIGINAL activityId (never rematched from the new title)
+=== B2 SUBMISSION MAPPING ===
+OK   B2 mapping: exactly 2 submission rows, "Strength training session" absent
+OK   B2 mapping: renamed+rhythmed row carries the exact reviewed shape
+OK   B2 mapping: untouched row defaults to Rhythm NONE
+=== B3 + B3.1: REAL GOAL CREATION (idempotent) ===
+OK   B3: Goal created via the real route handler
+OK   B3: exactly the 2 reviewed activities persisted
+OK   B3: removed row never persisted
+OK   B3: renamed title persisted verbatim
+OK   B3: original activityId preserved through persistence
+OK   B3: completionRequirement preserved (GET_FITTER rows carry none -> DONE)
+OK   B3: Rhythm preserved through persistence
+=== B3.1: IDEMPOTENT REPLAY OF THE SAME COMPOSED PAYLOAD ===
+OK   B3.1: replay returns the SAME Goal id
+OK   B3.1: replay returns the same 2 activities (no duplicates)
+OK   B3.1: exactly one Goal exists after the replay
+OK   B3.1: exactly 2 GoalActivity rows exist after the replay (no duplicates)
+=== IDEMPOTENCY CONFLICT (same clientRequestId, different payload) ===
+OK   idempotency conflict: 409 IDEMPOTENCY_CONFLICT for a mismatched replay
+OK   idempotency conflict: the original Goal is unchanged
+OK   idempotency conflict: Candidate A still only sees the original approved activities (never "Something else entirely")
+=== CANDIDATE A: DISCOVERY + PROVENANCE ===
+OK   Candidate A: the recurring reviewed GoalActivity is discovered eligible
+OK   provenance: discovered candidate carries the real goalId linkage
+OK   provenance: discovered candidate carries the renamed title, not the original template title
+OK   provenance: discovered candidate carries the ORIGINAL canonical activityId (renaming the title did not destroy semantic provenance)
+OK   Rhythm semantics: the untouched Stretch/mobility row (Rhythm NONE) never becomes eligible demand
+OK   approved-vs-discarded: the removed "Strength training session" suggestion is never discovered (it was never persisted)
+=== AUTOMATIC BOOTSTRAP (no manual Goal Detail round-trip) ===
+OK   bootstrap: the GoalActivity enters the planning candidate flow automatically
+OK   bootstrap: discarded/removed template row never surfaces
+=== NO AUTO-COMMIT ===
+OK   no-auto-commit: zero PlannedActivity/GoalActivityOccurrence/GoalActivityExecution exist merely from discovery+bootstrap
+=== PLANNING SURFACE: PREVIEW ===
+OK   planning surface: the Goal-derived candidate is proposed by the real Constructor
+=== ACCEPTANCE ===
+OK   acceptance: succeeds via verified server-derived provenance
+OK   acceptance: exactly one GoalActivityOccurrence created
+=== COMPLETION ===
+OK   completion: GoalActivityExecution becomes the durable completion truth
+OK   completion: PlannedActivity transitions to LOGGED
+=== WEEKLY ACCOUNTING + RESURFACING ===
+OK   weekly accounting: remainingThisWeek decreases 3 -> 2 after one completion
+OK   resurfacing: the activity is eligible again immediately (not terminated by completion)
+=== WEEKLY EXHAUSTION (2 more cycles within the same week) ===
+OK   exhaustion cycle (2026-12-30): accepted
+OK   exhaustion cycle (2026-12-31): accepted
+OK   exhaustion: canonical Rhythm eligibility remainingThisWeek = 0 after all 3 target occurrences are completed
+OK   exhaustion: discovery no longer surfaces the exhausted activity (A1's own zero-remaining structural exclusion)
+OK   exhaustion: automatic bootstrap no longer surfaces the exhausted activity
+=== NEXT-WEEK RESET ===
+OK   next-week reset: remainingThisWeek resets to the full target (3) with no recurrence rows pre-generated
+OK   next-week reset: automatic bootstrap can surface it again next week
+=== B4 OBSERVATIONAL INDEPENDENCE ===
+OK   B4: the observability summary builder is callable on the real final proposal state and returns the expected matchSource
+OK   B4: calling the observability builder is side-effect-free (Goal count unchanged, pure function)
+=== SECONDARY: UNKNOWN GOAL ("Learn Spanish") + FREEFORM ===
+OK   B1: "Learn Spanish" has no deterministic match (never forced into an unrelated template)
+OK   B2: no automatic proposal was invented for an unmatched title
+OK   freeform: activityId is null (never inferred from the freeform title)
+OK   B3: Learn Spanish Goal created with exactly one freeform GoalActivity
+OK   Candidate A: an eligible recurring FREEFORM GoalActivity participates in discovery exactly like a template-backed one
+=== SECONDARY: START FROM SCRATCH ===
+OK   scratch setup: the title still auto-matches GET_FITTER before the user overrides it
+OK   scratch: explicit null choice clears the proposal entirely
+OK   B3: scratch Goal created with exactly the one approved freeform activity
+OK   scratch: the auto-matched template rows the user discarded were never persisted for this Goal
+=== MULTIPLE GOALS ===
+OK   multiple goals: discovery surfaces eligible activities from more than one Goal at once, without interference
+ALL GOAL DECOMPOSITION PLANNING HANDOFF CHECKS PASSED
+
+# exit=0 signal=

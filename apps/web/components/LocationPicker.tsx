@@ -293,10 +293,25 @@ export function LocationPicker({ currentCity, currentLatitude, currentLongitude,
 
   // ---- Smart Location Selection: search ----
   const [searchQuery, setSearchQuery] = useState('');
-  const [searchLoading, setSearchLoading] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [searchResults, setSearchResults] = useState<GeocodeResultDto[]>([]);
+  // AURA-ANDROID-REL-04 IR-06 (R2) -- every input change starts a new INPUT
+  // GENERATION, in the same render as the new text. Results, error and the
+  // loading flag are stamped with the generation they belong to and shown
+  // only while it is current, so returning to an earlier query text (A -> B
+  // -> A) never brings back A's retired rows: only a response for the new
+  // generation can display (or be selected).
+  const [inputGen, setInputGen] = useState(0);
+  const [searchFor, setSearchFor] = useState(-1);
+  const [searchLoadingGen, setSearchLoadingGen] = useState(-1);
+  const changeSearchQuery = (value: string) => {
+    setSearchQuery(value);
+    setInputGen((g) => g + 1);
+  };
   const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // AURA-ANDROID-REL-04 -- id of the newest search request; an older, slower
+  // response must never replace newer results (REL-03 "search race").
+  const searchSeqRef = useRef(0);
 
   // ---- Location PR8: explicit "Confirm {currentCity}" action ----
   const [confirmingCurrent, setConfirmingCurrent] = useState(false);
@@ -336,34 +351,57 @@ export function LocationPicker({ currentCity, currentLatitude, currentLongitude,
   useEffect(() => {
     if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
     const query = searchQuery.trim();
+    // AURA-ANDROID-REL-04 IR-06 -- each query gets its own sequence id and
+    // AbortController. The cleanup below (next query OR unmount) clears the
+    // debounce, aborts the request and retires the id, so an obsolete
+    // request can never change results, error or loading state.
+    const seq = ++searchSeqRef.current;
+    const gen = inputGen;
+    const controller = new AbortController();
+    const isLatest = () => searchSeqRef.current === seq && !controller.signal.aborted;
     if (query.length < 2) {
       setSearchResults([]);
       setSearchError(null);
-      return;
+      setSearchFor(gen);
+      return () => { controller.abort(); };
     }
     searchDebounceRef.current = setTimeout(async () => {
-      setSearchLoading(true);
+      if (!isLatest()) return;
+      setSearchLoadingGen(gen);
       setSearchError(null);
       try {
-        const res = await fetch(`/api/location/search?q=${encodeURIComponent(query)}`);
+        const res = await fetch(`/api/location/search?q=${encodeURIComponent(query)}`, { signal: controller.signal });
         const data = await res.json().catch(() => ({}));
+        if (!isLatest()) return;
         if (res.ok) {
           setSearchResults(Array.isArray(data.results) ? data.results : []);
+          setSearchError(null);
         } else {
           setSearchResults([]);
           setSearchError(typeof data.error === 'string' ? data.error : 'Search is temporarily unavailable.');
         }
+        setSearchFor(gen);
       } catch {
+        if (!isLatest()) return;
         setSearchResults([]);
         setSearchError("Couldn't search right now. Please try again.");
+        setSearchFor(gen);
       } finally {
-        setSearchLoading(false);
+        if (isLatest()) setSearchLoadingGen(-1);
       }
     }, 400);
     return () => {
       if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+      controller.abort();
+      if (searchSeqRef.current === seq) searchSeqRef.current++;
     };
-  }, [searchQuery]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [inputGen]);
+
+  const searchIsCurrent = searchFor === inputGen;
+  const searchLoading = searchLoadingGen === inputGen;
+  const visibleSearchResults = searchIsCurrent ? searchResults : [];
+  const visibleSearchError = searchIsCurrent ? searchError : null;
 
   // "Use my current location" -- requested ONLY on explicit tap, never on
   // mount or automatically. Covers: unsupported browser/insecure context,
@@ -546,7 +584,7 @@ export function LocationPicker({ currentCity, currentLatitude, currentLongitude,
         setCustomCities((prev) => [confirmed, ...prev.filter((c) => c.cityName !== confirmed.cityName)]);
         onChanged(confirmed);
         setPending(null);
-        setSearchQuery('');
+        changeSearchQuery('');
         setSearchResults([]);
       } else {
         const data = await res.json().catch(() => ({}));
@@ -1171,24 +1209,24 @@ export function LocationPicker({ currentCity, currentLatitude, currentLongitude,
           type="text"
           placeholder="e.g. Kollam, Kerala"
           value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
+          onChange={(e) => changeSearchQuery(e.target.value)}
           style={inputStyle(false)}
           autoComplete="off"
         />
         {searchLoading && (
           <div style={{ fontSize: 11, color: 'var(--as-text-muted)', marginTop: 4 }}>Searching...</div>
         )}
-        {searchError && (
+        {visibleSearchError && (
           <div role="alert" style={{ fontSize: 11, color: 'var(--as-danger, var(--as-rahu))', marginTop: 4 }}>
-            {searchError}
+            {visibleSearchError}
           </div>
         )}
-        {!searchLoading && !searchError && searchQuery.trim().length >= 2 && searchResults.length === 0 && (
+        {!searchLoading && !visibleSearchError && searchIsCurrent && searchQuery.trim().length >= 2 && visibleSearchResults.length === 0 && (
           <div style={{ fontSize: 11, color: 'var(--as-text-muted)', marginTop: 4 }}>
             No matches found. Try a different spelling, or enter it manually below.
           </div>
         )}
-        {searchResults.length > 0 && (
+        {visibleSearchResults.length > 0 && (
           <div
             style={{
               marginTop: 6,
@@ -1198,7 +1236,7 @@ export function LocationPicker({ currentCity, currentLatitude, currentLongitude,
               overflow: 'hidden',
             }}
           >
-            {searchResults.map((result, i) => (
+            {visibleSearchResults.map((result, i) => (
               <button
                 key={`${result.cityName}-${result.latitude}-${result.longitude}-${i}`}
                 type="button"
@@ -1214,7 +1252,7 @@ export function LocationPicker({ currentCity, currentLatitude, currentLongitude,
                   padding: '8px 10px',
                   background: 'transparent',
                   border: 'none',
-                  borderBottom: i < searchResults.length - 1 ? '1px solid var(--as-border-subtle, var(--as-border))' : 'none',
+                  borderBottom: i < visibleSearchResults.length - 1 ? '1px solid var(--as-border-subtle, var(--as-border))' : 'none',
                   cursor: 'pointer',
                 }}
               >
@@ -1226,7 +1264,7 @@ export function LocationPicker({ currentCity, currentLatitude, currentLongitude,
             ))}
           </div>
         )}
-        {(searchResults.length > 0 || gpsError === null) && pending === null && searchQuery.trim().length >= 2 && (
+        {(visibleSearchResults.length > 0 || gpsError === null) && pending === null && searchQuery.trim().length >= 2 && (
           // OpenCage's free-tier terms require attribution wherever its
           // results are shown to an end user -- see this PR's own provider
           // decision memo. Kept small/quiet (not a promotional banner),

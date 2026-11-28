@@ -1,0 +1,33 @@
+$ npx ts-node --project tsconfig.jsdom-tests.json test/rel04R4QueueIntegrity.test.ts
+# job=math-core-tests step=Run REL-04 R4 queue integrity test env={"TS_NODE_COMPILER_OPTIONS":"{\"jsx\":\"react-jsx\"}"}
+OK   M1 every valid owned interim entry (R1 array, R2 per-entry, R3 record) is migrated with its payload intact
+OK   M1 sources are removed only after the copy committed; an unparseable source is left in place (never guessed at); another account's source is untouched
+OK   M2 25 interleavings of migration (stale source re-written) with settlement and discard in two other contexts: a settled/discarded entry is NEVER recreated
+OK   H1 a discard while another context is SENDING the record keeps it (reported keptInFlight), never removes it from under the send
+OK   H1 the send then decides it: confirmed and settled exactly once
+OK   H2 a record discarded after the replay read it is never sent (the claim transaction finds it gone)
+OK   D1 an unanswered send stays queued, its claim released, its dispatch recorded
+OK   D1 (R5) the sign-out question says it may already have been sent and that removing it will not undo that
+OK   D1 the discard reports it as removed-but-possibly-saved (never as undone)
+OK   D1 (R5) the message states the removed count, that it may already have been sent and saved, and that removing it here does not undo that
+OK   C1 three contexts replaying at once with no Web Locks: each entry is sent exactly once in total
+OK   C1 every entry stored once and settled
+OK   C2 while one context sends an identity, a second context does not send it again (queued for the first send to decide)
+OK   I1 a fresh claim from a context that died blocks re-sending (no concurrent duplicate)
+OK   I1 after the claim expires, the entry is sent again with the same clientRequestId and settled once
+OK   F1 with IndexedDB unavailable an unresolved write is reported NOT STORED (never "queued")
+OK   F1 nothing silently falls back to localStorage or memory
+OK   F1 reads are UNREADABLE (not empty) and replay sends nothing
+OK   F2 a discard that cannot write reports every entry as failed (nothing claimed removed) and the entry is still there
+OK   L1 the shared legacy array is byte-identical after sign-out (never rewritten, never removed)
+OK   S1 owned unreadable + legacy present: the owned part says none of the account's activity was removed, the legacy part says 2 earlier-version logs were left -- separately, no blanket "nothing removed"
+OK   S1 the confirmation is about owned entries only (legacy entries are not removed, so not asked about)
+OK   S2 an owned entry never sent is removed (not "possibly saved"); the legacy entry is reported as left on the device
+OK   S3 signed-out-unconfirmed says signed out on this device, server confirmation missing, activity kept
+OK   S3 account-changed says another account is now signed in (not "signed out")
+OK   S3 failed / busy / unverified each say sign-out did not complete or is unconfirmed
+OK   S3 cancelled says nothing (nothing happened)
+
+27 passed, 0 failed
+
+# exit=0 signal=

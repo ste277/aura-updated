@@ -122,7 +122,8 @@ function main() {
       "7b. [STRUCTURAL] the one-shot effect calls the EXISTING handleSend(pendingHandoffRequest!.text) -- no new fetch/parser call site",
       /handleSend\(pendingHandoffRequest!\.text\);/.test(askAuraView)
     );
-    const fetchCallSites = askAuraView.match(/fetch\(/g) ?? [];
+    // AURA-ANDROID-REL-04 (R2): the /api/plans call site is now boundFetch( (account-bound); same site.
+    const fetchCallSites = askAuraView.match(/(?:\bfetch|\bboundFetch)\(/g) ?? [];
     // The pre-existing call sites are: handleSend's own /api/ask-aura,
     // runAction's /api/plans, /api/aura-moments, and the FORWARD_PLAN
     // CHECK call to /api/timing-search -- exactly 4, unchanged by this

@@ -1,0 +1,69 @@
+$ npx ts-node --project tsconfig.jsdom-tests.json test/locationPickerM2dReliability.test.ts
+# job=math-core-tests step=Run LocationPicker M2-D reliability test env={"TS_NODE_COMPILER_OPTIONS":"{\"jsx\":\"react-jsx\"}"}
+OK   A1 one tap starts exactly one native request
+OK   A2 rapid repeated taps start no additional native requests
+OK   A2b button disabled while the request is active
+OK   A2c the single request completes normally (one reverse lookup)
+OK   A3 app timeout at 30 s shows the timeout message
+OK   A3b timed-out native request is still tracked (not treated as cancelled)
+OK   A4 retry is available and JOINS the running native request (no second native call)
+OK   A4b when the joined native request settles, the retry shows the result
+OK   A4c the native request is no longer tracked once settled
+OK   A5 late native result after app timeout does not update the obsolete UI (stays on timeout, no lookup)
+OK   A6 reopened picker starts idle (no stale spinner/result)
+OK   A6b stale result from the closed picker never appears in the reopened one
+OK   A6c a fresh tap after the old request settled starts a new native request
+OK   A6d and completes normally
+OK   A7 reopen + tap while the old native request is still running joins it (1 native call total)
+OK   A7b the reopened picker gets the joined result
+OK   A8 bounded: a native request still unsettled after 60 s no longer blocks a new one (2 calls, 2 unsettled)
+OK   B1 success at 2 s
+OK   B1b all app timers cleared after success
+OK   B2 success at 8 s
+OK   B3 progress message "Still finding your location..." from 10 s
+OK   B4 success at 15 s (no longer discarded at 10 s)
+OK   B5 success at 25 s
+OK   B6 never-settling request: still loading at 29.999 s, timeout message at 30 s
+OK   B6b app timers cleared after the timeout
+OK   B7 provider "location unavailable" maps to the unavailable message and clears timers
+OK   B8 native completion after the app timeout: timeout shown, late result ignored
+OK   B9 configured constants: native 30 s, progress 10 s, web 10 s
+OK   B10 boundary at exactly 30 s yields exactly one outcome (no duplicate completion)
+OK   C1 initial denial: ordinary denied message, no Open Settings, no location request
+OK   C2 repeated denial (don't ask again): permanent message + Open Settings
+OK   C3 permanently denied: one request to Android (no dialog on a real device), permanent message kept
+OK   C4 Open Settings calls the native AppSettings.open once and changes no permission
+OK   C5 search and manual-location fallbacks remain available
+OK   C6 return from Settings WITHOUT granting: permission re-checked, message kept
+OK   C7 return from Settings WITH permission granted: stale error cleared, notice shown
+OK   C7b resume never starts a location request by itself
+OK   C7c next tap acquires normally
+OK   C8 device location services off: services message
+OK   C9 services turned back on while away: stale services error cleared on resume
+OK   C10 non-Android native: permanent message but no Open Settings button (not supported there)
+OK   C11 if Settings cannot be opened, a manual Settings path is shown
+OK   C12 stale cached "denied" does not block: the app asks Android, gets a grant, and acquires
+OK   D1 native error classification table
+OK   D2 every message is concise and offers a next step (no raw plugin text, no digits)
+OK   D3 unexpected native failure shows the safe generic message (internal text never shown)
+OK   D4 reverse geocode 503 -> city lookup unavailable (distinct from acquisition)
+OK   D5 reverse geocode network failure -> city lookup unavailable
+OK   D6 reverse geocode 404 keeps the server's specific message
+OK   D7 web timeout unchanged at 10 000 ms with maximumAge 0
+OK   D8 web TIMEOUT uses the shared timeout message
+OK   D9 web PERMISSION_DENIED uses the shared denied message, never Open Settings
+OK   D10 web POSITION_UNAVAILABLE uses the shared unavailable message
+OK   E1 Strict Mode setup/cleanup/setup: request runs and progresses normally
+OK   E2 genuine unmount (incl. Android back closing the picker) clears all app timers
+OK   E3 no warnings, no lookup, after unmount during an active request
+OK   E3b resume listener removed on unmount
+OK   E4 background/resume during an active request does not disturb it (no re-check, no new request)
+OK   E4b request completes once after resume (no duplicate completion)
+OK   E5 no React warnings/errors across the whole suite
+OK   F1 waitWithTimeout arms exactly one timer
+OK   F2 waitWithTimeout clears its timer when the promise settles
+OK   F3 cancel() clears the timer
+
+63 passed, 0 failed
+
+# exit=0 signal=

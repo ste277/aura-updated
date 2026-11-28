@@ -1,0 +1,149 @@
+$ npx ts-node test/authMagicLinkLocalOnlyDb.test.ts
+# job=day-constructor-acceptance-db-tests step=Run magic-link local-only DB test (AURA-AUTH-02) env={"TS_NODE_COMPILER_OPTIONS":"{\"jsx\":\"react\"}"}
+OK   1. gate OPEN only for NODE_ENV=development + opt-in "true" + no Vercel marker
+OK   1. gate CLOSED: Production (NODE_ENV=production, no opt-in)
+OK   1. gate CLOSED: Production with the opt-in copied in by mistake
+OK   1. gate CLOSED: Vercel Production markers + opt-in
+OK   1. gate CLOSED: Vercel Preview markers + opt-in
+OK   1. gate CLOSED: Vercel Preview markers + opt-in + NODE_ENV=development
+OK   1. gate CLOSED: VERCEL_ENV alone + opt-in + NODE_ENV=development
+OK   1. gate CLOSED: VERCEL_URL alone + opt-in + NODE_ENV=development
+OK   1. gate CLOSED: missing environment (nothing set)
+OK   1. gate CLOSED: local dev without the opt-in
+OK   1. gate CLOSED: opt-in without NODE_ENV
+OK   1. gate CLOSED: NODE_ENV=test + opt-in
+OK   1. gate CLOSED: ambiguous opt-in "TRUE"
+OK   1. gate CLOSED: ambiguous opt-in "1"
+OK   1. gate CLOSED: ambiguous opt-in " true "
+OK   1. gate CLOSED: empty opt-in
+OK   2. code-only email: subject, HTML and text carry the code
+OK   2. code-only email: no link, URL, href or button in HTML or text
+OK   2. code-only email: clear wording ("enter this code in the app", expiry)
+OK   2. local link email unchanged (link button + code; text has both)
+OK   2. an email with neither link nor code is refused (never an empty email)
+OK   3. local (no provider): devLoginUrl + devLoginCode returned, token minted
+OK   3. local: the link signs in (307 redirect, session cookie, account created)
+OK   3. local (provider): {sent:true}; the email has the link button AND the code
+OK   4. [Production (NODE_ENV=production, no opt-in)] request-link: 200 {sent:true}, no token minted, no link in the response
+OK   4. [Production (NODE_ENV=production, no opt-in)] email is code-only (code present; no link/URL/href in HTML or text)
+OK   4. [Production (NODE_ENV=production, no opt-in)] request-link logged nothing with the email or code
+OK   4. [Production (NODE_ENV=production, no opt-in)] verify: 403 with the fixed message, no cookie
+OK   4. [Production (NODE_ENV=production, no opt-in)] verify: token never verified, no user lookup/creation, no account created
+OK   4. [Production (NODE_ENV=production, no opt-in)] verify: token and email absent from the response and logs
+OK   4. [Production (NODE_ENV=production, no opt-in)] verify without a token: the same 403 (predictable)
+OK   4. [Production with the opt-in copied in by mistake] request-link: 200 {sent:true}, no token minted, no link in the response
+OK   4. [Production with the opt-in copied in by mistake] email is code-only (code present; no link/URL/href in HTML or text)
+OK   4. [Production with the opt-in copied in by mistake] request-link logged nothing with the email or code
+OK   4. [Production with the opt-in copied in by mistake] verify: 403 with the fixed message, no cookie
+OK   4. [Production with the opt-in copied in by mistake] verify: token never verified, no user lookup/creation, no account created
+OK   4. [Production with the opt-in copied in by mistake] verify: token and email absent from the response and logs
+OK   4. [Production with the opt-in copied in by mistake] verify without a token: the same 403 (predictable)
+OK   4. [Vercel Production markers + opt-in] request-link: 200 {sent:true}, no token minted, no link in the response
+OK   4. [Vercel Production markers + opt-in] email is code-only (code present; no link/URL/href in HTML or text)
+OK   4. [Vercel Production markers + opt-in] request-link logged nothing with the email or code
+OK   4. [Vercel Production markers + opt-in] verify: 403 with the fixed message, no cookie
+OK   4. [Vercel Production markers + opt-in] verify: token never verified, no user lookup/creation, no account created
+OK   4. [Vercel Production markers + opt-in] verify: token and email absent from the response and logs
+OK   4. [Vercel Production markers + opt-in] verify without a token: the same 403 (predictable)
+OK   4. [Vercel Preview markers + opt-in] request-link: 200 {sent:true}, no token minted, no link in the response
+OK   4. [Vercel Preview markers + opt-in] email is code-only (code present; no link/URL/href in HTML or text)
+OK   4. [Vercel Preview markers + opt-in] request-link logged nothing with the email or code
+OK   4. [Vercel Preview markers + opt-in] verify: 403 with the fixed message, no cookie
+OK   4. [Vercel Preview markers + opt-in] verify: token never verified, no user lookup/creation, no account created
+OK   4. [Vercel Preview markers + opt-in] verify: token and email absent from the response and logs
+OK   4. [Vercel Preview markers + opt-in] verify without a token: the same 403 (predictable)
+OK   4. [Vercel Preview markers + opt-in + NODE_ENV=development] request-link: 200 {sent:true}, no token minted, no link in the response
+OK   4. [Vercel Preview markers + opt-in + NODE_ENV=development] email is code-only (code present; no link/URL/href in HTML or text)
+OK   4. [Vercel Preview markers + opt-in + NODE_ENV=development] request-link logged nothing with the email or code
+OK   4. [Vercel Preview markers + opt-in + NODE_ENV=development] verify: 403 with the fixed message, no cookie
+OK   4. [Vercel Preview markers + opt-in + NODE_ENV=development] verify: token never verified, no user lookup/creation, no account created
+OK   4. [Vercel Preview markers + opt-in + NODE_ENV=development] verify: token and email absent from the response and logs
+OK   4. [Vercel Preview markers + opt-in + NODE_ENV=development] verify without a token: the same 403 (predictable)
+OK   4. [VERCEL_ENV alone + opt-in + NODE_ENV=development] request-link: 200 {sent:true}, no token minted, no link in the response
+OK   4. [VERCEL_ENV alone + opt-in + NODE_ENV=development] email is code-only (code present; no link/URL/href in HTML or text)
+OK   4. [VERCEL_ENV alone + opt-in + NODE_ENV=development] request-link logged nothing with the email or code
+OK   4. [VERCEL_ENV alone + opt-in + NODE_ENV=development] verify: 403 with the fixed message, no cookie
+OK   4. [VERCEL_ENV alone + opt-in + NODE_ENV=development] verify: token never verified, no user lookup/creation, no account created
+OK   4. [VERCEL_ENV alone + opt-in + NODE_ENV=development] verify: token and email absent from the response and logs
+OK   4. [VERCEL_ENV alone + opt-in + NODE_ENV=development] verify without a token: the same 403 (predictable)
+OK   4. [VERCEL_URL alone + opt-in + NODE_ENV=development] request-link: 200 {sent:true}, no token minted, no link in the response
+OK   4. [VERCEL_URL alone + opt-in + NODE_ENV=development] email is code-only (code present; no link/URL/href in HTML or text)
+OK   4. [VERCEL_URL alone + opt-in + NODE_ENV=development] request-link logged nothing with the email or code
+OK   4. [VERCEL_URL alone + opt-in + NODE_ENV=development] verify: 403 with the fixed message, no cookie
+OK   4. [VERCEL_URL alone + opt-in + NODE_ENV=development] verify: token never verified, no user lookup/creation, no account created
+OK   4. [VERCEL_URL alone + opt-in + NODE_ENV=development] verify: token and email absent from the response and logs
+OK   4. [VERCEL_URL alone + opt-in + NODE_ENV=development] verify without a token: the same 403 (predictable)
+OK   4. [missing environment (nothing set)] request-link: 200 {sent:true}, no token minted, no link in the response
+OK   4. [missing environment (nothing set)] email is code-only (code present; no link/URL/href in HTML or text)
+OK   4. [missing environment (nothing set)] request-link logged nothing with the email or code
+OK   4. [missing environment (nothing set)] verify: 403 with the fixed message, no cookie
+OK   4. [missing environment (nothing set)] verify: token never verified, no user lookup/creation, no account created
+OK   4. [missing environment (nothing set)] verify: token and email absent from the response and logs
+OK   4. [missing environment (nothing set)] verify without a token: the same 403 (predictable)
+OK   4. [local dev without the opt-in] request-link: 200 {sent:true}, no token minted, no link in the response
+OK   4. [local dev without the opt-in] email is code-only (code present; no link/URL/href in HTML or text)
+OK   4. [local dev without the opt-in] request-link logged nothing with the email or code
+OK   4. [local dev without the opt-in] verify: 403 with the fixed message, no cookie
+OK   4. [local dev without the opt-in] verify: token never verified, no user lookup/creation, no account created
+OK   4. [local dev without the opt-in] verify: token and email absent from the response and logs
+OK   4. [local dev without the opt-in] verify without a token: the same 403 (predictable)
+OK   4. [opt-in without NODE_ENV] request-link: 200 {sent:true}, no token minted, no link in the response
+OK   4. [opt-in without NODE_ENV] email is code-only (code present; no link/URL/href in HTML or text)
+OK   4. [opt-in without NODE_ENV] request-link logged nothing with the email or code
+OK   4. [opt-in without NODE_ENV] verify: 403 with the fixed message, no cookie
+OK   4. [opt-in without NODE_ENV] verify: token never verified, no user lookup/creation, no account created
+OK   4. [opt-in without NODE_ENV] verify: token and email absent from the response and logs
+OK   4. [opt-in without NODE_ENV] verify without a token: the same 403 (predictable)
+OK   4. [NODE_ENV=test + opt-in] request-link: 200 {sent:true}, no token minted, no link in the response
+OK   4. [NODE_ENV=test + opt-in] email is code-only (code present; no link/URL/href in HTML or text)
+OK   4. [NODE_ENV=test + opt-in] request-link logged nothing with the email or code
+OK   4. [NODE_ENV=test + opt-in] verify: 403 with the fixed message, no cookie
+OK   4. [NODE_ENV=test + opt-in] verify: token never verified, no user lookup/creation, no account created
+OK   4. [NODE_ENV=test + opt-in] verify: token and email absent from the response and logs
+OK   4. [NODE_ENV=test + opt-in] verify without a token: the same 403 (predictable)
+OK   4. [ambiguous opt-in "TRUE"] request-link: 200 {sent:true}, no token minted, no link in the response
+OK   4. [ambiguous opt-in "TRUE"] email is code-only (code present; no link/URL/href in HTML or text)
+OK   4. [ambiguous opt-in "TRUE"] request-link logged nothing with the email or code
+OK   4. [ambiguous opt-in "TRUE"] verify: 403 with the fixed message, no cookie
+OK   4. [ambiguous opt-in "TRUE"] verify: token never verified, no user lookup/creation, no account created
+OK   4. [ambiguous opt-in "TRUE"] verify: token and email absent from the response and logs
+OK   4. [ambiguous opt-in "TRUE"] verify without a token: the same 403 (predictable)
+OK   4. [ambiguous opt-in "1"] request-link: 200 {sent:true}, no token minted, no link in the response
+OK   4. [ambiguous opt-in "1"] email is code-only (code present; no link/URL/href in HTML or text)
+OK   4. [ambiguous opt-in "1"] request-link logged nothing with the email or code
+OK   4. [ambiguous opt-in "1"] verify: 403 with the fixed message, no cookie
+OK   4. [ambiguous opt-in "1"] verify: token never verified, no user lookup/creation, no account created
+OK   4. [ambiguous opt-in "1"] verify: token and email absent from the response and logs
+OK   4. [ambiguous opt-in "1"] verify without a token: the same 403 (predictable)
+OK   4. [ambiguous opt-in " true "] request-link: 200 {sent:true}, no token minted, no link in the response
+OK   4. [ambiguous opt-in " true "] email is code-only (code present; no link/URL/href in HTML or text)
+OK   4. [ambiguous opt-in " true "] request-link logged nothing with the email or code
+OK   4. [ambiguous opt-in " true "] verify: 403 with the fixed message, no cookie
+OK   4. [ambiguous opt-in " true "] verify: token never verified, no user lookup/creation, no account created
+OK   4. [ambiguous opt-in " true "] verify: token and email absent from the response and logs
+OK   4. [ambiguous opt-in " true "] verify without a token: the same 403 (predictable)
+OK   4. [empty opt-in] request-link: 200 {sent:true}, no token minted, no link in the response
+OK   4. [empty opt-in] email is code-only (code present; no link/URL/href in HTML or text)
+OK   4. [empty opt-in] request-link logged nothing with the email or code
+OK   4. [empty opt-in] verify: 403 with the fixed message, no cookie
+OK   4. [empty opt-in] verify: token never verified, no user lookup/creation, no account created
+OK   4. [empty opt-in] verify: token and email absent from the response and logs
+OK   4. [empty opt-in] verify without a token: the same 403 (predictable)
+OK   5. no provider + Vercel markers: only devLoginCode, no devLoginUrl, no token minted
+OK   5. production without a provider: 500 unchanged, no credentials
+OK   6. Production: request-link then verify-code with the emailed code -> 200 {ok:true} + Secure HttpOnly session cookie
+OK   6. Production: open registration -- first code sign-in creates the account
+OK   6. Production: a code cannot be reused (401)
+OK   6. Production: the code never appears in logs
+OK   6. Production: the AUTH-01 quota still applies (200,200,200,429)
+
+136 checks, all passed
+[auth] no email provider configured (MOM_API_KEY+MOM_FROM_EMAIL or RESEND_API_KEY); refusing to expose sign-in credentials
+[auth] verify-code: no active code { emailRef: 'e706a315a208d7af' }
+[auth] request-link rate-limited {
+  emailRef: '2816fd199fd441c7',
+  ip: '198.51.100.rl3-auth02-1795716366033',
+  recent: 3
+}
+
+# exit=0 signal=

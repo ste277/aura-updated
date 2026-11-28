@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionFromRequest } from '../../../lib/session';
+import { refuseUnboundWrite, refuseAccountMismatch } from '../../../lib/expectedAccount';
 import { DIRECT_PLAN_SCHEDULING_MODE } from '../../../lib/plannedActivitySchedulingMode';
 import { beginTransaction, carryGoalActivityPersonToPlan, createPlannedActivity, listPlannedActivities, getPlannedActivityForOwner, getGuestConversionRedemption, claimGuestConversionToken, fillGuestConversionRedemption, getPlanCreationClaim, claimPlanCreation, fillPlanCreationClaim, linkGoalActivityToPlannedActivity, lockGoalParentLifecycleForPlanning, lockLinkedPeopleForGoalActivities, materializeGoalActivityRhythmOccurrence, getUserById, getSavedPersonForOwner } from '../../../lib/db';
 import { isMyPeopleServerEnabled } from '../../../lib/myPeopleGate';
@@ -126,8 +127,16 @@ class PlanOverlapRejection extends Error {
 }
 
 export async function POST(req: NextRequest) {
+  // AURA-ANDROID-REL-04 IR-01 (R2) -- plan creation REQUIRES the account the
+  // user acted under: unbound (out-of-date client) -> retryable 503 before
+  // authentication; another account's session -> 409. Nothing is read or
+  // written in either case. The session stays the only authorization.
+  const unbound = refuseUnboundWrite(req);
+  if (unbound) return unbound;
   const session = getSessionFromRequest(req);
   if (!session) return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 });
+  const accountMismatch = refuseAccountMismatch(req, session.userId);
+  if (accountMismatch) return accountMismatch;
 
   const body = await parseJsonObject(req);
   if (!body) return NextResponse.json({ error: 'A valid JSON request body is required.' }, { status: 400 });

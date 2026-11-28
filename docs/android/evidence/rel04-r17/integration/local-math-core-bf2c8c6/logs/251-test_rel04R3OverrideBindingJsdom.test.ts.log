@@ -1,0 +1,13 @@
+$ npx ts-node --project tsconfig.jsdom-tests.json test/rel04R3OverrideBindingJsdom.test.ts
+# job=math-core-tests step=Run REL-04 R3 overlap-override binding test (mounted) env={"TS_NODE_COMPILER_OPTIONS":"{\"jsx\":\"react-jsx\"}"}
+OK   PW precondition: the first save (stated A) was refused with an overlap
+OK   PW "Save anyway" after the account changed sends NOTHING (bound to A, not re-captured as B)
+OK   MD precondition: the first save (stated A) was refused with an overlap
+OK   MD "Save anyway" after the account changed sends NOTHING (bound to A, not re-captured as B)
+OK   MD same account: the override is sent once, ALLOW, stating the original account A
+
+5 passed, 0 failed
+(node:78990) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+# exit=0 signal=

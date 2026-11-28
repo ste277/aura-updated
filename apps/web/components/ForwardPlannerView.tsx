@@ -9,6 +9,7 @@ import { FULL_ACTIVITY_CATALOG } from '../../../packages/recommendation/src/pers
 import type { ForwardPlannerHorizon } from '../lib/forwardPlanner';
 import type { ForwardPlannerResult, ForwardPlannerOption } from '../lib/forwardPlannerOrchestrator';
 import type { TimingSearchResponse } from '../../../packages/recommendation/src/timingSearch';
+import { captureAccountBinding } from '../lib/accountBoundFetch';
 
 /**
  * Forward Planner V1 -- "Plan Ahead" surface.
@@ -122,6 +123,8 @@ export function ForwardPlannerView({ timezone, onBack, onOpenBirthProfile }: For
     setSavingRank(option.rank);
     setScheduleError('');
     try {
+      // AURA-ANDROID-REL-04 IR-01 (R2) -- bound at the tap, kept through CHECK.
+      const binding = captureAccountBinding();
       const checkRes = await fetch('/api/timing-search', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -131,7 +134,7 @@ export function ForwardPlannerView({ timezone, onBack, onOpenBirthProfile }: For
       const checkBody: TimingSearchResponse = await checkRes.json();
       const candidate = checkBody.requestedCandidate;
       if (!candidate) throw new Error('no-candidate');
-      await saveUpcomingPlanFromCandidate(candidate, effectiveDurationMinutes, { activityId });
+      await saveUpcomingPlanFromCandidate(candidate, effectiveDurationMinutes, { activityId, binding });
       setScheduledRanks((current) => new Set(current).add(option.rank));
     } catch {
       setScheduleError('Unable to schedule this time. Please try again.');

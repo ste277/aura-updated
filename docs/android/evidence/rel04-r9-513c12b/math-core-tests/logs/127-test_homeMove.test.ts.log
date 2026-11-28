@@ -1,0 +1,127 @@
+$ npx ts-node test/homeMove.test.ts
+# job=math-core-tests step=Run Home Move test env={}
+OK   4/5. ACTIVE_PLAN: Done, Skip and Move are all offered for the plan
+OK   4/5. IMMINENT_PLAN: Done and Move offered; Skip still absent (Skip rule not broadened)
+OK   4/35. Opportunity and context/open: no Move
+OK   4/43. a MISSED plan gets no Home action in D3 (it is not Right Now)
+OK   4. LOGGED / SKIPPED / MOVED / CANCELLED plans: no Move
+OK   7. Today and Tomorrow map to the Home-timezone calendar dates (canonical timezone utilities)
+OK   36. Today 15:30 in Asia/Kolkata serializes to the exact absolute instant 10:00Z
+OK   36. Tomorrow 09:15 in Asia/Kolkata serializes to 03:45Z the next UTC day
+OK   36/37. a non-Kolkata Home timezone (America/Los_Angeles, PDT) converts correctly: Tomorrow 09:00 = 16:00Z
+OK   37. across DST the canonical conversion applies the right offset: NY 2026-03-08 09:00 = 13:00Z (EDT), 2026-11-01 09:00 = 14:00Z (EST)
+OK   8/12. minute precision only; invalid or empty time is rejected before any request
+OK   12. past and exactly-now are rejected (PAST); the current start is rejected (SAME)
+OK   12/38. a destination that only TOUCHES another plan is not rejected client-side (conflicts are the server's decision; resolve takes no plan list)
+OK   12. user-facing copy exists for each local rejection
+OK   9. the default is a non-committed sensible time: next quarter hour at least 30 min ahead (11:07 -> 11:45), Today
+OK   9. late in the day the default rolls to Tomorrow (23:50 -> 00:30 tomorrow), never a past time
+OK   9. the default never resolves to a past instant
+OK   11. the confirm label is "Move to <time>" in the Home timezone
+OK   10-13/17/18. LA spring-forward (the reported blocker; Tomorrow): America/Los_Angeles 2026-03-08 09:00 -> 2026-03-08T16:00:00.000Z; round trip is exactly 2026-03-08 09:00; the confirm label reads "Move to 9:00 AM"
+OK   10-13/17/18. NY spring-forward 05:00 (Tomorrow): America/New_York 2026-03-08 05:00 -> 2026-03-08T09:00:00.000Z; round trip is exactly 2026-03-08 05:00; the confirm label reads "Move to 5:00 AM"
+OK   10-13/17/18. NY spring-forward 09:00 (Tomorrow): America/New_York 2026-03-08 09:00 -> 2026-03-08T13:00:00.000Z; round trip is exactly 2026-03-08 09:00; the confirm label reads "Move to 9:00 AM"
+OK   10-13/17/18. LA fall-back 09:00 (Tomorrow): America/Los_Angeles 2026-11-01 09:00 -> 2026-11-01T17:00:00.000Z; round trip is exactly 2026-11-01 09:00; the confirm label reads "Move to 9:00 AM"
+OK   10-13/17/18. LA fall-back 05:00 (Tomorrow): America/Los_Angeles 2026-11-01 05:00 -> 2026-11-01T13:00:00.000Z; round trip is exactly 2026-11-01 05:00; the confirm label reads "Move to 5:00 AM"
+OK   10-13/17/18. NY fall-back 05:00 (Tomorrow): America/New_York 2026-11-01 05:00 -> 2026-11-01T10:00:00.000Z; round trip is exactly 2026-11-01 05:00; the confirm label reads "Move to 5:00 AM"
+OK   10-13/17/18. NY fall-back 09:00 (Tomorrow): America/New_York 2026-11-01 09:00 -> 2026-11-01T14:00:00.000Z; round trip is exactly 2026-11-01 09:00; the confirm label reads "Move to 9:00 AM"
+OK   10-13/17/18. 20. LA spring-forward day, Today 15:00 (the transition day is TODAY, chosen later the same day): America/Los_Angeles 2026-03-08 15:00 -> 2026-03-08T22:00:00.000Z; round trip is exactly 2026-03-08 15:00; the confirm label reads "Move to 3:00 PM"
+OK   10-13/17/18. 20. NY fall-back day, Today 15:00: America/New_York 2026-11-01 15:00 -> 2026-11-01T20:00:00.000Z; round trip is exactly 2026-11-01 15:00; the confirm label reads "Move to 3:00 PM"
+OK   10-13/17/18. London spring-forward 09:00 (Tomorrow, BST): Europe/London 2026-03-29 09:00 -> 2026-03-29T08:00:00.000Z; round trip is exactly 2026-03-29 09:00; the confirm label reads "Move to 9:00 AM"
+OK   10-13/17/18. Sydney spring-forward 09:00 (Tomorrow, AEDT): Australia/Sydney 2026-10-04 09:00 -> 2026-10-03T22:00:00.000Z; round trip is exactly 2026-10-04 09:00; the confirm label reads "Move to 9:00 AM"
+OK   10-13/17/18. Kolkata control 09:00 (no DST) on the same dates: Asia/Kolkata 2026-03-08 09:00 -> 2026-03-08T03:30:00.000Z; round trip is exactly 2026-03-08 09:00; the confirm label reads "Move to 9:00 AM"
+OK   7/15/16. a wall time that does not exist (NY 2026-03-08 02:30) is REFUSED as NONEXISTENT with truthful copy, never silently sent as 03:30
+OK   8/15/16. a wall time that occurs twice (NY 2026-11-01 01:30) is REFUSED as AMBIGUOUS with truthful copy, no invisible earlier/later choice
+OK   16. no auto-correction anywhere in the sweep: no wall time on a transition day ever resolves to a DIFFERENT wall time (every accepted destination round-trips to exactly what was selected)
+OK   21. the default never lands on a repeated wall time: NY fall-back night (now 00:40 EDT) skips the ambiguous 01:xx hour to the next unique time (02:00 EST); an ordinary time is unchanged
+OK   21. the default is always a wall time that resolves (checked across a transition-day sweep, every 15 minutes)
+OK   15/19. Antarctica/Troll (a 2-hour DST shift repeats a wall-time span lasting 4 real hours): the default that used to be the ambiguous 01:00 now skips the whole interval and lands on the first UNIQUE time, 03:00
+OK   17. the old 16-step bound was one step short for Troll (16 consecutive ambiguous quarter-hours); the bound is now 24 steps and is a search limit, not an assumption that DST changes are short
+OK   18. search exhaustion returns NO default (null) instead of the last/ambiguous candidate: Troll with a 3-step bound
+OK   20. Lord Howe (30-minute shift): the default on the fall-back night is a UNIQUE wall time
+OK   21. a default search that crosses the spring-forward gap goes 01:45 EST -> 03:15 EDT and never proposes a nonexistent 02:xx wall time
+OK   22. defaults that would land in a fall-back overlap skip every ambiguous candidate to the first unique time (Sydney 02:15 AEDT -> 03:00 AEST; New York 01:15 EDT -> 02:00 EST)
+OK   23. default sweep across transition days incl. Troll and Lord Howe (every 15 min): every default is UNIQUE (0 nonexistent / 0 ambiguous / 0 invalid), and none is missing
+OK   3/10. Move is POST /api/plans/<id>/move with a JSON body of ONLY { newStartAt } (no other endpoint, no timestamps of the plan)
+OK   18. success requires from.status MOVED + a NEW UPCOMING successor; the successor is returned hydrated (real Dates)
+OK   18. malformed success (200 with from not MOVED) is FAILED, never a confirmed move
+OK   18. malformed success (200 with successor not UPCOMING) is FAILED, never a confirmed move
+OK   18. malformed success (200 where the successor IS the original) is FAILED, never a confirmed move
+OK   18. malformed success (200 with a different original id) is FAILED, never a confirmed move
+OK   18. malformed success (200 with missing successor) is FAILED, never a confirmed move
+OK   18. malformed success (200 with unusable times) is FAILED, never a confirmed move
+OK   18. malformed success (200 with a non-JSON body) is FAILED, never a confirmed move
+OK   18. malformed success (200 empty object) is FAILED, never a confirmed move
+OK   13/14/15. server 409 CONFLICT keeps its identity for truthful feedback
+OK   13/14/15. server 409 HAS_LINKED_MOMENT keeps its identity for truthful feedback
+OK   13/14/15. server 409 INVALID_STATE keeps its identity for truthful feedback
+OK   13/14/15. server 409 ALREADY_MOVED keeps its identity for truthful feedback
+OK   13/14/15. server 400 INVALID_DESTINATION keeps its identity for truthful feedback
+OK   13/14/15. server 409 CAPACITY_EXCEEDED keeps its identity for truthful feedback
+OK   13/14/15. server 409 DAILY_CAPACITY_EXCEEDED keeps its identity for truthful feedback
+OK   13/14/15. server 409 DAILY_ATTRIBUTION_UNRESOLVED keeps its identity for truthful feedback
+OK   27. a 401 on the Move POST is FAILED (no confirmed fact, no session side effect), like Done/Skip
+OK   45. 404, 500, an unknown 4xx code and a network error are all FAILED
+OK   13/14/15. every failure code has concise, actionable copy
+OK   parseMoveResponse is pure: a 2xx with the right shape parses, an error status never parses as success
+OK   HPG3-A4a. weekly capacity (CAPACITY_EXCEEDED) reuses the shared module's exact weekly message, verbatim
+OK   HPG3-A4a. daily capacity (DAILY_CAPACITY_EXCEEDED) reuses the shared module's exact daily message, verbatim
+OK   HPG3-A4a. unresolved legacy attribution (DAILY_ATTRIBUTION_UNRESOLVED) reuses the shared module's exact message, verbatim
+OK   HPG3-A4a. weekly, daily and unresolved-attribution messages are all mutually distinct (never collapsed into one generic conflict message)
+OK   HPG3-A4a. unresolved attribution is specifically distinguishable from ordinary daily-capacity exhaustion (not presented as the same kind of conflict)
+OK   HPG3-A4a. weekly capacity's message explicitly rules out "a different time" helping (the conflict is week-wide, not time-of-day-specific)
+OK   HPG3-A4a. daily capacity's message asks for a different day, never implying the SAME day could work on a plain retry
+OK   HPG3-A4a. all 3 codes classify to their OWN status, never falling through to the generic FAILED bucket
+OK   HPG3-A4a. an unrelated, pre-existing known code (CONFLICT) keeps its exact pre-existing message, unchanged by this ticket
+OK   HPG3-A4a. an unknown/unrecognized code still retains the existing safe generic fallback (no new per-code message fabricated for it)
+OK   HPG3-A4a. successful Move presentation is unaffected: a real MOVED outcome still requires the same from/plan shape as before this ticket
+OK   16/17. Move + Move (rapid): exactly one POST; the extras are BUSY
+OK   16/17. Move then Done: only the Move request begins for that plan
+OK   16/17. Move then Skip: only the Move request begins for that plan
+OK   16/17. Done then Move and Skip then Move: only the first action begins (one authority, not independent guards)
+OK   16. the guard is released after a failed Move so a deliberate retry is possible
+OK   21. Move confirmed: A is no longer ACTIVE_PLAN or IMMINENT_PLAN (no stale A) and no Move/Skip/Done is offered for it
+OK   22. the live Timeline hides the MOVED original and shows the successor at its NEW time, exactly once
+OK   22. A remains in the underlying agenda as MOVED history (hidden only in the live presentation)
+OK   24. the stale reminder for A (by target.planId) is masked immediately; the unrelated reminder stays; the authoritative list is untouched
+OK   21. when B is imminent by its new time it becomes Right Now (IMMINENT_PLAN, with Move but not Skip)
+OK   21. next committed plan wins when A moves away (existing hierarchy, no special ranking)
+OK   21. Opportunity/context fallback follows the existing hierarchy
+OK   7/22. a move to Tomorrow removes A from today and does not put B on today's list
+OK   23. "Coming up"/next item uses B, never the old-time A
+OK   35. an active cross-midnight plan is ACTIVE_PLAN (movable, by absolute instants) and disappears once moved
+OK   25/48. Move confirmed, then EVERY reconciliation read fails: Home stays authenticated, A is resolved and hidden, B is on the list at its new time, no A reminder, Right Now advanced, no "Move failed"
+OK   47. stale refresh (agenda still says A UPCOMING/CURRENT, reminder list still has A, nothing else refreshed): A resolved, B current at the new time, no stale A reminder, no A Right Now
+OK   26. partial refresh: once the authoritative agenda already contains B and a MOVED A there is no duplicate B and no mixed state (A never Right Now)
+OK   26. partial refresh (agenda updated, reminders still stale): the confirmed fact still masks A's reminder
+OK   28. Move succeeded, then a refresh returns 401: the confirmed Move stands (A still resolved, B still shown); the 401 only asks for the authoritative session check
+OK   13/49. after a CONFLICT nothing is confirmed: A stays ACTIVE with Done, Skip and Move, and there is no B
+OK   50. ALREADY_MOVED never fabricates a successor: with no confirmed fact Home shows exactly what the server data shows (A hides only once the authoritative MOVED arrives)
+OK   4/5. Move renders only under moveablePlanIdNow (ACTIVE or IMMINENT), with an activity-specific accessible name and a real disabled state
+OK   5. Done and Skip semantics are preserved: same gating and endpoints; Skip is still gated on skippablePlanIdNow only
+OK   16. one guard: the Move executor entry uses the SAME inFlight set (no second guard) and the handler checks isBusy synchronously first
+OK   6/8/33. the picker is an accessible form: labelled Day select and time input (htmlFor/id pairs), type="time" step=60 (no seconds), a submit button, a Cancel button, a form label naming the activity
+OK   7. only Today and Tomorrow are offered (no week calendar, no arbitrary date entry)
+OK   30/31. Cancel and Escape close the picker with NO request and return focus to the Move trigger
+OK   32. Enter/confirm is a single form submit routed to the guarded handler
+OK   12. local validation runs before any request and only reports local problems
+OK   15/16. a refused destination (invalid/past/same/NONEXISTENT/AMBIGUOUS) returns BEFORE any request and never touches the Day/Start-time selection
+OK   19. Home passes its EXPLICIT timezone (effectiveTimezone) into every conversion; no browser-local Date parsing in the Move path
+OK   18/20. no optimistic Move: the MOVED fact and successor are written only after the non-MOVED branch has returned; the picker stays open (with the chosen time) on every failure
+OK   20. success order: fact -> successor -> close picker -> focus -> best-effort refresh in its own try/catch
+OK   15. INVALID_STATE / ALREADY_MOVED reconcile from authoritative data (the existing refresh) and confirm nothing
+OK   29. after success focus goes to the successor row when it is on today's list, else the stable Right Now region (no keyboard-raising input focus)
+OK   9. opening the picker only sets a default (no request, no submit)
+OK   10/33. exact time only: no Timing Search, Constructor, recommendation engine or duration editing anywhere in the Home Move code
+OK   36/37. timezone conversion goes through the canonical STRICT resolver (resolveLocalDateTime/getDatePartsInTimezone/addDaysToDateStr) and no new timezone math exists
+OK   39/40. Home Move knows nothing about sources, Captures, Goals, HabitLogs or timestamps of plans
+OK   3. no new API route and no other write path: the only endpoint referenced is /api/plans/<id>/move; no DELETE + create, no POST /api/plans
+OK   42. the Plan-tab reschedule workflow reuses the SAME shared Move endpoint Home uses (DR4-F1), with no surviving create+delete reschedule path and no second/duplicate reschedule implementation
+OK   43/62. MISSED exposure, new lifecycle state, schema and migrations are absent: the specific, already-known migration set from F1/Goals V2 G2.1/G2.2.1 is present (baseline presence check, count-independent), ExecutionOutcome adds only the confirmed MOVED fact
+OK   22. presentation choice: the live Timeline hides MOVED rows via one helper; the read model (agenda, DB) keeps them
+OK   18. the picker then starts empty (time ""), which the strict resolver rejects as INVALID, so the user must choose a valid time and nothing is pre-filled or submitted
+OK   16. the default is pre-filled ONLY when the strict resolver says OK: the search tests resolveLocalDateTime(...).status === "OK" and returns null otherwise
+OK   24/26. submission still runs strict resolution independently of any default, and the legacy total function is never used by Home Move
+ALL HOME MOVE CHECKS PASSED
+
+# exit=0 signal=

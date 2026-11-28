@@ -1,0 +1,39 @@
+$ npx ts-node test/decisionFactPreparation.test.ts
+# job=math-core-tests step=Run decision fact preparation behavior test env={}
+OK   PREPARATION ORDER: initial searches, then preparation (completing), then the replenishment re-search -- which only exists after the first constructDay
+OK   the contest still resolves exactly as in the P0c baseline: A proposed, B deferred
+OK   preparation input: request order preserved, the ALREADY-resolved duration (30 explicit; 45 generic fallback), the fallback flag from the resolution's own warning, the provider facts untouched
+OK   preparation context is the server request's own planning date, timezone and reference instant
+OK   NO CONSUMPTION: prepared facts that make the LOW candidate look maximally scarce (and the HIGH one abundant) leave the constructed day, warnings and window byte-identical
+OK   NO CONSUMPTION: the winner is still the HIGH candidate and the loser still the LOW candidate whatever was prepared
+OK   the only difference is the preview metadata: the resolved intents carry the prepared facts, everything else about them is unchanged
+OK   NO CONSUMPTION under input reversal: still A wins, B deferred
+OK   a deferred (losing) intent keeps its prepared facts in the resolved-intent metadata exactly as the current preview contract exposes them
+OK   ONE preparation per preview (never once before and once after construction)
+OK   ONE O1 projection per fact-bearing candidate (3 candidates have a horizon, 1 typed has none) and none after construction
+OK   ONE O2 range load for the whole preview (one availability load, one plan query) regardless of candidate count
+OK   the typed intent with no facts gets nothing and does not trigger work of its own
+OK   ATTACHMENT: the object attached to each resolved intent IS the object prepared before construction (same identity, hence deep equal)
+OK   the prepared facts keep the exact 12-field opportunity contract and the provider's recurrence entry unchanged
+OK   IMMUTABLE SNAPSHOT: the prepared facts and their opportunity entry are frozen
+OK   the facts are candidate-local: both candidates see the same viable days (no capacity allocated between them)
+OK   original order preserved: resolved intents come back in request order
+OK   attachment is by server-owned id only: identical titles do not swap, an intent with nothing prepared is returned untouched, and the input is never mutated
+OK   attaching an empty prepared set returns the same entries without change
+OK   DUPLICATE TITLES: three intents with identical titles each get THEIR OWN facts (different duration, different horizon)
+OK   SAME ACTIVITY, DIFFERENT DURATION: each projection uses its own resolved duration (30 min fits Wed/Thu/Fri = 3; 300 min cannot use Thursday's split day = 2)
+OK   FAILURE BEFORE THE CONSTRUCTOR: a rejecting or throwing preparer yields a preview byte-identical to the one built without any preparer (constructed day AND metadata)
+OK   no retry loop: each failing preparer was called exactly once per preview
+OK   O2 FAILURE: a failing range load yields no opportunity facts and an otherwise identical preview (nothing fabricated)
+OK   prepareDecisionFactsFailOpen: no preparer and a failing preparer both resolve to an empty set
+OK   UNKNOWN stays UNKNOWN when prepared before the Constructor: unconfigured availability -> 5 evaluated, 5 unknown, 0 viable, UNKNOWN (never a COMPLETE zero)
+OK   DST: the repeated 01:30 Sunday window stays UNKNOWN (not zero) after the move: 7 evaluated, 5 viable (lower bound), 1 unknown, PARTIAL
+OK   GENERIC_FALLBACK: the fact is labelled GENERIC_FALLBACK over the 45-minute fallback (matching the preview's own warning) and stays inert (identical constructed day)
+OK   SOURCE NEUTRALITY: identical facts yield identical prepared opportunity facts whatever the id looks like (no source branch)
+OK   NON-GOAL and FIXED intents without a horizon: no facts, no range load, normal construction
+OK   EMPTY DAY: no intents -> no filler, no facts, no load
+OK   through the real handler: the constructed day is byte-identical with and without preparation, and the handler no longer performs a post-Constructor load (exactly one)
+OK   forged client opportunity values are ignored: the prepared fact is server-derived
+ALL DECISION FACT PREPARATION CHECKS PASSED
+
+# exit=0 signal=

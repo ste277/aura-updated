@@ -1,0 +1,37 @@
+$ npx ts-node test/myPeopleMp2Ui.test.ts
+# job=math-core-tests step=Run AURA-MP-2 My People special-day UI helpers test env={}
+OK   civil day: 2026-12-05 is "Sat 5 Dec" (no timezone shift)
+OK   civil day: 2027-01-01 is "Fri 1 Jan" (year rollover)
+OK   saved day without a year: "5 December"
+OK   saved day with a year: "29 February 2000"
+OK   days until: Today / Tomorrow / In 9 days
+OK   29 Feb observed on 28 Feb is labelled "(for 29 Feb)" (D4)
+OK   turning: birthday "Turns 40"; anniversary ordinals 1st/2nd/3rd/11th/12th/13th/21st
+OK   turning: unknown year (null) or 0 shows nothing; OTHER never shows a count
+OK   titles: "Ravi's birthday", "Amma's anniversary", "Ravi · Graduation"
+OK   reminder labels: 7 / 0 / null / other
+OK   valid: 5 December, no year
+OK   valid: 29 February without a year
+OK   valid: 29 February 2000 (leap year)
+OK   refused: 29 February 2001 (not a leap year), with a clear message
+OK   refused: 29 February 1900 (century, not a leap year)
+OK   refused: 31 April and 30 February
+OK   refused: no day or no month
+OK   refused: year before 1900, after this year, or not 4 digits
+OK   valid: year exactly 1900 and exactly this year
+OK   refused: another important date without a name
+OK   create: birthday, no year, reminder untouched -> exactly {kind, month, day} (API default 7 applies)
+OK   create: anniversary with a year, "on the day only" chosen -> year and remindDaysBefore 0 sent
+OK   create: other date -> trimmed label; "No reminder" -> remindDaysBefore null
+OK   create: a label is never sent for a birthday
+OK   create: invalid date -> refused, no body
+OK   edit: no change -> no request (null body)
+OK   edit: clearing the year -> exactly {year: null}
+OK   edit: reminder off -> exactly {remindDaysBefore: null}
+OK   edit: day only -> exactly {day: 6}
+OK   edit: a saved reminder outside the three choices (3 days) is kept -> no request
+OK   chart birth date -> birthday values only when complete
+
+ALL MY PEOPLE MP-2 UI CHECKS PASSED (31)
+
+# exit=0 signal=

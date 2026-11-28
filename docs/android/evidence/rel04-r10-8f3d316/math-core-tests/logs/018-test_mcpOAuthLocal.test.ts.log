@@ -1,0 +1,128 @@
+$ npx ts-node test/mcpOAuthLocal.test.ts
+# job=math-core-tests step=Run local OAuth -> MCP test env={}
+OK   discovery: RFC 8414 URL serves metadata (200)
+OK   discovery: OIDC URL serves the same document
+OK   discovery: authorization + token + revocation endpoints under /oauth
+OK   discovery: PKCE S256 only
+OK   discovery: code flow only, no implicit/hybrid
+OK   discovery: public clients only (token auth "none")
+OK   discovery: RFC 9207 iss parameter advertised
+OK   discovery: no userinfo, registration, end-session, introspection, PAR or device endpoints
+OK   discovery: scopes_supported advertises no extra scopes
+OK   discovery: JWKS exposes public key material only
+OK   surface: default userinfo route is not mounted (404)
+OK   surface: dynamic client registration is not available (404)
+OK   flow: authorization returns a code to the registered redirect
+OK   flow: authorization response carries iss (RFC 9207) and state
+OK   flow: token endpoint issues a Bearer access token
+OK   flow: token scope is exactly aura.planning.read
+OK   flow: no refresh token issued
+OK   flow: expires_in matches configured TTL
+OK   flow: access token is opaque (not a JWT)
+OK   verifier: resolves user id, client id and scope
+OK   mcp: initialize succeeds with the issued token
+OK   mcp: tools/list returns exactly find_best_time
+OK   mcp: find_best_time returns ranked, non-personalized candidates
+OK   mcp: no token -> 401 with resource_metadata challenge
+OK   pkce: authorization without code_challenge is refused (invalid_request)
+OK   pkce: code_challenge_method=plain is refused (invalid_request)
+OK   pkce: wrong code_verifier -> invalid_grant
+OK   pkce: missing code_verifier -> refused
+OK   client binding: code issued to one client cannot be redeemed by another
+OK   code: single use -- replay is refused
+OK   code: replay revokes the tokens already issued from that code
+OK   clients: unregistered client_id is refused without redirect
+OK   errors: authorization error page has no stack or internal paths
+OK   clients: unregistered redirect_uri is refused without redirect
+OK   clients: token for a client the resource does not accept -> 403 unauthorized_client
+OK   audience: authorization for a foreign resource is refused (invalid_target)
+OK   login: without an Aura session the flow stops at sign-in (401), no code
+OK   consent: Deny returns access_denied to the client
+OK   consent: page is served with anti-framing headers
+OK   consent: label comes from Aura config, not the client
+OK   csrf: confirm without token -> 403
+OK   csrf: confirm with wrong token -> 403
+OK   csrf: confirm from a foreign Origin -> 403
+OK   consent: CSRF token is bound to the signed-in user (other user -> 403)
+OK   consent: account switch mid-flow -> no code; restarts at a fresh consent page for the new user
+OK   consent: after the switch, the token is for the new user (B), never A
+OK   tokens: tampered token -> rejected
+OK   tokens: JWT with a foreign signature -> rejected
+OK   tokens: unsigned (alg=none) JWT -> rejected
+OK   tokens: token from a different authorization server instance -> rejected
+OK   mcp: invalid token -> 401 error="invalid_token"
+OK   tokens: oversized token -> rejected without lookup
+OK   audience: valid token presented for another resource -> rejected
+OK   audience: token whose aud is another resource -> rejected
+OK   audience: MCP call with wrong-audience token -> 401
+OK   scope: token without aura.planning.read -> 403 insufficient_scope
+     (openid-only request -> error access_denied)
+OK   scope: authorizing without the resource scope yields no usable MCP token
+     (unknown-scope request -> token scope "aura.planning.read")
+OK   scope: unknown scopes are never granted
+OK   revocation: RFC 7009 revoke -> 200 and token immediately unusable
+OK   revocation: another client cannot revoke this client's token
+OK   revocation: disconnect (grant revocation) invalidates every token of that user+client
+OK   revocation: disconnecting user A leaves user B connected
+OK   isolation: user B's token resolves to user B, never A
+OK   rate limit: 4th request of a user in the window -> 429
+OK   rate limit: 429 carries Retry-After and no internals
+OK   rate limit (R1 F2): a user at their limit does not block another user of the same client
+OK   rate limit: rules keyed by verified user AND client with default limits (60 / 600)
+OK   rate limit: window resets
+OK   rate limit: checked only after authentication (401 first)
+OK   expiry: short-lived token initially valid (expires_in 1)
+OK   expiry: expired token -> rejected by verifier
+OK   expiry: MCP call with expired token -> 401 invalid_token
+OK   audit: events were recorded for MCP and OAuth
+OK   audit: no access token appears
+OK   audit: no authorization code or PKCE verifier appears
+OK   audit: no tool arguments appear
+OK   audit: no raw user id appears (pseudonymous userRef only)
+OK   audit: no cookies, secrets or bearer strings
+OK   audit: only allowlisted fields are ever emitted
+OK   audit: tool calls are attributed to user+client+tool
+OK   audit: rate-limit and auth failures are recorded with codes
+OK   audit: unknown fields, non-identifier values and unknown methods/tools are dropped or masked
+OK   gate: local dev with explicit opt-in and loopback URLs -> local
+OK   gate: Production project id -> reject_all
+OK   gate: staging project id -> reject_all
+OK   gate: VERCEL_ENV=production -> reject_all
+OK   gate: VERCEL_ENV=preview -> reject_all
+OK   gate: VERCEL=1 (any Vercel build/runtime) -> reject_all
+OK   gate: VERCEL_URL set -> reject_all
+OK   gate: unknown Vercel project id -> reject_all
+OK   gate: NODE_ENV=production (next build / next start / Docker) -> reject_all
+OK   gate: NODE_ENV unset -> reject_all
+OK   gate: opt-in missing -> reject_all
+OK   gate: opt-in misspelled ("1") -> reject_all
+OK   gate: AUTH_SECRET missing (R1 F14) -> reject_all
+OK   gate: AUTH_SECRET shorter than 32 (R1 F14) -> reject_all
+OK   gate: AUTH_SECRET = public dev fallback (R1 F14) -> reject_all
+OK   gate: remote MCP config disabled -> reject_all
+OK   gate: non-loopback resource URL -> reject_all
+OK   gate: non-loopback issuer -> reject_all
+OK   gate: issuer origin differs from resource origin -> reject_all
+OK   gate: issuer with a path -> reject_all
+OK   gate: loopback lookalike host -> reject_all
+OK   gate: Production project wins over every other variable
+OK   gate: config parser still requires the flag (enabled !== "1" -> disabled)
+OK   gate: rejectAllAccessTokens still rejects
+OK   wiring: /api/mcp falls back to rejectAllAccessTokens unless the gate says local
+OK   wiring: /api/mcp loads the local AS lazily (dynamic import), never at module load
+OK   wiring (R1 F15): /api/mcp local block sits behind a literal process.env.NODE_ENV !== production guard
+OK   wiring (R1 F15): OAuth mount body (incl. the dynamic import) sits inside a literal NODE_ENV !== production block, 404 otherwise
+OK   wiring: OAuth mount 404s unless the gate says local
+OK   wiring: OAuth mount disables Next body parsing (provider reads the raw body)
+OK   wiring: local AS refuses to construct unless the gate says local
+OK   wiring: local AS registers only loopback synthetic redirect URIs
+OK   wiring: runtime gate has a literal process.env.NODE_ENV production check (inlined by next build)
+OK   wiring: remote handler still reads no environment variables
+OK   wiring: authorization server reads no environment variables
+OK   wiring: dev interactions disabled
+OK   pins: oidc-provider pinned exactly to 9.13.3 (D2-reviewed version)
+
+All 119 AURA-MCP-02-I2a local OAuth checks passed.
+oidc-provider WARNING: Unsupported runtime. Use Node.js v22.x LTS, or a later LTS release.
+
+# exit=0 signal=

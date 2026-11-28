@@ -1,0 +1,30 @@
+$ npx ts-node test/hpgFix01AlreadyScheduled.test.ts
+# job=math-core-tests step=Run HPG-FIX-01 already-scheduled recommendation test env={}
+OK   1. ONCE_PER_DAY (null kind) + session today -> occupied
+OK   1. explicit ONCE_PER_DAY + session today -> occupied
+OK   1. same activity, a different day -> not occupied
+OK   1. MULTIPLE_PER_DAY is never blocked by an existing session
+OK   1. CUSTOM (reserved, not enforceable) is never blocked
+OK   1. an invalid persisted pair normalizes to ONCE_PER_DAY, same as the write guard
+OK   1. no occupancy entry -> not occupied
+OK   2. activity with today's session is still weekly-eligible (2 remaining)
+OK   2. ...and flagged scheduledOnPlanningDate
+OK   2. activity with nothing today -> scheduledOnPlanningDate false
+OK   2. planning for tomorrow: today's session does not block
+OK   2. occupancy loader not wired -> field absent (legacy shape unchanged)
+OK   2. occupancy read failure degrades to "no hint", never LOAD_FAILED
+OK   2. MULTIPLE_PER_DAY activity is not flagged
+OK   3. already-scheduled-today activity is NOT offered in Aura suggests
+OK   3. other eligible activities are still offered
+OK   3. an explicit manual handoff is still recognised (server guard decides, not hidden)
+OK   3. planning tomorrow still offers it
+OK   4. Home suggestion carries scheduledToday
+OK   4. scheduled today, 2 remaining -> no "Just today", weekly review primary
+OK   4. scheduled today -> explanatory note shown
+OK   4. scheduled today, 1 remaining -> "Plan another day" (weekly review), never "Plan it" for today
+OK   4. not scheduled today, 2 remaining -> unchanged ("Just today" + "Plan remaining 2")
+OK   4. not scheduled today, 1 remaining -> unchanged single "Plan it"
+
+hpgFix01AlreadyScheduled: all checks passed
+
+# exit=0 signal=

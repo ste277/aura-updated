@@ -1,0 +1,66 @@
+$ npx ts-node test/timingSearch.test.ts
+# job=math-core-tests step=Run timing search test env={}
+OK   FIND returns ranked candidates
+OK   FIND scores are descending
+OK   FIND respects requested duration
+OK   FIND (WEEKEND horizon) only returns Saturday/Sunday candidates
+OK   FIND respects the EVENING time preference (17:00-21:00 IST)
+OK   FIND does not return near-duplicate overlapping options
+OK   FIND (SEVEN_DAYS, >=4-day range) prefers distinct days for its top candidates
+OK   FIND respects the MORNING time preference (05:00-12:00 IST)
+OK   FIND with an explicit dateRange respects that range
+OK   FIND returns fewer than the limit when insufficient valid candidates exist (does not manufacture options)
+OK   Date Night with NO explicit timePreference defaults to EVENING (17:00-21:00 IST) -- the activity's own real-world convention
+OK   Coffee/Tea has no timeOfDayPreference -- candidates are NOT constrained to evening hours (proves this is per-activity, not a blanket default)
+OK   An explicit request.timePreference overrides the activity's own default (caller intent always wins)
+OK   timePreference: 'ANY' (the manual-search API's own default for "not specified") still applies Date Night's EVENING default
+OK   CHECK evaluates exactly the requested start
+OK   CHECK does not silently move the candidate (candidates[0] matches requestedCandidate)
+OK   CHECK found a better nearby candidate for a deliberately poor slot
+OK   CHECK betterNearby is a different instant than the requested one
+OK   CHECK with checkNearbyWindowMinutes: 0 never searches for a nearby alternative
+OK   COMPARE evaluates every supplied candidate
+OK   COMPARE ranks candidates by descending score
+OK   COMPARE preserves original candidate identity (every result start matches a supplied start)
+OK   COMPARE does not introduce candidates beyond what was supplied
+OK   evaluateTimingCandidate() called directly produces the same auraFitScore as evaluateActivityFit()
+OK   evaluateTimingCandidate() result carries a windowLabel matching its windowType
+OK   Known activityId resolves through the explicit ActivityDefinition/ActivityProfile path (auraFitScore defined)
+OK   Known activityId reasons include an activity-rule or Aura Fit reason
+OK   Free-text (no catalog match) still uses the fallback classifier (auraFitScore undefined)
+OK   Free-text fallback still produces structured Muhurta reasons
+OK   Aura Fit score for start-journey via timingSearch matches evaluateActivityFit() directly (76 === 76)
+OK   Aura Fit score for start-journey matches the pre-existing pinned baseline (76 === 76)
+OK   Aura Fit score for deep-work via timingSearch matches evaluateActivityFit() directly (75 === 75)
+OK   Aura Fit score for deep-work matches the pre-existing pinned baseline (75 === 75)
+OK   Aura Fit score for tea-break via timingSearch matches evaluateActivityFit() directly (76 === 76)
+OK   Aura Fit score for tea-break matches the pre-existing pinned baseline (76 === 76)
+OK   Legacy findOptimalTaskTimes still returns planning options for a representative request
+OK   New engine FIND still returns candidates for the equivalent representative request
+OK   Legacy planner reaches its genuine best-fit path for this request (not the NO_FIT chronological fallback)
+OK   New engine's top FIND candidate lands in the same solar window as the legacy planner's top pick
+OK   FIND candidates carry structured MuhurtaReason objects
+OK   CHECK candidate carries structured MuhurtaReason objects
+OK   COMPARE candidates carry structured MuhurtaReason objects
+OK   Explicit-range FIND in a non-IST timezone lands on the correct local date (DST-correct)
+OK   CHECK flags a duration that would cross local midnight instead of silently mis-scoring it
+OK   searchWindow: FIND still returns candidates when real capacity exists inside the bounds
+OK   searchWindow: every returned candidate starts at/after the window start
+OK   searchWindow: every returned candidate ends at/before the window end (half-open, same convention as isWithinWindow/ConstructionWindow)
+OK   searchWindow: the unbounded day-wide search (for comparison) does return at least one candidate outside the narrow window, proving the bound is doing real work
+OK   searchWindow: filtering happens before the result limit is applied (limit=3 still returns in-window candidates, never an empty/out-of-window set)
+OK   searchWindow: bounded FIND still respects the requested duration exactly
+OK   searchWindow: bounded FIND is still ranked by the engine's own real ranking metric (auraFitScore, unmodified)
+OK   searchWindow: omitting the field entirely still returns the full day-wide candidate set (existing callers unaffected)
+OK   excludedIntervals regression setup: WITHOUT excludedIntervals, this real date/activity genuinely reproduces the pass-3 defect (every one of the 3 returned candidates overlaps the gap)
+OK   excludedIntervals: the SAME real defect date now returns candidates when excludedIntervals covers the gap
+OK   excludedIntervals: none of the returned candidates overlap the excluded gap (half-open overlap check, full candidate span not just start)
+OK   excludedIntervals: every returned candidate lies inside one of the two genuinely usable periods (05:00-06:00 or 08:00-09:00 ET)
+OK   excludedIntervals: a 30-minute candidate starting at 05:45 ET (would end at 06:15, straddling into the 06:00 gap boundary) is excluded, not merely checked at its start
+OK   excludedIntervals: a candidate ending exactly at the gap start (05:30-06:00 ET) is NOT excluded -- adjacency remains legal
+OK   excludedIntervals: a candidate starting exactly at the gap end (08:00-08:30 ET) is NOT excluded -- adjacency remains legal
+OK   excludedIntervals: searchWindow alone (no excludedIntervals) still works exactly as before this amendment
+
+ALL TIMING SEARCH CHECKS PASSED
+
+# exit=0 signal=

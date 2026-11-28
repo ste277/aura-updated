@@ -1,0 +1,21 @@
+$ npx ts-node test/birthDateCanonicalization.test.ts
+# job=math-core-tests step=Run birth date canonicalization test env={}
+OK   THE CONTRACT EXAMPLE: 1990-06-15 -> 1990-06-15T00:00:00.000Z
+OK   leap day, century non-leap, 400-year leap, month ends, year boundaries
+OK   EVERY civil date 1900-01-01 .. 2100-12-31 (73414 dates): the canonical string is exactly that day's UTC midnight and its UTC date part is the civil date (the readers' convention)
+OK   NOT A REAL CALENDAR DATE is rejected, never rolled over: 2026-02-30, 2023-02-29, 1900-02-29, 2026-04-31, month 13 / 00, day 00 / 32
+OK   NOT THE ACCEPTED FORMAT is rejected, never silently broadened: unpadded, time suffix, offset, spaces, slashes, empty, year 0000
+OK   NOT A STRING is rejected: Date, number, null, undefined, object
+OK   the rejection is a typed error (TypeError for format, RangeError for calendar) -- the same failure class as before (the database refused such a value), only earlier and deterministic
+OK   PURE STRING CONSTRUCTION: the helper reads no Date, Intl, clock, randomness, environment or timezone, and imports nothing
+OK   the helper exports exactly one function, `canonicalizeCivilBirthDate`
+OK   PROCESS TIMEZONE: the output is identical under UTC, Asia/Kolkata, America/Los_Angeles and Pacific/Auckland
+OK   THE WRITERS (updateBirthProfile, createSavedPerson, updateSavedPerson) pass ONLY the canonical surrogate: the profile writer via `canonicalizeCivilBirthDate(input.birthDate)`, both SavedPerson writers via savedPersonChartParams -- nothing else can reach a birthDate parameter
+OK   MUTATION: a profile writer reverted to the bare `input.birthDate`, the chart helper reverted to the bare `chart.birthDate`, a SavedPerson writer bypassing the helper, a fourth bare use, a writer building its own Date, and a missing import are each detected
+OK   THE DIAGNOSTIC IS READ-ONLY AND AGGREGATE-ONLY: one SELECT ... UNION ALL SELECT, counts per table, no id / name / email / date / time / coordinate / city selected, no GROUP BY, no write
+OK   the diagnostic documents that non-midnight rows are evidence of shifted writes and that midnight rows are NOT certified correct, and that no automatic repair may be built from it
+OK   NO SCHEMA, NO MIGRATION: no migration directory's own contents mention the helper, and no schema.prisma mention either (count-independent -- holds regardless of how many unrelated migrations exist)
+OK   CI RUNS BOTH NEW SUITES: the pure canonicalization suite and the DB timezone-matrix suite
+ALL BIRTH DATE CANONICALIZATION CHECKS PASSED
+
+# exit=0 signal=

@@ -1,0 +1,34 @@
+$ npx ts-node test/autoGoalSuggestionInclusion.test.ts
+# job=math-core-tests step=Run Automatic Goal suggestion inclusion test env={}
+OK   encodeGoalDemandIntentId: same GoalActivity + same date -> same id
+OK   encodeGoalDemandIntentId: different date -> different id
+OK   encodeGoalDemandIntentId: different GoalActivity -> different id
+OK   encodeGoalDemandIntentId: canonical format
+OK   goalDemandIntentId.ts imports exactly one module, the pure zero-import date-validity helper (client-bundle-safe, this ticket's own A3.4 addition)
+OK   goalDemandIntentId.ts never imports pg/db.ts/React/next in real code
+OK   goalDemandIntentId.ts never calls Date.now()/new Date() in real code (no randomness/time dependency)
+OK   10. included row uses the canonical goal-demand intent id as its own id
+OK   11. the id uses exactly the planningLocalDate it was given
+OK   13. included row carries goalActivityId
+OK   14. included row carries activityId when present
+OK   15. no duration is invented
+OK   16. flexibility uses the existing Goal/manual default (FLEXIBLE)
+OK   row id never uses the manual plan-day-goal- scheme
+OK   row carries no additional Rhythm/goalId/remainingThisWeek fields beyond the existing Goal row shape
+OK   44. title change does not alter identity
+OK   45. repeated include/remove/include yields the same intent id
+OK   43. same GoalActivity, Today vs Tomorrow -> different intent ids
+OK   2. one suggestion with zero rows -> fully available
+OK   1/19. zero suggestions -> empty available list
+OK   3. multiple suggestions preserve input order (no re-sort)
+OK   7/17. a GoalActivity with an existing row (included) disappears from available suggestions
+OK   19. removing the row (simulated) returns the suggestion to the available list
+OK   25. manual Goal row identity is unchanged (still plan-day-goal-<id>)
+OK   24. a manually-seeded GoalActivity remains excluded from available automatic suggestions (defensive, in addition to A3.2's own server-side dedup)
+OK   29. suggestions from multiple Goals all remain available together
+OK   4. suggestion carries the activity title
+OK   5. suggestion carries the Goal title
+OK   6. remainingThisWeek is never read anywhere in planDayEntry.ts (not rendered, not used as a scheduling field)
+ALL AUTO GOAL SUGGESTION INCLUSION CHECKS PASSED
+
+# exit=0 signal=

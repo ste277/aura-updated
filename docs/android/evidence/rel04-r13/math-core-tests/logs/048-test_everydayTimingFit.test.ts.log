@@ -1,0 +1,24 @@
+$ npx ts-node test/everydayTimingFit.test.ts
+# job=math-core-tests step=Run everyday shared timing fit test env={}
+OK   date-night is NOT Muhurtham-eligible (sanity check this test is exercising the right path)
+OK   findEverydaySharedTiming returns OK for an everyday activity
+OK   Returns at least one candidate for a real 3-day window
+OK   Every candidate has a sharedScore between 0 and 10
+OK   Every candidate has a rating in the everyday vocabulary (never Muhurtham language)
+OK   Candidates are ranked by sharedScore descending
+OK   Each candidate carries the underlying GENERAL candidate untouched
+OK   An unknown activityId returns UNSUPPORTED_ACTIVITY, not a throw
+OK   A partner/user with no natal data still returns OK (personal context is optional)
+OK   The shared result's generalCandidate score matches a plain GENERAL FIND search for the same instant (reused, not reinvented)
+OK   evaluateEverydaySharedCandidate preserves the exact instant (start/end untouched)
+OK   evaluateEverydaySharedCandidate carries the general candidate untouched
+OK   sharedScore is within 0-10
+OK   rating is everyday vocabulary, never Muhurtham language
+OK   owner and partner scores genuinely differ for divergent natal signals
+OK   sharedScore differs from the owner-only score (a real blend, not owner-only)
+OK   sharedScore differs from the unpersonalized general score
+OK   weaker-floor blend pulls sharedScore below the plain average when partner is the weaker signal
+
+ALL EVERYDAY TIMING FIT CHECKS PASSED
+
+# exit=0 signal=

@@ -1,0 +1,20 @@
+$ npx ts-node test/goalActivityRhythmGoalDetailStructuralGuards.test.ts
+# job=math-core-tests step=Run Goal activity rhythm Goal Detail structural guards test env={}
+OK   route.ts never writes a Rhythm policy (no UPDATE/INSERT touching rhythmKind/rhythmTargetPerWeek)
+OK   route.ts never creates a GoalActivityOccurrence row (no INSERT reference at all -- read-only loadGoalActivityRhythmFactsForActivities only)
+OK   Rhythm-authoring fetches go ONLY through the two allowed call sites: Goal Detail's Add-activity POST (optional rhythm field) and RhythmSettingsEditor's single PATCH .../rhythm -- never a third
+OK   GoalDetailClient.tsx's own fetch endpoints are still exactly the pre-R4 set (load/dismiss/add/archive/delete) -- no new endpoint was added
+OK   goalsPresentation.ts introduces no percentage/ratio math for Rhythm (no "/ rhythm" or "rhythm *" arithmetic, no Math.round paired with a rhythm field)
+OK   goalsPresentation.ts never multiplies a Rhythm count by a CompletionRequirement target/duration (no targetPerWeek next to targetValue/durationMinutes in real code)
+OK   route.ts introduces no percentage/ratio math for Rhythm
+OK   no dayBucket/dailyTarget/day-accumulation concept anywhere in the three R4-touched files
+OK   no partial-progress concept (partialProgress/fractionalCompletion) was introduced
+OK   GoalDetailClient.tsx has no Rhythm configuration control (no input/select tied to a rhythm field)
+OK   GoalDetailClient.tsx has no streak/calendar/history/trend UI
+OK   goalsPresentation.ts defines no streak/calendar/history formatter
+OK   R4 added no schema: no migration directory beyond the already-known 0043 adds a real rhythm column/table (count-independent -- holds regardless of how many unrelated migrations exist; scoped to actual DDL, not comment prose)
+OK   loadGoalActivityRhythmFactsForActivities contains no INSERT/UPDATE/DELETE (read-only, same contract as its single-activity sibling)
+OK   loadGoalActivityRhythmFactsForActivities never loops/batches to WRITE anything (no .map()-driven mutation, read-only batching of a SELECT only)
+ALL GOAL ACTIVITY RHYTHM GOAL DETAIL STRUCTURAL GUARD CHECKS PASSED
+
+# exit=0 signal=

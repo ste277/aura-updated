@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createHabitLog, getHabitLogByClientRequestId, getUserById, listHabitLogsForInsights, INSIGHTS_HISTORY_DAYS } from '../../../lib/db';
 import { getSessionFromRequest } from '../../../lib/session';
+import { refuseUnboundWrite, refuseAccountMismatch } from '../../../lib/expectedAccount';
 import { parseJsonObject } from '../../../lib/request';
 import { resolveHistoricalActiveWindow } from '../../../lib/historicalActivityWindow';
 import { SolarNoEventError } from '../../../../../packages/astronomy/src/errors';
@@ -18,10 +19,22 @@ function parseActivitySignificance(value: unknown): 'LOW' | 'MEDIUM' | 'HIGH' {
 }
 
 export async function POST(req: NextRequest) {
+  // AURA-ANDROID-REL-04 IR-01 (R2) -- an unbound write comes from a client
+  // loaded before account binding: refused with a retryable 503 (old clients
+  // keep their queue) BEFORE authentication, so an expired old tab gets the
+  // same answer. Nothing is read or written.
+  const unbound = refuseUnboundWrite(req);
+  if (unbound) return unbound;
+
   const session = getSessionFromRequest(req);
   if (!session) {
     return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 });
   }
+
+  // The write must be for the account this session authenticates; checked
+  // before any read or write.
+  const accountMismatch = refuseAccountMismatch(req, session.userId);
+  if (accountMismatch) return accountMismatch;
 
   const user = await getUserById(session.userId);
   if (!user) return NextResponse.json({ error: 'User not found.' }, { status: 404 });

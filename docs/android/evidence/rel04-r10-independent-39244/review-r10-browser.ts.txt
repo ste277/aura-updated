@@ -1,0 +1,219 @@
+/**
+ * AURA-ANDROID-REL-04 (R3) -- REAL Chromium multi-tab checks (Playwright).
+ *
+ *   npx ts-node test/rel04Chromium.test.ts      (needs `npx playwright install chromium`)
+ *
+ * A local HTTP server (this process) serves:
+ *   - one page that loads the ACTUAL client modules (lib/accountRoutePolicy,
+ *     accountSession, offlineHabitQueue, habitLogSyncPolicy, activitySync,
+ *     signOut, signInCode, accountBoundFetch), transpiled and bundled as-is,
+ *     plus the pre-REL-04 client's enqueue/replay code (vendored, a54daf6);
+ *   - the REAL middleware and route handlers (logout, session, habit-logs,
+ *     plans) over the in-memory db stub of rel04AccountIsolationHarness, and a
+ *     simulated verify-code (it issues the real session cookie).
+ * Two pages in ONE browser context = two tabs sharing real localStorage, real
+ * Web Locks and the real cookie jar; Set-Cookie ordering is the browser's own.
+ *
+ * Chromium only: this is NOT WKWebView, Android WebView or physical-device
+ * acceptance.
+ */
+import * as http from 'http';
+import * as fs from 'fs';
+import * as path from 'path';
+import { WEB, addUser, check, routes, store } from './rel04AccountIsolationHarness';
+
+const ts = require(require.resolve('typescript', { paths: [WEB] }));
+const { NextRequest } = require(require.resolve('next/server', { paths: [path.join(WEB, 'app', 'api', 'habit-logs')] }));
+const auth = require(path.join(WEB, 'lib', 'auth'));
+const middlewareMod = require(path.join(WEB, 'middleware'));
+const Module = require('module');
+
+const A = 'synthetic-user-a';
+const B = 'synthetic-user-b';
+addUser(A, 'alicesynth@example.invalid');
+addUser(B, 'bobsynth@example.invalid');
+const EMAIL: Record<string, string> = { 'alicesynth@example.invalid': A, 'bobsynth@example.invalid': B };
+
+// ---------------------------------------------------------------- bundle of the real client modules
+const MODULES = ['serviceWorkerBridge', 'accountRoutePolicy', 'accountSession', 'offlineHabitQueue', 'habitLogSyncPolicy', 'activitySync', 'signOut', 'signInCode', 'accountBoundFetch'];
+const OLD = path.join(__dirname, 'fixtures', 'rel04-reviewed-head');
+function bundle(): string {
+  const defs = MODULES.map((n) => {
+    const src = fs.readFileSync(path.join(WEB, 'lib', `${n}.ts`), 'utf8');
+    const js = ts.transpileModule(src, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText;
+    return `__def(${JSON.stringify('./' + n)}, function (require, module, exports) {\n${js}\n});`;
+  }).join('\n');
+  const tsOld = (body: string, params: string) => ts.transpileModule(`async function __f(${params}) {\n${body}\n}`, { compilerOptions: { target: ts.ScriptTarget.ES2020 } }).outputText;
+  const oldEnqueue = tsOld(fs.readFileSync(path.join(OLD, 'page.enqueue.txt'), 'utf8'), 'localStorage, payload, tempId');
+  const oldReplay = tsOld(fs.readFileSync(path.join(OLD, 'page.syncOfflineLogs.txt'), 'utf8') + '\nreturn syncOfflineLogs();', 'localStorage, fetch, classifyHabitLogSyncOutcome, loadUserDataAndLogs, loadMyDay');
+  return `(function(){
+var __mods = {}, __cache = {};
+function __def(id, fn) { __mods[id] = fn; }
+function __req(id) {
+  if (__cache[id]) return __cache[id].exports;
+  var m = { exports: {} }; __cache[id] = m; __mods[id](__req, m, m.exports); return m.exports;
+}
+${defs}
+var acct = __req('./accountSession');
+window.aura = { acct: acct, q: __req('./offlineHabitQueue'), sync: __req('./activitySync'), so: __req('./signOut'), si: __req('./signInCode'), bf: __req('./accountBoundFetch'), policy: __req('./accountRoutePolicy'), cls: __req('./habitLogSyncPolicy') };
+window.__nativeFetch = window.fetch.bind(window); // what an old bundle uses
+window.aura.bf.installAccountBoundFetch();
+__req('./serviceWorkerBridge').announceAccountBoundary();
+window.aura.swb = __req('./serviceWorkerBridge');
+window.oldEnqueue = (${oldEnqueue.trim().replace(/;$/, '')});
+window.oldReplay = (${oldReplay.trim().replace(/;$/, '')});
+window.auraReady = true;
+})();`;
+}
+
+// R2 (091e3ce) logout route, to show the browser-ordering defect it allowed.
+function compileFixture(file: string, fake: string, overrides: Record<string, unknown> = {}) {
+  const js = ts.transpileModule(fs.readFileSync(file, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, esModuleInterop: true } }).outputText;
+  const m = new Module(fake, module); m.filename = fake; m.paths = Module._nodeModulePaths(path.dirname(fake));
+  const orig = m.require.bind(m); m.require = (id: string) => (id in overrides ? overrides[id] : orig(id));
+  m._compile(js, fake); return m.exports;
+}
+const R2F = path.join(__dirname, 'fixtures', 'rel04-r2-head');
+const r2Expected = compileFixture(path.join(R2F, 'expectedAccount.ts.txt'), path.join(WEB, 'lib', 'expectedAccount.r2c.js'));
+const r2Logout = compileFixture(path.join(R2F, 'logout.route.ts.txt'), path.join(WEB, 'app', 'api', 'auth', 'logout', 'route.r2c.js'), { '../../../../lib/expectedAccount': r2Expected });
+
+// ---------------------------------------------------------------- server
+type Gate = { path: string; phase: 'before' | 'after'; release: () => void; promise: Promise<void>; arrived: Promise<void>; mark: () => void };
+const gates: Gate[] = [];
+function hold(p: string, phase: 'before' | 'after') {
+  let release!: () => void, mark!: () => void;
+  const g: Gate = { path: p, phase, release: () => release(), promise: new Promise((r) => { release = r; }), arrived: new Promise((r) => { mark = r; }), mark: () => mark() };
+  gates.push(g); return g;
+}
+function takeGate(p: string, phase: 'before' | 'after') { const i = gates.findIndex((g) => g.path === p && g.phase === phase); return i >= 0 ? gates.splice(i, 1)[0] : null; }
+const serverLog: Array<{ path: string; method: string; status: number; expected: string | null }> = [];
+let BUNDLE = '';
+// R4 service-worker cases: what the "deployment" currently serves at /sw.js and at the app URL.
+const OLD_SW = fs.readFileSync(path.join(__dirname, 'fixtures', 'rel04-prod-head', 'sw.js.txt'), 'utf8'); // Production ac46fc3
+const NEW_SW = fs.readFileSync(path.join(WEB, 'public', 'sw.js'), 'utf8');
+const R5_SW = fs.readFileSync(path.join(__dirname, 'fixtures', 'rel04-r5-head', 'sw.js.txt'), 'utf8'); // R6 before/after (CH15)
+const OLD_LOGOUT = fs.readFileSync(path.join(__dirname, 'fixtures', 'rel04-prod-head', 'page.handleLogout.txt'), 'utf8');
+const deploy = { sw: NEW_SW, appHtml: 'new' as 'old' | 'new' };
+// The pre-boundary page: registers the worker like Home does, and signs out with Production's own handleLogout body.
+const OLD_PAGE = `<!doctype html><html><body data-screen="signed-in"><script>
+navigator.serviceWorker.register('/sw.js');
+const setUser = (u) => { document.body.dataset.screen = u ? 'signed-in' : 'signed-out'; };
+const useCallback = (fn) => fn;
+${OLD_LOGOUT.replace('const handleLogout', 'window.handleLogout')}
+window.oldReady = true;
+</script></body></html>`;
+
+const server = http.createServer(async (req, res) => {
+  const url = new URL(req.url ?? '/', 'http://127.0.0.1');
+  if (url.pathname === '/sw.js') { res.writeHead(200, { 'content-type': 'text/javascript', 'cache-control': 'no-cache' }); res.end(deploy.sw); return; }
+  if (url.pathname === '/app') { res.writeHead(200, { 'content-type': 'text/html', 'cache-control': 'no-cache' }); res.end(deploy.appHtml === 'old' ? OLD_PAGE : '<!doctype html><html><body><script>navigator.serviceWorker.register("/sw.js");</script><script src="/bundle.js"></script></body></html>'); return; }
+  if (url.pathname === '/') { res.writeHead(200, { 'content-type': 'text/html' }); res.end('<!doctype html><html><body><script src="/bundle.js"></script></body></html>'); return; }
+  if (url.pathname === '/bundle.js') { res.writeHead(200, { 'content-type': 'text/javascript' }); res.end(BUNDLE); return; }
+  const chunks: Buffer[] = [];
+  for await (const c of req) chunks.push(c as Buffer);
+  const body = chunks.length ? Buffer.concat(chunks).toString('utf8') : undefined;
+  const headers = new Headers();
+  for (const [k, v] of Object.entries(req.headers)) if (typeof v === 'string') headers.set(k, v);
+  const method = (req.method ?? 'GET').toUpperCase();
+  const key = `${method} ${url.pathname}`;
+  const before = takeGate(url.pathname, 'before');
+  if (before) { before.mark(); await before.promise; }
+  const nreq = new NextRequest(url.toString(), { method, headers, body: method === 'GET' || method === 'HEAD' ? undefined : body });
+  let out: Response;
+  const mw: Response = url.pathname.startsWith('/api/') ? await middlewareMod.middleware(nreq) : new Response(null, { headers: { 'x-middleware-next': '1' } });
+  if (mw.headers.get('x-middleware-next') !== '1') out = mw;
+  else if (key === 'POST /api/auth/verify-code') {
+    const uid = EMAIL[JSON.parse(body ?? '{}').email];
+    out = uid
+      ? Response.json({ ok: true, userId: uid }, { status: 200, headers: { 'set-cookie': `as_session=${auth.createSessionToken(uid, store.users.get(uid)!.email)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000`, 'Cache-Control': 'no-store' } })
+      : Response.json({ error: 'That code is not valid.' }, { status: 401 });
+  } else if (key === 'POST /api/auth/logout-r2') out = await r2Logout.POST(nreq);
+  else if (routes[key]) out = await routes[key](nreq);
+  else out = Response.json({}, { status: 200 });
+  serverLog.push({ path: url.pathname, method, status: out.status, expected: headers.get('x-aura-expected-account') });
+  const after = takeGate(url.pathname, 'after');
+  if (after) { after.mark(); await after.promise; }
+  const outHeaders: Record<string, string | string[]> = {};
+  out.headers.forEach((v, k) => { if (k !== 'set-cookie') outHeaders[k] = v; });
+  const sc = (out.headers as any).getSetCookie?.() ?? [];
+  if (sc.length) outHeaders['set-cookie'] = sc;
+  res.writeHead(out.status, outHeaders);
+  res.end(Buffer.from(await out.arrayBuffer()));
+});
+
+const payload = (title: string, crid: string) => ({ activityTitle: title, activeWindow: 'NEUTRAL', logTimestamp: '2026-11-25T06:00:00.000Z', durationMinutes: 30, logSource: 'MANUAL', activitySignificance: 'MEDIUM', clientRequestId: crid });
+
+async function main() {
+  const assert = require('node:assert/strict');
+  const { payload } = require('./rel04AccountIsolationHarness');
+  const { chromium } = require('@playwright/test');
+  BUNDLE = bundle();
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const origin = 'http://127.0.0.1:' + (server.address() as any).port;
+  const profiles = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'r10-browser-'));
+  const profile = path.join(profiles, 'existing');
+  const key = 'offline_habit_queue_v2:' + A;
+  const raw = '[{"clientRequestId":"historical"';
+  let context: any;
+  const launch = async (dir: string) => chromium.launchPersistentContext(dir, { headless: true });
+  async function open(email: string) {
+    const p = await context.newPage();
+    await p.goto(origin + '/');
+    await p.waitForFunction(() => (window as any).auraReady);
+    const result = await p.evaluate(async (e: string) => (window as any).aura.si.verifySignInCode({ email: e, code: '123456' }), email);
+    assert.equal(result.kind, 'VERIFIED');
+    return p;
+  }
+  const accountA = 'alicesynth@example.invalid';
+  const accountB = 'bobsynth@example.invalid';
+  const run = (p: any, id: string) => p.evaluate(async (value: any) => {
+    const w = (window as any).aura;
+    const sent = await w.sync.submitActivityLog(value, 'temp');
+    const rp = await w.sync.replayOfflineQueue();
+    return { submit: sent.kind, replayStoppedBecause: rp.stoppedBecause, attempted: rp.attempted };
+  }, payload('review browser activity', id));
+  const signout = (p: any) => p.evaluate(async () => {
+    const so = (window as any).aura.so;
+    const r = await so.performSignOut({ fetch: window.fetch.bind(window), confirm: () => true });
+    return { outcome: r.outcome, owned: r.owned, message: so.signOutOutcomeMessage(r) };
+  });
+  try {
+    context = await launch(profile);
+    const a = await open(accountA);
+    const browserVersion = context.browser()?.version();
+    await a.evaluate(async (value: any) => (window as any).aura.q.enqueueOwned(value), { ...payload('queued before damage', 'browser-preexisting'), ownerUserId: A, tempId: 'pre' });
+    // Exercise replay before sign-out has given the pre-existing request a decision.
+    await a.evaluate(([k,v]: string[]) => localStorage.setItem(k,v), [key,raw]);
+    const start = await run(a,'browser-before-signout');
+    const logout = await signout(a);
+    const b = await open(accountB);
+    const other = await run(b,'browser-b');
+    await signout(b);
+    const same = await open(accountA);
+    const signedBackIn = await run(same,'browser-after-signin');
+    await context.close();
+    context = undefined;
+    context = await launch(profile);
+    const newA = await open(accountA);
+    const restarted = await run(newA,'browser-after-restart');
+    const survivor = await newA.evaluate((k: string) => localStorage.getItem(k), key);
+    await context.close();
+    context = undefined;
+    context = await launch(path.join(profiles, 'clean'));
+    const clean = await open(accountA);
+    const otherProfile = await run(clean,'browser-clean-profile');
+    assert.equal(survivor, raw);
+    for (const x of [start,signedBackIn,restarted]) { assert.equal(x.submit,'storage-unavailable'); assert.equal(x.attempted,0); }
+    assert.equal(logout.outcome,'signed-out'); assert.equal(logout.owned.unidentified,1);
+    assert.equal(other.submit,'confirmed'); assert.equal(otherProfile.submit,'confirmed');
+    const writes = serverLog.filter((r) => r.method === 'POST' && r.path === '/api/habit-logs');
+    assert.equal(writes.length,2);
+    console.log(JSON.stringify({ browserVersion, start, logout, other, signedBackIn, restarted, survivor, otherProfile, logPosts: writes.length, rowsA: store.logs.filter(x => x.userId === A).map(x=>x.clientRequestId), rowsB: store.logs.filter(x => x.userId === B).map(x=>x.clientRequestId) }));
+  } finally {
+    if (context) await context.close();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    fs.rmSync(profiles, { recursive: true, force: true });
+  }
+}
+main().catch((error) => { console.error(error); process.exitCode = 1; });
+

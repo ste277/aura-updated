@@ -1,0 +1,31 @@
+$ npx ts-node --project tsconfig.jsdom-tests.json test/myPeopleMp3R1ConcurrencyDb.test.ts
+# job=day-constructor-acceptance-db-tests step=Run AURA-MP-3-R1 My People concurrency DB test env={}
+OK   F1 occasion DELETE while a dismissal is mid-write: the DELETE waits on the day's row lock
+OK   F1 occasion DELETE after dismissal: dismissal 200, DELETE 200, the day and its dismissal are both gone
+OK   F1 occasion DELETE after dismissal: unrelated reminder rows (other type, other user) untouched
+OK   F1 dismissal while an occasion DELETE is mid-way: the dismissal waits on the day's row lock
+OK   F1 dismissal after occasion DELETE: DELETE 200, dismissal 404, nothing written
+OK   F1 person DELETE while a dismissal is mid-write: the DELETE waits on the person's special days BEFORE removing dismissals
+OK   F1 person DELETE after dismissal: dismissal 200, DELETE 200, no orphan dismissal left
+OK   F1 person DELETE after dismissal: unrelated reminder rows untouched
+OK   F1 dismissal while a person DELETE is mid-way: the dismissal waits on the day's row lock
+OK   F1 dismissal after person DELETE: DELETE 200, dismissal 404, nothing written
+OK   F1: none of the owner's PERSON_OCCASION dismissals outlives its special day
+OK   F2 Move first, person DELETE second: the DELETE waits on the person row (lock taken before the plan), never on the plan
+OK   F2 Move first, person DELETE second: both 200 (no deadlock), source MOVED, one successor, person gone, no link left to it
+OK   F2 person DELETE first, Move second: the replacement waits on the person row before locking the plan
+OK   F2 person DELETE first, Move second: both 200 (no deadlock), source MOVED and unlinked, one unlinked successor, history kept
+OK   F2 Home Move first, person DELETE second: the DELETE waits on the person row (lock taken before the plan), never on the plan
+OK   F2 Home Move first, person DELETE second: both 200 (no deadlock), source MOVED, one successor, person gone, no link left to it
+OK   F2 person DELETE first, Home Move second: the replacement waits on the person row before locking the plan
+OK   F2 person DELETE first, Home Move second: both 200 (no deadlock), source MOVED and unlinked, one unlinked successor, history kept
+OK   F2 Recomposition first, person DELETE second: the DELETE waits on the person row (lock taken before the plan), never on the plan
+OK   F2 Recomposition first, person DELETE second: both 200 (no deadlock), source MOVED, one successor, person gone, no link left to it
+OK   F2 person DELETE first, Recomposition second: the replacement waits on the person row before locking the plan
+OK   F2 person DELETE first, Recomposition second: both 200 (no deadlock), source MOVED and unlinked, one unlinked successor, history kept
+OK   F2: no plan links to a person that does not exist
+OK   Steady state: Move keeps the link to a living person
+
+ALL MY PEOPLE MP-3-R1 CONCURRENCY DB CHECKS PASSED (25)
+
+# exit=0 signal=

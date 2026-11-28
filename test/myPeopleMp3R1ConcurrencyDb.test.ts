@@ -31,6 +31,7 @@ const occasionsRoute = require('../apps/web/app/api/people/[personId]/occasions/
 const occasionRoute = require('../apps/web/app/api/people/[personId]/occasions/[occasionId]/route');
 const dismissalRoute = require('../apps/web/app/api/people/occasions/[occasionId]/dismissal/route');
 const plansRoute = require('../apps/web/app/api/plans/route');
+const { boundHeaders } = require('./rel04BoundTestHeaders');
 const moveRoute = require('../apps/web/app/api/plans/[planId]/move/route');
 const acceptRoute = require('../apps/web/app/api/day/recompose/accept/route');
 
@@ -203,7 +204,10 @@ async function main() {
     const nextSlot = () => (slot += 0.75) - 0.75; // 45-minute steps, 30-minute plans
     const mkPlan = async (personId: string, title: string, flexible = false) => {
       const start = at(nextSlot());
-      const res = await call(plansRoute.POST(req(token, { title, activityType: 'Catch-up', plannedStartAt: start.toISOString(), plannedEndAt: new Date(start.getTime() + 30 * MINUTE).toISOString(), durationMinutes: 30, windowType: 'NEUTRAL', savedPersonId: personId })));
+      // AURA-ANDROID-REL-04 (R2/R3 pattern, test/rel04BoundTestHeaders.ts): POST /api/plans is an account-bound write --
+      // every current client states the account it writes for (X-Aura-Expected-Account), here the request's OWN session
+      // account, exactly what the app sends. Ownership is still decided by the route.
+      const res = await call(plansRoute.POST({ ...req(token, { title, activityType: 'Catch-up', plannedStartAt: start.toISOString(), plannedEndAt: new Date(start.getTime() + 30 * MINUTE).toISOString(), durationMinutes: 30, windowType: 'NEUTRAL', savedPersonId: personId }), headers: boundHeaders(token) }));
       if (res.status !== 200) throw new Error(`plan create ${res.status} ${JSON.stringify(res.body)}`);
       if (flexible) await q(`UPDATE "PlannedActivity" SET "schedulingMode" = 'FLEXIBLE' WHERE id = $1`, [res.body.id]);
       return res.body.id as string;

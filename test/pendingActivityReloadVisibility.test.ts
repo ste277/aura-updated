@@ -52,8 +52,14 @@ class MemoryStorage {
   clear(): void {
     this.store = {};
   }
+  get length(): number { return Object.keys(this.store).length; }
+  key(i: number): string | null { return Object.keys(this.store)[i] ?? null; }
 }
 (global as any).localStorage = new MemoryStorage();
+// AURA-ANDROID-REL-04 (R4, R8): the queue is IndexedDB; entries are seeded as
+// active (R8) records, and a retired-format localStorage value (R3 aura_q4, below)
+// is quarantined -- never read back as pending. A spec-conformant in-memory IndexedDB stands in for the browser's.
+{ const fidb = require('fake-indexeddb'); (global as any).indexedDB = fidb.indexedDB; (global as any).IDBKeyRange = fidb.IDBKeyRange; }
 
 import {
   readOfflineHabitQueue,
@@ -64,8 +70,33 @@ import {
 } from '../apps/web/lib/offlineHabitQueue';
 import { LoggedEntryItem } from '../apps/web/components/CalendarViewSection';
 
+// AURA-ANDROID-REL-04 IR-01: the queue is per verified account; entries carry ownerUserId.
+const OWNER = 'synthetic-user-a';
+// A retired R3-format key (aura_q4:<owner>:<clientRequestId>:<recordId>): R8 quarantines it, so a corrupt value there never yields a pending entry.
+const OWNED_KEY = 'aura_q4:' + OWNER + ':corrupt-entry:r0';
+async function clearIdb() {
+  const db: IDBDatabase = await require('../apps/web/lib/offlineHabitQueue').__openQueueDbForTests();
+  const t = db.transaction(['records', 'claims', 'dispatches', 'tombstones'], 'readwrite');
+  for (const n of ['records', 'claims', 'dispatches', 'tombstones']) t.objectStore(n).clear();
+  await new Promise<void>((res) => { t.oncomplete = () => res(); });
+}
+let pendingClear: Promise<void> = Promise.resolve();
+// AURA-ANDROID-REL-04 (R8): the one ACTIVE format is an IndexedDB record stamped fmt 'r8' (retired
+// localStorage formats are quarantined, never read as pending), so entries are seeded as such records.
+async function writeRecords(items: unknown[]) {
+  const db: IDBDatabase = await require('../apps/web/lib/offlineHabitQueue').__openQueueDbForTests();
+  const t = db.transaction(['records'], 'readwrite');
+  items.forEach((i, n) => {
+    const it = i && typeof i === 'object' ? { ownerUserId: OWNER, ...(i as object), recordId: `r${n}` } : i;
+    const crid = (it as { clientRequestId?: string })?.clientRequestId ?? `malformed-${n}`;
+    t.objectStore('records').put({ recordId: `r${n}`, ownerUserId: OWNER, clientRequestId: crid, item: it, queuedAt: n, fmt: 'r8' });
+  });
+  await new Promise<void>((res) => { t.oncomplete = () => res(); });
+}
 function setQueue(items: unknown[]) {
-  (global as any).localStorage.setItem('offline_habit_queue', JSON.stringify(items));
+  pendingClear = clearIdb().then(() => writeRecords(items));
+  const ls = (global as any).localStorage;
+  for (const k of Object.keys((ls as any).store ?? {})) if (k.startsWith('aura_q')) ls.removeItem(k);
 }
 
 const queuedA: QueuedHabitLog = {
@@ -94,9 +125,11 @@ function confirmedEntry(id: string, clientRequestId: string, title = 'Deep Work'
 // (1. pending survives reload, 2. multiple entries, 5. stable identity).
 // ============================================================
 
-(global as any).localStorage.clear();
+async function readQ() { await pendingClear; const r = await readOfflineHabitQueue(OWNER); if (r === null) throw new Error('queue unreadable'); return r; }
+(async () => {
+(global as any).localStorage.clear(); pendingClear = clearIdb();
 setQueue([queuedA]);
-const read1 = readOfflineHabitQueue();
+const read1 = (await readQ());
 check('readOfflineHabitQueue reads back the one queued entry', read1.length === 1);
 const reconstructed1 = read1.map(toPendingLoggedEntry);
 check('the reconstructed entry has syncStatus === \'pending\' (4. no accidental promotion -- always literal, never derived)', reconstructed1[0]?.syncStatus === 'pending');
@@ -108,9 +141,9 @@ check('the reconstructed entry preserves activityTitle/loggedAt/notes/source/sig
   reconstructed1[0]?.activitySignificance === 'HIGH'
 ));
 
-(global as any).localStorage.clear();
+(global as any).localStorage.clear(); pendingClear = clearIdb();
 setQueue([queuedA, queuedB]);
-const reconstructedMulti = readOfflineHabitQueue().map(toPendingLoggedEntry);
+const reconstructedMulti = (await readQ()).map(toPendingLoggedEntry);
 check('two queued entries both reconstruct independently', reconstructedMulti.length === 2 && reconstructedMulti.every((e) => e.syncStatus === 'pending'));
 check('each keeps its own distinct id (clientRequestId)', reconstructedMulti[0]?.id !== reconstructedMulti[1]?.id);
 
@@ -124,9 +157,9 @@ check('clientRequestId is carried onto the reconstructed entry itself (never a f
 // once it's gone from the queue (inherent to reading live, not cached).
 // ============================================================
 
-(global as any).localStorage.clear();
+(global as any).localStorage.clear(); pendingClear = clearIdb();
 setQueue([queuedB]); // queuedA removed, as if replay had confirmed/rejected + removed it
-const afterRemoval = readOfflineHabitQueue();
+const afterRemoval = (await readQ());
 check('an item removed from the queue is no longer read back', !afterRemoval.some((item) => item.clientRequestId === queuedA.clientRequestId));
 check('the remaining still-queued item is still read back', afterRemoval.some((item) => item.clientRequestId === queuedB.clientRequestId));
 
@@ -136,22 +169,22 @@ check('the remaining still-queued item is still read back', afterRemoval.some((i
 // malformed sibling destroy otherwise-valid entries.
 // ============================================================
 
-(global as any).localStorage.clear();
-check('no queue key at all -> empty array, no throw', (() => { try { return readOfflineHabitQueue().length === 0; } catch { return false; } })());
+(global as any).localStorage.clear(); pendingClear = clearIdb();
+check('no queue key at all -> empty array, no throw', (await readQ().then((r) => r.length === 0, () => false)));
 
-(global as any).localStorage.setItem('offline_habit_queue', 'not valid json{{{');
-check('corrupt JSON -> empty array, no throw', (() => { try { return readOfflineHabitQueue().length === 0; } catch { return false; } })());
+setQueue([]); (global as any).localStorage.setItem(OWNED_KEY, 'not valid json{{{');
+check('corrupt JSON -> empty array, no throw', (await readQ().then((r) => r.length === 0, () => false)));
 
-(global as any).localStorage.setItem('offline_habit_queue', JSON.stringify({ not: 'an array' }));
-check('a non-array value -> empty array, no throw', (() => { try { return readOfflineHabitQueue().length === 0; } catch { return false; } })());
+setQueue([]); (global as any).localStorage.setItem(OWNED_KEY, JSON.stringify({ not: 'an array' }));
+check('a non-array value -> empty array, no throw', (await readQ().then((r) => r.length === 0, () => false)));
 
-(global as any).localStorage.setItem('offline_habit_queue', JSON.stringify([queuedA, { activityTitle: 'Missing required fields' }]));
-const mixedRead = readOfflineHabitQueue();
+setQueue([queuedA, { activityTitle: 'Missing required fields' }]);
+const mixedRead = (await readQ());
 check('a malformed sibling is dropped while a valid sibling in the SAME queue still reconstructs (one bad item does not destroy the rest)', mixedRead.length === 1 && mixedRead[0]?.clientRequestId === queuedA.clientRequestId);
 
-(global as any).localStorage.setItem('offline_habit_queue', JSON.stringify([{ ...queuedA, logSource: 'NOT_A_REAL_SOURCE' }]));
-check('an invalid logSource degrades to the safe MANUAL default rather than propagating garbage', readOfflineHabitQueue().map(toPendingLoggedEntry)[0]?.logSource === 'MANUAL');
-(global as any).localStorage.clear();
+setQueue([{ ...queuedA, logSource: 'NOT_A_REAL_SOURCE' }]);
+check('an invalid logSource degrades to the safe MANUAL default rather than propagating garbage', (await readQ()).map(toPendingLoggedEntry)[0]?.logSource === 'MANUAL');
+(global as any).localStorage.clear(); pendingClear = clearIdb();
 
 // ============================================================
 // mergeConfirmedLogEntries -- the loadUserDataAndLogs merge, called
@@ -302,22 +335,30 @@ const insightsSource = fs.readFileSync('apps/web/components/InsightsView.tsx', '
 
 check(
   'page.tsx imports the extracted helpers from the new lib module',
-  /import \{ readOfflineHabitQueue, toPendingLoggedEntry, mergeConfirmedLogEntries, selectQueueItemsToReconstruct \} from '\.\.\/lib\/offlineHabitQueue';/.test(pageSource)
+  /import \{ readOfflineQueueView, toPendingLoggedEntry, mergeConfirmedLogEntries, selectQueueItemsToReconstruct \} from '\.\.\/lib\/offlineHabitQueue';/.test(pageSource)
 );
-check('loadUserDataAndLogs calls mergeConfirmedLogEntries (no re-implemented inline merge logic)', /return mergeConfirmedLogEntries\(confirmedEntries, prev, queuedClientRequestIds\);/.test(pageSource));
+// R15 (39257): the merge also receives the ID-keyed operation projection (a list never releases an open operation).
+check('loadUserDataAndLogs calls mergeConfirmedLogEntries (no re-implemented inline merge logic)', /return mergeConfirmedLogEntries\(confirmedEntries, prev, queuedClientRequestIds, ops\);/.test(pageSource));
 check('the confirmed fetch propagates clientRequestId from the server row onto each entry', /clientRequestId: l\.clientRequestId \?\? undefined,/.test(pageSource));
 check('the reload-reconstruction effect calls selectQueueItemsToReconstruct (no re-implemented inline selection logic)', /const reconstructed = selectQueueItemsToReconstruct\(queued, prev\)\.map\(toPendingLoggedEntry\);/.test(pageSource));
-check('an empty queue is a no-op in the reconstruction effect (early return, no unnecessary setLogEntries call)', /if \(queued\.length === 0\) return;/.test(pageSource));
+check('an empty queue is a no-op in the reconstruction (no unnecessary setLogEntries call)', /if \(queued && queued\.length > 0\) \{/.test(pageSource));
+check('AURA-ANDROID-REL-04: reconstruction reads only the verified account\'s queue (R4: awaited IndexedDB read, dropped if the account changed meanwhile; R8: view read with the paused count)', /const view = await readOfflineQueueView\(check\.user\.id\);\s*if \(accountIdRef\.current !== check\.user\.id\) return;\s*const queued = view \? view\.items : null;\s*setQueueUnavailable\(queued === null\);/.test(pageSource));
 
-check('handleLogActivity is unchanged: still returns Promise<\'confirmed\' | \'pending\'>', /Promise<'confirmed' \| 'pending'>/.test(pageSource));
+check('handleLogActivity resolves to the shared ActivityLogResult (R15 adds \'unresolved\')', /\): Promise<ActivityLogResult> => \{/.test(pageSource));
 check(
-  'the only change to handleLogActivity itself is stamping the already-generated clientRequestId onto the pending-marked entry',
-  /prev\.map\(\(item\) => \(item\.id === tempId \? \{ \.\.\.item, syncStatus: 'pending', clientRequestId \} : item\)\)\);/.test(pageSource)
+  'the only change to handleLogActivity itself is stamping the already-generated clientRequestId onto the pending-marked entry (R15: isMine = the optimistic entry or the operation\'s existing row, which a Retry reuses)',
+  /prev\.map\(\(item\) => \(isMine\(item\) \? \{ \.\.\.item, syncStatus: 'pending', clientRequestId \} : item\)\)\);/.test(pageSource) && /const isMine = \(item: LoggedEntryItem\) => item\.id === tempId \|\| item\.clientRequestId === clientRequestId;/.test(pageSource)
 );
-check('handleLogActivity\'s optimistic-entry literal (before the request) and offline-queue push are untouched', /const optimisticEntry: LoggedEntryItem = \{\s*id: tempId,\s*activityTitle,\s*activeWindow: activeWindowForLog,\s*loggedAt: targetDate,\s*logMinuteOfDay: calculatedMinute,\s*durationMinutes,\s*notes: notes \? String\(notes\)\.trim\(\) : null,\s*logSource: finalLogSource,\s*activitySignificance: inferredSignificance,\s*\};/.test(pageSource));
+// R15 (39257): the optimistic entry is projected from the operation's immutable dispatch body (the same values; a Retry
+// shows the ORIGINAL timestamp), still carrying its outbox clientRequestId.
+check('handleLogActivity\'s optimistic entry is projected from the operation\'s immutable dispatch body, carrying its outbox clientRequestId (AURA-ANDROID-REL-04 R2/R15)', /const optimisticEntry: LoggedEntryItem = \{\s*id: tempId,[\s\S]{0,200}?clientRequestId,\s*activityTitle: payload\.activityTitle,\s*activeWindow: payload\.activeWindow,\s*loggedAt: new Date\(payload\.logTimestamp\),\s*logMinuteOfDay: payload\.logMinuteOfDay,\s*durationMinutes: payload\.durationMinutes,\s*notes: payload\.notes \?\? null,\s*logSource: payload\.logSource,\s*activitySignificance: payload\.activitySignificance,\s*\};/.test(pageSource) && /activeWindow: activeWindowForLog,\s*logMinuteOfDay: calculatedMinute,\s*logTimestamp: targetDate\.toISOString\(\),\s*notes: notes \? String\(notes\)\.trim\(\) \|\| undefined : undefined,\s*durationMinutes,\s*logSource: finalLogSource,\s*activitySignificance: inferredSignificance,/.test(pageSource));
 check('page.tsx still generates clientRequestId once per log attempt via generateClientRequestId() (PR #86 idempotency untouched; AURA-MOBILE-01-M2-B/AND-01: not crypto.randomUUID() directly, which throws outside a secure context)', /const clientRequestId = generateClientRequestId\(\);/.test(pageSource));
-check('page.tsx still imports classifyHabitLogSyncOutcome for offline-queue replay (PR #86 untouched)', /classifyHabitLogSyncOutcome/.test(pageSource));
-check('the Offline Log Sync Listener queue-removal/retention logic is untouched (still classifies confirmed/retry/permanent-failure)', /const outcome = classifyHabitLogSyncOutcome\(res\.status\);/.test(pageSource));
+// AURA-ANDROID-REL-04 IR-01: replay moved to lib/activitySync.ts (account-bound); same classification.
+const activitySyncSource = fs.readFileSync('apps/web/lib/activitySync.ts', 'utf8');
+// R15 (39257) supersedes: replay classifies through THE shared response decoder.
+// AURA-ANDROID-REL-04 R18 (39265, online-first): automatic replay is deferred -- page.tsx no longer triggers it.
+check('the (dormant) queue replay classifies via the shared decodeHabitLogResponse (lib/activitySync.ts); page.tsx never triggers it (online-first)', /decode: decodeHabitLogResponse/.test(activitySyncSource) && !/replayOfflineQueue/.test(pageSource));
+check('the replay queue-removal/retention logic classifies accepted / retry / unverified / rejected (R15)', /const decoded = await __decoder\.decode\(res,/.test(activitySyncSource) && /decoded\.kind === 'retry'/.test(activitySyncSource) && /decoded\.kind === 'unverified'/.test(activitySyncSource) && /decoded\.kind === 'accepted'/.test(activitySyncSource));
 check('Plan logging (handlePlanLogged) remains separate and untouched in page.tsx', /const handlePlanLogged = useCallback\(async \(\) => \{/.test(pageSource));
 check('Timing Location save orchestration (handleLocationChanged) remains untouched in page.tsx', /const handleLocationChanged = useCallback\(async \(city: \{/.test(pageSource));
 check('LocationPicker.tsx was not touched by this change (no reference to offlineHabitQueue there)', !fs.existsSync('apps/web/components/LocationPicker.tsx') || !/offlineHabitQueue/.test(fs.readFileSync('apps/web/components/LocationPicker.tsx', 'utf8')));
@@ -326,10 +367,10 @@ check('LocationPicker.tsx was not touched by this change (no reference to offlin
 // boundary are untouched by this PR -- reconstructed entries flow
 // through the exact same syncStatus discriminator those already branch
 // on, so no new presentation logic was (or needed to be) added.
-check('CalendarViewSection.tsx\'s pending-row StatusBadge treatment (PR #90) is untouched', /log\.syncStatus === 'pending' \?[\s\S]*?<StatusBadge label="Pending sync" tone="caution" \/>/.test(calendarSource));
+check('CalendarViewSection.tsx\'s pending-row StatusBadge treatment (PR #90) is untouched', /log\.syncStatus === 'pending' \?[\s\S]*?<StatusBadge label="Not confirmed" tone="caution" \/>/.test(calendarSource));
 check('Timeline.tsx\'s PR #90 pending count/badge treatment is untouched', /windowPendingCount = windowLogs\.filter\(\(log\) => log\.syncStatus === 'pending'\)\.length/.test(timelineSource));
 check('InsightsView.tsx\'s PR #90 confirmed-only evidence filter is untouched', /const confirmedLogEntries = logEntries\.filter\(\(entry\) => entry\.syncStatus !== 'pending'\);/.test(insightsSource));
-check('InsightsView.tsx\'s Recent Activity Trail still visibly labels a pending entry (untouched)', /entry\.syncStatus === 'pending' && <StatusBadge label="Pending sync" tone="caution" \/>/.test(insightsSource));
+check('InsightsView.tsx\'s Recent Activity Trail still visibly labels a pending entry (untouched)', /entry\.syncStatus === 'pending' && <StatusBadge label="Not confirmed" tone="caution" \/>/.test(insightsSource));
 
 if (!allPassed) {
   console.error('\nSome Pending Activity Reload Visibility checks FAILED.');
@@ -337,3 +378,4 @@ if (!allPassed) {
 } else {
   console.log('\nALL PENDING ACTIVITY RELOAD VISIBILITY CHECKS PASSED');
 }
+})().catch((e) => { console.error(e); process.exit(1); });

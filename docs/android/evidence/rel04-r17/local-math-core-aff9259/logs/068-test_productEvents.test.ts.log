@@ -1,0 +1,54 @@
+$ npx ts-node test/productEvents.test.ts
+# job=math-core-tests step=Run product events validation test env={}
+OK   isProductEventName accepts every name in the taxonomy
+OK   isProductEventName rejects an unknown event name
+OK   validateProductEvent rejects an unknown event name
+OK   AURA_HOME_VIEWED (no metadata fields) accepts an empty object
+OK   AURA_HOME_VIEWED accepts undefined metadata
+OK   Forbidden metadata key "birthDate" is rejected even on an otherwise-valid event
+OK   Forbidden metadata key "birthTime" is rejected even on an otherwise-valid event
+OK   Forbidden metadata key "latitude" is rejected even on an otherwise-valid event
+OK   Forbidden metadata key "janmaNakshatra" is rejected even on an otherwise-valid event
+OK   Forbidden metadata key "natalNakshatraIndex" is rejected even on an otherwise-valid event
+OK   Forbidden metadata key "tarabala" is rejected even on an otherwise-valid event
+OK   Forbidden metadata key "name" is rejected even on an otherwise-valid event
+OK   Forbidden metadata key "email" is rejected even on an otherwise-valid event
+OK   Forbidden metadata key "publicToken" is rejected even on an otherwise-valid event
+OK   Forbidden metadata key "query" is rejected even on an otherwise-valid event
+OK   Forbidden key check is case-insensitive (BirthDate)
+OK   Forbidden key check is case-insensitive (EMAIL)
+OK   "preference" is valid on AURA_MOMENT_ANOTHER_TIME
+OK   "preference" is NOT valid on AURA_MOMENT_ACCEPTED (not in that event's schema)
+OK   An unlisted metadata key is rejected even when it looks harmless
+OK   scope must be one of GENERAL/PERSONAL/SHARED
+OK   scope accepts a valid value
+OK   mode must be a string enum, not a number
+OK   activityId must be a real, known catalog activity id
+OK   activityId accepts a Muhurtham-eligible activity id
+OK   activityId accepts a non-Muhurtham-eligible everyday activity id (date-night)
+OK   AURA_MOMENT_ALTERNATIVE_CREATED accepts an everyday activityId plus source/planningMode
+OK   resultCount rejects a negative number
+OK   resultCount rejects a non-finite number
+OK   durationMs rejects an absurdly large value (bounds enforced)
+OK   durationMs accepts a realistic value
+OK   relationshipType must be a known SavedPerson relationship
+OK   relationshipType accepts a known relationship
+OK   method must be native_share or copy_link
+OK   A fully valid event returns exactly the submitted allow-listed keys
+OK   GOAL_DECOMPOSITION_SHOWN accepts its own valid shape
+OK   GOAL_DECOMPOSITION_SHOWN rejects an unknown "title" key (a Goal title could never be smuggled through)
+OK   GOAL_DECOMPOSITION_SHOWN rejects an unknown "activityTitle" key
+OK   GOAL_DECOMPOSITION_SHOWN rejects an unknown "clientRequestId" key
+OK   GOAL_DECOMPOSITION_SHOWN rejects source=SCRATCH/NO_MATCH (not in its own narrower enum -- only AUTO_MATCH/MANUAL_TEMPLATE are "shown")
+OK   GOAL_DECOMPOSITION_CONFIRMED accepts its own valid shape
+OK   GOAL_DECOMPOSITION_CONFIRMED rejects an unknown "title" key
+OK   GOAL_DECOMPOSITION_CONFIRMED rejects an unknown "activityTitles" key
+OK   GOAL_DECOMPOSITION_CONFIRMED rejects an unknown "clientRequestId" key
+OK   GOAL_DECOMPOSITION_CONFIRMED rejects a completion/Rhythm VALUE field (e.g. a raw targetValue) -- only rhythmChanged, a boolean, is allowed
+OK   GOAL_DECOMPOSITION_CREATE_FAILED accepts its own valid shape
+OK   GOAL_DECOMPOSITION_CREATE_FAILED rejects a raw error message string
+OK   GOAL_DECOMPOSITION_CREATE_FAILED rejects an unbounded errorCategory value
+
+ALL PRODUCT EVENTS CHECKS PASSED
+
+# exit=0 signal=

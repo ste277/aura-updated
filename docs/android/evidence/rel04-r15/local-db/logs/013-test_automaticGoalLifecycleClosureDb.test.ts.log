@@ -1,0 +1,91 @@
+$ npx ts-node test/automaticGoalLifecycleClosureDb.test.ts
+# job=day-constructor-acceptance-db-tests step=Run automatic Goal lifecycle closure DB test env={}
+=== PHASE 1: ELIGIBLE ===
+OK   5a. canonical eligibility reports remainingThisWeek = 3 (0 completed, 0 committed, target 3)
+OK   5b. automatic Goal-demand discovery returns the GoalActivity exactly once
+  [EVIDENCE PHASE 1 INITIAL] occurrences=0 executions=0 linkedPlans=0 remainingThisWeek(2026-12-29)=3
+=== PHASE 2: SURFACED (bootstrap) ===
+OK   6a. Plan Day bootstrap surfaces the candidate for this user/date
+OK   6b. the surfaced candidate carries the exact correct fields
+  [EVIDENCE PHASE 2 AFTER BOOTSTRAP] occurrences=0 executions=0 linkedPlans=0 remainingThisWeek(2026-12-29)=3
+  [EVIDENCE PHASE 2 recheck] occurrences=0 executions=0 linkedPlans=0 remainingThisWeek(2026-12-29)=3
+OK   6c. bootstrap itself created zero PlannedActivity/GoalActivityOccurrence rows
+=== PHASE 3: EXPLICIT INCLUDE ===
+OK   7a. canonical intent identity format
+OK   7b. FLEXIBLE behavior preserved on the included row
+OK   7c. goalActivityId carried by the client row
+OK   7d. the suggestion is no longer available while the row is included
+  [EVIDENCE PHASE 3 AFTER INCLUDE] occurrences=0 executions=0 linkedPlans=0 remainingThisWeek(2026-12-29)=3
+=== PHASE 4: PREVIEW / CONSTRUCTION ===
+OK   8a. the automatic intent reaches Preview and the Constructor proposes it
+OK   8b. the proposed item is ordinary scheduling output -- no Goal field leaked onto it
+  [EVIDENCE PHASE 4 AFTER PREVIEW] occurrences=0 executions=0 linkedPlans=0 remainingThisWeek(2026-12-29)=3
+OK   8c. Preview creates zero Goal occurrence writes and consumes zero capacity
+=== PHASE 5/10: ACCEPT WITH SERVER-DERIVED PROVENANCE ===
+OK   10a. the accept body genuinely carries no goalActivityLinks entry for this item
+OK   9a. acceptance succeeds (verified signed automatic intent -> provenance authorization -> persistence)
+  [EVIDENCE PHASE 5 AFTER ACCEPT] occurrences=1 executions=0 linkedPlans=1 remainingThisWeek(2026-12-29)=2
+OK   9b. exactly one GoalActivityOccurrence created
+OK   9c. exactly one accepted PlannedActivity associated via the occurrence
+OK   9d. occurrence points to the correct GoalActivity and the accepted plan (R3 model)
+OK   10b. GoalActivity.plannedActivityId correctly reflects the SERVER-DERIVED (not client-supplied) association
+=== PHASE 6/11: POST-ACCEPT ELIGIBILITY / LIVE-UPCOMING ===
+OK   11a. canonical Rhythm eligibility: remainingThisWeek = 2 (1 UPCOMING committed, target 3)
+OK   11b. Multi-Occurrence Rhythm PR 2: the GoalActivity DOES appear in automatic discovery while its current link is UPCOMING, now that weekly capacity (not a single live link) is the only gate -- remainingThisWeek correctly reflects the live commitment (2 of 3)
+  [EVIDENCE PHASE 6 POST-ACCEPT] occurrences=1 executions=0 linkedPlans=1 remainingThisWeek(2026-12-29)=2
+=== PHASE 7: COMPLETE ===
+OK   13a. no new GoalActivity was created by completion
+OK   13b. GoalActivityExecution records the durable completion truth
+OK   13c. PlannedActivity transitions to LOGGED (existing lifecycle semantics)
+OK   13d. GoalActivityOccurrence identity remains durable (same row, unchanged id)
+  [EVIDENCE PHASE 7 AFTER COMPLETE] occurrences=1 executions=1 linkedPlans=1 remainingThisWeek(2026-12-29)=2
+=== PHASE 8/14: RECONSIDER ===
+OK   14a. remainingThisWeek = 2 after first completion (1 completed, 0 committed, target 3)
+OK   14b. CENTRAL CLOSURE INVARIANT: completion of one occurrence does NOT terminate the ongoing GoalActivity -- it becomes eligible again
+OK   14c. Plan Day bootstrap can surface it again (next planning date)
+OK   14d. HPG-FIX-01: not re-suggested for the SAME day that already holds its once-per-day occurrence
+=== PHASE 15: SECOND OCCURRENCE IDENTITY (next planning date) ===
+OK   15a. second planning-date intent id differs from the first
+OK   15b. both map to the same GoalActivity definition (same goalActivityId component)
+OK   23a. Tomorrow (the next fixture day) preview succeeds using the supplied canonical planning date, never the wall clock
+OK   9e. second occurrence (Tomorrow) accepted successfully
+OK   37/38. no duplicate occurrence path: exactly TWO occurrences now exist (one per real completed+committed cycle), never more
+  [EVIDENCE PHASE 8 SECOND OCCURRENCE COMPLETE] occurrences=2 executions=2 linkedPlans=2 remainingThisWeek(2026-12-29)=1
+=== PHASE 16: WEEKLY CAPACITY EXHAUSTION ===
+OK   9f. third occurrence (completing the week's full target of 3) accepted successfully
+OK   16a. remainingThisWeek = 0 after all 3 target occurrences are completed
+OK   16b. automatic Goal-demand discovery does NOT return the exhausted activity
+OK   16c. Plan Day bootstrap does NOT surface the exhausted activity
+  [EVIDENCE PHASE CAPACITY EXHAUSTION] occurrences=3 executions=3 linkedPlans=3 remainingThisWeek(2026-12-29)=null
+=== PHASE 17: NEXT-WEEK RESET ===
+OK   17a. prior-week completions create no debt -- remainingThisWeek resets to the full target (3) next week
+OK   17b. automatic Goal-demand discovery can surface it again next week
+OK   17c. BEFORE the boundary (the Sunday of the same Monday-start week) the target is still exhausted: remainingThisWeek = 0 and the activity is not surfaced
+OK   17d. AFTER the boundary (the Tuesday of the next week) the full target is available again
+=== PHASE 18: DECLINE / REMOVE PATH ===
+OK   18a. while included, the suggestion is unavailable
+OK   18b. removing the row (simulated by omitting it) returns the suggestion to the available list
+OK   18c. decline/remove before Preview/accept causes zero Goal writes
+OK   18d. no DISMISSED, no SKIPPED -- the GoalActivity remains SUGGESTED
+=== PHASE 19: PREVIEW WITHOUT ACCEPT ===
+OK   19 setup: preview succeeds
+OK   19a. user never accepting: zero GoalActivityOccurrence/GoalActivityExecution, no committed PlannedActivity, no weekly capacity consumed
+=== PHASE 20: ACCEPTANCE FAILURE (conflicting provenance) ===
+OK   20a. acceptance with a conflicting client GoalActivity link is rejected
+OK   20b. zero Goal persistence from the rejected acceptance
+OK   20c. the original GoalActivity remains eligible -- failed acceptance did not consume recurring demand
+=== PHASE 21: MULTIPLE GOALS ===
+OK   21a. both GoalActivities from different Goals are discoverable together
+OK   21b. accepting one GoalActivity succeeds independently
+OK   21c. accepting ga2 consumed only its OWN Rhythm facts -- the other GoalActivity (gaFail) remains independently eligible at its own prior value
+=== PHASE 22: MANUAL GOAL REGRESSION ===
+OK   22a. the manual Goal Detail -> Plan with Aura handoff still resolves the activity
+OK   22b. manual Goal row identity is unchanged (plan-day-goal-<id>)
+OK   22c. manual Goal acceptance still succeeds through its existing, unchanged path
+OK   22d. manual Goal persistence behavior (legacy link, finite Rhythm NONE) is unchanged
+=== PHASE 24: MOVE/RECOMPOSITION CONTINUITY ===
+OK   24a. the SAME occurrence id persists across the Move
+OK   24b. the occurrence now points to the successor (moved) plan
+ALL AUTOMATIC GOAL LIFECYCLE CLOSURE CHECKS PASSED
+
+# exit=0 signal=

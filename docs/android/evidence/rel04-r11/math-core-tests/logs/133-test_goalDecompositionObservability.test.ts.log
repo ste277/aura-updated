@@ -1,0 +1,44 @@
+$ npx ts-node test/goalDecompositionObservability.test.ts
+# job=math-core-tests step=Run Goal decomposition observability test env={"TS_NODE_COMPILER_OPTIONS":"{\"jsx\":\"react\"}"}
+OK   privacy: GOAL_DECOMPOSITION_SHOWN metadata has exactly the allowed keys, nothing else
+OK   privacy: no key or value resembles a Goal/activity title
+OK   privacy: GOAL_DECOMPOSITION_CONFIRMED metadata has only allowed keys
+OK   privacy: no activity title ("Go for a run" etc.) appears anywhere in the confirmed metadata
+OK   privacy: no clientRequestId-shaped value (a UUID) appears anywhere in the confirmed metadata
+OK   privacy: every value is a string enum, a number, or a boolean -- never a free-text-shaped string (no spaces)
+OK   privacy: classifyGoalCreateError returns a bounded category, never an error message
+OK   classifyGoalCreateError: null status (thrown/network exception) -> NETWORK_ERROR
+OK   classifyGoalCreateError: 409 with IDEMPOTENCY_CONFLICT code -> IDEMPOTENCY_CONFLICT (checked before the 4xx/5xx range split)
+OK   classifyGoalCreateError: 400 with no special code -> VALIDATION
+OK   classifyGoalCreateError: 499 (top of 4xx range) -> VALIDATION
+OK   classifyGoalCreateError: 500 -> SERVER_ERROR
+OK   classifyGoalCreateError: 503 with an unrecognized code -> SERVER_ERROR (unknown codes never get special treatment)
+OK   auto-accept: SHOWN identifies AUTO_MATCH/GET_FITTER with the correct activity count
+OK   auto-accept: confirmed metadata identifies AUTO_MATCH/GET_FITTER
+OK   auto-accept: accepted unchanged (wasEdited=false)
+OK   auto-accept: initial and final activity counts match (3, untouched)
+OK   auto-accept: no text (title) present anywhere in either event
+OK   edited-auto: wasEdited true
+OK   edited-auto: removedCount=1, renamedCount=1, addedCount=1
+OK   edited-auto: rhythmChanged=true
+OK   edited-auto: finalActivityCount reflects 2 kept template rows + 1 freeform = 3
+OK   edited-auto: matchSource remains AUTO_MATCH (editing rows never changes the match source)
+OK   edited-auto: no activity title present anywhere in the metadata
+OK   edited-auto: renaming the same row multiple times (keystrokes) never inflates renamedCount beyond the distinct-row count
+OK   manual override: matchSource MANUAL_TEMPLATE, final category STUDY_CONSISTENTLY
+OK   manual override: manualOverrideUsed sticky true
+OK   scratch: scratchUsed true
+OK   scratch: matchSource SCRATCH, no templateCategory
+OK   scratch: freeformCount = 1
+OK   scratch: no Goal/activity text present anywhere
+OK   unknown goal: no automatic proposal (zero rows, no SHOWN-worthy state)
+OK   unknown goal: matchSource NO_MATCH, identifiable without storing "Learn Spanish" anywhere
+OK   unknown goal: the literal title text never appears in the metadata
+OK   unknown goal: freeformCount = 1
+OK   refresh: edited before refresh
+OK   refresh: refreshUsed sticky true
+OK   refresh: "accepted unchanged" (wasEdited) refers to the REFRESHED proposal, which is untouched again -- wasEdited=false
+OK   refresh: finalActivityCount reflects the fresh, full 3-activity template again (the pre-refresh removal is gone)
+ALL GOAL DECOMPOSITION OBSERVABILITY CHECKS PASSED
+
+# exit=0 signal=

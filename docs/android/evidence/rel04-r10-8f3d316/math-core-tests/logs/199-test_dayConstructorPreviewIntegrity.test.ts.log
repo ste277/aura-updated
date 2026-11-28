@@ -1,0 +1,52 @@
+$ npx ts-node test/dayConstructorPreviewIntegrity.test.ts
+# job=math-core-tests step=Run day constructor preview integrity test env={}
+OK   20. the canonical payload is an explicit fixed-order array (pinned literally), not object key order
+OK   20. the canonical form does not depend on property order of the inputs and encodes an absent activityId as null
+OK   6/48. a token verifies against exactly the facts it was signed for
+OK   20. signing is deterministic for identical facts (no nonce/clock in the payload)
+OK   9-17. tampering with 10. placementSource FLEXIBLE->FIXED is rejected (PREVIEW_TOKEN_MISMATCH)
+OK   9-17. tampering with 8. a different user is rejected (PREVIEW_TOKEN_MISMATCH)
+OK   9-17. tampering with 13. start is rejected (PREVIEW_TOKEN_MISMATCH)
+OK   9-17. tampering with 13. start only is rejected (PREVIEW_TOKEN_MISMATCH)
+OK   9-17. tampering with 15. end / duration (60 -> 30 minutes) is rejected (PREVIEW_TOKEN_MISMATCH)
+OK   9-17. tampering with 14. intent id is rejected (PREVIEW_TOKEN_MISMATCH)
+OK   9-17. tampering with 16. activity id is rejected (PREVIEW_TOKEN_MISMATCH)
+OK   9-17. tampering with 16. activity id removed is rejected (PREVIEW_TOKEN_MISMATCH)
+OK   9-17. tampering with 16. title is rejected (PREVIEW_TOKEN_MISMATCH)
+OK   9-17. tampering with 7. window date is rejected (PREVIEW_TOKEN_MISMATCH)
+OK   9-17. tampering with 7. window timezone is rejected (PREVIEW_TOKEN_MISMATCH)
+OK   9-17. tampering with 7. window source is rejected (PREVIEW_TOKEN_MISMATCH)
+OK   9-17. tampering with 7. window start is rejected (PREVIEW_TOKEN_MISMATCH)
+OK   9-17. tampering with 7. window end is rejected (PREVIEW_TOKEN_MISMATCH)
+OK   10. the reverse forgery (FIXED token presented as SELECTED_CANDIDATE) is rejected too
+OK   14. an item token cannot be reused for another item of the same preview (token swap)
+OK   36. a mutated signature is rejected (PREVIEW_TOKEN_INVALID)
+OK   36. a mutated body (validly-shaped base64url, original signature) is rejected
+OK   37. missing / empty / non-string tokens are rejected (PREVIEW_TOKEN_MISSING) -- no fallback to trusting the payload
+OK   36. garbage strings are rejected (PREVIEW_TOKEN_INVALID)
+OK   38/21. an unknown version fails closed even when correctly signed (v:2, and a missing v)
+OK   21/4. the wrong purpose is rejected: a correctly signed session token can never be presented as a preview token
+OK   4. a malformed signed body (field array missing / wrong length) fails closed
+OK   4. the token carries no userId/email keys, so it is not a session lookalike (its user is only a bound fact)
+OK   18/19. a full, untampered set of items verifies with no diagnostics regardless of submission order
+OK   39. tampering with ONE item yields a diagnostic for exactly that item (INVALID_REQUEST / PREVIEW_TOKEN_MISMATCH); the caller rejects the whole request
+OK   37. an item with no token is rejected (PREVIEW_TOKEN_MISSING) even when its sibling is valid
+OK   40. a subset of a signed preview still verifies (tokens are per item; nothing forces the full set)
+OK   8. the same tokens under another authenticated user are all rejected
+OK   42. the diagnostics never echo cryptographic detail
+OK   25. a READY preview body gets one acceptanceToken per proposed item, which verifies for its own item and user
+OK   25. the original preview fields are preserved and the input is not mutated
+OK   25. non-READY bodies (NO_USABLE_CAPACITY, errors, malformed) are returned untouched
+OK   16/26/41. the accept route verifies every item BEFORE calling persistAcceptedConstructedDay (so a replay with altered facts can never reach the idempotency path), and rejects as INVALID_REQUEST
+OK   26. there is no compatibility path: the route has no branch that skips verification when a token is missing
+OK   16. persistAcceptedConstructedDay has exactly ONE production caller -- the accept route -- so no path bypasses the integrity gate
+OK   16. the preview boundary signs the READY result for the authenticated user (O5 R3: bodyWithReview is result.body, optionally with the Preview-only shadowReview sibling field attached BEFORE signing -- signing itself is unchanged)
+OK   46/47. the integrity module is server-only and no client/UI file imports it (the client only passes the opaque token back)
+OK   5/6/46. the module reuses the repository HMAC-SHA256 sign/verify (auth.ts, timingSafeEqual): no new secret, no custom crypto, no persistence or Constructor logic
+OK   45/50. the pure Constructor, capacity, availability and acceptance-evaluation modules never mention the integrity token
+OK   42/43/44. F1 semantics are frozen: POST /api/plans and Move take no preview token; the accept route still ignores a body schedulingMode
+OK   51/52. no migration or dependency change: the specific, already-known migration set from Goals V2 G2.1/G2.2.1 is present (baseline presence check, count-independent), no package files touched by the working tree
+
+ALL PREVIEW INTEGRITY CHECKS PASSED
+
+# exit=0 signal=

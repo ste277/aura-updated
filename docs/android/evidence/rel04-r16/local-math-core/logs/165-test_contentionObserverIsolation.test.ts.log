@@ -1,0 +1,54 @@
+$ npx ts-node test/contentionObserverIsolation.test.ts
+# job=math-core-tests step=Run contention observer isolation test env={}
+=== strict-mode precondition ===
+OK   this file runs in strict mode: a write to a frozen object THROWS
+=== A. a FROZEN caller-supplied sink can no longer abort construction ===
+OK   A. `constructDay(input, Object.freeze([]))` does not throw and returns exactly the baseline result (the exported API accepts no caller sink: a second argument is inert)
+=== B. a THROWING caller sink can no longer propagate into scheduling ===
+OK   B. a sink whose push throws is never invoked: no exception escapes `constructDay`, and the result is the baseline
+=== C. a caller can no longer mutate Constructor-owned intervals DURING construction ===
+OK   C. a sink that rewrites the intervals/Dates/owner ids it receives is never called, and scheduling is the baseline (there is no caller-controlled during-construction channel)
+OK   C'. the same holds for the diagnostics entry point: a third argument is inert and construction is the baseline
+=== D. a retained reference can no longer be mutated AFTER return to change the Constructor result ===
+OK   D. nothing is collected into a caller-retained list (it stays empty), so a later mutation through it cannot change the returned result
+=== the exported API has no observer, sink, callback or collector parameter ===
+OK   `constructDay` takes exactly ONE parameter (the input) -- and its source declares no second one
+OK   `constructDayWithTrace` takes the input and a round LABEL (a number) only -- nothing a caller supplies is ever invoked from inside placement
+OK   the Constructor module exports no observer/sink/collector/core: its only trace-related export is `constructDayWithTrace`
+OK   the orchestrator exports exactly three entry points -- the legacy one and the two diagnostics ones (trace; trace + evidence hand-off for the inert shadow stage) -- and no callback-accepting variant
+=== identity: the diagnostics path and the legacy path produce the same Constructor result ===
+OK   LEGACY IDENTITY: `constructDay(input)` is the baseline result
+OK   TRACE IDENTITY: `constructDayWithTrace(input).result` deeply equals `constructDay(input)` for the same input
+OK   the fixture really contends: LOW's first candidate lost [10:00,11:00) to HIGH (and LOW was placed on its second), so the independence checks below are not vacuous
+=== a returned trace is DETACHED scalar data ===
+OK   DATE OWNERSHIP, structurally: no Date (and no object other than the frozen trace, its events array and its events) is reachable from a trace -- every event field is a string or a number
+OK   instants are ISO-8601 UTC strings, not Constructor Date objects
+OK   SHARED-REFERENCE AUDIT: nothing reachable from the trace is a Constructor-owned object (ProposedItem, its start/end Dates, an owner interval, a candidate or a candidate window)
+=== post-call mutation of the returned trace ===
+OK   the mutation fixture is a two-event trace (so sort and reverse are genuine mutations)
+OK   POST-CALL: attempting to reassign an event field is rejected
+OK   POST-CALL: attempting to reassign the round is rejected
+OK   POST-CALL: attempting to add a field to an event is rejected
+OK   POST-CALL: attempting to delete an event field is rejected
+OK   POST-CALL: attempting to push an event is rejected
+OK   POST-CALL: attempting to pop an event is rejected
+OK   POST-CALL: attempting to splice the events is rejected
+OK   POST-CALL: attempting to assign an index is rejected
+OK   POST-CALL: attempting to set length is rejected
+OK   POST-CALL: attempting to sort the events is rejected
+OK   POST-CALL: attempting to reverse the events is rejected
+OK   POST-CALL: attempting to replace the events array is rejected
+OK   the trace and the Constructor result are unchanged by every attempt
+OK   RESULT MUTATION INDEPENDENCE: mutating a caller-owned copy of the trace changes neither the Constructor result nor the real trace
+=== the trace and the Constructor result are independently owned ===
+OK   TRACE MUTATION INDEPENDENCE: mutating the returned Constructor result (its Dates, ids and arrays) after return does not alter the trace
+OK   two calls share nothing: mutating one call's result cannot change another call's trace or result
+OK   the Constructor input is not mutated by tracing
+=== the orchestrator: legacy path never traces; the diagnostics path uses the internal observer only ===
+OK   NORMAL PREVIEW / ORCHESTRATION: `orchestrateConstructDay` never collects a trace (no call to the trace entry point) and calls `constructDay` with exactly one argument every time (initial pass and replenishment)
+OK   TRACE ORCHESTRATOR: `orchestrateConstructDayWithTrace` runs the same passes through `constructDayWithTrace` (an internally created observer), never handing a caller observer to `constructDay`
+OK   same result either way, and the accumulated trace is detached scalar data with the round-0 event surviving the final NO_CANDIDATES
+OK   the orchestrator trace is frozen at every level too
+ALL CONTENTION OBSERVER ISOLATION CHECKS PASSED
+
+# exit=0 signal=

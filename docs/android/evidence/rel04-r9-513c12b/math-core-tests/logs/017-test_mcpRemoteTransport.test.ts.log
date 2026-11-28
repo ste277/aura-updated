@@ -1,0 +1,75 @@
+$ npx ts-node test/mcpRemoteTransport.test.ts
+# job=math-core-tests step=Run remote MCP transport test env={}
+OK   config: off by default (no env)
+OK   config: flag must be exactly "1"
+OK   config: enabled without URLs fails closed
+OK   config: http (non-localhost) rejected
+OK   config: query string rejected
+OK   config: credentials rejected
+OK   config: garbage rejected
+OK   config: valid https config normalized (no trailing slash)
+OK   config: localhost http allowed for local testing
+OK   disabled: POST /api/mcp -> 404
+OK   disabled: GET /api/mcp -> 404
+OK   disabled: DELETE /api/mcp -> 404
+OK   disabled: protected resource metadata -> 404
+OK   disabled: other methods on metadata URLs -> 404
+OK   enabled: other methods on metadata URLs -> 405
+OK   disabled: OPTIONS /api/mcp -> 404
+OK   disabled: PUT /api/mcp -> 404
+OK   disabled: PATCH /api/mcp -> 404
+OK   disabled: HEAD /api/mcp -> 404
+OK   disabled: /api/mcp route exports every method through the handler (no Next auto-204/405)
+OK   metadata: 200 with resource, authorization_servers and scope
+OK   metadata: path-inserted RFC 9728 URL
+OK   enabled: GET -> 405 with Allow: POST
+OK   enabled: DELETE -> 405 with Allow: POST
+OK   origin: present and not allowlisted -> 403
+OK   origin: resource origin allowed
+OK   body: declared length over cap -> 413 before auth
+OK   auth: missing token -> 401
+OK   auth: 401 carries Bearer resource_metadata (path-inserted) and scope
+OK   auth: non-Bearer scheme -> 401 without error code
+OK   auth: no credentials -> challenge without error code (RFC 6750 3.1)
+OK   auth: unknown token -> 401 with error="invalid_token"
+OK   auth: deployed reject-all verifier -> 401 even for the test token
+OK   auth: Aura session cookie alone -> 401
+OK   auth: token without aura.planning.read -> 403 insufficient_scope
+OK   body: actual body over cap (no content-length) -> 413
+OK   body: JSON-RPC batch rejected (400, -32600) before any tool runs
+OK   body: streamed body without content-length is cut off at the cap -> 413
+OK   body: invalid JSON -> 400 parse error
+OK   mcp: initialize -> 200 with protocol 2025-11-25 and tools capability
+OK   mcp: exactly one tool, find_best_time
+OK   mcp: title/description from the shared definition
+OK   mcp: annotations equal the shared definition (readOnlyHint true, destructiveHint false)
+OK   mcp: inputSchema properties equal the shared schema shape
+OK   mcp: inputSchema forbids additional properties
+OK   mcp: full inputSchema equals the committed snapshot (also asserted for stdio in apps/mcp/test/sharedDefinition.test.ts)
+OK   parity: free-text, TOMORROW morning, New York -- remote structuredContent deep-equals shared executor
+OK   parity: catalog activity, 7-day range, Chennai, with Daily Rhythm -- remote structuredContent deep-equals shared executor
+OK   parity: DST-crossing range (US DST ends 2026-11-01), New York -- remote structuredContent deep-equals shared executor
+OK   parity: server clock default (no referenceTime) -- remote structuredContent deep-equals shared executor
+OK   window: span of 14 days (end - start, same convention as the 90-day local limit) accepted
+OK   window: span of 15 days rejected by the remote cap specifically
+OK   schema: client-supplied userId is rejected (strict schema)
+OK   read-only: unknown/write tool name is not callable
+OK   pins: root zod and @modelcontextprotocol/server are exact
+OK   pins: root zod === apps/mcp zod (one zod version across transports)
+OK   isolation: packages/mcp-tools/src/findBestTime.ts imports no SDK, database, session or framework
+OK   isolation: packages/mcp-tools/src/findBestTime.ts reads no environment variables
+OK   isolation: packages/mcp-tools/src/findBestTimeSchema.ts imports no SDK, database, session or framework
+OK   isolation: packages/mcp-tools/src/findBestTimeSchema.ts reads no environment variables
+OK   isolation: packages/mcp-tools/src/findBestTimeTool.ts imports no SDK, database, session or framework
+OK   isolation: packages/mcp-tools/src/findBestTimeTool.ts reads no environment variables
+OK   isolation: packages/mcp-tools/src/findBestTimeRemote.ts imports no SDK, database, session or framework
+OK   isolation: packages/mcp-tools/src/findBestTimeRemote.ts reads no environment variables
+OK   isolation: remote handler imports only the SDK v2 server and shared core
+OK   isolation: remote handler reads no environment variables
+OK   isolation (B1): remoteMcpConfig.ts has no imports and reads no environment variables
+OK   isolation (B1): lib/mcpRemoteConfig.ts never imports remoteMcpHandler (keeps the SDK out of the OAuth Pages route)
+OK   deployment: /api/mcp route wires rejectAllAccessTokens (nothing callable until I2)
+
+All AURA-MCP-02-I1 remote transport checks passed.
+
+# exit=0 signal=

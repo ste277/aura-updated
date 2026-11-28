@@ -1,0 +1,35 @@
+$ npx ts-node test/opportunityFactQualityArchitecture.test.ts
+# job=math-core-tests step=Run opportunity fact quality architecture test env={}
+OK   O1 stays the only place that classifies a day: the day-state literals appear only in O1, the facts TYPE module and the unwired P2b pressure deriver (which only READS a day state from immutable evidence)
+OK   O1 evaluates each date exactly once (one evaluateDay call inside the single day map) -- no second projection or second date loop for the new facts
+OK   the totals AND the first-day/after-first-day counts come from ONE aggregation pass over the day results (no separate filter passes, no re-derivation)
+OK   the later-day evaluated count is derived from the same day list (length - 1), never from a second horizon
+OK   O4 reuses the one O1 projection per candidate and copies the four facts straight across (no counting, no day inspection, no second classifier)
+OK   no second O2 load was added for the new facts (still exactly one range load, outside the candidate loop)
+OK   the four new fields exist on the DecisionFacts opportunity entry, after the eight original ones, and none is optional
+OK   the O1 facts type carries the same four fields, required
+OK   the day-state type has exactly the three distinct states (UNKNOWN is never folded into infeasible)
+OK   the first-day/after-first-day contract and its exact partition are documented where the fields are defined
+OK   the field names carry no recurrence, Goal or period vocabulary (a deadline or any other horizon can use them unchanged)
+OK   no policy vocabulary in the new-fact production files (O1, the facts type, the enrichment) -- comments excluded for the type module and enrichment, included for O1
+OK   O1 reads no demand: no target / completed / committed / remaining counts and no recurrence vocabulary
+OK   O1 and the enrichment know nothing about Goal, Rhythm, Candidate A, or manual versus automatic entry
+OK   the new facts add no database access, write, clock or randomness anywhere in O1 or the enrichment
+OK   the new facts are referenced only by O1 (produces), the facts type (carries), O4 (copies), the P2a evidence copy (copies by value, interprets nothing) and the unwired P2b pressure deriver (reads immutable evidence) in production
+OK   dayIntent.ts (including compareByOverloadPrecedence) cannot read the new facts
+OK   dayConstructor.ts (including compareCandidatesForPlacement and evaluateCandidate) cannot read the new facts
+OK   dayCapacity.ts cannot read the new facts
+OK   the orchestrator cannot read the new facts
+OK   the preview handler cannot read the new facts
+OK   the Goal facts provider cannot read the new facts
+OK   acceptance cannot read the new facts
+OK   acceptance persistence cannot read the new facts
+OK   preview integrity/signing cannot read the new facts
+OK   the accept route cannot read the new facts
+OK   db.ts cannot read the new facts
+OK   the facts are PREPARED before the Constructor (O5 P1) and attached to the preview metadata only after construction, as opaque metadata (no module that prepares or attaches them inspects a field)
+OK   no schema field stores them and no component reads them
+OK   the designated-consumer relationship is unchanged: exactly one production caller of the projection and of the range loader
+ALL OPPORTUNITY FACT QUALITY ARCHITECTURE CHECKS PASSED
+
+# exit=0 signal=

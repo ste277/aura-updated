@@ -1,0 +1,40 @@
+$ npx ts-node test/pendingReplayReconciliation.test.ts
+# job=math-core-tests step=Run pending replay reconciliation test env={}
+OK   (1) a title that is now confirmed (no syncStatus) resolves 'confirmed'
+OK   (2) a title with one pending row and one confirmed row (a live optimistic entry not yet cleaned up) still resolves a single unambiguous 'confirmed', never 'pending'
+OK   (3) a title still present with syncStatus 'pending' and nothing confirmed resolves 'pending'
+OK   (4) two different titles resolve independently: A confirmed, B still pending
+OK   a title with no matching row at all resolves 'gone' (permanent-failure convergence), never 'confirmed'
+OK   'gone' is distinct from 'confirmed' -- a caller must not treat them the same
+OK   (5) a brand-new pending row for a title that also has an older confirmed row still reads 'confirmed' overall (matches existing "isAlreadyLogged" semantics) -- resolvePendingActivityStatus never regresses a title from confirmed back to pending
+OK   (6) Timeline.tsx's windowPendingCount/windowConfirmedCount are computed inline from windowLogs (itself derived from the logEntries prop via getWindowLogs), not from any useState
+OK   (6) Timeline.tsx never caches windowLogs/windowPendingCount/windowConfirmedCount in a useMemo keyed away from logEntries (would go stale after a replay) -- computed directly inside the per-window render, not memoized at all
+OK   Timeline.tsx imports resolvePendingActivityStatus from the new self-contained pendingReplayReconciliation.ts (not offlineHabitQueue.ts, which still imports the .tsx-declared LoggedEntryItem and would force a new tsconfig.json exclusion for any .ts test importing it)
+OK   Timeline.tsx has a useEffect keyed on [logEntries] that filters pendingLogged down to titles resolvePendingActivityStatus still reports 'pending'
+OK   Timeline.tsx still renders "Pending" vs "Logged" off pendingLogged (unchanged copy/logic, only the staleness fixed)
+OK   Timeline.tsx's onLogActivity return type is unchanged (still Promise<'confirmed' | 'pending'>) -- no clientRequestId threaded back to this call site
+OK   HomeDashboard.tsx imports resolvePendingActivityStatus from pendingReplayReconciliation.ts
+OK   HomeDashboardProps gained an optional logEntries prop, passed straight through from page.tsx (never used to recompute myDayPendingActivities/loggedActivitiesToday here)
+OK   HomeDashboard passes logEntries down to each GoodRightNowCard render call
+OK   GoodRightNowCard's own props type gained an optional logEntries field
+OK   GoodRightNowCard has a reconciliation useEffect keyed on [logEntries, status, planTitle] that only acts while status === 'pending'
+OK   GoodRightNowCard's reconciliation effect sets status 'logged' (with a loggedAtLabel) on 'confirmed', and 'idle' (not 'error', not stuck) on 'gone' -- converging with PR #91's existing permanent-failure behavior instead of inventing a new failure state
+OK   HomeDashboard.tsx's onLogActivity return type is unchanged (still Promise<'confirmed' | 'pending'>) -- pinned the same way habitLogActivityIdentity.test.ts already pins it
+OK   page.tsx passes logEntries into <HomeDashboard>
+OK   page.tsx's handleLogActivity is unchanged: still returns Promise<'confirmed' | 'pending'>
+OK   syncOfflineLogs still calls loadUserDataAndLogs() after every replay attempt (success or permanent failure), and loadMyDay() only when something was confirmed -- the same refresh path (AURA-ANDROID-REL-04: replay now in lib/activitySync.ts)
+OK   replay still classifies each item via classifyHabitLogSyncOutcome, keeps retry-worthy items (claim released), and settles exactly the records of that identity (AURA-ANDROID-REL-04 R4/R5: one IndexedDB settlement transaction per identity, fenced by the attempt claim token -- never a batched rewrite)
+OK   (7) before replay: the pending overlay shows the entry
+OK   (7) after replay success: logEntries no longer carries a syncStatus 'pending' row for this clientRequestId (mergeConfirmedLogEntries's own post-replay result) -- the pending overlay row disappears
+OK   apps/web/lib/offlineHabitQueue.ts (queue core: mergeConfirmedLogEntries, selectQueueItemsToReconstruct, readOfflineHabitQueue, toPendingLoggedEntry, clientRequestId generation) is untouched by this change
+OK   apps/web/lib/myDayPendingOverlay.ts is untouched by this change
+OK   apps/web/components/HomeTimeline.tsx is untouched by this change (My Day pending overlay rendering itself was not modified)
+OK   apps/web/components/CalendarViewSection.tsx is untouched by this change
+OK   apps/web/components/InsightsView.tsx is untouched by this change (confirmed-only analytics preserved)
+OK   apps/web/lib/dailyAgenda.ts is untouched by this change (DailyAgendaItemStatus untouched)
+OK   pendingReplayReconciliation.ts never references PlannedActivity, planId, habitLogId, or Plan matching of any kind
+OK   pendingReplayReconciliation.ts never reads localStorage or the offline queue directly in actual code -- it only reconciles against whatever logEntries it is given (the module doc comment mentions "localStorage" in prose explaining what it deliberately does NOT do, so comments are stripped before this check)
+
+ALL HOME/TIMELINE PENDING REPLAY RECONCILIATION CHECKS PASSED
+
+# exit=0 signal=

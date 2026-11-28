@@ -49,7 +49,7 @@ const filesMatching = (needle: RegExp, ...excluding: string[]) => all.filter((f)
 const bootstrap = read('apps/web/lib/planDayBootstrap.ts');
 const planDayEntry = read('apps/web/lib/planDayEntry.ts');
 const client = read('apps/web/app/plan-day/PlanDayClient.tsx');
-const page = read('apps/web/app/plan-day/page.tsx');
+const page = read('apps/web/app/api/plan-day/bootstrap/route.ts'); // R5: the plan-day bootstrap moved unchanged into this route
 const provider = read('apps/web/lib/goalDecisionFactsProvider.ts');
 const authorization = read('apps/web/lib/goalDemandProvenanceAuthorization.ts');
 
@@ -76,7 +76,7 @@ const marking = functionBody(bootstrap, 'markCanonicalGoalDemandHandoff');
 check('marking is exact-id membership only: no title, activityId, label or similarity access', /canonical\.has\(item\.id\)/.test(marking) && !/\.title|\.activityId|toLowerCase|localeCompare|includes\(|startsWith|match\(/.test(marking));
 const auto = functionBody(bootstrap, 'resolveAutomaticGoalDemand');
 check('the canonical set comes from the SAME single eligible-demand load (one loadEligibleGoalDemand call, no second eligibility implementation)', (code(path.join(lib, 'planDayBootstrap.ts')).match(/loadEligibleGoalDemand\(/g) ?? []).length === 1 && /manualCanonicalGoalActivityIds: result\.candidates\.filter/.test(auto) && !/computeGoalActivityRhythmEligibility/.test(auto));
-check('the page passes the server-marked items to the client (never the raw handoff) and marks nothing on a failed load', /markCanonicalGoalDemandHandoff\(goalActivities, automaticGoalDemand\.status === 'OK' \? automaticGoalDemand\.manualCanonicalGoalActivityIds : \[\]\)/.test(page) && /goalActivities=\{handoffGoalActivities\}/.test(page));
+check('the page passes the server-marked items to the client (never the raw handoff) and marks nothing on a failed load', /markCanonicalGoalDemandHandoff\(goalActivities, automaticGoalDemand\.status === 'OK' \? automaticGoalDemand\.manualCanonicalGoalActivityIds : \[\]\)/.test(page) && /goalActivities: handoffGoalActivities/.test(page));
 
 // ============================================================
 // NO new client claim channel

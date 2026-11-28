@@ -1,0 +1,46 @@
+$ npx ts-node test/goalActivityRhythmStructuralGuards.test.ts
+# job=math-core-tests step=Run Goal Activity Rhythm structural guards test env={}
+OK   Constructor core (dayConstructor.ts) does not reference Rhythm
+OK   Constructor orchestrator (dayConstructorOrchestrator.ts) does not reference Rhythm
+OK   Timeline (HomeTimeline.tsx) does not reference Rhythm
+OK   DailyAgenda (dailyAgenda.ts) does not reference Rhythm
+OK   MyDay orchestrator (myDayOrchestrator.ts) does not reference Rhythm
+OK   Home timeline composer (homeTimelineComposer.ts) does not reference Rhythm
+OK   Right Now selection (rightNowSelection.ts) does not reference Rhythm
+OK   Recomposition decision engine (remainingDayRecomposition.ts) does not reference Rhythm
+OK   Recomposition server wiring (remainingDayRecompositionServer.ts) does not reference Rhythm
+OK   Recomposition acceptance (remainingDayRecompositionAcceptance.ts) does not reference Rhythm
+OK   Goal completion domain (goalCompletion.ts) does not reference Rhythm
+OK   Goal activity execution domain (goalActivityExecution.ts) does not reference Rhythm
+OK   GOAL_TEMPLATES (goals.ts) references Rhythm ONLY via the advisory GOAL_TEMPLATE_LIKELY_ONGOING boolean table (R5) -- never assigns an exact N, never computes eligibility, GOAL_TEMPLATES itself carries no rhythm field
+OK   planMove.ts references Rhythm ONLY via its documented GoalActivityOccurrence repoint UPDATE (R3) and the destination-capacity enforcement (Final Capacity Safety Gate), which delegates to evaluateNewOccurrenceEligibility -- never a duplicated formula, never a Rhythm policy WRITE
+OK   GoalDetailClient.tsx reads the canonical rhythm view shape (R4) -- never the raw rhythmKind/rhythmTargetPerWeek DB column names, never a second eligibility computation
+OK   goalsPresentation.ts defines the canonical rhythm view shape/formatters (R4) -- no rhythmKind/targetPerWeek DB column names, no eligibility-engine import/call in real code (doc-comment prose describing the single source of truth is excluded)
+OK   planDayBootstrap.ts's resolveGoalActivityHandoff re-derives eligibility server-side from persisted facts (R3) -- never trusts a client-supplied Rhythm/eligibility flag
+OK   at least one Ask Aura orchestrator file exists to check
+OK   Ask Aura (lib/askAuraOrchestrator.ts) does not reference Rhythm
+OK   Ask Aura (lib/homeAskAuraHandoff.ts) does not reference Rhythm
+OK   logPlannedActivity itself does not reference Rhythm
+OK   skipPlannedActivity itself does not reference Rhythm
+OK   createGoalWithActivities persists Rhythm ONLY via toPersistedGoalActivityRhythm(activity.rhythm ...) (R5) -- no eligibility computation anywhere in db.ts's own Goal-creation write path
+OK   addGoalActivity persists Rhythm ONLY via toPersistedGoalActivityRhythm(input.rhythm ...) (R5) -- no eligibility computation anywhere in db.ts's own manual-add write path
+OK   db.ts defines ONLY the eight allowed, intentionally-reviewed Rhythm functions (O5 P2d added the PURE row mapper buildGoalActivityRhythmFactsFromOccurrenceRows, no query; loadGoalActivityRhythmFacts [read-only], loadGoalActivityRhythmFactsForActivities [R4's batched read-only sibling], materializeGoalActivityRhythmOccurrence [R3's sole occurrence writer], updateGoalActivityRhythmSettings [R5's existing-activity policy writer, generalized by MR1], and loadCandidateGoalActivitiesForRhythmDemand [Candidate A1's read-only discovery query]; AURA-MP-4 added createPersonRhythm [creates ONE person-linked N_PER_WEEK GoalActivity on explicit request; no occurrence write] and listPersonRhythms [read-only]) -- no other function references Rhythm
+OK   AURA-MR2: listPausedGoalRhythms contains no INSERT/UPDATE/DELETE (read-only)
+OK   AURA-MR2: listNextGoalRhythmOccurrences contains no INSERT/UPDATE/DELETE (read-only) and returns only UPCOMING plans
+OK   loadCandidateGoalActivitiesForRhythmDemand itself contains no INSERT/UPDATE/DELETE (read-only, this ticket's own section 15)
+OK   loadGoalActivityRhythmFacts itself contains no INSERT/UPDATE/DELETE (read-only, this ticket's own section 23)
+OK   goalActivityRhythm.ts imports no Prisma/pg client (pure domain, no DB access -- this ticket's own section 11)
+OK   goalActivityRhythm.ts never reads Date.now() or constructs `new Date()` with no argument inside real CODE (this ticket's own section 20; doc-comment prose explaining the restriction is excluded)
+OK   goalActivityRhythm.ts does not define DAILY/WEEKDAYS/SPECIFIC_WEEKDAYS/AURA_DECIDES (R2's own minimal vocabulary -- this ticket's own section 3)
+OK   goalActivityRhythm.ts does not reference RRULE/cron/monthly/custom interval concepts in real CODE (doc-comment prose listing what is OUT of scope is excluded)
+OK   goalActivityRhythm.ts introduces no occurrence ordinal/windowKey/occurrenceKey concept (this ticket's own section 22 -- R2 computes capacity only)
+OK   goalActivityRhythm.ts never creates a GoalActivityOccurrence row (no INSERT/CREATE reference at all -- pure domain module)
+OK   schema.prisma defines rhythmKind/rhythmTargetPerWeek on GoalActivity (the one allowed schema reference)
+OK   migration 0043_goal_activity_rhythm exists and adds exactly the two Rhythm columns, nothing else
+OK   R2 introduced rhythmKind/rhythmTargetPerWeek exactly once, in 0043: no OTHER migration directory's own contents also reference them (count-independent -- holds regardless of how many unrelated migrations exist)
+OK   GoalActivityOccurrence model (R1) was not modified by R2 -- still no status/windowKey column
+OK   GoalActivityExecution model gained no new RHYTHM-shaped column from R2
+OK   no separate "model GoalActivityRhythm" entity exists in schema.prisma (this ticket's own YAGNI decision, section 5)
+ALL GOAL ACTIVITY RHYTHM STRUCTURAL GUARD CHECKS PASSED
+
+# exit=0 signal=

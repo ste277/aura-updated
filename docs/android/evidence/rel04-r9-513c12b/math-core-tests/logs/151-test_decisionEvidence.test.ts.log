@@ -1,0 +1,61 @@
+$ npx ts-node test/decisionEvidence.test.ts
+# job=math-core-tests step=Run decision evidence test env={}
+=== strict-mode precondition ===
+OK   this file runs in strict mode: a write to a frozen object THROWS instead of being silently ignored
+=== content: exactly the contract fields, absence stays absence ===
+OK   absent facts -> no evidence
+OK   facts carrying no category ({}) -> no evidence at all (nothing is manufactured)
+OK   recurrence-only facts -> recurrence evidence and NO opportunity key (no zero / UNKNOWN filler)
+OK   opportunity-only facts -> opportunity evidence and NO recurrence key
+OK   both -> both categories
+OK   RECURRENCE CONTRACT: exactly the seven fields, in contract order, values preserved exactly (no reinterpretation)
+OK   OPPORTUNITY CONTRACT: exactly the twelve P0b fields, in contract order, values preserved exactly
+OK   only contract fields are evidence: an extra property on a source object is NOT carried over
+OK   values are carried as data and never interpreted: UNKNOWN stays UNKNOWN, GENERIC_FALLBACK stays GENERIC_FALLBACK, zeros stay zeros, no field is added or dropped
+OK   the builder takes the facts and nothing else (no intent id, no source, no clock)
+=== owned by value: no shared references ===
+OK   NO SHARED NESTED REFERENCES: the recurrence and opportunity evidence objects are not the provider's objects
+OK   PROVIDER MUTATION: mutating the original recurrence object afterwards does not change the evidence
+OK   OPPORTUNITY-SOURCE MUTATION: mutating the original opportunity object afterwards does not change the evidence
+OK   the whole evidence is byte-identical after every source mutation
+OK   DECISIONFACTS MUTATION: mutating a DecisionFacts view that shares the provider's recurrence object does not change the evidence
+=== deep immutability: runtime freeze, rejected writes, readonly types ===
+OK   OUTER FREEZE: the evidence object is frozen
+OK   NESTED FREEZE: the recurrence and the opportunity evidence are each frozen
+OK   OUTER MUTATION: reassigning evidence.recurrence / evidence.opportunity, adding a key, or deleting a key all throw
+OK   NESTED MUTATION: writing EVERY recurrence field throws and leaves the value unchanged
+OK   NESTED MUTATION: writing EVERY opportunity field throws and leaves the value unchanged
+OK   adding a key to a nested evidence object throws
+OK   READONLY TYPES: assignments to evidence, evidence.recurrence, evidence.opportunity and their fields are compile errors (@ts-expect-error) and are also rejected at runtime
+=== isolation, reuse, equality ===
+OK   REUSED SOURCE: building twice from the same authoritative source object yields independently owned evidence (no shared object at any level)
+OK   STRUCTURAL EQUALITY: identical inputs give structurally identical evidence
+OK   REFERENCE INEQUALITY: independent builds do not depend on shared mutable nested references
+OK   CROSS-CANDIDATE ISOLATION: changing candidate A's source (or its evidence) does not alter candidate B's evidence, and A's evidence did not follow its own source
+=== the preparation-stage builder: prepared facts over provider facts, fail-open, source-neutral ===
+OK   only fact-bearing intents get evidence (recurrence-only: recurrence only); an intent with no facts, or none of the categories, gets NO entry (no fabricated zero demand)
+OK   the result is synchronous (no promise): evidence preparation performs no I/O
+OK   the evidence reflects the facts AS PREPARED: the prepared opportunity facts are included, and nothing is recomputed
+OK   PROVIDER FAILURE: when no facts could be prepared, evidence holds only what the provider carried -- no opportunity is invented, no UNKNOWN or zero is created
+OK   SOURCE NEUTRALITY: identical authoritative facts give deeply equal evidence whatever the intent id looks like (an automatic demand id, a manual hand-off id, a typed id) -- there is no source branch
+OK   MULTIPLE CANDIDATES: evidence is candidate-local -- each keeps its own values with no cross-contamination
+OK   two intents handed the SAME source object get independently owned evidence
+OK   FAIL-OPEN: evidence that cannot be built for one intent is skipped (warned, never fabricated), and the other intents are unaffected
+=== through the real orchestrator: built once, never recomputed, inert ===
+OK   REPLENISHMENT RAN: a real contest re-searched the conflicted loser after the first construction (so there was a window in which evidence could have been rebuilt)
+OK   ONE evidence stage per preview, and exactly ONE build per fact-bearing candidate (2), none for the typed intent with no facts, none during replenishment or attachment
+OK   the evidence was built from the facts AS PREPARED: candidate A's build saw the prepared opportunity facts, candidate B's only its provider facts
+OK   NO OUTPUT DRIFT [no facts]: the whole preview (constructed day, warnings, window, resolved-intent metadata incl. attached DecisionFacts) is byte-identical with and without the evidence stage
+OK   NO OUTPUT DRIFT [recurrence only]: the whole preview (constructed day, warnings, window, resolved-intent metadata incl. attached DecisionFacts) is byte-identical with and without the evidence stage
+OK   NO OUTPUT DRIFT [opportunity only (prepared)]: the whole preview (constructed day, warnings, window, resolved-intent metadata incl. attached DecisionFacts) is byte-identical with and without the evidence stage
+OK   NO OUTPUT DRIFT [both facts (prepared)]: the whole preview (constructed day, warnings, window, resolved-intent metadata incl. attached DecisionFacts) is byte-identical with and without the evidence stage
+OK   NO OUTPUT DRIFT [both facts (real preparer, real range adapter)]: the whole preview (constructed day, warnings, window, resolved-intent metadata incl. attached DecisionFacts) is byte-identical with and without the evidence stage
+OK   ATTACHMENT CONTRACT PRESERVED: the object attached to the resolved intent is still the exact object the preparer produced (P1 identity), with its recurrence first and the 12-field opportunity after
+OK   SCARCE LOW CANDIDATE: with the LOW candidate given maximally scarce qualifying-looking evidence (1 viable day, target 7, 7 remaining) the winner is still HIGH and the loser still LOW, and the constructed day is byte-identical to the fact-free one
+OK   TOKEN IDENTITY: the signed preview body -- every acceptance token included -- is identical with and without the evidence stage (tokens are HMACs over the proposed items, not over decision facts)
+OK   PREPARATION FAILURE UNCHANGED: a rejecting or synchronously throwing preparer yields the exact preview built without any preparer, each called once, no retry
+OK   on preparation failure evidence is built only from what the provider carried (recurrence), with no opportunity invented
+OK   EVIDENCE FAILURE NON-INTERFERENCE: a builder that throws for every candidate never turns into a failed preview, and the preview is byte-identical to the one built normally
+ALL DECISION EVIDENCE CHECKS PASSED
+
+# exit=0 signal=

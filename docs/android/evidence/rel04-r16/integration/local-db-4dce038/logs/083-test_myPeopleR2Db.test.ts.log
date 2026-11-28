@@ -1,0 +1,66 @@
+$ npx ts-node --project tsconfig.jsdom-tests.json test/myPeopleR2Db.test.ts
+# job=day-constructor-acceptance-db-tests step=Run AURA-MP-1 R2 profile preservation and Gregorian integrity DB test env={}
+OK   DISABLED name-only edit (custom city, Chicago): persisted change is exactly [name]
+OK   DISABLED name-only edit (custom city, Chicago): payload keys are exactly [name] and the API returned 200
+OK   DISABLED relationship-only edit (FRIEND -> FAMILY, chart without location): persisted change is exactly [relationshipType]
+OK   DISABLED relationship-only edit (FRIEND -> FAMILY, chart without location): payload keys are exactly [relationshipType] and the API returned 200
+OK   DISABLED save without changes (custom city): persisted change is exactly []
+OK   DISABLED save without changes (custom city): the editor sent NO request
+OK   DISABLED name edit, chart with NO optional location (stays absent): persisted change is exactly [name]
+OK   DISABLED name edit, chart with NO optional location (stays absent): payload keys are exactly [name] and the API returned 200
+OK   DISABLED explicit birth-time edit keeps the ORIGINAL custom location: persisted change is exactly [birthTime]
+OK   DISABLED explicit birth-time edit keeps the ORIGINAL custom location: payload keys are exactly [birthDate, birthTime, birthTimezone, birthCityName, birthLatitude, birthLongitude] and the API returned 200
+OK   DISABLED birth-time edit payload carries America/Chicago + Naperville + its coordinates (never a presentation default)
+OK   DISABLED explicit birth-date edit on a chart with NO location keeps it absent: persisted change is exactly [birthDate]
+OK   DISABLED explicit birth-date edit on a chart with NO location keeps it absent: payload keys are exactly [birthDate, birthTime, birthTimezone] and the API returned 200
+OK   DISABLED no-location payload sends only the all-or-none trio (no city, no coordinates)
+OK   DISABLED explicit location change (Chennai -> Mumbai): persisted change is exactly [birthCityName, birthLatitude, birthLongitude]
+OK   DISABLED explicit location change (Chennai -> Mumbai): payload keys are exactly [birthDate, birthTime, birthTimezone, birthCityName, birthLatitude, birthLongitude] and the API returned 200
+OK   DISABLED name-only person rename: persisted change is exactly [name]
+OK   DISABLED name-only person rename: payload keys are exactly [name] and the API returned 200
+OK   DISABLED explicit chart clearing (chart:null) is refused (400) and nothing changes
+OK   DISABLED clearing only the birth time in the editor is refused client-side; nothing sent or changed
+OK   ENABLED name-only edit keeps chart, notes, interests, label, location, timezone: persisted change is exactly [name]
+OK   ENABLED name-only edit keeps chart, notes, interests, label, location, timezone: payload keys are exactly [name] and the API returned 200
+OK   ENABLED save without changes: persisted change is exactly []
+OK   ENABLED save without changes: the editor sent NO request
+OK   ENABLED notes + interests edit (API) changes exactly [interests, notes]
+OK   ENABLED explicit chart clearing (chart:null) clears exactly the six chart columns
+OK   RE-DISABLED rename of a person whose chart was just cleared (no chart sent): persisted change is exactly [name]
+OK   RE-DISABLED rename of a person whose chart was just cleared (no chart sent): payload keys are exactly [name] and the API returned 200
+OK   RE-ENABLED: custom person kept everything (Chicago, Naperville, coordinates, notes, interests, label, location, timezone)
+OK   RE-ENABLED: no-location chart still has no city or coordinates
+OK   RE-ENABLED: name-only person still has no chart and kept its note
+OK   F4 INSERT NULL month -> refused by PersonOccasion_gregorian_date_check
+OK   F4 INSERT NULL day -> refused by PersonOccasion_gregorian_date_check
+OK   F4 INSERT NULL month and day -> refused by PersonOccasion_gregorian_date_check
+OK   F4 INSERT NULL month with a year -> refused by PersonOccasion_gregorian_date_check
+OK   F4 INSERT month 0 -> refused by PersonOccasion_gregorian_date_check
+OK   F4 INSERT month 13 -> refused by PersonOccasion_gregorian_date_check
+OK   F4 INSERT day 0 -> refused by PersonOccasion_gregorian_date_check
+OK   F4 INSERT day 32 -> refused by PersonOccasion_gregorian_date_check
+OK   F4 INSERT 31 April -> refused by PersonOccasion_gregorian_date_check
+OK   F4 INSERT 30 February -> refused by PersonOccasion_gregorian_date_check
+OK   F4 INSERT 29 February 1900 -> refused by PersonOccasion_gregorian_date_check
+OK   F4 INSERT 29 February 2023 -> refused by PersonOccasion_gregorian_date_check
+OK   F4 INSERT 15 June 2001 -> accepted
+OK   F4 INSERT 31 December 1999 -> accepted
+OK   F4 INSERT 29 February 2000 -> accepted
+OK   F4 INSERT 29 February 2024 -> accepted
+OK   F4 INSERT 29 February, unknown year -> accepted
+OK   F4 INSERT 30 April, unknown year -> accepted
+OK   F4 INSERT 1 January, unknown year -> accepted
+OK   F4 UPDATE month = NULL -> refused
+OK   F4 UPDATE day = NULL -> refused
+OK   F4 UPDATE month = NULL, day = NULL -> refused
+OK   F4 UPDATE 31 April -> refused
+OK   F4 UPDATE 30 February -> refused
+OK   F4 UPDATE 29 Feb 1900 -> refused
+OK   F4 UPDATE month 13 -> refused
+OK   F4 UPDATE to 29 Feb 2000 -> accepted
+OK   F4 UPDATE to 29 Feb with unknown year -> accepted
+OK   F4 the row is intact after the refused UPDATEs (29 Feb, unknown year)
+
+ALL MY PEOPLE R2 DB CHECKS PASSED
+
+# exit=0 signal=

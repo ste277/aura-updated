@@ -1,0 +1,39 @@
+$ npx ts-node test/muhurta.test.ts
+# job=math-core-tests step=Run muhurta test env={}
+OK   Panchanga snapshot includes all four elements
+OK   Abhijit scores higher than Rahu Kalam for an important start
+OK   Rahu Kalam explains the blocker
+OK   Panchanga factors change recommendation strength across dates
+OK   Plan returns one to three opportunities
+OK   Plan opportunities are score-sorted
+OK   Plan summaries include Muhurtham context
+OK   Seven-day planning excludes already-passed moments from today
+OK   Seven-day planning returns a daily option for each day
+OK   Seven-day planning returns varied start times when alternatives exist
+OK   Seven-day base calendar matches the best returned option
+OK   Weekend base calendar matches the best returned option
+OK   Custom-range base calendar matches the best returned option
+OK   Planner preserves long requested durations in base recommendation
+OK   Activity catalog resolves start-journey intent
+OK   Birth context adds a secondary personal Muhurtham signal
+OK   Planner uses catalog profile for journey starts
+OK   Tomorrow planning from Aug 19 IST labels Aug 20
+OK   Planner calendar timestamps use user timezone offset
+OK   Planner recomputes timezone offset for future DST dates
+OK   Tomorrow planning adds local calendar days across DST
+OK   Low-stakes catalog activities can remain usable today
+OK   Catalog-matched activity scores differ across window types (not flat 55)
+OK   Catalog-matched activity scores are never the generic flat-55 fallback value
+OK   Catalog-matched activity scores its recommended window meaningfully higher than its avoid window
+OK   Deep Work resolves to the deep-work catalog entry
+OK   Deep Work (catalog match) window scores are differentiated, not flat
+OK   Deep Work scores its recommended window meaningfully higher than its avoid window
+OK   Discovery cards expose fit labels
+OK   Discovery is catalog-backed for dating in Neutral Flow
+OK   Discovery uses nuanced fit labels
+OK   Muhurta fit favors stronger starts during Abhijit
+OK   Tea break is not best fit during Abhijit
+
+ALL MUHURTA CHECKS PASSED
+
+# exit=0 signal=

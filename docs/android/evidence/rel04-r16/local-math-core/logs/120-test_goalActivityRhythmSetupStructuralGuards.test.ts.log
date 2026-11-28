@@ -1,0 +1,28 @@
+$ npx ts-node test/goalActivityRhythmSetupStructuralGuards.test.ts
+# job=math-core-tests step=Run Goal activity rhythm setup structural guards test env={}
+OK   59. no weekday picker (no Mon/Tue/Wed.../Sun day-of-week selector)
+OK   27/59. no "Which days?" question anywhere
+OK   59. no recurrence calendar / calendar grid UI
+OK   59. no streak UI introduced by the setup flow
+OK   59. no reminder setup introduced by the setup flow
+OK   59. no start/end recurrence date fields (recurrenceStart/recurrenceEnd/untilDate)
+OK   23/59. no RRULE concept anywhere
+OK   59. no monthly recurrence option
+OK   59. no interval/cron syntax (no "every N days", no cron expression fields)
+OK   28. no targetDate-based frequency inference (no "weeks until"/"days remaining" arithmetic, no date subtraction feeding a rhythm/targetPerWeek value)
+OK   12. CreateGoalModal never inspects the Goal title text to decide a rhythm value
+OK   12. AddActivityControl never inspects the activity title text to decide a rhythm value
+OK   9. RhythmPicker itself contains no NLP/regex-based parsing of free text into a frequency
+OK   19. POST /api/goals validates every activityRhythms entry through the canonical R2 validator (validateGoalActivityRhythm), never trusts the client object raw
+OK   19. POST /api/goals/[goalId]/activities validates rhythm through the canonical R2 validator
+OK   19. PATCH .../rhythm validates rhythm through the canonical R2 validator, preferences through the canonical MR1 parser, and requires at least one field
+OK   18. none of the three routes coerce an invalid value (no Math.round/Math.floor/Math.abs/|| applied to a client-supplied targetPerWeek)
+OK   21/22/23. updateGoalActivityRhythmSettings never references plannedActivityId/status/GoalActivityOccurrence (a pure policy UPDATE, this ticket's own section 21)
+OK   21/22/23. updateGoalActivityRhythmSettings issues exactly one UPDATE, targeting only the Rhythm policy, MR1 pause/preference columns and updatedAt
+OK   21/22/23. updateGoalActivityRhythmSettings reads the current row FOR UPDATE scoped by id + goalId + userId (ownership + serialized merge)
+OK   24. the manual Add activity form has no CompletionRequirement control (no kind/targetValue/unit selector added alongside the frequency picker)
+OK   25. no duration x frequency aggregate math anywhere in the setup UI (no targetPerWeek multiplied/added with a duration value)
+OK   26. dayConstructor*.ts has zero reference to activityRhythms/RhythmPicker/setGoalActivityRhythm (R5 never reaches the Constructor)
+ALL GOAL ACTIVITY RHYTHM SETUP STRUCTURAL GUARD CHECKS PASSED
+
+# exit=0 signal=

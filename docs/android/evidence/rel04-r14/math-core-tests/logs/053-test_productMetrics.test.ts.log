@@ -1,0 +1,36 @@
+$ npx ts-node test/productMetrics.test.ts
+# job=math-core-tests step=Run product metrics test env={}
+OK   isMetricsTimeWindow accepts 24h/7d/30d
+OK   isMetricsTimeWindow rejects an unsupported window
+OK   windowStart(24h) is exactly 24 hours before now
+OK   windowStart(7d) is exactly 7 days before now
+OK   windowStart(30d) is exactly 30 days before now
+OK   percentile of an empty array is null (no data, not a misleading 0)
+OK   percentile(50) of [1,2,3,4] is 2
+OK   percentile is order-independent (unsorted input)
+OK   percentile(95) of 1..100 is 95
+OK   percentile(100) returns the max value
+OK   rate(0, 0) is null, not 0 -- "no data" is distinct from "0% conversion"
+OK   rate(1, 0) is null
+OK   rate(1, 4) is 0.25
+OK   rate(0, 4) is 0 (genuinely zero conversion, valid distinct case)
+OK   totalCountForEvent sums across all groups (including null-group rows)
+OK   totalCountForEvent handles a null-group-only event
+OK   totalCountForEvent is 0 for an event with no rows
+OK   countByGroupForEvent breaks totals down per group
+OK   countByGroupForEvent excludes null-group rows from the breakdown
+OK   A: Plan activation = completed/started
+OK   B: Personalization rate = (PERSONAL+SHARED)/total
+OK   C: Shared adoption = SHARED/total
+OK   D: Moment creation = created/SHARED searches
+OK   E: Share rate = shared/created
+OK   F: Open rate = opened/shared
+OK   G: Response rate = responded/opened
+OK   H: Accept rate = accepted/responded
+OK   I: Rescheduling rate = alternativeCreated/anotherTime
+OK   J: Acquisition intent = findYourOwn/opened
+OK   Every funnel rate is null (not 0 or NaN) with zero data across the board
+
+ALL PRODUCT METRICS CHECKS PASSED
+
+# exit=0 signal=

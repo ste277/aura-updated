@@ -1,0 +1,47 @@
+$ npx ts-node test/decisionFactPreparationArchitecture.test.ts
+# job=math-core-tests step=Run decision fact preparation architecture test env={}
+OK   the orchestrator calls the preparation exactly ONCE
+OK   preparation runs AFTER every intent was resolved (duration included) and BEFORE the first constructDay call
+OK   nothing prepares, computes or projects facts after the last constructDay call (no post-Constructor recomputation)
+OK   the preview handler no longer computes opportunity facts after construction: no attachOpportunityFacts, no enrichment/O1/O2 call
+OK   the preview boundary only SUPPLIES the generic preparer to the orchestration (two wiring sites: the coherent snapshot-backed deps, and the legacy live deps used only when no scheduling binding is supplied)
+OK   the enrichment is invoked only by the preparation module; the O1 projection and O2 range loader only by the enrichment (ownership unchanged)
+OK   the preparation module calls the enrichment exactly once and never the projection or range loader itself
+OK   the enrichment still projects once per candidate and loads the range once per call (cost shape unchanged)
+OK   production wiring no longer supplies the LIVE range deps (the route supplies the coherent snapshot through the preview boundary instead)
+OK   the Constructor intents are built from the intents AS RESOLVED (provider facts only), never from the prepared facts
+OK   the prepared set is referenced exactly three times in the orchestrator: where it is prepared, where the P2a evidence stage reads it (to build immutable evidence from the facts as prepared, never to feed the Constructor), and where it is attached to the preview metadata
+OK   both constructDay calls receive exactly the existing keys (intents, window, blockedIntervals, candidatesByIntentId, fixedConstraintsByIntentId, today) -- no facts, no prepared set
+OK   the orchestrator hands the preparation only generic values (id, resolved duration, fallback flag, provider facts) and the server request context -- the same `preparationIntents` the P2a evidence stage reads
+OK   the fallback flag comes from the SAME resolution that produced the duration (no second duration resolution)
+OK   compareByOverloadPrecedence reads no fact
+OK   sortByOverloadPrecedence reads no fact
+OK   compareCandidatesForPlacement reads no fact
+OK   evaluateCandidate reads no fact
+OK   dayConstructor.ts and dayCapacity.ts never mention decision facts at all
+OK   dayIntent.ts carries the generic decisionFacts field only: nothing else in it reads facts
+OK   no decision module imports the preparation module
+OK   the orchestrator never interprets a fact: it only forwards them (no property read of a fact, no condition on one)
+OK   acceptance, persistence and signing never see the preparation or the prepared facts (no new client authority)
+OK   no schema field or db.ts function stores prepared facts
+OK   the preparation module imports exactly the generic facts types, the P2a evidence builder (a pure, DB-free generic module), the enrichment and the O2 deps type -- no decision module, no Goal/Rhythm/provider module, no policy module
+OK   SOURCE NEUTRALITY: the preparation module (comments included) never mentions Goal, GoalActivity, Rhythm, manual, automatic, Candidate A, the provider, canonical demand or a source tag
+OK   the orchestrator and the preview boundary gained no source branch (no Goal/manual/automatic vocabulary introduced by P1 in the orchestrator)
+OK   NO SCORE, PRESSURE, SCARCITY, POLICY or REASON concept in the preparation module (code and comments)
+OK   the preparation module defines no ranking, comparison or classification: no sort, no comparator, no threshold
+OK   the preparation module reproduces no O1/O2/O3 logic (no day-state, coverage, contiguity, availability, timezone, DST, blocker or week arithmetic)
+OK   the preparation module is pure and read-only: no clock, no randomness, no environment, no database or network, no write verb, no background work
+OK   prepared facts are an immutable snapshot (frozen) and attachment never mutates its input (spreads into new objects)
+OK   attachment matches by the server-owned requestedIntentId only (never a title) and preserves order (a single map over the resolved intents)
+OK   FAIL-OPEN: preparation failure is isolated by try/catch and resolves to an EMPTY set (construction never depends on it); the orchestrator adds no throwing path around it
+OK   an omitted preparer is byte-identical to this stage never existing (the dependency is optional)
+OK   the generic DecisionFacts contract is unchanged by P1: still recurrence + opportunity only
+OK   the Opportunity Facts contract is still exactly the 12 P0b fields
+OK   no DecisionPressure, DecisionPolicy, scarcity classification, score or policy-reason type exists anywhere in production code EXCEPT the P2b pure deriver module (decisionPressure.ts) and, since O5 P3b, the two inert shadow modules and, since O5 P4a, the two inert promotion-input modules that CONSUME its derived value (shadowPressureEvaluation.ts, shadowPressureObservation.ts, promotionInput.ts, promotionInputPreparation.ts) -- each unwired from the Constructor and pinned by its own architecture guard
+OK   constructDay is still reached only through the orchestrator and there are still exactly two construction call sites plus the bounded replenishment loop (no optimizer, no backtracking)
+OK   no test-only production hook was introduced (no env flag, no force/override in the preparation or orchestration)
+OK   the behavior suite proves preparation order, non-consumption, single projection/load, attachment identity, duplicate titles, different durations, failure isolation, UNKNOWN, DST and fallback
+OK   the DB suite proves the real order (range loads before the replenishment re-search), byte identity with and without preparation, an independent recomputation, zero writes and 0/1/3/10 query counts
+ALL DECISION FACT PREPARATION ARCHITECTURE CHECKS PASSED
+
+# exit=0 signal=

@@ -1,0 +1,42 @@
+$ npx ts-node test/dailyGuidanceOrchestratorDb.test.ts
+# job=day-constructor-acceptance-db-tests step=Run Daily Guidance orchestrator DB test env={}
+OK   BIRTH_PROFILE_REQUIRED: missing birthDate -> status BIRTH_PROFILE_REQUIRED
+OK   NO_ACTIVITY_INTENT: complete profile, zero Plans today, Day Builder disabled -> status NO_ACTIVITY_INTENT
+OK   PLAN CANDIDATES: an eligible Plan with a resolved activityId produces exactly one candidate
+OK   PLAN CANDIDATES: candidate.source is PLAN
+OK   PLAN CANDIDATES: candidate.activityFamily is derived (DEEP_WORK for deep-work)
+OK   PLAN CANDIDATES: candidate.timingCandidates has exactly one CHECK-evaluated window
+OK   PLAN CANDIDATES: the CHECK-evaluated window matches the Plan's own scheduled instant (never a FIND-searched different time)
+OK   TITLE-ONLY PLAN: a Plan with activityId=null is excluded from candidates (never a guessed family)
+OK   MISSED PLAN: an elapsed, unlogged Plan is excluded (the identical MISSED rule dailyAgenda.ts uses)
+OK   DAY BUILDER CANDIDATES: every returned candidate has a non-empty activityId
+OK   DAY BUILDER CANDIDATES: every returned candidate has at least one timing candidate reused from Day Builder's own FIND result
+OK   DAILY RHYTHM (missing prefs): a real Day Builder workout suggestion is produced with multiple timing candidates
+OK   DAILY RHYTHM (all candidates inside a wide work window): fallback preserves the full original candidate count (never excluded)
+OK   DAILY RHYTHM (all candidates inside a wide work window): rank-1 candidate is unchanged from the unfiltered baseline
+OK   DAILY RHYTHM (missing prefs): Home recommends the workout at the baseline rank-1 time, which is guidance-eligible
+OK   DAILY RHYTHM (fixture A): the real baseline has a CAUTION candidate that can lie alone outside a work window
+OK   DAILY RHYTHM (only CAUTION outside work): the original ranked list is kept (no CAUTION-only narrowing)
+OK   DAILY RHYTHM (only CAUTION outside work): the eligible in-work WORKOUT recommendation is retained (previously dropped -- #349)
+OK   DAILY RHYTHM DISPLAY/COMMIT CONSISTENCY (only CAUTION outside work): the displayed/committed timing.start is exactly the kept rank-1 candidate
+OK   DAILY RHYTHM (fixture B): the real baseline has a guidance-eligible candidate that can lie alone outside a work window
+OK   DAILY RHYTHM (eligible outside-work candidate exists): rank-1 is exactly that outside-work candidate
+OK   DAILY RHYTHM (eligible outside-work candidate exists): the surviving set is strictly narrower than the unfiltered baseline (a real preference, not a no-op)
+OK   DAILY RHYTHM (non-configured workday): unchanged, no workday restriction inherited
+OK   DAILY RHYTHM DISPLAY/COMMIT CONSISTENCY: buildPersonalDailyGuidance reaches READY for the Daily-Rhythm user
+OK   DAILY RHYTHM DISPLAY/COMMIT CONSISTENCY: exactly one WORKOUT recommendation is present (no duplicates)
+OK   DAILY RHYTHM DISPLAY/COMMIT CONSISTENCY: the recommendation's displayed/committed timing.start is EXACTLY the Daily-Rhythm-preferred (outside-work) instant
+OK   DAILY RHYTHM (synthetic): an eligible non-rank-1 outside-work candidate is promoted to rank 1, and the in-work ones are deprioritized away
+OK   DAILY RHYTHM (synthetic): a CAUTION-only outside-work candidate does not displace the eligible in-work ranking (original list kept)
+OK   DAILY RHYTHM (synthetic): all candidates inside work -> unchanged (existing fallback)
+OK   DAILY RHYTHM (synthetic): no Daily Rhythm configured -> unchanged
+OK   DAILY RHYTHM (synthetic): eligible + CAUTION outside work -> the outside set is kept, eligible first (Daily Rhythm behaviour unchanged)
+OK   READY: a complete profile + at least one eligible Plan produces status READY
+OK   READY: guidance.recommendations preserved verbatim from #104 (rank 1..N present)
+OK   READY: selectedActivities contains metadata only for families actually in guidance.recommendations
+OK   READY: DEEP_WORK selectedActivities metadata traces back to the real Plan (activityId=deep-work, source=PLAN)
+OK   DETERMINISM: two calls with the identical user+now+Plans produce deeply-equal guidance.recommendations
+
+ALL PERSONAL GUIDANCE ORCHESTRATION (LIVE-DATABASE) CHECKS PASSED
+
+# exit=0 signal=

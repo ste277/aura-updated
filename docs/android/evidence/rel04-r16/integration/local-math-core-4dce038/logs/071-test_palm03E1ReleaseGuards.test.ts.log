@@ -1,0 +1,6 @@
+$ npx ts-node test/palm03E1ReleaseGuards.test.ts
+# job=math-core-tests step=Run personalised interpretation release-guard test (PALM-03-E1) env={}
+
+PALM-03-E1 release guards: 27 passed, 0 failed
+
+# exit=0 signal=

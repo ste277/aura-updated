@@ -1,0 +1,22 @@
+$ npx ts-node test/automaticGoalDemandBootstrap.test.ts
+# job=math-core-tests step=Run Automatic Goal demand bootstrap test env={}
+OK   1. an eligible N_PER_WEEK GoalActivity is returned as a bootstrap suggestion
+OK   2. zero eligible GoalActivities -> OK with an empty suggestion list (never conflated with failure)
+OK   3. an A1 read failure propagates as LOAD_FAILED out of the resolver, never converted to an empty suggestion list here
+OK   4. manual GA-1 + automatic eligible GA-1 -> automatic GA-1 absent (manual wins)
+OK   5. manual GA-1 + automatic eligible GA-2 -> automatic GA-2 remains
+OK   6. dedup uses goalActivityId only -- a shared title/activityId/goalId with a manually-seeded (different) GoalActivity never causes exclusion
+OK   7. an exclude id that matches no real candidate never suppresses an unrelated eligible suggestion
+OK   8. suggestions from multiple ACTIVE Goals all survive bootstrap together
+OK   9. output order is A1's own stable goalActivityId sort, never re-ranked by this resolver
+OK   10. Today: the exact supplied planningLocalDate is used (eligible, no occurrences yet)
+OK   11. Tomorrow within the same Rhythm week: a prior completion correctly exhausts a 1/week target -> excluded
+OK   12. Sunday->Monday (crossing the week boundary): the SAME prior completion does not carry over into the new week -> eligible again
+OK   13. planDayBootstrap.ts never calls Date.now() or constructs a clock-reading Date in real code
+OK   no session token -> OK empty result, never seeds anything, never LOAD_FAILED
+OK   an invalid session token -> OK empty result
+OK   missing planningLocalDate -> OK empty result, no query even attempted
+OK   missing timezone -> OK empty result, no query even attempted
+ALL AUTOMATIC GOAL DEMAND BOOTSTRAP CHECKS PASSED
+
+# exit=0 signal=

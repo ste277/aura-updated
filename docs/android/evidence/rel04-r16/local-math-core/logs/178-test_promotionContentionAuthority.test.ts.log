@@ -1,0 +1,66 @@
+$ npx ts-node test/promotionContentionAuthority.test.ts
+# job=math-core-tests step=Run promotion contention authority test env={}
+=== REAL pipeline: the blocked counterexample (P3a -> P3b -> P4a2 -> P4b1 -> P4b1b -> P4b2a) ===
+OK   SCENARIO IS THE BLOCKED ONE: O proposed 11:00, B proposed 10:00 (replenished), P finally Deferred; P3a recorded P@10:30 vs O (round 0), P@10:00 vs B (round 1)
+OK   P4a2: exactly one PromotionInput -- candidate P, owners O and B -- from the same real pipeline
+OK   P3b (the diagnostic oracle) classifies P PRESSURE_ELIGIBLE_AGAINST_ALL_FINAL_OWNERS, in agreement with the promotion input
+OK   THE BOUNDARY HANDS ONE AUTHORITY PER INPUT, in input order, from the SAME run
+OK   BOTH historical P attempts are preserved, in the trace's own order: P@10:30-11:30 vs O and P@10:00-11:00 vs B
+OK   MISSING-INTERMEDIATE PROOF: the 10:00 slot is NOT in P's initial candidates (10:30 only) and NOT in P's final candidates (empty), and IS in the authority -- the exact loss that blocked P4b2
+OK   the authority does NOT replace the candidate lists: the basis still holds initial AND final lists (B's relocation slot 11:30 survives only in its INITIAL list)
+OK   CONTRACT SHAPE: exactly { candidateIntentId, attempts: [ { ownerIntentId, start, end, timingFit? } ] } (timingFit = the own descriptive fit of the attempting candidate, O5 P4b2b) -- no round, winner interval, pressure, importance, deadline, originalOrder, candidate order, raw event or classification
+OK   the pure projection over the diagnostics' own trace, the same input and the same basis / placements equals what the boundary handed over
+OK   P4a / P4a2 UNCHANGED: the boundary still returns the same `promotion` outcome shape (PREPARED, inputs only) -- the pairs live in the separate run-level `run` sibling
+=== filters: candidate, owner, no owner expansion ===
+OK   CANDIDATE FILTER: another loser's events (B lost to O at 11:30; X lost to O) are excluded -- only loser P's attempts remain
+OK   OWNER FILTER: an event whose winner is not an owner of the PromotionInput (Z, or P itself) is excluded -- the unrelated trace owner never appears
+OK   NO OWNER EXPANSION: with the PromotionInput authorizing only O, the real P-vs-B attempt (a placed basis intent, a real event) is NOT in the authority -- the trace cannot enlarge the owner scope
+OK   an authorized owner with NO supporting event is an inconsistent pairing (never a quiet widening): INCONSISTENT_INPUT
+OK   MULTIPLE AUTHORIZED OWNERS: attempts are preserved against EACH authorized owner (O and B)
+=== duplicates and order ===
+OK   DEDUP (pinned): the same (owner, start, end) recorded in several rounds is ONE attempt -- the round is not part of the contract, so the repetition carries nothing a generator can use; first occurrence wins
+OK   DEDUP keeps DISTINCT owners over the same interval (P3a emits one event per overlapping owner): O@10:30-11:30 and B@10:30-11:30 would both survive
+OK   ORDER: the trace's own order is preserved among surviving events (no policy ordering): reversing the source reverses the attempts
+OK   DISTINCT attempted intervals against the SAME owner are all preserved (this is exactly the authority P4b2 proved missing)
+=== fail closed ===
+OK   ZERO MATCH: a trace with no event for the candidate (or none for its owners) -> UNAVAILABLE / NO_MATCHING_CONTENTION
+OK   UNKNOWN CANDIDATE: a candidate id that is not a basis intent -> INCONSISTENT_INPUT
+OK   UNKNOWN OWNER: an owner id that is not a basis intent -> INCONSISTENT_INPUT
+OK   UNAUTHORIZED / UNPLACED OWNER: an authorized owner that holds no baseline placement (P itself is a basis intent but Deferred) -> INCONSISTENT_INPUT; a candidate that IS placed (O) -> INCONSISTENT_INPUT
+OK   an authorized owner that holds NO baseline placement (B removed from the placements of the pairing) -> INCONSISTENT_INPUT: the authority never implies an owner can be moved that the baseline did not place
+OK   EMPTY / DUPLICATE owners -> INCONSISTENT_INPUT
+OK   basis or placements not READY -> RUN_NOT_READY (no partial authority)
+OK   a malformed attempted interval (invalid date, or start >= end) -> CAPTURE_FAILED, never a guessed or partial authority
+OK   a throwing source is caught: UNAVAILABLE / CAPTURE_FAILED (never an exception)
+OK   the failure outcomes are frozen and carry only a reason
+=== ownership, detachment, freeze ===
+OK   DETACHED: none of the 9 authority objects / Dates / arrays is reachable from the trace, the PromotionInput, the ConstructionBasis or the BaselinePlacements
+OK   SOURCE MUTATION (test only): changing the source trace strings and the basis Dates after projection leaves the authority byte-identical
+OK   every attempt Date is a newly created, valid Date of the exact attempted instants (10:30-11:30 and 10:00-11:00 UTC)
+OK   DEEP FREEZE: the outcome, the authority, the attempts array, every attempt and every Date are frozen; writes throw -- and the freeze is NOT claimed to protect a Date's time value
+OK   INPUTS ARE NEVER MUTATED: the trace, the PromotionInput, the basis and the placements are byte-identical after repeated projection
+OK   NO CLOCK and DETERMINISM: projection reads Date.now zero times and is byte-identical across repeats
+=== no policy: owner pressure never changes the captured intervals ===
+OK   SYNTHETIC: the same owner set with every owner NONE vs every owner LAST_KNOWN_OPPORTUNITY yields byte-identical authority
+OK   REAL PIPELINE: with only P pressured the owners are NONE; with all three pressured the owners are LAST_KNOWN_OPPORTUNITY -- and the authority intervals are byte-identical
+=== multiple promotion inputs: one separate authority each ===
+OK   two PromotionInputs (P1, P2) produce two separate, input-aligned authorities, each ONLY its own loser's attempts against O (no joint authority, no cross-contamination)
+=== same run, baseline untouched, normal path zero work, failure isolation ===
+OK   NORMAL PATH: `orchestrateConstructDay` (the preview entry point) performs ZERO authority projections
+OK   DIAGNOSTICS ENTRY POINT alone performs ZERO authority projections (only the internal promotion boundary does, once per input)
+OK   the promotion boundary projects exactly ONCE per PromotionInput (1) and runs NO second orchestration: identical loader / search call counts to the normal run
+OK   BASELINE IDENTITY: the Constructor result of the boundary run is deep-identical to the normal orchestration
+OK   FAILURE ISOLATION: a throwing projection makes ONLY that authority UNAVAILABLE / CAPTURE_FAILED -- the PromotionInput outcome is still PREPARED with the same input and the Constructor result is byte-identical to a normal run
+OK   a not-READY run yields no authorities (empty), exactly like no inputs
+OK   no PromotionInput (nobody pressured) -> no authority is projected
+=== the Constructor is not touched or called ===
+OK   the pure projection performs ZERO Constructor passes (no second construction, no timing search: it has no dependency to call)
+=== PROPERTY SWEEP: completeness and soundness over every emitted PromotionInput ===
+     sweep: {"runs":1200,"inputs":244,"authorities":244,"attempts":662,"missing":0,"invented":0,"notReady":0,"outsideOwnerScope":0,"ownerWithoutPlacement":0,"notOverlappingOwnerPlacement":0,"multiRoundInputs":212,"reconstructionWouldLose":76,"lostIntervals":100}
+OK   COMPLETENESS (the principal P4b2a proof): over 244 real PromotionInputs from 1200 deterministic runs (662 distinct attempts), EVERY real P3a candidate->authorized-owner attempted interval is in the authority: ZERO missing
+OK   SOUNDNESS: ZERO invented intervals -- every authority interval is a real P3a event of that candidate against an authorized owner
+OK   BASELINE CONSISTENCY: every authority owner holds a final baseline placement and every attempted interval overlaps that owner's final placement (the scheduling invariant the counterfactual relies on): zero violations
+OK   the sweep is MEANINGFUL: 212 inputs come from multi-round replenishment, and for 76 inputs (100 intervals) the REJECTED initial-UNION-final candidate reconstruction would have lost a real attempt that the authority preserves
+ALL PROMOTION CONTENTION AUTHORITY CHECKS PASSED
+
+# exit=0 signal=

@@ -1,0 +1,92 @@
+$ npx ts-node test/marriageMuhurthamFoundation.test.ts
+# job=math-core-tests step=Run Marriage Muhurtham foundation test env={}
+OK   1. MARRIAGE is a distinct MuhurtaIntent, mapped to the RELATIONSHIP family
+OK   1b. Marriage activity classification uses the MARRIAGE intent (not ENGAGEMENT/NEW_BEGINNING/etc.)
+OK   1c. Marriage activity is CEREMONIAL depth
+OK   2. Marriage rule pack id reflects a real intent-specific pack (MARRIAGE_V1)
+OK   2b. Marriage Tithi coverage is IMPLEMENTED (genuinely sourced, not REUSABLE_BASE_RULE)
+OK   2c. Marriage Nakshatra coverage is IMPLEMENTED
+OK   2d. Marriage Yoga coverage is authoritatively IMPLEMENTED (the new hard-eligibility axis, not merely the always-on global scoring)
+OK   2e. Marriage Karana coverage is authoritatively IMPLEMENTED
+OK   3. Marriage Tithi favorable list differs from Griha Pravesh's
+OK   3b. Marriage Tithi avoid list differs from Griha Pravesh's (Marriage: only the 3 Rikta Tithis; Griha Pravesh also avoids Amavasya/Ashtami)
+OK   4. Marriage Nakshatra favorable list differs from Griha Pravesh's
+OK   4b. Marriage Nakshatra avoid list differs from Griha Pravesh's (Marriage: empty -- no sourced whole-Nakshatra avoid list; Griha Pravesh: Ashlesha/Jyeshtha/Mula)
+OK   Griha Pravesh has no authoritative Yoga/Karana data (its own INTENT_RULE_PACKS entry supplies none) -- confirms Marriage's Yoga/Karana coverage is genuinely new, not inherited
+OK   5. Chaturthi is an authoritative avoid Tithi for Marriage
+OK   6. Navami is an authoritative avoid Tithi for Marriage
+OK   7. Chaturdashi is an authoritative avoid Tithi for Marriage
+OK   8. A favorable Tithi (Ekadashi) is NOT an authoritative avoid for Marriage
+OK   8b. Amavasya is NOT an avoid Tithi for Marriage specifically (unlike Griha Pravesh) -- no source attested it for Marriage, so it was not invented
+OK   9. Vishkambha (a prohibited Marriage Yoga) is an authoritative avoid
+OK   9b. All 9 sourced prohibited Yogas are authoritative avoids for Marriage
+OK   10. A safe Yoga (Siddhi -- not in the prohibited-9 list) remains eligible for Marriage
+OK   Yoga authoritative-eligibility is Marriage-only: Griha Pravesh never hard-rejects on Yoga
+OK   11. Vishti (Bhadra) is an authoritative avoid Karana for Marriage
+OK   12. Shakuni is an authoritative avoid Karana for Marriage
+OK   13. Chatushpada is an authoritative avoid Karana for Marriage
+OK   14. Naga is an authoritative avoid Karana for Marriage
+OK   15. A safe Karana (Bava) remains eligible for Marriage
+OK   Karana authoritative-eligibility is Marriage-only: Griha Pravesh never hard-rejects on Karana (Vishti is not a global hard veto)
+OK   16. A candidate straddling a REAL transition into a prohibited Tithi is rejected
+OK   16b. A genuinely clean window (all 4 factors verified clear) entirely BEFORE that transition is NOT rejected
+OK   17. A candidate straddling a REAL transition into a prohibited Nakshatra is rejected (proven against Griha Pravesh's pack, since Marriage sources no avoid-Nakshatra list -- same generalized mechanism)
+OK   17b. Marriage's own nakshatra.avoid is genuinely empty (favorable-only semantics -- see semantic check below)
+OK   18. A candidate straddling a REAL transition into a prohibited Yoga is rejected for Marriage
+OK   18b. A genuinely clean window (all 4 factors verified clear) entirely BEFORE that Yoga transition is NOT rejected
+OK   19. A candidate straddling a REAL transition into a prohibited Karana is rejected for Marriage
+OK   19b. A genuinely clean window (all 4 factors verified clear) entirely BEFORE that Karana transition is NOT rejected
+OK   20/21. spanOverlapsAuthoritativeEventAvoid()'s own signature carries no score/modifier parameter -- structurally cannot be influenced by how well an unrelated factor scores
+OK   20b/21b. evaluateMuhurthamCandidate rejects (returns null) on spanOverlapsAuthoritativeEventAvoid BEFORE any scoring modifier is applied -- "no modifier large enough to offset it"
+OK   22. Tara Bala/personalContext plays no role in spanOverlapsAuthoritativeEventAvoid -- the same hard-rejection check runs identically for GENERAL (no personalContext at all) and PERSONAL/SHARED (personalContext present), proven by its own classification-only signature
+OK   23. Griha Pravesh Tithi favorable list is byte-identical to before this PR
+OK   23b. Griha Pravesh Tithi avoid list is byte-identical
+OK   23c. Griha Pravesh Nakshatra favorable list is byte-identical
+OK   23d. Griha Pravesh Nakshatra avoid list is byte-identical
+OK   23e. Griha Pravesh still resolves to SUPPORTED (requiresPeriodExclusion/requiresPlanetaryCombustion default false -- unaffected by Marriage's gate)
+OK   23f. Griha Pravesh is still in SUPPORTED_MUHURTHAM_ACTIVITY_IDS
+OK   24. start-journey does not inherit Marriage's Karana hard exclusion (Vishti stays non-authoritative for it)
+OK   24b. start-journey does not inherit Marriage's Yoga hard exclusion (Vishkambha stays non-authoritative for it)
+OK   24c. start-journey coverage.yogaAuthoritative/karanaAuthoritative are MISSING (reusable-base packs get no authoritative Yoga/Karana data)
+OK   24. financial-decision does not inherit Marriage's Karana hard exclusion (Vishti stays non-authoritative for it)
+OK   24b. financial-decision does not inherit Marriage's Yoga hard exclusion (Vishkambha stays non-authoritative for it)
+OK   24c. financial-decision coverage.yogaAuthoritative/karanaAuthoritative are MISSING (reusable-base packs get no authoritative Yoga/Karana data)
+OK   24. business-start does not inherit Marriage's Karana hard exclusion (Vishti stays non-authoritative for it)
+OK   24b. business-start does not inherit Marriage's Yoga hard exclusion (Vishkambha stays non-authoritative for it)
+OK   24c. business-start coverage.yogaAuthoritative/karanaAuthoritative are MISSING (reusable-base packs get no authoritative Yoga/Karana data)
+OK   24. property-purchase does not inherit Marriage's Karana hard exclusion (Vishti stays non-authoritative for it)
+OK   24b. property-purchase does not inherit Marriage's Yoga hard exclusion (Vishkambha stays non-authoritative for it)
+OK   24c. property-purchase coverage.yogaAuthoritative/karanaAuthoritative are MISSING (reusable-base packs get no authoritative Yoga/Karana data)
+OK   24. new-beginning does not inherit Marriage's Karana hard exclusion (Vishti stays non-authoritative for it)
+OK   24b. new-beginning does not inherit Marriage's Yoga hard exclusion (Vishkambha stays non-authoritative for it)
+OK   24c. new-beginning coverage.yogaAuthoritative/karanaAuthoritative are MISSING (reusable-base packs get no authoritative Yoga/Karana data)
+OK   25. Engagement rule pack coverage is still REUSABLE_BASE_RULE for Tithi/Nakshatra (not promoted to IMPLEMENTED)
+OK   25b. Engagement does NOT inherit Marriage's Nakshatra favorable list
+OK   25c. Engagement does NOT inherit Marriage's Yoga/Karana authoritative coverage
+OK   25d. Engagement still resolves to PARTIAL (unaffected by Marriage work)
+OK   26/33a. Marriage rule pack has BOTH Tithi and Nakshatra genuinely dedicated (bothDedicated bar cleared)
+OK   26/33b. Marriage rule pack declares requiresPeriodExclusion
+OK   26/33c. Marriage rule pack declares requiresPlanetaryCombustion
+OK   26/33d. Marriage rule pack coverage.periodExclusion is now IMPLEMENTED (PR B)
+OK   26/33e. Marriage rule pack coverage.planetaryCombustion is now IMPLEMENTED (PR B)
+OK   26/33f. With dedicated Tithi/Nakshatra/Yoga/Karana coverage AND period/combustion coverage, computeMuhurtaSupportLevel now resolves Marriage to SUPPORTED
+OK   26/33g. Marriage is now in SUPPORTED_MUHURTHAM_ACTIVITY_IDS
+OK   26/33h. isSupportedMuhurthamActivity('marriage') is now true
+OK   26/33i. findMuhurthams no longer throws for marriage (genuinely searchable; a Chaturmas-window range legitimately returns zero dates instead)
+OK   27. MuhurthamFinderView's activity dropdown is driven entirely by SUPPORTED_MUHURTHAM_ACTIVITY_IDS.map(...), not a hardcoded list that could include marriage
+OK   27b. MuhurthamFinderView.tsx source contains no hardcoded reference to a "marriage" activity id, Partner A/B UI, or a Marriage-specific screen
+OK   28. Marriage catalog entry now has a POPULATED aliases array (Ask Aura Marriage Muhurtham Routing V1 -- Marriage is canonically supported, so it is no longer deliberately unreachable)
+OK   28b. findActivityIntent("marriage") now resolves to the marriage activity
+OK   28c. findActivityIntent("wedding") now resolves to the marriage activity
+OK   28d. The known pre-existing "best marriage date" -> dating misroute is FIXED: it now resolves to marriage, not dating
+OK   28e. "find a wedding muhurtham" now resolves to marriage
+OK   29. No Marriage-specific Prisma migration directory exists (Marriage Foundation V1 needs no schema change)
+OK   29b. schema.prisma contains no Marriage-specific field
+OK   Zero-result semantics preserved: findBestWindowsForDate can still return null / no candidate reaching MIN_INCLUSION_SCORE is included (unchanged code path -- this PR only added rejection checks, never a fallback)
+OK   SEMANTIC CHECK (A, not B): a Nakshatra that is neither favorable NOR avoid for Marriage is NOT authoritatively rejected -- "favorable" is a positive signal, never an implicit "all others prohibited" rule
+OK   SEMANTIC CHECK: Marriage's nakshatra.avoid is genuinely empty (11 favorable, 0 avoid) -- confirms no "all others prohibited" allow-list was silently implemented
+OK   SEMANTIC CHECK: a Yoga that is neither favorable nor in Marriage's 9-item avoid list (e.g. Priti) is not authoritatively rejected
+
+ALL MARRIAGE MUHURTHAM FOUNDATION CHECKS PASSED
+
+# exit=0 signal=

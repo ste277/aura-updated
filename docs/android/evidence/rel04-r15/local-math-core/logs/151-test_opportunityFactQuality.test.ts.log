@@ -1,0 +1,46 @@
+$ npx ts-node test/opportunityFactQuality.test.ts
+# job=math-core-tests step=Run opportunity fact quality test env={}
+OK   exhaustive sweep over 1092 day-state combinations (horizon lengths 1..6): the new facts equal an independent oracle and partition the totals exactly
+OK   ...and the ORIGINAL six facts (evaluated, viable, unknown, coverage, horizon dates) equal an independent oracle in every combination: P0b is purely additive
+OK   Monday..Sunday horizon: six days after the first; first day KNOWN_FEASIBLE; 4 later viable (Tue-Fri); totals 7 evaluated / 5 viable
+OK   mid-week start (Wednesday): first day feasible, 4 later days (Thu, Fri, Sat, Sun) of which 2 viable
+OK   first day VIABLE, no later viable or unknown day: KNOWN_FEASIBLE, after 2 evaluated / 0 viable / 0 unknown (a fact, not a label)
+OK   first day VIABLE and later days viable: KNOWN_FEASIBLE, after 2 viable
+OK   first day INFEASIBLE, a later day viable: viableDays is 1 yet startDateState is KNOWN_INFEASIBLE -- a total of one does NOT mean the first day
+OK   ...and the same total of one with the viable day FIRST is distinguishable
+OK   first day viable, a later day UNKNOWN: after 2 evaluated / 1 viable / 1 unknown; coverage PARTIAL (unchanged semantics)
+OK   first day INFEASIBLE, a later day UNKNOWN: reported separately (infeasible start, 1 unknown later, 0 viable later)
+OK   first day UNKNOWN, later days viable: UNKNOWN is independent of the later state
+OK   UNKNOWN later days are never turned into zero opportunity: an all-unknown later span has 0 viable BUT its unknown count says why
+OK   one-day horizon (feasible): state KNOWN_FEASIBLE; later set is a KNOWN empty set -- 0 evaluated, 0 viable, 0 unknown (never "unknown")
+OK   one-day horizon (infeasible): state KNOWN_INFEASIBLE; later set is a KNOWN empty set -- 0 evaluated, 0 viable, 0 unknown (never "unknown")
+OK   one-day horizon (unknown): state UNKNOWN; later set is a KNOWN empty set -- 0 evaluated, 0 viable, 0 unknown (never "unknown")
+OK   Sunday as the period end (a weekly horizon 10-11..10-11): later counts are all zero, nothing is inferred
+OK   today: availability that existed only EARLIER today leaves the first day KNOWN_INFEASIBLE (it reflects the time remaining, not the original day)
+OK   remaining interval EXACTLY the duration (09:30..10:00, 30 min) is KNOWN_FEASIBLE; one minute short (09:31) is KNOWN_INFEASIBLE
+OK   later days are NOT clipped by now (a later 30-minute day stays feasible at exactly 30 minutes) while the clipped first day is infeasible
+OK   a historical first day is KNOWN_INFEASIBLE regardless of what was supplied (never invented as UNKNOWN); the elapsed later day too; today remains
+OK   UNCONFIGURED: the first day UNKNOWN and every later day UNKNOWN (no Constructor fallback): after 4 evaluated / 0 viable / 4 unknown; coverage UNKNOWN
+OK   CONFIGURED EMPTY: known infeasible, NOT unknown: first day KNOWN_INFEASIBLE, after 4 evaluated / 0 viable / 0 unknown; coverage COMPLETE
+OK   DST overlap (NY 2026-11-01) as a LATER day: UNKNOWN (never zero): first day feasible, after 6 evaluated / 4 viable / 1 unknown
+OK   DST overlap as the FIRST day: startDateState UNKNOWN, and the later days are evaluated independently
+OK   DST gap (NY 2026-03-08, 02:30 does not exist): the Sunday is UNKNOWN
+OK   non-one-hour DST transition (Lord Howe, 30 minutes): the affected Sunday window is UNKNOWN; the Saturday and Monday are evaluated normally
+OK   an ordinary week with no transition has no unknown days (granularity is per date)
+OK   blocking TODAY only: the first day turns KNOWN_INFEASIBLE and the later counts are unchanged
+OK   blocking a FUTURE day only: the later viable count drops by one and the first day is unchanged
+OK   civil days, not windows: one later day with FOUR fitting windows is exactly ONE later viable day
+OK   month boundary (Apr 30 .. May 3): 3 later days
+OK   year boundary (Dec 31 .. Jan 3): 3 later days
+OK   leap day (2024-02-29 .. 03-03): 3 later days; non-leap Feb 28 .. Mar 1: 1 later day
+OK   Kolkata (local Monday): the first day is Monday, six later days, 4 later viable
+OK   Los Angeles (still local Sunday, period end): one-day horizon, first day known-empty, no later days
+OK   UTC Monday: six later days
+OK   O4 transports all four new facts with explicit, non-optional values
+OK   O4 old fields keep their meaning: evaluated 5, viable 3, unknown 0, COMPLETE, horizon 10-07..10-11
+OK   RESOLVED and GENERIC_FALLBACK produce the SAME structural fields (same keys, same order); only the basis (and the duration used) differ
+OK   candidate-local: two candidates may both count the same later day (no shared-capacity inference)
+OK   no horizon (no recurrence facts): no opportunity facts at all, so no new field can silently mean zero
+ALL OPPORTUNITY FACT QUALITY CHECKS PASSED
+
+# exit=0 signal=

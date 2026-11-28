@@ -1,0 +1,77 @@
+$ npx ts-node test/remainingDayRecompositionProposalOverlapDb.test.ts
+# job=day-constructor-acceptance-db-tests step=Run Recomposition proposal overlap DB test env={}
+=== CONTROL: no plan reaches into the day from outside -- the proposal is the reference for "unchanged" ===
+OK   control: READY proposal from the real path with the real timing search
+OK   control: the candidate is decided and its current slot is feasible (no conflict-driven invalidity)
+OK   control: the fixed plan is protected as SCHEDULING_MODE_NOT_FLEXIBLE
+OK   control: the proposal is deterministic for a fixed clock (identical JSON apart from the signed token)
+=== PRIMARY DEFECT: an overnight blocker that started the PREVIOUS civil day ===
+   [diag] Asia/Kolkata (no DST): protected=[["Overnight shift","ACTIVE"]] decision=MOVE reason=CURRENT_SLOT_INVALID invalid=BLOCKED_OR_UNAVAILABLE to=Wed Oct 14 2026 14:00:00 GMT+0530 (India Standard Time)..Wed Oct 14 2026 15:00:00 GMT+0530 (India Standard Time)
+OK   [Asia/Kolkata (no DST)] overnight UPCOMING blocker is protected as ACTIVE (it is running now) -- previously not even listed
+OK   [Asia/Kolkata (no DST)] the candidate whose current slot lies INSIDE the overnight blocker is reported CURRENT_SLOT_INVALID / BLOCKED_OR_UNAVAILABLE
+OK   [Asia/Kolkata (no DST)] no proposed destination overlaps the overnight blocker
+OK   [Asia/Kolkata (no DST)] the proposal used the canonical overlap loader exactly once, for the civil day [from,to), and never the start-scoped loader
+   [diag] America/Los_Angeles spring-forward day (23h): protected=[["Overnight shift","ACTIVE"]] decision=MOVE reason=CURRENT_SLOT_INVALID invalid=BLOCKED_OR_UNAVAILABLE to=Mon Mar 09 2026 07:45:00 GMT+0530 (India Standard Time)..Mon Mar 09 2026 08:45:00 GMT+0530 (India Standard Time)
+OK   [America/Los_Angeles spring-forward day (23h)] overnight UPCOMING blocker is protected as ACTIVE (it is running now) -- previously not even listed
+OK   [America/Los_Angeles spring-forward day (23h)] the candidate whose current slot lies INSIDE the overnight blocker is reported CURRENT_SLOT_INVALID / BLOCKED_OR_UNAVAILABLE
+OK   [America/Los_Angeles spring-forward day (23h)] no proposed destination overlaps the overnight blocker
+OK   [America/Los_Angeles spring-forward day (23h)] the proposal used the canonical overlap loader exactly once, for the civil day [from,to), and never the start-scoped loader
+   [diag] America/Los_Angeles fall-back day (25h): protected=[["Overnight shift","ACTIVE"]] decision=MOVE reason=CURRENT_SLOT_INVALID invalid=BLOCKED_OR_UNAVAILABLE to=Mon Nov 02 2026 03:30:00 GMT+0530 (India Standard Time)..Mon Nov 02 2026 04:30:00 GMT+0530 (India Standard Time)
+OK   [America/Los_Angeles fall-back day (25h)] overnight UPCOMING blocker is protected as ACTIVE (it is running now) -- previously not even listed
+OK   [America/Los_Angeles fall-back day (25h)] the candidate whose current slot lies INSIDE the overnight blocker is reported CURRENT_SLOT_INVALID / BLOCKED_OR_UNAVAILABLE
+OK   [America/Los_Angeles fall-back day (25h)] no proposed destination overlaps the overnight blocker
+OK   [America/Los_Angeles fall-back day (25h)] the proposal used the canonical overlap loader exactly once, for the civil day [from,to), and never the start-scoped loader
+   [diag] Pacific/Auckland (+13 DST): protected=[["Overnight shift","ACTIVE"]] decision=MOVE reason=CURRENT_SLOT_INVALID invalid=BLOCKED_OR_UNAVAILABLE to=Wed Oct 14 2026 09:00:00 GMT+0530 (India Standard Time)..Wed Oct 14 2026 10:00:00 GMT+0530 (India Standard Time)
+OK   [Pacific/Auckland (+13 DST)] overnight UPCOMING blocker is protected as ACTIVE (it is running now) -- previously not even listed
+OK   [Pacific/Auckland (+13 DST)] the candidate whose current slot lies INSIDE the overnight blocker is reported CURRENT_SLOT_INVALID / BLOCKED_OR_UNAVAILABLE
+OK   [Pacific/Auckland (+13 DST)] no proposed destination overlaps the overnight blocker
+OK   [Pacific/Auckland (+13 DST)] the proposal used the canonical overlap loader exactly once, for the civil day [from,to), and never the start-scoped loader
+=== SAME-DAY EARLY START: starts earlier on the SAME civil date, before `now`, and continues into the remaining window ===
+OK   same-day early-start blocker (06:00-12:30, now 08:00) is protected ACTIVE and blocks the candidate at 12:00 (this was already correct: the civil-day loader reaches it; pinned as a regression guard)
+=== LIFECYCLE of an overlapping overnight row (reference instant = the request `now`) ===
+OK   overnight UPCOMING, still running (end 14:00 >= now 08:00): BLOCKS the candidate
+OK   overnight UPCOMING, still running (end 14:00 >= now 08:00): protected-list entry is ACTIVE
+OK   overnight LOGGED (always blocks; history is never listed as protected): BLOCKS the candidate
+OK   overnight LOGGED (always blocks; history is never listed as protected): protected-list entry is none
+OK   overnight CANCELLED never blocks: does NOT block
+OK   overnight CANCELLED never blocks: protected-list entry is none
+OK   overnight SKIPPED never blocks: does NOT block
+OK   overnight SKIPPED never blocks: protected-list entry is none
+OK   overnight MOVED never blocks: does NOT block
+OK   overnight MOVED never blocks: protected-list entry is none
+OK   overnight UPCOMING already elapsed at `now` (end 06:00 < 08:00) does NOT block (MISSED; the overlap query can retrieve it, the lifecycle rule still decides): does NOT block
+OK   overnight UPCOMING already elapsed at `now` (end 06:00 < 08:00) does NOT block (MISSED; the overlap query can retrieve it, the lifecycle rule still decides): protected-list entry is MISSED
+=== CROSS-USER: another user's overlapping plan neither loads nor blocks ===
+OK   cross-user: the other user's overnight plan neither blocks the candidate nor appears in the proposal
+=== CIVIL-DAY BOUNDARIES (half-open [from, to)) ===
+OK   ends EXACTLY at the day start: does not overlap, not loaded: protected-list entry is none
+OK   ends ONE ms after the day start: overlaps, loaded (elapsed UPCOMING -> MISSED): protected-list entry is MISSED
+OK   starts EXACTLY at the day end: does not overlap, not loaded: protected-list entry is none
+OK   starts ONE ms before the day end and extends beyond: overlaps, loaded (OUTSIDE_TODAY): protected-list entry is OUTSIDE_TODAY
+OK   ENTIRELY BEFORE the day: not loaded: protected-list entry is none
+OK   ENTIRELY AFTER the day: not loaded: protected-list entry is none
+OK   FULL SPAN blocker (starts before the day, ends after it) is loaded and consumes the whole remaining day: NO_USABLE_CAPACITY, no proposal, no token
+=== MULTIPLE BLOCKERS, independent of row order; protected/candidate sets never duplicated ===
+OK   protected plans are listed once each (no row appears twice)
+OK   a reconsidered plan is never also listed as protected
+OK   the plan straddling the next midnight stays protected OUTSIDE_TODAY and the overnight plan ACTIVE
+OK   protected plans are listed once each (no row appears twice)
+OK   a reconsidered plan is never also listed as protected
+OK   the plan straddling the next midnight stays protected OUTSIDE_TODAY and the overnight plan ACTIVE
+OK   MULTIPLE blockers: the proposal is identical whichever order the rows were inserted (titles substituted for ids)
+=== SELF-BLOCKING: a reconsidered plan never blocks itself, however it is loaded ===
+OK   with nothing else in the way, neither reconsidered plan is reported BLOCKED by its own (or the other's) current slot
+OK   each reconsidered plan has exactly one decision
+=== ROW VOLUME, QUERY COUNT, READ-ONLY ===
+   [info] 158 historical plans + 1 overnight + 1 candidate: overlap loader returned 2 rows; whole proposal 73 ms (informational, not an assertion)
+OK   ROW VOLUME: with 158 historical plans, the overlap query returns ONLY the rows overlapping the day (the overnight plan and the candidate = 2), not the history
+OK   QUERY COUNT / no N+1: exactly ONE plan-blocker load for the whole proposal (every placement run reuses it)
+OK   the overnight blocker is still honored with 158 rows of history
+OK   ZERO WRITES: every PlannedActivity column of every row is byte-identical after proposing
+=== ACCEPTANCE STILL REVALIDATES INDEPENDENTLY ===
+OK   precondition: the overnight blocker makes the 09:00 candidate a CURRENT_SLOT_INVALID MOVE with a signed token
+OK   acceptance re-reads persisted blockers at write time: a plan that appeared on the destination after the proposal makes it STALE (CONFLICT) and nothing moves
+
+ALL RECOMPOSITION PROPOSAL OVERLAP DB CHECKS PASSED
+
+# exit=0 signal=

@@ -1,0 +1,9 @@
+$ (apps/web) npx prisma generate
+Prisma schema loaded from prisma/schema.prisma
+✔ Generated Prisma Client (v5.22.0) to ./node_modules/@prisma/client in 196ms
+# exit=0
+$ (apps/web) npx tsc --noEmit -p tsconfig.json
+# exit=0
+$ npx tsc --noEmit -p tsconfig.web.json
+# exit=0
+head 13d773eef0717952e8fcb940b83498c0d09e67fa

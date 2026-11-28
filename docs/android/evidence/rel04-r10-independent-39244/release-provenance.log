@@ -1,0 +1,15 @@
+origin/main a39f3982eda3004862f360534ad606deb4599985 contains v2: False
+ac46fc3 ac46fc315771685abefc38783be311745b007f2c contains v2: False
+7a9af83 7a9af83d84d71ceab2fd4208367441319fae533a contains v2: False
+225de3a 225de3a83d25dc53603a310de4ede5291a304439 contains v2: False
+bf5d433 bf5d4333ddb75249e12a2cc3860ad2cb9b04a7a5 contains v2: False
+d09449b655d21c213f8bbb29cf90f5bdc71c208e d09449b655d21c213f8bbb29cf90f5bdc71c208e contains v2: True
+Fetched main history contains no tracked app commit adding or removing v2.
+Production target since writer: dpl_CdHs8Gv98T4JhT23m7b9HeH1McPW CANCELED a39f3982eda3004862f360534ad606deb4599985 2026-11-26T17:19:08.319000+00:00
+Production target since writer: dpl_CMkXHjhmNqkCBsAXMQKgkoLnkjqh CANCELED 14fbe8eee1661544e161706814cf14f9d9848ebd 2026-11-26T16:34:42.271000+00:00
+Production target since writer: dpl_B3JEfpsyVGiyxaCwV48H9mNpzf77 CANCELED c8a9ca75dbc6d3adaa7f9f7dc38acba1818e340e 2026-11-26T15:17:45.955000+00:00
+Production target since writer: dpl_4KnftpEnjiPGP42Ka6NMiw8WWBRh CANCELED 3feff0342c48959be7006648ee4bdcaa71fbb162 2026-11-26T09:42:03.126000+00:00
+Production target since writer: dpl_8DSHwq3qWcCThxZ5Ny6H56d8imsd CANCELED 3b568302877b3672e46aa0449d530007c5c56326 2026-11-25T17:09:58.938000+00:00
+Production target since writer: dpl_HBA2QxtJH39KWgGGs4mJYb2DBnwz CANCELED 7b80f989e9fb1217cab3fabd34f00e874798f3ba 2026-11-25T12:04:28.125000+00:00
+GitHub REST releases: v1.0.0, published 2026-08-17, zero attached build assets.
+GitHub REST tags: v1.1.0 225de3a83d25dc53603a310de4ede5291a304439; v1.0.0 bf5d4333ddb75249e12a2cc3860ad2cb9b04a7a5.

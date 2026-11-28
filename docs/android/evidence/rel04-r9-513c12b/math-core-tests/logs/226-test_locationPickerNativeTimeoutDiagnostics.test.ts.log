@@ -1,0 +1,30 @@
+$ npx ts-node --project tsconfig.jsdom-tests.json test/locationPickerNativeTimeoutDiagnostics.test.ts
+# job=math-core-tests step=Run LocationPicker native timeout diagnostics test env={"TS_NODE_COMPILER_OPTIONS":"{\"jsx\":\"react-jsx\"}"}
+OK   2 s: success before any timeout; reverse geocode called once
+OK   8 s: success
+OK   10 s: success (no longer a timeout boundary)
+OK   15 s (M2-D): progress message at 10 s, then the fix is USED (was discarded in F2)
+OK   30 s boundary: exactly one outcome (here the fix, scheduled first in the fake clock)
+OK   provider failure just before the app timeout shows the unavailable message; no unhandled rejection
+OK   never: timeout message at 30 s, native call left pending and still tracked
+OK   M2-D: every scenario clears its app timers (clearTimeout called)
+OK   no unhandled rejections in any scenario
+OK   button re-enabled after the 30 s app timeout
+OK   M2-D: a retry joins the running request -- 1 native call(s), 1 in flight (was 3 overlapping in F2)
+OK   the joined request settles once and the retry shows its outcome
+OK   no warnings or unhandled rejections
+OK   unmount at 5 s: later timeout (10 s) and late fix (15 s) cause no warnings, no reverse call, no unhandled rejections
+
+| Scenario | UI @9.999 s | UI @10.000 s | UI @31 s | Native call | Reverse calls | clearTimeout | Unhandled | Warnings |
+|---|---|---|---|---|---|---|---|---|
+| 2 s success | SUCCESS (pending result shown) | SUCCESS (pending result shown) | SUCCESS (pending result shown) | resolved @2000ms | 1 | 2 | 0 | 0 |
+| 8 s success | SUCCESS (pending result shown) | SUCCESS (pending result shown) | SUCCESS (pending result shown) | resolved @8000ms | 1 | 2 | 0 | 0 |
+| 10 s success | LOADING | SUCCESS (pending result shown) | SUCCESS (pending result shown) | resolved @10000ms | 1 | 1 | 0 | 0 |
+| 15 s success | LOADING | LOADING (still finding) | SUCCESS (pending result shown) | resolved @15000ms | 1 | 1 | 0 | 0 |
+| 30 s success (boundary) | LOADING | LOADING (still finding) | SUCCESS (pending result shown) | resolved @30000ms | 1 | 1 | 0 | 0 |
+| 30 s "location unavailable" (device-observed F2) | LOADING | LOADING (still finding) | ERROR (unavailable message) | rejected @29000ms | 0 | 1 | 0 | 0 |
+| never resolves | LOADING | LOADING (still finding) | ERROR (timeout message) | pending | 0 | 0 | 0 | 0 |
+
+14 passed, 0 failed
+
+# exit=0 signal=

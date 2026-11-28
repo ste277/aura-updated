@@ -1,0 +1,21 @@
+$ npx ts-node test/rel04R5NextAppRendering.test.ts
+# job=rel04-next-app-rendering step=Run REL-04 Next.js app rendering test (builds the app) env={}
+building apps/web (next build)…
+OK   N0 the production build serves (next start)
+OK   N1 GET /plan-day with the account's session cookie: 200, response (HTML + RSC payload, 6821 bytes) contains NONE of the account's id/email/city/goal
+OK   N1 GET /plan-day?horizon=tomorrow with the account's session cookie: 200, response (HTML + RSC payload, 6821 bytes) contains NONE of the account's id/email/city/goal
+OK   N1 GET /goals with the account's session cookie: 200, response (HTML + RSC payload, 6343 bytes) contains NONE of the account's id/email/city/goal
+OK   N1 GET /goals/ae733a74-2dc0-4034-b528-4209fa335587 with the account's session cookie: 200, response (HTML + RSC payload, 7109 bytes) contains NONE of the account's id/email/city/goal
+OK   N1 GET /captures with the account's session cookie: 200, response (HTML + RSC payload, 6074 bytes) contains NONE of the account's id/email/city/goal
+OK   N2 (R6) real GET /api/plan-day/bootstrap without a session -> 401 {"error":"Not authenticated."}, with an invalid session stating an account -> 401 (both 401); headerless + invalid cookie -> 503 (existing middleware rule, 503)
+OK   N2 real GET /api/plan-day/bootstrap: headerless 503 (503), other account 409 (409), own account 200 with the account's city and a server planning date
+OK   N3 (real Chromium, real app) Plan Day shows the account's city only after verification; the bootstrap request(s) (1) were sent after the session answer and stated the verified account
+OK   N3 (real Chromium, real app) Goal detail shows the goal only after verification; GET /api/goals/<id> sent after the session answer, stating the verified account
+OK   N3 (real Chromium, real app) Goals list shows the goal only after verification, from bound requests
+OK   N3 (real Chromium, real app) Captures fetches its list only after verification, stating the verified account
+OK   N4 (R8, real Chromium, real app) Home shows "Sync paused — legacy activity could not be safely reconciled." with the count (2) for the account's quarantined activity
+OK   N4 (R8) the quarantined activity is never shown as a pending entry ("Pending sync") and never sent (no POST /api/habit-logs)
+
+14 passed, 0 failed
+
+# exit=0 signal=

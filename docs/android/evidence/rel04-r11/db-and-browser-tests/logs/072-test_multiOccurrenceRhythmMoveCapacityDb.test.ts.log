@@ -1,0 +1,44 @@
+$ npx ts-node test/multiOccurrenceRhythmMoveCapacityDb.test.ts
+# job=day-constructor-acceptance-db-tests step=Run multi-occurrence Rhythm Move capacity DB test env={}
+OK   fixture (#294): this run's scenario blocks never straddle a local week boundary
+OK   fixture (#294): the Tuesday anchor is boundary-safe from every hour of a week
+OK   fixture (#294): the guard rejects the old "now + 2h" base at the 2026-11-20T15:33Z CI failure
+OK   A setup: occurrence created
+OK   A. Move into a week with available capacity (target 5, destination empty) SUCCEEDS
+OK   A. exactly ONE occurrence row, now pointing at the successor
+OK   B setup: source occurrence created
+OK   B setup: destination week independently filled to its own full capacity (2 of 2)
+OK   B. the Move into the already-full destination week is REJECTED with code CAPACITY_EXCEEDED
+OK   B. the original plan is UNCHANGED (still UPCOMING, never MOVED)
+OK   B. ZERO partial mutation: no successor plan was created, total PlannedActivity count unchanged
+OK   B. ZERO partial mutation: no occurrence row was added or repointed
+OK   C setup: 1 of 2 committed
+OK   C. moving the ONLY committed occurrence within the SAME week succeeds (it is not double-counted against itself)
+OK   C. remainingThisWeek after the same-week Move is still 1 (2 - 1 committed), never 0 -- the occurrence being moved was correctly excluded from its own destination-week count
+OK   D setup: occurrence created in the source week
+OK   D. source week before the Move: remainingThisWeek=4 (5-0-1)
+OK   D. source week releases its commitment (remainingThisWeek back to full, 5)
+OK   D. destination week counts it exactly once (remainingThisWeek reduced to 4, not duplicated/double-counted)
+OK   D. exactly ONE occurrence row throughout
+OK   E setup: two occurrences created (to be moved concurrently into the same destination week, which has room for exactly ONE more)
+OK   E setup: destination week pre-filled to 1 of 2 (exactly one slot remains)
+OK   E. exactly ONE of two concurrent Moves into the final destination-week slot succeeds, the other is rejected -- never both
+OK   E. the destination week never ends up over capacity: remainingThisWeek is 0, never negative (durably, not a timing-luck artifact)
+OK   F setup: finite (NONE-rhythm) activity accepted
+OK   F. a NONE-rhythm GoalActivity's plan moves freely across a week boundary with NO capacity check at all (unaffected)
+OK   F setup: a plain, non-Goal-linked plan accepted
+OK   F. a plan with NO Goal link at all also moves freely (zero occurrence rows match, pure no-op check)
+OK   G setup: an occurrence accepted in the destination week
+OK   G setup: it is LOGGED (completed)
+OK   G setup: a second, separate occurrence created in another week (to be moved into the destination week)
+OK   G. a completed (LOGGED) occurrence in the destination week correctly counts toward capacity -- moving a second occurrence in (1 completed + 1 moved-in = 2 of 2) SUCCEEDS, exactly at the target
+OK   G. remainingThisWeek in the destination week is now 0 (2 of 2: 1 completed + 1 committed, canonical distinct-dimension counting)
+OK   H setup: occurrence created
+OK   H. an idempotent retry of the same Move returns the SAME successor, never a new one
+OK   H. no duplicate Plan rows were created by the retry
+OK   H. no duplicate/second occurrence row was created or repointed by the retry
+OK   Recomp setup: 1 of 1 occurrence created (capacity now exactly full for this week)
+FAIL Recomp. the SAME enforcement point is reached via Recomposition acceptance: a same-week self-move (not exceeding capacity) SUCCEEDS through applyMoveWrites, proving one shared check, not two
+SOME PR2 MOVE CAPACITY DB CHECKS FAILED
+
+# exit=1 signal=

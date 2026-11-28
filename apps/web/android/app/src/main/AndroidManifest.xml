@@ -1,7 +1,18 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- AURA-ANDROID-REL-04 (S5A-F2 / BK-1): no Android backup or device transfer.
+         The shell keeps no user data of its own: everything lives on the server,
+         and the only local state is the WebView profile (the as_session cookie,
+         localStorage, cache). Restoring that profile from a cloud backup or a
+         device-to-device transfer could bring back a session that was signed out
+         after the backup was taken. allowBackup="false" stops cloud backup and
+         adb backup on every API level and device transfer up to API 30; from
+         API 31 device transfer ignores allowBackup, so data_extraction_rules.xml
+         excludes every domain for both cloud backup and device transfer. -->
     <application
-        android:allowBackup="true"
+        android:allowBackup="false"
+        android:fullBackupContent="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"

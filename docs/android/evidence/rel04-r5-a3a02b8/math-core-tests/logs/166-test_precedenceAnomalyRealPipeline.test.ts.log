@@ -1,0 +1,24 @@
+$ npx ts-node test/precedenceAnomalyRealPipeline.test.ts
+# job=math-core-tests step=Run precedence anomaly real-pipeline test env={}
+=== the real pipeline: FIXED reservation -> weaker FIXED owner -> stronger FLEXIBLE loser ===
+OK   the run is READY and the Constructor outcome is the baseline: the weaker FIXED X is Proposed at its declared interval (placementSource FIXED_CONSTRAINT) and the stronger FLEXIBLE F is Deferred
+OK   REAL CONTENTION (P3a): the trace holds an event for F as the loser with X as the owner, and the attempted interval is the otherwise-usable 11:00-12:00 slot that overlaps X (the Constructor, not the fixture, produced it)
+OK   THE CONTENTION IS CANDIDATE-VS-CANDIDATE ONLY: this run has no external blocker, F's slot lies inside the 09:00-17:00 window and is long enough, and P3a records only rejections caused by an interval a Proposed candidate already owns -- every event in the trace is F versus X, so the reserved FIXED interval alone explains it
+=== the above-pressure relation is asserted through the reviewed primitive, not inferred from the fixture ===
+OK   compareAbovePressure(F, X) === A_STRONGER: F (HIGH) is stronger than X (LOW) on a dimension that outranks pressure, and the reverse call says B_STRONGER
+OK   F ALSO PRECEDES X BY THE PLAIN OVERLOAD ORDER AND BY originalOrder (importance HIGH vs LOW; originalOrder 0 vs 1): precedence alone would have placed F first -- only the FIXED reservation explains the loss
+=== pressure: derived from real evidence for F; X carries the canonical NONE ===
+OK   F: real recurrence + opportunity evidence (scarce Friday, resolved duration) derives LAST_KNOWN_OPPORTUNITY; X (FIXED, no facts) derives NONE -- both through the production deriver, nothing injected
+=== downstream: P3b says PRECEDENCE_ANOMALY, P4a / P4a2 emit no PromotionInput ===
+OK   P3b (real pipeline): F is FINAL_DEFERRED with pressure LAST_KNOWN_OPPORTUNITY, its only owner X is FINAL_PROPOSED and compares LOSER_STRONGER_ABOVE_PRESSURE -> classification PRECEDENCE_ANOMALY
+OK   P4a / P4a2 (real pipeline): the preparation is PREPARED and holds NO PromotionInput for F -- an anomaly can never become policy authority
+OK   inertness: the Constructor result, with the shadow stage and with the promotion preparation, is deep-identical to a plain orchestrateConstructDay (nothing downstream altered scheduling)
+=== controls: the FIXED reservation is the cause ===
+OK   CONTROL (X FLEXIBLE): with the very same importance and order and no reservation, the stronger F is Proposed and the weaker X is the one Deferred -- there is no anomaly and F is not a loser at all
+OK   CONTROL (X FIXED but equally important): the same reservation against an owner that TIES above pressure is the ordinary eligible relationship, not an anomaly -- so the anomaly in the main fixture comes from the precedence difference, not from the mere presence of a FIXED owner
+OK   CONTROL (F no stronger than the FIXED owner): a pressured loser that merely TIES a FIXED owner does get an input -- exactly the case P4b must later reject because a FIXED owner is immovable (no FIXED policy is added here)
+=== determinism ===
+OK   10 independent runs of the whole real pipeline give an identical anomaly classification, the same (empty) promotion inputs and the same trace
+ALL PRECEDENCE ANOMALY REAL-PIPELINE CHECKS PASSED
+
+# exit=0 signal=

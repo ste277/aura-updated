@@ -1,4 +1,5 @@
 import { notFound } from 'next/navigation';
+import { AccountScoped } from '../../../components/AccountScoped';
 import { remoteMcpConfigFromEnv } from '../../../lib/mcpRemoteConfig';
 import { resolveRuntimeMcpAuthMode } from '../../../lib/mcpAuthGate';
 import { ConnectedAppsClient } from './ConnectedAppsClient';
@@ -13,5 +14,6 @@ export const dynamic = 'force-dynamic';
 export default function ConnectedAppsPage() {
   if (process.env.NODE_ENV === 'production') notFound();
   if (resolveRuntimeMcpAuthMode(remoteMcpConfigFromEnv()).mode !== 'local') notFound();
-  return <ConnectedAppsClient />;
+  // AURA-ANDROID-REL-04 (R3): client-fetched account data -> remount on account change.
+  return <AccountScoped><ConnectedAppsClient /></AccountScoped>;
 }

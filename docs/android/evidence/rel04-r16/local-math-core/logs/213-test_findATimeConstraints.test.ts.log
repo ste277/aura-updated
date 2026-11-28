@@ -1,0 +1,87 @@
+$ npx ts-node test/findATimeConstraints.test.ts
+# job=math-core-tests step=Run Find a Time constraints test (HPG5-V2-I1) env={"TS_NODE_COMPILER_OPTIONS":"{\"jsx\":\"react\"}"}
+OK   dates: TODAY -> the request context's local date
+OK   dates: TOMORROW -> next local date
+OK   dates: SEVEN_DAYS -> 7 consecutive dates from today
+OK   dates: WEEKEND (Wed) -> Sat+Sun
+OK   dates: explicit dateRange wins
+OK   dates: CUSTOM horizon uses custom dates
+OK   load bounds cover the whole local day plus 6h padding on both sides (cross-midnight plans load)
+OK   load bounds: empty date list -> null
+OK   T1 searchWindow = Wed 06:00-22:00 IST
+OK   T1 every candidate lies fully inside 06:00-22:00
+OK   T1 control: the unconstrained search DOES offer out-of-availability slots (fix is load-bearing)
+OK   T2 no candidate ends after 22:00 (a slot ending 1 minute past the window is excluded)
+OK   T2 boundary: window 06:00-07:14 admits 06:30-07:00 but not 06:45-07:15
+OK   T3 UNCONFIGURED -> no searchWindow (no availability filter, no new overnight restriction)
+OK   T3 UNCONFIGURED -> existing plans are still excluded
+OK   T3 summary reports UNCONFIGURED
+OK   T3 overnight slots stay possible for unconfigured users (e.g. a 23:00 start)
+OK   T3 no candidate overlaps the existing plan
+OK   T3 configured=false ignores stray period rows (UNCONFIGURED wins)
+OK   T4 multi-day search returns only Mon/Wed dates (other weekdays fully excluded)
+OK   T4 Mon and Wed both still searched
+OK   T4 CONFIGURED with nothing on the searched weekday -> hasUsableAvailability false
+OK   T4 ... and the engine returns zero candidates (no out-of-availability fallback)
+OK   T5 gap 09:00-17:00 becomes an excluded interval
+OK   T5 top-3 (diversified) never lands in the gap
+OK   T5 full list never lands in the gap
+OK   T6 no candidate overlaps either plan (full overlap)
+OK   T7 partial overlaps excluded: no 06:45 (ends inside Learn) and no 07:45 (starts inside Learn)
+OK   T8 adjacent allowed: a 30-min slot ending exactly at 07:00 (06:30) is eligible
+OK   T8 adjacent allowed: a slot starting exactly at 08:00 is eligible
+OK   T8 adjacent allowed: a slot starting exactly when Running ends (18:45) is eligible
+OK   T9 both plans counted as blockers
+OK   T9 remaining candidates keep descending score order
+OK   T10 CANCELLED does not block
+OK   T10 SKIPPED does not block
+OK   T10 MOVED does not block (its successor does)
+OK   T10 LOGGED blocks
+OK   T10 future UPCOMING blocks
+OK   T10 elapsed UPCOMING (missed) does not block future slots
+OK   T10 zero-length plan rows are ignored
+OK   T11 no candidate overlaps 23:30-00:30 on either side of midnight
+OK   T11 Thu 00:00 slot (inside the overnight plan) excluded; Thu 00:30 (adjacent) allowed
+OK   T11 Wed 23:00 (ends exactly at 23:30) allowed
+OK   T12 Los Angeles: window resolves to local 09:00-17:00
+OK   T12 Los Angeles 09:00 PST = 17:00Z
+OK   T12 Kolkata 09:00 IST = 03:30Z
+OK   T12 LA engine run: every candidate inside local 09:00-17:00
+OK   T13 spring-forward 01:00-04:00 is 2 real hours (06:00Z-08:00Z)
+OK   T13 fall-back 01:00-04:00 is 4 real hours (05:00Z-09:00Z)
+OK   T13 spring-forward engine run: every candidate inside the 2 real hours
+OK   T13 no candidate has a real local start in the nonexistent 02:xx hour
+OK   T14 today window is clipped at now
+OK   T14 no candidate before now
+OK   T14 today's window already over -> NO_AVAILABILITY_IN_RANGE
+OK   T15 availability entirely inside work hours: Daily Rhythm does not remove the eligible slots (soft)
+OK   T15 ... and annotates them as the in-hours fallback
+OK   T15 with outside-work room available, Daily Rhythm still prefers outside-work slots, all inside availability
+OK   T16 CHECK scores the explicit 02:00 instant unchanged (route only builds constraints for FIND)
+OK   T22 constrained full list == unconstrained list with ineligible slots removed (same set)
+OK   T22 same score sequence (rank order by Panchang/auraFit score preserved)
+OK   T22 identical Panchang/auraFit scores for every surviving slot
+OK   T22 reasons still cite Panchang factors
+OK   T22 best constrained candidate has the highest eligible score
+OK   T23 window fully occupied -> zero candidates
+OK   T23 emptyReason NO_ELIGIBLE_TIME
+OK   T23 non-empty result -> no emptyReason
+OK   T23 copy for NO_ELIGIBLE_TIME mentions availability and existing plans
+OK   T23 copy for NO_AVAILABILITY_IN_RANGE
+OK   T23 unknown/absent reason -> null (generic copy kept)
+OK   overlapPolicy absent -> ALLOW (legacy callers unchanged)
+OK   overlapPolicy REJECT_ACTIVE_OVERLAP accepted
+OK   overlapPolicy explicit ALLOW accepted
+OK   overlapPolicy unknown/garbage -> null (400)
+OK   isPlanOverlapResponse recognizes the 409 body
+OK   parsePlanOverlapConflict extracts title/start/end
+OK   parsePlanOverlapConflict rejects malformed details
+OK   presentPlanOverlap names the plan and its local time
+OK   presentPlanOverlap says nothing was saved
+OK   presentPlanOverlap Save anyway label names the conflict for screen readers
+OK   presentPlanOverlap without details (deleted/raced plan) still renders a safe message
+
+80 checks
+ALL CHECKS PASSED
+
+# exit=0 signal=

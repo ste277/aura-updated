@@ -1,0 +1,23 @@
+$ npx ts-node test/goalDetailCompletionStructuralGuards.test.ts
+# job=math-core-tests step=Run Goal Detail completion structural guards test env={}
+OK   Goal Detail consumes completionRequirement (formatGoalActivityCompletion call site)
+OK   Goal Detail consumes currentValue via the same call
+OK   No GoalActivityExecution persistence field (id/source/snapshot columns/timestamps) reaches GoalDetailClient.tsx JSX
+OK   formatGoalActivityCompletion itself never references execution id/source/timestamps -- only kind/targetValue/unit/currentValue
+OK   no new progress-write fetch/POST was added to GoalDetailClient.tsx (still exactly the pre-existing load/dismiss/add/archive/delete endpoints, plus Rhythm R5's own single, separate rhythm-edit endpoint)
+OK   no "Done"/"Complete" action button was added to Goal Detail (execution stays in Home/Right Now)
+OK   no Progress/Adjust/Edit target/+1/History button was added
+OK   no per-activity progress bar was added (role="progressbar" appears at most once, the existing Goal-level bar)
+OK   no threshold-based completion inference (no ">= " comparison against currentValue/targetValue anywhere in this file)
+OK   no percentage conversion was introduced for activity rows (the existing Goal-level Math.round(...) percentage usage is untouched, and no new one was added)
+OK   homeCompletion.ts (the Done/Skip/Move action layer, not presentation) does not reference formatGoalActivityCompletion
+OK   HomeTimeline.tsx (ordinary Timeline rows) does not reference formatGoalActivityCompletion -- numeric Goal progress stays spotlight-only, never on every row
+OK   dayConstructorOrchestrator.ts does not reference formatGoalActivityCompletion
+OK   planMove.ts does not reference formatGoalActivityCompletion
+OK   schema.prisma was not touched by G3.2 beyond what G3.2 itself added (still no localDate/dayBucket/frequency/recurrence, and the only Rhythm/frequency references are R2's and HPG3-A1's own documented columns)
+OK   formatGoalActivityCompletion introduces no day-scoped progress concept
+OK   formatGoalActivityCompletion introduces no Rhythm/recurrence concept
+OK   formatGoalActivityCompletion introduces no history/aggregate concept
+ALL GOAL DETAIL COMPLETION STRUCTURAL GUARD CHECKS PASSED
+
+# exit=0 signal=

@@ -1,0 +1,14 @@
+$ npx ts-node test/goalAwareRecompositionPresentationDb.test.ts
+# job=day-constructor-acceptance-db-tests step=Run Goal-aware Recomposition presentation DB test env={}
+OK   precondition: the mocked run produced a READY, CHANGES_PROPOSED proposal with both plans as MOVE
+OK   21. the Goal-linked MOVE decision carries goalContext.goal.id/title matching the REAL persisted Goal
+OK   22. the non-Goal MOVE decision has NO goalContext field at all (never null/blank placeholder)
+OK   28/33. Goal context was resolved in exactly ONE batched call (no N+1 -- one call for two decisions)
+OK   23. decisions are byte-identical with and without Goal-context enrichment (decision purity)
+OK   23. the unenriched response has no goalContext field anywhere in its decisions
+OK   12. each decision's own target time/reason is exactly what the mocked timing table dictates -- Goal association changes nothing about the decision itself
+OK   27. a different user's proposal contains none of this Goal's plans/title (empty day -> NO_CHANGES, never leaking another user's Goal)
+OK   56/79 (re-confirmed for G3.5): generating a proposal through the REAL route writes nothing to GoalActivity
+ALL GOAL-AWARE RECOMPOSITION PRESENTATION DB CHECKS PASSED
+
+# exit=0 signal=

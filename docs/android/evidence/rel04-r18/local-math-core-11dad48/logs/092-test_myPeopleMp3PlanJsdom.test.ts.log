@@ -1,0 +1,26 @@
+$ npx ts-node --project tsconfig.jsdom-tests.json test/myPeopleMp3PlanJsdom.test.ts
+# job=math-core-tests step=Run AURA-MP-3 My People plan with a person (jsdom) test env={}
+OK   hand-off pre-fills: activity Catch Up, "Who's this with?" shown, custom dates D1..D3
+OK   hand-off pre-fills only: no search and no plan yet
+OK   the note says Aura uses YOUR availability and to check with Ravi (never assumes theirs)
+OK   quick-add is offered as "+ Add someone" while My People is on
+OK   Find with Ravi uses the MAIN route (onTimingSearch FIND, catch-up, CUSTOM D1..D3) and never the shared route
+OK   results are shown, and nothing is saved before an explicit "Use this time"
+OK   ranking is unchanged by the person (same request -> same candidates and scores as "Just me")
+OK   explicit "Use this time" -> exactly one POST /api/plans with savedPersonId p-ravi and REJECT_ACTIVE_OVERLAP
+OK   the saved plan keeps the existing "Planned with Ravi" note (D6 convention); title stays the activity
+OK   "+ Add someone" opens the My People form in place (no navigation away from Plan)
+OK   quick-add creates the person through the My People create API with only what was entered
+OK   after quick-add: form closed, Asha selected, activity and dates unchanged (context preserved)
+OK   a plan saved after quick-add is linked to the NEW person
+OK   "Just me" -> no savedPersonId and no "Planned with" note
+OK   OFF: "+ Choose someone" (navigate to People) is unchanged; no quick-add
+OK   OFF: no "Planning with" note
+OK   OFF: a selected person keeps the pre-existing shared route (with savedPersonId for its chart blend); main route not used
+OK   OFF: no plan is created by searching
+
+ALL MY PEOPLE MP-3 PLAN CHECKS PASSED (18)
+(node:11772) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+# exit=0 signal=

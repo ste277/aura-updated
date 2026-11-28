@@ -1,0 +1,47 @@
+$ npx ts-node test/baselinePlacementsArchitecture.test.ts
+# job=math-core-tests step=Run baseline placements architecture test env={}
+=== the real tree conforms ===
+OK   THE REAL PRODUCTION TREE HAS ZERO BASELINE-PLACEMENTS ARCHITECTURE VIOLATIONS (584 production files scanned)
+=== separation, producer and zero consumers ===
+OK   THE PLACEMENTS VOCABULARY EXISTS IN EXACTLY EIGHT PRODUCTION FILES (O5 P4b3: plus the pure acceptance predicate, TYPES only; O5 P4b4: plus the same-run shadow composition, which only carries the run outcome through and imports nothing from the module): the pure module, the orchestrator that produces it, the promotion contention authority and the local counterfactual generator (TYPES only) and the internal promotion boundary that passes it through; only the orchestrator imports the module as a value; O5 P4c3: plus the typed accepted-counterfactual authority, TYPES only
+OK   INPUT AUTHORITY AND OUTCOME AUTHORITY STAY SEPARATE: constructionBasis.ts names no placement, Proposed item or placement source, and the placements module imports only the basis TYPES (it never writes the basis)
+OK   PRODUCER: the placements are captured only INSIDE the orchestration run -- one capture, from the terminal `result.day`, inside the same `if (evidenceOut)` T4 block that assembles the basis, AFTER the assembly and after the last Constructor pass, wrapped in `optionalBasisStep`; the normal and trace entry points never name it, so the preview path does no capture
+OK   NO CALLER CAN BLESS A RESULT: the hand-off is module-private, the only call is the orchestrator's own, and `orchestrateConstructDayWithDiagnostics` takes only (request, deps)
+OK   ZERO CONSUMERS: the orchestrator only writes `evidenceOut.baselinePlacements` and returns `handOff.baselinePlacements`; the shadow boundary never mentions it and the promotion boundary only PASSES the same run's outcome to the contention authority (one fixed `diagnostics.baselinePlacements` argument and one run-level pass-through, never read); no other production file names it
+OK   NO PUBLIC / SIGNED / PERSISTED EXPOSURE: the Constructor, comparator, capacity, preview request / client / integrity, acceptance, persistence, Recomposition, Move, every route, db.ts, every Decision Intelligence module and the basis module are free of the placements vocabulary
+OK   NO PERSISTENCE, NO SCHEMA: the Prisma schema and every migration directory's own contents mention no baseline placements; no migration was added (count-independent -- holds regardless of how many unrelated migrations exist)
+OK   THE CONSTRUCTOR IS UNTOUCHED AND NO PRIVATE HELPER WAS EXPORTED: dayConstructor.ts still exports only the ranking comparator, `constructDay` and `constructDayWithTrace` (plus types), and names no placements
+OK   NOTHING ELSE CHANGED IN CONSTRUCTION: still exactly two `constructDay({` sites, two `deps.searchTiming(` sites and the same five `new Date(` allocations in the orchestrator
+=== the module: validation, never reconstruction; pure, neutral, copying, frozen ===
+OK   IMPORTS: exactly two TYPE imports (the Constructor result and timing-fit types, the basis types) -- no value import of anything, so no database, search, Constructor, clock, evidence, facts, pressure or promotion module can be reached
+OK   NO POLICY, NO EVIDENCE, NO FACTS, NO FLAG, NO SOURCE; NO DB, CLOCK, SEARCH, CONSTRUCTION, RANKING, I/O: none of that vocabulary appears, and the ranking primitive is deliberately NOT imported here (P4b2's concern)
+OK   COPYING IS EXPLICIT: no `any`, no JSON round-trip, no structuredClone, no Object.assign, no generic deepFreeze; the ONLY Date allocation is `new Date(source.getTime())` in `ownDate`, which freezes it; no Map, and the single `Set` is the local duplicate-id check; no module-level state
+OK   EVERYTHING IS FROZEN: the outcome, the placements wrapper, the array, every placement and every Date pass through `Object.freeze` at creation (>= 6 sites) -- and the freeze is NOT claimed to protect a Date's time value (ownership + the #208 guard do)
+OK   THE BASELINE ORDER IS PRESERVED: placements are mapped from `day.proposedItems` in place -- no sort, reverse or splice -- and Deferred intents are never read
+OK   VALIDATION, NOT RECONSTRUCTION: identity (exactly once in the basis, no duplicate), the window, every blocker, pairwise half-open disjointness, FIXED against the single basis fixed constraint with exact timestamps, flexible against a candidate of the TERMINAL (`finalCandidates`) list matching start, timingFit and candidateOrder exactly with the interval being [start, start + duration) -- and the initial list is never read, nothing is chosen or repaired
+OK   EXACT OVERLAP SEMANTICS: the half-open formula `a.start < b.end && b.start < a.end` (touching intervals do not overlap) -- the same formula the Constructor uses, here as a local one-liner whose parity the P4b2 slice must prove exhaustively before it re-implements any placement gate
+OK   PAIRED TO A READY BASIS, ALL-OR-NOTHING, NEVER THROWING: a non-READY basis is UNAVAILABLE / BASIS_UNAVAILABLE; capture returns UNAVAILABLE / CAPTURE_FAILED on any failure; the reasons are infrastructural only (RUN_NOT_READY, BASIS_UNAVAILABLE, CAPTURE_FAILED, DUPLICATE_INTENT_ID, INVALID_PLACEMENT) -- no policy label
+OK   THE MINIMUM CONTRACT: a placement has exactly intentId, start, end, placementSource, timingFit?, candidateOrder? -- no title, activity, importance, deadline, flexibility, originalOrder, pressure or source; the module exports only its types and `captureBaselinePlacements`
+=== MUTATIONS OF THE GUARD: each violation class, injected into the real tree, is detected ===
+OK   MUTATION: a pressure / promotion / owner / facts / evidence / shadow / flag field or import enters the module -> detected
+OK   MUTATION: a clock read, a database import, a timing search, a Constructor / ranking call, an async boundary, `any`, a JSON clone, a Map, module state -> detected
+OK   MUTATION: shared Date (the copy returns the source), unfrozen output -> detected
+OK   MUTATION: the placements are SORTED, Deferred items are included, or the initial candidate list is used for validation -> detected
+OK   MUTATION: unknown intent allowed, duplicate last-wins, FIXED validation skipped, candidate validation skipped or loosened, window / blocker / pairwise validation skipped, overlap formula changed -> detected
+OK   MUTATION: the placements are paired to an unavailable basis, the capture can throw, or a policy-flavoured unavailable reason is added -> detected
+OK   MUTATION: a pressure / contract field is added to the placement, or a title / flexibility duplicated from the basis -> detected
+OK   MUTATION: baseline OUTCOME fields are added to the ConstructionBasis (the two contracts merge) -> detected
+OK   MUTATION: the capture runs on the normal path (unguarded), outside `optionalBasisStep`, before the basis, or is moved out of the T4 block -> detected
+OK   MUTATION: a SECOND timing search / Constructor pass / clock read is added to the orchestrator -> detected
+OK   MUTATION: the orchestrator READS the placements (a decision branch), or the normal / trace entry names them -> detected
+OK   MUTATION: a consumer appears (a shadow / promotion boundary reads the placements, a new module imports or calls the capture) -> detected
+OK   MUTATION: PUBLIC / SIGNED / PERSISTED EXPOSURE -- the placements named by the preview request, signing, acceptance, persistence, a route, db.ts, the Constructor or the comparator -> detected
+OK   the mutations were applied to in-memory copies only: the real tree still has zero violations afterwards
+=== wiring and honest scope ===
+OK   both baseline-placements suites (behavior and architecture) run in the required PURE job
+OK   THE #208 DATE-MUTATOR GUARD COVERS THE NEW MODULE DELIBERATELY: baselinePlacements.ts is on its explicit protected list (its scope and its single timezone exception were not widened)
+OK   the behavior suite asserts invariants only: no sleeps, timers, randomness, heap layout or query-plan mechanics
+OK   SCOPE STATEMENT: this guard does not claim a future P4b2 boundary may skip revalidating the trio; the overlap / gate re-implementation parity and the ranking reuse (`compareCandidatesForPlacement`) are recorded as P4b2 obligations, not done here
+ALL BASELINE PLACEMENTS ARCHITECTURE CHECKS PASSED
+
+# exit=0 signal=

@@ -1,0 +1,25 @@
+$ npx ts-node --project tsconfig.jsdom-tests.json test/locationPickerStrictModeLifecycle.test.ts
+# job=math-core-tests step=Run LocationPicker StrictMode lifecycle test env={"TS_NODE_COMPILER_OPTIONS":"{\"jsx\":\"react-jsx\"}"}
+OK   A1 Strict Mode: request starts (spinner shown, native getCurrentPosition called)
+OK   A2 Strict Mode: native error clears the loading indicator
+OK   A3 Strict Mode: native error shows the unavailable message
+OK   B1 Strict Mode: denial requests coarse permission and never calls getCurrentPosition
+OK   B2 Strict Mode: denial shows the expected message
+OK   B3 Strict Mode: denial clears the loading indicator
+OK   C1 app-level timeout armed at NATIVE_LOCATION_TIMEOUT_MS (30 000 ms since M2-D)
+OK   C2 Strict Mode: timeout shows an error
+OK   C3 Strict Mode: timeout clears the spinner
+OK   D1 Strict Mode: success calls the reverse-geocode route
+OK   D2 Strict Mode: success renders the pending result
+OK   D3 Strict Mode: success clears the spinner
+OK   E1 picker closed while the native request is still in flight
+OK   E2 late error/timeout after a genuine unmount renders nothing
+OK   E3 no React warnings or errors after close-during-request
+OK   F1 reopened picker starts idle (no stale spinner or error)
+OK   F2 reopened picker handles a new request (error shown, spinner cleared)
+OK   G1 reverse-geocode resolving after unmount causes no warnings or errors
+OK   H1 non-Strict mount: native error clears spinner and shows message
+
+19 passed, 0 failed
+
+# exit=0 signal=

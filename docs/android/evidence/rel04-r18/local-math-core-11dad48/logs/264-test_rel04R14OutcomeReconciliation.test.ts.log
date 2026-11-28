@@ -1,0 +1,38 @@
+$ npx ts-node --project tsconfig.jsdom-tests.json test/rel04R14OutcomeReconciliation.test.ts
+# job=math-core-tests step=Run REL-04 R14 outcome reconciliation test (39252 witnesses on a8a9767 vs current; real Home retry; cleanup matrix) env={"TS_NODE_COMPILER_OPTIONS":"{\"jsx\":\"react-jsx\"}"}
+OK   fixture rel04-r13-head/offlineHabitQueue.ts.txt == a8a9767 apps/web/lib/offlineHabitQueue.ts
+OK   fixture rel04-r13-head/activitySync.ts.txt == a8a9767 apps/web/lib/activitySync.ts
+OK   fixture rel04-r13-head/signOut.ts.txt == a8a9767 apps/web/lib/signOut.ts
+OK   the 39252 reviewer evidence is preserved byte-for-byte (50 SHA256SUMS entries; scripts stored as .txt)
+F1 {"R13":{"first":"storage-unavailable","same":"not-stored","invitesFreshRetry":true,"rowsA":2,"rowsOriginal":1,"decisions":["A:ack-id:settled","A:ui-retry-new-id:settled"]},"current":{"first":"already-recorded","same":"already-recorded","invitesFreshRetry":false,"rowsA":1,"rowsOriginal":1,"decisions":["A:ack-id:settled:accepted"]}}
+OK   F1 R13 (negative control) reproduces: commit + lost acknowledgement + another tab settles -> storage-unavailable; the invited fresh-id retry creates a DUPLICATE (2 A rows)
+OK   F1 CORRECTED: reconciliation reads the durable settlement for the exact account + request id -> already-recorded; no retry invited; a same-id retry is idempotent; exactly 1 server row
+OK   M1 commit + lost acknowledgement, nothing settled yet -> queued (live copy found), same-id retry kept, no fresh retry invited; it later replays once
+OK   M2 settlement concurrent with reconciliation -> queued or already-recorded (never a failure); exactly 1 row
+OK   M3 active copy absent + durable DISCARD -> not-stored:discarded (never already-recorded, never storage-unavailable); 0 server rows
+OK   M4 active copy absent + settlement whose server answer was a REJECTION -> rejected (never already-recorded, never storage-unavailable); 0 server rows
+OK   M5 active copy absent + settlement written before R14 (answer not recorded) -> outcome-unknown (never already-recorded, never storage-unavailable); 0 server rows
+OK   M6 decision for the same id but a DIFFERENT payload (contradictory evidence) -> not-stored (never already-recorded, never storage-unavailable); 0 server rows
+OK   M7 durable-decision read failure during reconciliation -> outcome-unknown (never a failure), the same id replays exactly once
+OK   M8 no active copy AND no decision (rolled back) -> storage-unavailable is only reported when non-commit is ESTABLISHED; 0 rows
+OK   M9 B's durable settlement for the same request id never answers for A: A's request is sent and confirmed once
+HOME {"R13":{"found":true,"errorShown":true,"retried":true,"rowsA":2,"distinctIds":2},"current":{"found":true,"errorShown":false,"retried":false,"rowsA":1,"distinctIds":1}}
+OK   H1 the real Home page offers "Start now" (Good Right Now) and drives handleLogActivity -> submitActivityLog
+OK   H1 NEGATIVE CONTROL (R13 submission in the real Home): the settled activity is shown as "Couldn't log. Try again." and the retry click creates a fresh-id DUPLICATE (2 rows, 2 request ids)
+OK   H1 CORRECTED (current code, real Home): no error and no retry is offered; exactly 1 row under the original request id
+F2 {"R13":"removed=1,unidentified=1","current":"discardedUnverified=1,unidentified=1"}
+OK   F2 R13 (negative control: opaque storage treated as absent) reproduces: removed=1 while an unreadable v2 array still holds the activity
+OK   F2 CORRECTED: discarded with physical state UNVERIFIED (not removed); the opaque bytes are preserved; the decision blocks resubmission
+F3 {"R13":"cleanupPending=1","current":"removed=1,cleanupErrors=1"}
+OK   F3 R13 (negative control: a stale cleanup error overrides verification) reproduces: cleanupPending=1 although storage is empty
+OK   F3 CORRECTED: the final complete verification is authoritative -> removed=1; the transient error is kept as a diagnostic (cleanupErrors=1)
+OK   C1 deletion + successful final verification -> removed=1
+OK   C2 deletion + failed final verification -> discardedUnverified=1
+OK   C3 known remaining copy (a contradictory copy of it is preserved) -> cleanupPending=1,unidentified=1
+OK   C4 retired write during the final scan -> cleanupPending=1
+OK   C5 concurrent replacement (another identity at the same record id) -> the confirmed one removed and decided; the replacement preserved, undecided
+OK   C6 transient final-read failure -> discardedUnverified (never removed); resubmission refused as discarded; a later verification of the same snapshot reports removed; 0 rows
+
+28 passed, 0 failed
+
+# exit=0 signal=

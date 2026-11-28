@@ -1,0 +1,42 @@
+$ npx ts-node test/ceremonialMuhurthamEligibility.test.ts
+# job=math-core-tests step=Run ceremonial Muhurtham eligibility test env={}
+OK   Griha Pravesh rule pack has IMPLEMENTED coverage for both Tithi and Nakshatra (the precondition for any of this to matter)
+OK   isAuthoritativeAvoidNakshatra is true for Jyeshtha against the Griha Pravesh pack
+OK   isAuthoritativeAvoidNakshatra is false for a favorable Nakshatra (Rohini)
+OK   isAuthoritativeAvoidNakshatra is false for a neutral (neither favorable nor avoid) Nakshatra (Shravana)
+OK   isAuthoritativeAvoidTithi is true for Amavasya against the Griha Pravesh pack
+OK   isAuthoritativeAvoidTithi is false for a favorable Tithi (Shukla Tritiya)
+OK   start-journey resolves to REUSABLE_BASE_RULE (not IMPLEMENTED) coverage -- confirms it has no genuine intent-specific data
+OK   isAuthoritativeAvoidNakshatra is false for ANY value against a REUSABLE_BASE_RULE pack, even one in its own avoid list
+OK   The additive scoring formula itself is untouched: Jyeshtha + Yoga + Karana + Abhijit still nets a POSITIVE modifier (+5)
+OK   ...and still carries the raw NAKSHATRA_UNFAVORABLE reason as a soft -10 (this PR does not change reason generation)
+OK   spanOverlapsAuthoritativeEventAvoid flags this exact instant as an avoid-Nakshatra span
+OK   Despite the positive additive modifier, findMuhurthams excludes 2026-09-18 entirely for griha-pravesh (Jyeshtha covers the whole calendar day at this location)
+OK   Sanity: the anchor instant is genuinely Anuradha (favorable, not avoid)
+OK   Sanity: the found transition instant is on the correct calendar date (2026-09-17, afternoon IST)
+OK   avoid-at-start: a candidate starting exactly at the Anuradha->Jyeshtha transition is rejected
+OK   avoid-mid-candidate: a candidate starting 30min before and ending 30min after the transition (clean start, but crosses into Jyeshtha) is rejected
+OK   boundary-exact (end === transition instant): half-open [start, end) EXCLUDES the new value -- not rejected
+OK   boundary-exact (start === transition instant): the new value applies from its own start instant -- rejected
+OK   duration-sensitivity: a 15-minute candidate ending well before the transition survives
+OK   duration-sensitivity: a 60-minute candidate at the same start instant runs past the transition and is rejected
+OK   duration-sensitivity: a 120-minute candidate at the same start instant is also rejected
+OK   A candidate on a genuinely favorable Nakshatra+Tithi instant is never flagged
+OK   An authoritative avoid Tithi (Amavasya) alone triggers rejection, independent of Nakshatra
+OK   A Vishti Karana instant with favorable Nakshatra/Tithi is NOT flagged by the new check (Karana is out of scope for it)
+OK   ...and Vishti Karana still surfaces as its own soft CAUTION reason via the unchanged additive scoring path
+OK   start-journey (no dedicated rule pack) is never hard-rejected by this check, even on a Griha-Pravesh-avoid Nakshatra date
+OK   start-journey Muhurtham search for 2026-09-18 is governed only by pre-existing rules (not silently zeroed out by the new check)
+OK   PERSONAL scope returns OK status for this fixture (sanity)
+OK   SHARED scope returns OK status for this fixture (sanity)
+OK   GENERAL excludes 2026-09-18 and 2026-09-19 (Jyeshtha/Mula) for griha-pravesh
+OK   SHARED surfaces exactly the same set of eligible dates as GENERAL (architectural invariant: findSharedMuhurthams always selects using generalContext)
+OK   Every GENERAL wide-sweep date is independently valid under a solo single-day GENERAL query
+OK   Every PERSONAL wide-sweep date is independently valid under a solo single-day PERSONAL query
+OK   GENERAL wide-sweep result is deterministic (identical date set on a repeated call)
+OK   PERSONAL wide-sweep result is deterministic (identical date set on a repeated call)
+OK   A date range entirely inside an authoritative-avoid stretch returns a genuinely empty dates array, not an error
+
+ALL CEREMONIAL MUHURTHAM ELIGIBILITY CHECKS PASSED
+
+# exit=0 signal=

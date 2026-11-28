@@ -1,0 +1,76 @@
+$ npx ts-node test/localCounterfactual.test.ts
+# job=math-core-tests step=Run local counterfactual test env={}
+=== Part 1: revalidating the five same-run authorities (validation only: nothing repaired, dropped or invented) ===
+OK   SANITY: the well-formed context generates READY
+OK   EVERY authority must be READY: basis, placements, scheduling attempts or contention UNAVAILABLE -> UNAVAILABLE / RUN_NOT_READY (no partial generation)
+OK   READY attempts with `[]` is VALID (no contention attempts), not a failure: owner relocation still works from the basis candidates
+OK   PAIR CONSISTENCY: the contention authority's candidate must equal the PromotionInput's candidate -> INCONSISTENT_AUTHORITY
+OK   CANDIDATE: must exist exactly once in the basis; a Deferred baseline candidate (no placement); a duplicate intent id anywhere in the basis fails closed
+OK   OWNERS: distinct, in the basis, holding a baseline placement, and never the candidate; an empty owner list fails closed
+OK   CONTENTION CANNOT EXPAND THE RELEASE SCOPE: a contention owner that PromotionInput did not authorize (even a real placed non-owner) fails closed; an authorized owner with no supporting contention record fails closed
+OK   PLACEMENTS must still match THIS basis: an unknown id, duplicate placements, overlapping placements, a placement outside the window or on a blocker, a FIXED / FLEXIBLE source mismatch, a wrong duration -> INCONSISTENT_AUTHORITY
+OK   MALFORMED INSTANTS fail closed -> INVALID_INTERVAL: a non-finite window, blocker, placement, attempt or contention interval; a contention slot whose length is not P's resolved duration
+OK   SCHEDULING ATTEMPTS naming an intent that is not in the basis fail closed (no reconstruction, no repair)
+OK   the candidate must be FLEXIBLE with a resolved positive duration
+OK   the UNAVAILABLE taxonomy is generation / integrity only: RUN_NOT_READY, INCONSISTENT_AUTHORITY, INVALID_INTERVAL, NO_ACTIONABLE_PROMOTION_SLOT, GENERATION_FAILED -- no policy term exists
+OK   a throwing source is caught (GENERATION_FAILED), never an exception
+=== Part 2: P's slots, terminal-overlap scope, pinned non-owners, FIXED, alternate slots ===
+OK   SIMPLE CASE: P's historical slot overlaps one FLEXIBLE owner O; O has a usable alternative -> P placed at the slot, O relocated (RELOCATED, fit carried), the non-owner N unchanged
+OK   OWNER UNPLACEABLE: O has no alternative -> P is placed, O is simply UNPLACED, the result is a valid READY counterfactual (never a rejection)
+OK   GOOD / BEST: slots discovered as GOOD@10:00, BEST@13:00, WORKABLE@10:30 -> the Constructor's own comparator selects BEST@13:00 (O2 displaced); discovery order is never a ranking
+OK   SHUFFLED-ORDER INVARIANCE (the behavioral proof the heuristic trace-order guard cannot give): 12 permutations of the contention attempts x candidate-list order x scheduling-attempt order yield byte-identical results and the same selected P slot
+OK   MULTI-OWNER SAME P SLOT: the slot terminally overlaps O1 and O2 -> both are displaced and re-placed (one slot, two owner relationships)
+OK   HISTORICAL MULTI-OWNER, TERMINAL ONE: the slot's history names O1 AND O2, but only O1 terminally overlaps -> only O1 is displaced; O2 stays BYTE-IDENTICALLY pinned (an authorized owner is not released merely because it is authorized)
+OK   HISTORICAL OWNER MOVED AWAY / ZERO TERMINAL OWNER: the only historical slot overlaps no authorized terminal owner (it overlaps a NON-owner instead) -> not actionable, and P is never promoted into newly free time
+OK   NON-OWNER BLOCK + ALTERNATE SLOT: the best-ranked slot (BEST@13:00) overlaps the pinned non-owner N and is unusable -> the next-ranked slot (GOOD@10:30, displacing O) is generated; N is untouched
+OK   ALL P SLOTS UNUSABLE: every slot overlaps a non-owner -> UNAVAILABLE / NO_ACTIONABLE_PROMOTION_SLOT
+OK   FIXED OWNER (mechanics only): a slot that would have to move a FIXED authorized owner cannot be generated -> NO_ACTIONABLE_PROMOTION_SLOT; no FIXED_OWNER policy result exists; with another valid slot the FIXED owner is simply never moved
+OK   EXTERNAL BLOCKER / WINDOW: a slot that overlaps an external blocker or lies outside the window is mechanically unusable and skipped (the next slot is tried)
+OK   NO POLICY LABELS: nothing in a READY or UNAVAILABLE outcome names SAFE / UNSAFE / ACCEPT / REJECT / OWNER_PRESSURED / FIXED_OWNER / NET_PROPOSED_LOSS / TIMING_FLOOR / NON_OWNER_CHANGED
+=== Part 3: owner relocation (initial UNION final UNION attempts), neutral order, no transitive displacement ===
+OK   INITIAL-ONLY OWNER (B@11:30-style): the alternative exists only in the INITIAL list -> relocation succeeds from the initial list
+OK   FINAL OWNER ALTERNATIVE: the alternative exists only in the FINAL list -> relocation succeeds from the final list
+OK   ATTEMPT-ONLY OWNER (the committed O@09:30 case): O's only alternative is a scheduling attempt absent from initial and final -> relocation succeeds ONLY because the attempts supplement the basis (without them O is unplaced)
+OK   DEDUP + ORIGIN NEUTRALITY: the same alternative (15:00 GOOD) present in initial, final AND attempts is ONE scheduling choice (a longer span in one source does not change the placed interval), and placing it from any single source gives the identical result
+OK   DEDUP SPAN, BOTH COPIES LONG ENOUGH (60 / 120 minutes for a 60-minute owner): over all 6 source arrangements the retained span changes NOTHING -- every result is byte-identical and the placed interval is [start, start + O's resolved duration) (end 16:00, never the 17:00 source end)
+OK   DEDUP SPAN, ONE COPY TOO SHORT: when one copy of (start, fit) is shorter than O's resolved duration and the other is long enough, the alternative is usable from WHICHEVER source holds the long copy -- all 6 arrangements (initial / final / attempt, either order) relocate to the same 15:00-16:00 with byte-identical output (the longest span is retained, so feasibility is "some copy is individually feasible", exactly the Constructor's rule; origin and source order cannot matter)
+OK   DEDUP SPAN, ONLY SHORT COPIES: an alternative whose every copy is shorter than O's resolved duration is INSUFFICIENT_DURATION exactly as in the Constructor -> O stays unplaced (no span is stretched)
+OK   OWNER RANKING with the real comparator: the best timing tier wins, then the earlier start -> GOOD@15:30 beats GOOD@16:00, WORKABLE@15:00 and CAUTION@14:00 (and the released baseline slot 10:00 fails its overlap with P by itself)
+OK   TIMING DEGRADATION is allowed: a relocation to a WORSE fit than the baseline is generated and reported, never rejected
+OK   OWNER ALTERNATIVE CONFLICTS A NON-OWNER: the best alternative (BEST@13:00) overlaps the pinned non-owner N -> the next alternative is tried and N is never moved
+OK   OWNER ALTERNATIVE CONFLICTS P: an alternative overlapping the promoted slot is skipped (here the earlier GOOD@11:00 overlaps P@10:30-11:30) and the next one is used
+OK   OWNER ORDER (neutral Constructor precedence): both owners want 14:00 -> the HIGH-importance B (processed FIRST by `compareByOverloadPrecedence`, not by pressure or input order) takes it; the LOW-importance A falls to its next alternative; displaced order is B, A
+OK   NO TRANSITIVE DISPLACEMENT: the relocated owner B holds 14:00 and A may NOT displace it (A is pushed to another alternative); no placement outside the displaced owners changes
+OK   PRESSURE PARITY: the same authorities with every owner NONE, every owner LAST_KNOWN_OPPORTUNITY, or mixed produce BYTE-IDENTICAL output (pressure is never read; NONE means "no established pressure" and licenses no inference; owner order is by Constructor precedence only)
+OK   an owner left without any alternative stays UNPLACED while the others relocate (A has only the contested 14:00): valid neutral output, listed in `unplacedOwnerIds`
+OK   OWNER DEADLINE PRECEDENCE: a deadline-today owner is processed before a higher-importance owner (the Constructor's own order), proving the comparator, not a local ordering, decides
+OK   the processing order equals `compareByOverloadPrecedence` over the basis intents (cross-check with the real comparator)
+=== Part 4: ownership, freezing, determinism, independence ===
+OK   INPUTS ARE NEVER MUTATED: the basis, placements, attempts, input and contention are byte-identical after generation (they are deep-frozen, so a write would throw)
+OK   DETACHED: none of the 21 output objects / arrays / Dates is reachable from any authority
+OK   DEEP FREEZE: the outcome, the counterfactual, every array, every placement and every Date is frozen; writes throw -- and the freeze is NOT claimed to protect a Date's time value
+OK   SOURCE MUTATION AFTER GENERATION (test only): changing a source Date / array afterwards leaves the earlier output unchanged
+OK   DETERMINISM: the same semantic authority input yields byte-equivalent output across repeated calls and across independently built (equal) authorities
+OK   NO CLOCK: generation calls Date.now zero times
+OK   INDEPENDENT OUTPUTS: two calls on the same authorities share NO object, array or Date (every output is newly owned each time)
+OK   OWNER ALTERNATIVES ARE THE OWNER'S OWN: scheduling attempts of ANOTHER intent (here a BEST@15:00 attempt of the non-owner N) are never used to relocate O -> O stays unplaced
+OK   MULTIPLE PROMOTION INPUTS: one pair per call, each from the SAME run-level baseline; evaluating Q does not change P (no sequential mutation, no first-accepted choice among inputs)
+OK   the output contains exactly the promoted P, the baseline placements outside the displaced owners (unchanged), and the relocated owners: NO other intent is placed (no global replan), P transitions Deferred -> placed
+=== Part 5: the REAL pipeline -- orchestrator diagnostics -> evidence / pressure -> PromotionInput -> contention -> attempts -> generator ===
+OK   COMPOSED REAL PIPELINE (directed case): real orchestrator -> evidence / pressure -> PromotionInput -> contention -> scheduling attempts -> generator (no handcrafted input) generates P@10:30 (GOOD, the earliest of three equally fitted historical slots), displacing Y and O with X pinned
+OK   ATTEMPT-ONLY RELOCATION END TO END: O -- whose 09:30 alternative is in NEITHER the initial nor the final list -- relocates to 09:30 (GOOD) from the scheduling attempts; Y has no usable alternative and is left unplaced; the result equals the full-history oracle's
+OK   BASELINE RESULT BYTE-IDENTICAL: the Constructor result of the preparation run is unchanged by invoking the generator (before / after), equals a plain orchestration, and the signed preview token body is byte-identical (the generator is not wired)
+OK   PRESSURE PARITY (real pipeline): with only P pressured the owners are NONE; with all four pressured they are LAST_KNOWN_OPPORTUNITY -- the generator output is byte-identical
+OK   P INTERMEDIATE SLOT: P@10:00 is absent from P's initial and final candidate lists (they hold only 10:30) yet is a real contention slot; the generator ranks its slots from the contention authority (both GOOD -> the earlier 10:00 wins) and displaces only the owner it terminally overlaps, B
+OK   INITIAL-ONLY OWNER END TO END (B@11:30-style): P's best slot (BEST@10:30) terminally overlaps B and O; O (no alternative) is unplaced and B relocates to 11:30 -- a candidate that exists ONLY in B's INITIAL list (its final list holds 10:00)
+OK   GOOD / BEST END TO END: P discovered GOOD@10:00 first and BEST@11:30 second (real search labels) -> the generator selects BEST@11:30 by the real comparator and displaces only B
+=== Part 6: property sweep over REAL runs against an independent FULL-HISTORY oracle ===
+     sweep: {"runs":900,"pairs":547,"ready":536,"noActionable":11,"otherUnavailable":0,"invariantViolations":0,"oracleMismatches":0,"shuffleMismatches":0,"pressureMismatches":0,"displacedOwners":577,"relocated":92,"unplaced":485,"attemptOnlyRelocations":0,"alternateSlotCases":32,"multiOwnerDisplacements":41}
+OK   ORACLE EQUALITY: over 900 deterministic real runs (547 promotion pairs, 536 READY counterfactuals, 577 displaced owners) the generator equals an independently written oracle that uses the FULL history of every candidate list: ZERO mismatches in the selected P slot, the displaced set and every owner relocation / unplaced result
+OK   INVARIANTS on every READY result: only authorized owners displaced; every other baseline placement unchanged byte-for-byte (non-owners, undisturbed owners, FIXED); no extra intent placed; no overlap, window or blocker violation; every relocated placement comes from initial UNION final UNION the owner's attempts; P placed at a contention slot
+OK   no UNAVAILABLE reason other than NO_ACTIONABLE_PROMOTION_SLOT occurs on real, consistent authorities
+OK   SHUFFLE and PRESSURE invariance hold on every real pair (reversed contention order and reversed attempt order, and every owner pressure flipped): zero byte differences
+OK   the sweep is MEANINGFUL: 92 relocations (0 that exist only as scheduling attempts), 485 unplaced owners, 41 multi-owner displacements and 11 non-actionable pairs all occur
+ALL LOCAL COUNTERFACTUAL CHECKS PASSED
+
+# exit=0 signal=

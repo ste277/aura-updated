@@ -27,6 +27,7 @@ const goalActivitiesRoute = require('../apps/web/app/api/goals/[goalId]/activiti
 const rhythmSettingsRoute = require('../apps/web/app/api/goals/[goalId]/activities/[goalActivityId]/rhythm/route');
 const dismissRoute = require('../apps/web/app/api/goals/[goalId]/activities/[goalActivityId]/dismiss/route');
 const plansRoute = require('../apps/web/app/api/plans/route');
+const { boundHeaders } = require('./rel04BoundTestHeaders');
 const moveRoute = require('../apps/web/app/api/plans/[planId]/move/route');
 
 let allPassed = true;
@@ -155,7 +156,10 @@ async function main() {
   const nextStart = () => new Date(base + (slot++) * 45 * MINUTE);
   const planFor = (goalActivityId: string | null, title: string, extra: any = {}) => {
     const start = nextStart();
-    return () => call(plansRoute.POST(req(token, { title, activityType: 'Catch-up', activityId: 'catch-up', plannedStartAt: start.toISOString(), plannedEndAt: new Date(start.getTime() + 30 * MINUTE).toISOString(), durationMinutes: 30, windowType: 'NEUTRAL', ...(goalActivityId ? { goalActivityId } : {}), ...extra })));
+    // AURA-ANDROID-REL-04 (R2/R3 pattern, test/rel04BoundTestHeaders.ts): POST /api/plans is an account-bound write --
+    // every current client states the account it writes for (X-Aura-Expected-Account), here the request's OWN session
+    // account, exactly what the app sends. Ownership is still decided by the route.
+    return () => call(plansRoute.POST({ ...req(token, { title, activityType: 'Catch-up', activityId: 'catch-up', plannedStartAt: start.toISOString(), plannedEndAt: new Date(start.getTime() + 30 * MINUTE).toISOString(), durationMinutes: 30, windowType: 'NEUTRAL', ...(goalActivityId ? { goalActivityId } : {}), ...extra }), headers: boundHeaders(token) }));
   };
   const settings = (goalId: string, id: string, body: any, as = token) => () => call(rhythmSettingsRoute.PATCH(req(as, body), { params: { goalId, goalActivityId: id } }));
 

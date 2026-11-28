@@ -1,0 +1,33 @@
+$ npx ts-node test/authSessionDeadline.test.ts
+# job=math-core-tests step=Run session deadline and retry controlled-clock test (AUTH-SESSION-01-I1 R1) env={}
+PASS  budgets: lookup acquire 500 / lock 250 / statement 1000 / deadline 2000
+PASS  budgets: write acquire 500 / lock 1000 / statement 1500 / deadline 2000
+PASS  budgets: cleanup acquire 500 / lock 1000 / statement 5000 / deadline 6000
+PASS  pool: dedicated five connections, 500 ms acquisition
+PASS  1 success: revoked, 1 attempt, 15 ms, connection returned
+PASS  1 success: first send uses the full write maxima (1500 / 1000)
+PASS  2 confirmed statement_timeout: failed, 1 attempt, no retry, 1500 ms
+PASS  3 confirmed lock_timeout: failed, 1 attempt, no retry, 1000 ms
+PASS  3b confirmed constraint failure: failed, 1 attempt
+PASS  4 acquire (no connection): failed at exactly 500 ms, nothing sent, no retry
+PASS  4b acquire (pool timeout error): failed, nothing sent, no retry
+PASS  5 uncertain then retry: already_inactive (the first attempt had committed), 2 attempts, 600 ms
+PASS  5 uncertain: the uncertain connection is discarded, the retry gets a fresh one
+PASS  6 retry within budget: revoked, 2 attempts, total 1700 ms <= 2000
+PASS  6 retry limits = remaining budget (400 ms), not the maxima
+PASS  7 insufficient budget (< 300 ms left): uncertain, 1 attempt, no retry
+PASS  7b exactly 300 ms left: one retry is allowed
+PASS  8 deadline exhaustion: uncertain at exactly 2000 ms, 1 attempt, connection discarded
+PASS  9 retry hangs: still ends at the ORIGINAL deadline (2000 ms, not 1600 + 2000)
+PASS  9b retry acquisition waits only for the remaining 400 ms (not 500), ends at 2000 ms
+PASS  10 late completion (2100 ms): reported uncertain at 2000 ms, result ignored, connection discarded once
+PASS  11 recovery: a failed operation discards its connections; the next one succeeds normally
+PASS  12 boundary: connection at 1999 ms -> sent with statement/lock limits of exactly 1 ms
+PASS  12b boundary: connection only at 2000 ms -> nothing sent, confirmed failure (deadline)
+PASS  12c an external deadlineAt can only shorten the budget (300 ms -> limits 300 / 250)
+PASS  12d a far deadlineAt can never extend the budget (limits stay 1000 / 250)
+PASS  13 lookup: an uncertain failure is reported, never retried
+
+27 passed, 0 failed
+
+# exit=0 signal=

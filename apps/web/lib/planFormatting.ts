@@ -479,4 +479,11 @@ export interface SaveUpcomingPlanOptions {
    * time save (My Day story card) sends 'REJECT_ACTIVE_OVERLAP'; only an
    * explicit user "Save anyway" re-sends the same payload with 'ALLOW'. */
   overlapPolicy?: 'ALLOW' | 'REJECT_ACTIVE_OVERLAP';
+  /** AURA-ANDROID-REL-04 IR-01 (R2) -- the account the user acted under,
+   * captured at the action (captureAccountBinding). Omitted -> captured when
+   * the helper is called. Sent as X-Aura-Expected-Account; the server refuses
+   * the save (409, nothing written) under any other session, and the client
+   * refuses to send it once that account is no longer current. Re-used
+   * verbatim by delayed confirmations, overlap overrides and retries. */
+  binding?: import('./accountSession').AccountBinding;
 }

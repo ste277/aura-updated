@@ -1,0 +1,30 @@
+$ npx ts-node test/opportunityProjectionArchitecture.test.ts
+# job=math-core-tests step=Run opportunity projection architecture test env={}
+OK   imports are exactly the allowed pure helpers (5; availabilityContext only for the shared canonical window merge)
+OK   no import of db, Goal, Rhythm, Candidate A, the provider, the Constructor/orchestrator, acceptance/persistence, or DecisionFacts
+OK   no database/network/framework modules are imported (pg, next, react, fetch)
+OK   no clock: no Date.now(), no new Date() without an explicit argument, no performance.now
+OK   no randomness
+OK   no async/await/Promise (synchronous)
+OK   no environment or process access
+OK   no database access or writes
+OK   no mutation of input collections (no .sort on a supplied array, no push into inputs)
+OK   the engine mentions no source, requirement, scoring, urgency, shortfall, timing-quality, or Constructor vocabulary anywhere
+OK   the engine contains no user-facing copy (no string literal contains whitespace)
+OK   OpportunityFacts has exactly the six original factual fields plus the four additive first-day/after-first-day fields (P0b)
+OK   the input carries no requirement count and no candidate/source identity
+OK   the three day states are structurally distinct literals
+OK   only the pure date helpers are imported from ./timezone (never the form-input validator isValidIanaTimezone)
+OK   timezone validity is decided by Intl resolution (the canonical helpers' own contract), not a private stricter dialect
+OK   the elapsed-day relation is decided BEFORE availability is inspected (nothing supplied can change an elapsed day)
+OK   an elapsed day returns the known-infeasible state
+OK   the public input contract is unchanged by the correction (no new input field)
+OK   only the O2 range adapter (types/constant) and the O4 enrichment (the caller) reference the engine
+OK   the O2 adapter imports only the engine's MAX_PROJECTION_HORIZON_DAYS constant and DayAvailabilityInput type
+OK   exactly one production file calls projectOpportunityFacts: the generic O4 enrichment
+OK   decisionFacts.ts carries the opportunity TYPE but never imports or calls the engine
+OK   the orchestrator, preview handler and route never reference the engine directly (the handler reaches it only through the enrichment)
+OK   no Constructor decision module references the engine
+ALL OPPORTUNITY PROJECTION ARCHITECTURE CHECKS PASSED
+
+# exit=0 signal=

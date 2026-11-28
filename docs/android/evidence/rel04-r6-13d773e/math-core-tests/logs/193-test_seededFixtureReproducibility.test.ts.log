@@ -1,0 +1,15 @@
+$ npx ts-node test/seededFixtureReproducibility.test.ts
+# job=math-core-tests step=Run seeded fixture reproducibility test env={}
+OK   ROOT CAUSE REPRODUCED: the old random-comparator pattern yields DIFFERENT orders for the SAME seed under two valid sort algorithms (198 of 200 seeds disagree) -- the order was engine-dependent
+OK   THE FIX IS ENGINE-INDEPENDENT: seeded Fisher-Yates + a stable sort by a pure rank comparator gives the same order as a merge sort, an insertion sort and the native sort for all 200 seeds
+OK   THE SHUFFLE STREAM IS PINNED (seed 20261007, 12 items): 10,1,6,7,9,4,11,8,2,3,0,5
+OK   seededShuffle consumes exactly (length - 1) random draws
+OK   seededShuffle can reach every permutation of three items (no bias to a subset)
+OK   NO RANDOM SORT COMPARATOR anywhere in the test tree
+OK   the detector catches the old pattern (and its Math.random variant) when injected
+OK   the four seeded sweeps import the shared deterministic helper and call it
+OK   SUPPORTED NODE IS DECLARED: every CI job declares Node 24 and `.nvmrc` records the same major
+OK   the only non-24 Node in CI is the single non-required "MCP Server (Node 20 compatibility)" job, and it pins exactly Node 20
+ALL SEEDED FIXTURE REPRODUCIBILITY CHECKS PASSED
+
+# exit=0 signal=

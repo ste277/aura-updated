@@ -1,0 +1,36 @@
+$ npx ts-node test/reminderConsistency.test.ts
+# job=math-core-tests step=Run reminder consistency test env={}
+OK   nothing confirmed: the first reminder is shown exactly as before (no behavior change)
+OK   13. imminent A ("Starts in 10 min") confirmed completed -> not shown
+OK   14. active A ("Started 20 min ago") confirmed completed -> not shown
+OK   15/7. upcoming [A, B]: complete A -> B becomes the reminder (filter FIRST, then select)
+OK   16. only A: complete A -> null (no empty shell to render)
+OK   8/32. upcoming [A, B, C] with a STALE list: A then B confirmed -> C
+OK   a not-yet-confirmed plan is never hidden (20/36: a failed completion adds nothing, so its reminder stays)
+OK   identity is the durable plan id only: a different plan with the SAME title/time is not filtered
+OK   6. the authoritative list is never mutated
+OK   Moment reminders are never filtered by a plan id (Moments are out of scope)
+OK   29. BLOCKER: imminent A with a "Starts in 10 min" reminder -> before Done the reminder is A and Right Now is Coming up
+OK   29/13. IMMEDIATELY after LOGGED confirmation (before any refresh): the reminder no longer shows A, Right Now advanced, the Timeline shows A completed
+OK   11. after an Aura Updates refresh that no longer contains A, the projection reconciles naturally (the authoritative [B, C] list; A gone, B is next; no permanent contradiction)
+OK   30/14. ACTIVE A ("Started 20 min ago") -> Done -> reminder gone immediately, Right Now advanced
+OK   31/15. upcoming [A, B]: Done A -> B is the visible reminder and Right Now moves to B
+OK   32. stale Aura Updates [A, B, C]: complete A then B -> both stay filtered and C surfaces
+OK   10/33. the Aura Updates refresh REJECTS: A stays filtered, Home model intact, no completion error state
+OK   12/34. the Aura Updates refresh returns HTTP 200 with STALE data still containing A: the confirmed filter still excludes A (a successful response cannot resurrect it)
+OK   23/35. EVERY reconciliation source fails (plans, habits, habit-logs, my-day, guidance, Aura Updates): A absent from the reminder and from actionable Right Now, completion remains confirmed
+OK   20/36. Done fails BEFORE confirmation: A never enters the confirmed set, its reminder stays and A stays actionable
+OK   21. LOST response: no local completion is invented (reminder stays); after the idempotent retry confirms LOGGED, the reminder is filtered
+OK   17/37. reminder selection is independent of Right Now: after A completes Right Now follows its own hierarchy while the reminder keeps showing the next eligible plan
+OK   37. absence of a Right Now plan does not force the reminder empty
+OK   40. a midnight-spanning plan with a reminder: Done -> reminder filtered, Right Now excludes it, every refresh failing
+OK   26. auraUpdates state stays in page.tsx (no second copy in Home): Home receives the authoritative list and filters it with its own confirmed ids
+OK   9/26. Aura Updates is refreshed by the existing loader (loadAuraUpdates) as one independent, failure-tolerant reconciliation step
+OK   27. Home-tab entry still refreshes Aura Updates (unchanged)
+OK   24/25. the filter depends only on the confirmed set (not on errors or in-flight state)
+OK   17/18. Right Now selection and the Timeline Composer are untouched by this correction
+OK   3. completion is unchanged: the reminder module contains no completion, HabitLog, Capture or Goal logic
+OK   no migration by this PR: the specific, already-known migration set from Skip C1/Move D2/F1/Goals V2 G2.1/G2.2.1 is present (baseline presence check, count-independent)
+ALL REMINDER CONSISTENCY CHECKS PASSED
+
+# exit=0 signal=

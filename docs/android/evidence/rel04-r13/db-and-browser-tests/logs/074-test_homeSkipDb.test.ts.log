@@ -1,0 +1,19 @@
+$ npx ts-node test/homeSkipDb.test.ts
+# job=day-constructor-acceptance-db-tests step=Run Home Skip DB test env={}
+OK   43. precondition: the active plan is ACTIVE_PLAN and skippable
+OK   43/25. Home Skip -> server SKIPPED with skippedAt, no loggedAt; only the skip route was called
+OK   26. Home Skip creates ZERO HabitLogs and never calls the log route
+OK   25. a source-less plan stays as historical SKIPPED evidence (no source object needed)
+OK   11/12/46. after confirmation Right Now is no longer that plan, with fresh AND with stale (UPCOMING) authoritative data
+OK   35/52. server COMMITTED SKIPPED but the client got no response: FAILED locally (no confirmation, stays actionable)
+OK   35/52. retry returns the idempotent SKIPPED: same skippedAt, one plan, zero HabitLogs, and Home can now confirm the overlay
+OK   36. Skip x3 in one task: exactly ONE POST, one durable SKIPPED outcome, zero HabitLogs
+OK   37. Done then Skip before the first response: only Done is issued; plan LOGGED with loggedAt and exactly one HabitLog, no skippedAt
+OK   37. Skip then Done before the first response: only Skip is issued; plan SKIPPED, no HabitLog, no loggedAt
+OK   21. Done is unchanged: LOGGED, loggedAt, exactly one HabitLog
+OK   50/23. Capture-linked plan Home Skip: plan SKIPPED, Capture OPEN, completedAt null, link retained, zero HabitLogs
+OK   51/24. GoalActivity-linked plan Home Skip: plan SKIPPED, GoalActivity SUGGESTED (never COMPLETED), zero HabitLogs
+OK   6/44. Skip of a plan the server cannot skip (409) is FAILED: no confirmation is produced and the row is unchanged
+ALL HOME SKIP DB CHECKS PASSED
+
+# exit=0 signal=

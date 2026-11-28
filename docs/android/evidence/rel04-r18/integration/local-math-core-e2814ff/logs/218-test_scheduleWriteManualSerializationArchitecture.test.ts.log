@@ -1,0 +1,48 @@
+$ npx ts-node test/scheduleWriteManualSerializationArchitecture.test.ts
+# job=math-core-tests step=Run manual writer serialization architecture test env={}
+OK   TRANSACTION: the plan insert runs inside a transaction (one beginTransaction in POST, COMMIT on success, a rollback-first catch block, release in finally)
+OK   ROLLBACK ALWAYS PRECEDES EVERY EXIT FROM THE CATCH BLOCK: no return or re-throw -- typed or not -- can happen before the transaction is rolled back
+OK   THE CATCH BLOCK ONLY EVER TYPES THE CLOSED SET OF TRANSACTION-SCOPED BUSINESS-RULE REJECTIONS (now a single typed SchedulingEligibilityError branch over its own closed 5-code map) -- a new, undeclared status branch here fails this check rather than being silently permitted
+OK   AN UNCLASSIFIED ERROR ALWAYS PROPAGATES: the catch block's last statement is `throw err;` -- nothing is ever silently swallowed into an unintended response
+OK   NO SUCCESS CAN FOLLOW A FAILED TRANSACTION: the success response is reachable only AFTER the whole try/catch/finally, never from inside the catch block itself
+OK   SHARED LOCK: POST takes the per-user transaction-scoped advisory lock exactly once, with the unchanged key `day-constructor-accept:${userId}`
+OK   ORDER: BEGIN, then the advisory lock, then the plan insert, then COMMIT
+OK   NO interval write before the lock: nothing that writes a plan appears before the lock in POST
+OK   SAME CLIENT: the insert receives the SAME transaction client that took the lock (`createPlannedActivity({...}, client)`)
+OK   PRE-TRANSACTION validation and authentication (cheap, input-shape checks) stay BEFORE the transaction; the only checks that legitimately follow beginTransaction are the allowlisted, locked-state business-rule rejections proven above -- arbitrary validation cannot move into the transaction unnoticed
+OK   idempotency claims stay outside the transaction (before it) and the claim fills stay after it: unchanged behavior
+OK   MUTATION BASELINE: the good snippet itself passes every revised check (the checks aren't simply always-false)
+OK   MUTATION 1 -- authentication moved AFTER transaction creation: detected
+OK   MUTATION 2 -- a required pre-transaction validation moved AFTER transaction creation: detected
+OK   MUTATION 3 -- rollback removed from the transaction-failure path: detected
+OK   MUTATION 4 -- a business-rule error returned WITHOUT rollback having happened first: detected
+OK   MUTATION 5 -- a successful response returned from INSIDE the catch block (after a failed transaction): detected
+OK   SERVER AUTHORITY: the lock identity is the authenticated session user and nothing from the request body or query
+OK   NO NEW LOCK DOMAIN: every advisory-lock key in production code is the same `day-constructor-accept:${userId}` construction (acceptance, Move, Recomposition acceptance, and now the manual writer)
+OK   the lock SQL is byte-identical at all four SCHEDULE-WRITE sites (same primitive, no variant)
+OK   TRANSACTION-SCOPED ONLY: no session-level advisory lock, try-lock or manual unlock exists anywhere in production code
+OK   no NOWAIT, lock_timeout or statement_timeout was introduced (the lock waits under the existing timeout semantics; re-baselined by AURA-AUTH-SESSION-01-I1: only lib/authSessionDb.ts may set timeouts, for session queries; lib/sessionErrors.ts only names the reasons)
+OK   the session-store timeout module never touches the schedule-write lock (no advisory lock, no "day-constructor-accept:" key)
+OK   the session error-label module contains no SQL at all (it cannot set a timeout)
+OK   NO LOCK HELPER / RENAME in this slice: no extracted lock helper, and the key is not renamed
+OK   LOCK ORDER: the manual writer takes no other lock (no FOR UPDATE / FOR SHARE / other advisory lock in POST), so it cannot invert the automatic writers' order
+OK   NO OVERLAP VALIDATION BY DEFAULT: outside the single opt-in block the manual path has no overlap/blocker query, no conflict logic and no 409 decision
+OK   OPT-IN ONLY (AURA-HPG5-V2-I1): exactly one overlap check, gated on overlapPolicy REJECT_ACTIVE_OVERLAP, using the existing findBlockingPlanForRange on the transaction client, after the lock and before the insert
+OK   OPT-IN ONLY: an absent overlapPolicy resolves to ALLOW (S2 default unchanged) and only one 409 exists in the route
+OK   the transaction client is used ONLY for the lock, COMMIT and ROLLBACK: POST runs no other query of its own (so no overlap/blocker SQL can be added unnoticed), and the route holds no PlannedActivity SQL
+OK   no availability or lifecycle check was added to manual creation
+OK   the success response contract is unchanged: POST still returns the created plan as JSON (NextResponse.json(plan))
+OK   GET /api/plans is untouched: still a plain read with no transaction or lock
+OK   createPlannedActivity gained only an optional executor (defaults to the pool), so every other caller is unchanged
+OK   createPlannedActivity itself takes NO lock and adds no overlap logic (the lock belongs to the writer that owns the transaction)
+OK   NO DUPLICATE INSERT SQL: the route contains no INSERT, and db.ts still has exactly the original two PlannedActivity INSERT statements
+OK   the only production caller of createPlannedActivity is the plans route
+OK   the automatic writers still take the lock themselves: acceptance, Move and Recomposition acceptance (unchanged)
+OK   no DB exclusion constraint or schema change for plans
+OK   no Decision Intelligence vocabulary was introduced (pressure, evidence, scarcity, promotion, shadow)
+OK   the DB test makes no global-non-overlap / race-free / overlap-prohibition claim in any assertion label
+OK   the DB test drives the REAL route handler (not a re-implementation) and covers: S1-race closure, manual-first, two manual writers, different users, Move, rollback, connection loss, manual-manual overlap, idempotency, API contract
+OK   the DB test asserts final database rows and the acceptance result, not only event order
+ALL MANUAL WRITER SERIALIZATION ARCHITECTURE CHECKS PASSED
+
+# exit=0 signal=

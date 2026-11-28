@@ -1,0 +1,81 @@
+$ npx ts-node test/marriageRequiredEligibility.test.ts
+# job=math-core-tests step=Run Marriage required eligibility test env={}
+OK   1. shortestAngularSeparation(10, 5) = 5
+OK   2. shortestAngularSeparation(359, 1) = 2 (wraparound)
+OK   2b. shortestAngularSeparation(1, 359) = 2 (symmetric)
+OK   3. Jupiter at 10.99 deg separation -> combust
+OK   4. Jupiter at exactly 11 deg -> NOT combust (strict <)
+OK   5. Jupiter at 11.01 deg -> not combust
+OK   4b. Jupiter retrograde uses the same 11 deg threshold (no distinction in the source)
+OK   6. Venus direct at 9.99 deg -> combust
+OK   7. Venus direct at exactly 10 deg -> not
+OK   8. Venus retrograde at 7.99 deg -> combust
+OK   9. Venus retrograde at exactly 8 deg -> not
+OK   9b. Venus direct threshold (10) differs from retrograde threshold (8) -- 7 deg is combust either way, but 9 deg is combust only direct (9 &lt; 10) not retrograde (9 is NOT &lt; 8)
+OK   10. retrograde detection returns a real boolean (no NaN/undefined from wraparound math) at an arbitrary probe instant
+OK   14. Dhanu Rashi (sunRashiIndex) is a real, computed index equal to DHANU_RASHI_INDEX at the Dec probe
+OK   15. Meena Rashi is computed at the March probe
+OK   16. A non-Kharmas Rashi (May probe) is neither Dhanu nor Meena
+OK   Kharmas (Dhanu) rejects a Marriage candidate at the Dec probe
+OK   Kharmas (Meena) rejects a Marriage candidate at the March probe
+OK   A non-Kharmas Rashi does not trigger Kharmas rejection (may still be Chaturmas/Adhika -- checked independently below)
+OK   Real Sankranti found by the engine near Dec 2026 is the Dhanu ingress (Kharmas onset)
+OK   A candidate crossing exactly into the Dhanu Sankranti is rejected (full-span safety, not just start-instant)
+OK   A candidate entirely BEFORE that Sankranti is not rejected on Kharmas grounds
+OK   11/12. A real 2026 synodic month with one Sankranti classifies NORMAL
+OK   classifySynodicMonth: zero Sankranti in a narrow window strictly between two real Sankrantis -> ADHIKA
+OK   classifySynodicMonth: exactly one real Sankranti inside a +-1hr window -> NORMAL
+OK   13. classifySynodicMonth: two Sankranti in one window -> explicit KSHAYA_OR_UNSUPPORTED, never silently NORMAL/ADHIKA
+OK   21/22. An ordinary (real, NORMAL) synodic month is not rejected on Adhika Masa grounds (integration-level proof spanOverlapsProhibitedPeriod correctly consults the real month, not a synthetic one)
+OK   34. Computed Chaturmas 2026 start lands on the audit benchmark date (Jul 25)
+OK   34b. Computed Chaturmas 2026 end lands on the audit benchmark date (Nov 20 or 21, Smarta)
+OK   17. A candidate well inside the Chaturmas window is rejected
+OK   18. A candidate well outside the Chaturmas window is not rejected on Chaturmas grounds
+OK   A candidate crossing exactly into the real Chaturmas start is rejected (full-span safety)
+OK   A candidate entirely before Chaturmas start is not rejected on Chaturmas grounds
+OK   Half-open semantics: a candidate ending EXACTLY at Chaturmas start is safe from Chaturmas (no overlap)
+OK   37. Chaturmas boundary is genuinely Event-Location sensitive (sunrise-owning tithi differs by location/timezone) -- Delhi and Dubai need not produce byte-identical instants
+OK   37b. Both locations still land on the same benchmark CIVIL DATE for start (the sunrise-ownership shift is at most a day, never wildly different)
+OK   38. Kharmas eligibility is identical across locations (global/instant-based, no location dependence)
+OK   38b. Asta eligibility does not take a location parameter at all (signature-level proof of global/instant-based computation)
+OK   33. Guru is combust at the audit benchmark instant (Jul 25, inside Jul15-Aug12)
+OK   33b. Guru is NOT combust at a date well outside the benchmark window
+OK   23. Guru Asta rejects a Marriage candidate at the benchmark instant
+OK   Shukra is combust at the engine-derived instant (Oct 24 2026, inside the real -- narrower than benchmark -- Shukra Asta window)
+OK   24/25. Shukra Asta rejects a Marriage candidate inside its real (engine-derived) combustion window (direct or retrograde, whichever applies)
+OK   A real Guru combustion-state transition was located by the engine (entry into the Jul15-Aug12 benchmark window)
+OK   30. A candidate crossing exactly into Guru combustion is rejected (full-span safety, not just start-instant)
+OK   A candidate entirely before that transition is not rejected on Asta grounds
+OK   26/27. spanOverlapsProhibitedPeriod's own signature carries no score/modifier parameter -- structurally cannot be influenced by an unrelated factor scoring well
+OK   26/27b. spanOverlapsPlanetaryCombustion's own signature carries no score/modifier parameter either
+OK   Both new checks are wired into evaluateMuhurthamCandidate BEFORE the function can return a scored candidate (same discipline as the existing Tithi/Nakshatra/Yoga/Karana check)
+OK   28. Tara Bala/personalContext plays no role in either new check -- neither function's signature accepts a personalContext parameter
+OK   34. Marriage period coverage is IMPLEMENTED
+OK   35. Marriage combustion coverage is IMPLEMENTED
+OK   36. Marriage support level is now SUPPORTED
+OK   37. Marriage is in SUPPORTED_MUHURTHAM_ACTIVITY_IDS
+OK   37b. isSupportedMuhurthamActivity('marriage') is true
+OK   38. Finder still derives its dropdown entirely from SUPPORTED_MUHURTHAM_ACTIVITY_IDS.map(...) -- no hardcoded Marriage addition needed or present
+OK   39. Griha Pravesh remains SUPPORTED and has its own Adhika-Masa-only periodRules (no Kharmas/Chaturmas, no combustionRules leaked from Marriage)
+OK   40. Engagement remains PARTIAL/reusable-base, unaffected
+OK   41. start-journey does not inherit Marriage's period/combustion rules (coverage stays MISSING)
+OK   41. financial-decision does not inherit Marriage's period/combustion rules (coverage stays MISSING)
+OK   41. business-start does not inherit Marriage's period/combustion rules (coverage stays MISSING)
+OK   41. property-purchase does not inherit Marriage's period/combustion rules (coverage stays MISSING)
+OK   41. new-beginning does not inherit Marriage's period/combustion rules (coverage stays MISSING)
+OK   30. GENERAL Marriage search runs end-to-end without throwing (activity is genuinely SUPPORTED now)
+OK   30b. GENERAL Marriage search in a post-Chaturmas window can produce results (not universally empty)
+OK   31. PERSONAL Marriage search with a natal profile runs end-to-end and returns status OK
+OK   32. SHARED Marriage search with a SavedPerson runs end-to-end and returns status OK
+OK   34. SHARED per-participant Tara/score values remain independently exposed for Marriage (user.score and person.score both present)
+OK   33. GENERAL search inside Chaturmas returns zero dates
+OK   33b. PERSONAL search inside Chaturmas returns zero dates too (Tara Bala cannot rescue it)
+OK   36/41. A real Marriage search range fully inside Chaturmas legitimately returns dates: [] -- no fallback/manufactured candidate
+OK   Cross-midnight: absolute instant ordering is preserved (end > start, ~105 min span)
+OK   Cross-midnight: period-exclusion check completes without throwing and returns a real boolean
+OK   Cross-midnight: combustion check completes without throwing and returns a real boolean
+OK   Cross-sunrise: period-exclusion check completes cleanly near a real sunrise instant, no civil-date/Panchang-day confusion crash
+
+ALL MARRIAGE REQUIRED ELIGIBILITY CHECKS PASSED
+
+# exit=0 signal=

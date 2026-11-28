@@ -1,0 +1,47 @@
+$ npx ts-node test/myRhythmSchedulingDb.test.ts
+# job=day-constructor-acceptance-db-tests step=Run My Rhythm scheduling DB test env={}
+OK   S0. setup: preferences saved (Mon/Wed/Fri, MORNING, 45)
+OK   S1. proposing creates nothing (no plan written before explicit confirmation)
+OK   S2. NEXT proposal is for next Monday..Sunday and offers 2 sessions
+OK   S3. every session is on a preferred weekday inside next week
+OK   S4. every session uses the preferred 45-minute duration
+OK   S5. matched sessions start in the morning; any fallback is explained
+OK   S6. sessions are on distinct days
+OK   S7. Panchang ranking is preserved: no matched session scores below the engine's best morning slot that day
+OK   S7b. sessions carry the engine reasons/labels (explainable)
+OK   S8. explicit acceptance of next week -> both ACCEPTED
+OK   S9. two goal-linked UPCOMING plans with occurrences frozen to next week
+OK   S10. remaining for next week is now 0
+OK   S11. replaying the same confirmation -> ALREADY_ACCEPTED, no new plan
+OK   S12. a session beyond the weekly target is refused (no duplicate)
+OK   S13. with next week full, the proposal is NOT_ELIGIBLE
+OK   S14. a next-week date submitted as CURRENT is still refused (OUTSIDE_CURRENT_WEEK) -- existing semantics
+OK   S15. invalid week values are rejected (400) by both routes
+OK   S16. none of the refused requests changed the existing plans
+OK   S17. Home exposes the CONFIRMED next session (the earliest accepted plan)
+OK   S18. Home: next week is complete for this rhythm (not in nextWeekCandidates)
+OK   S19. pause -> 200
+OK   S20. Home lists the rhythm as paused, still showing its confirmed next session
+OK   S21. paused: absent from Home this-week and next-week demand
+OK   S22. paused: weekly proposal NOT_ELIGIBLE for both weeks
+OK   S23. paused: Plan My Day does not auto-suggest it
+OK   S24. paused: the Goal -> Plan My Day handoff no longer previews it (MR1 preview inconsistency resolved)
+OK   S25. pausing left the confirmed plans byte-identical
+OK   S26. resume -> 200
+OK   S27. resumed: no longer listed as paused
+OK   S28. resumed: the handoff is available again and carries the time/duration preferences
+OK   C1. Plan My Day auto-suggests the rhythm preferred today
+OK   C2. Plan My Day does NOT auto-suggest the rhythm not preferred today
+OK   C3. Home: preferred-today rhythm keeps its "today" action; the other gets none
+OK   C4. weekly proposal for the other rhythm never offers today
+OK   M1. Plan My Day preview accepts timePreference (200)
+OK   M2. a placed item honours EVENING (17:00-21:00 local), or is deferred rather than misplaced
+OK   R0. setup: the work-aware proposal returned sessions
+OK   R1. personal sessions on workdays are outside work hours unless explained as a fallback
+OK   T1. LA next week bounds are LA-local Monday..Sunday
+OK   T2. LA sessions fall on Tue/Thu in LA local time, labelled with the LA date
+OK   T3. LA acceptance freezes the LA week (scheduledWeekStart = LA next Monday, timezone LA)
+
+All checks passed.
+
+# exit=0 signal=

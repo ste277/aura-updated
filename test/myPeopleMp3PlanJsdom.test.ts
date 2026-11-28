@@ -24,6 +24,9 @@ import { runTimingSearch, type TimingSearchRequest } from '../packages/recommend
 import { resolveTzOffsetMinutes, getDatePartsInTimezone, addDaysToDateStr } from '../apps/web/lib/timezone';
 
 process.env.NEXT_PUBLIC_AURA_MY_PEOPLE = '1';
+// AURA-ANDROID-REL-04 (R2 pattern, as findATimeConflictJsdom): plan saves are account-bound -- the client states the
+// verified account it writes for, so the standalone component needs one (what Home's session check sets in the app).
+require('../apps/web/lib/accountSession').setVerifiedAccount('synthetic-test-user', { broadcast: false });
 const { PlanWithAuraView } = require('../apps/web/components/PlanWithAuraView');
 
 let allPassed = true;

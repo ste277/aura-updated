@@ -1,0 +1,19 @@
+$ npx ts-node --project tsconfig.jsdom-tests.json test/myPeopleMp4UiDb.test.ts
+# job=day-constructor-acceptance-db-tests step=Run AURA-MP-4 Keep in touch screen DB test env={}
+OK   Person page shows "Keep in touch" with plain wording and no rhythm yet
+OK   The form proposes "Call Ravi", once a week, and a NEW goal named "Stay close to Ravi" that the user can see and edit
+OK   Changing what to do updates an untouched name ("Visit Ravi")
+OK   The form says suggested times come from the user's own calendar and to check with the person
+OK   Opening the form, choosing and cancelling writes nothing (no goal, no rhythm)
+OK   Save creates exactly ONE rhythm linked to Ravi and ONE goal with the edited name; the page lists it
+OK   "Add to one of my goals" attaches a second rhythm to the existing goal -- no new goal
+OK   Pause (existing route) -> "Paused" shown, stored paused, link kept
+OK   Resume -> active again
+OK   Edit how often -> 3 times a week
+OK   Remove asks first and says plans already made stay
+OK   Remove (existing dismiss) -> one rhythm left on the page; the removed one is kept as DISMISSED history
+OK   My People OFF: the legacy person screen has no "Keep in touch" section
+
+ALL MY PEOPLE MP-4 UI CHECKS PASSED (13)
+
+# exit=0 signal=

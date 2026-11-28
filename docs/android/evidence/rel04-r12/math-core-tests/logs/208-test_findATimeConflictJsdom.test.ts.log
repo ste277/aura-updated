@@ -1,0 +1,41 @@
+$ npx ts-node --project tsconfig.jsdom-tests.json test/findATimeConflictJsdom.test.ts
+# job=math-core-tests step=Run Find a Time conflict component test (HPG5-V2-I1) env={}
+OK   setup: goal activity linked in the Plan tab
+OK   setup: Find a Time rendered results with "Use this time"
+OK   T24 Use this time sends overlapPolicy REJECT_ACTIVE_OVERLAP
+OK   T24 ... with the explicit goal link
+OK   T24 409 shows the conflict with role="alert"
+OK   T24 conflict names the plan and its time
+OK   T24 conflict says nothing was saved
+OK   T24 alert is labelled and described for screen readers
+OK   T24 focus moves to the conflict heading
+OK   T24 never auto-saves after the conflict (still exactly one POST)
+OK   T24 the card is not marked Planned
+OK   T24 no generic error banner for an overlap
+OK   T24 Save anyway has an accessible name naming the conflict
+OK   T24 both actions are real buttons, at least 44px tall
+OK   T24 Choose another time dismisses the conflict, results stay
+OK   T24 Choose another time returns focus to the results
+OK   T24 Choose another time writes nothing
+OK   T24 second attempt refused again
+OK   T24 Save anyway shows Saving… and is disabled while in flight
+OK   T24 repeated clicks while saving submit only once
+OK   T24 Save anyway sends overlapPolicy ALLOW
+OK   T24 Save anyway keeps the same time and goal link
+OK   T24 after a successful Save anyway the conflict closes and the card is Planned
+OK   T24 goal link consumed only on success (linker reset)
+OK   T24 stale guard setup: conflict visible
+OK   T24 a new search clears the pending conflict (no Save anyway on stale data)
+OK   T24 relink setup: goal activity linked again
+OK   T24 relinked attempt carries the goal link and is refused
+OK   T24 Unlink hides the pending conflict (it belonged to the old link)
+OK   T24 non-overlap failure: generic error, no conflict panel
+OK   T16 UI: Check a Time searched the exact instant (mode CHECK)
+OK   T16 UI: Check a Time save posts the explicit time without overlapPolicy (manual semantics unchanged)
+
+32 checks
+ALL CHECKS PASSED
+(node:43420) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+# exit=0 signal=

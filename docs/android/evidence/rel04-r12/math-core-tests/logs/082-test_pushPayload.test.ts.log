@@ -1,0 +1,17 @@
+$ npx ts-node test/pushPayload.test.ts
+# job=math-core-tests step=Run reminder push payload test env={}
+OK   PLAN title includes icon, activity title, and lead minutes
+OK   PLAN body is the restrained generic copy
+OK   PLAN payload target matches the reminder's own target
+OK   PLAN falls back to a generic bell icon when the activity has none
+OK   An ACCEPTED shared Moment gets "You're both in." -- never claims confirmation otherwise
+OK   A waiting-response shared Moment gets "Your shared moment is coming up." (no false confirmation)
+OK   A GENERAL/PERSONAL Moment gets the generic "Your Aura Moment is coming up." (no participant assumed)
+OK   A CEREMONIAL occasion (Griha Pravesh) gets the restrained Muhurtham copy, NOT the ACCEPTED "You're both in." (ceremonial check wins)
+OK   Ceremonial copy never mentions Tithi/Nakshatra/Tara/score/reasoning
+OK   The push payload never contains any birth/natal/person/token field or value
+OK   The push payload has exactly the expected safe keys, nothing extra
+
+ALL PUSH PAYLOAD CHECKS PASSED
+
+# exit=0 signal=

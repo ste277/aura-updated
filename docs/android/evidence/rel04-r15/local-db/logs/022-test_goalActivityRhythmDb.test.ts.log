@@ -1,0 +1,22 @@
+$ npx ts-node test/goalActivityRhythmDb.test.ts
+# job=day-constructor-acceptance-db-tests step=Run Goal activity rhythm DB test env={}
+OK   37. a freshly-created GoalActivity has rhythmKind/rhythmTargetPerWeek NULL (no production writer sets them)
+OK   37. that NULL row normalizes to canonical NONE
+OK   37. explicit NONE (both columns null) normalizes to NONE
+OK   37. N_PER_WEEK(3) round-trips exactly through persistence
+OK   37. an invalid persisted target (0) normalizes to NONE, never silently recurrent
+OK   37. an unrecognized persisted rhythmKind normalizes to NONE, never thrown, never recurrent
+OK   37. no occurrence was created merely by setting a Rhythm policy
+OK   37. no PlannedActivity was created merely by setting a Rhythm policy
+OK   37. no GoalActivityExecution was created merely by setting a Rhythm policy
+OK   fact loader returns exactly 4 facts (one per linked occurrence)
+OK   fact loader derives COMPLETED for the LOGGED plan
+OK   fact loader derives COMMITTED for the UPCOMING plan
+OK   fact loader derives NONE for both SKIPPED and CANCELLED plans
+OK   fact loader resolves each localDate in the REQUESTED timezone, landing in the current local week
+OK   end-to-end: 3/week with 1 completed + 1 committed (skip/cancel ignored) -> remaining 1, eligible
+OK   15/21. a REAL Move (R3's own production wiring) already repoints the occurrence automatically -- still exactly 4 facts (never 5), the Move never creates a second occurrence/fact
+OK   15/21. the occurrence now correctly contributes COMMITTED (its successor is UPCOMING) -- same occurrence, different schedule placement, never double-counted alongside the old MOVED row, and never left stuck at NONE
+ALL GOAL ACTIVITY RHYTHM DB CHECKS PASSED
+
+# exit=0 signal=

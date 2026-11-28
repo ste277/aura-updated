@@ -1,0 +1,47 @@
+{
+  "head": "3c906f9c8485f51e0713c31d8a8517050a98d6c5",
+  "codeTreeClean": true,
+  "node": "v26.5.0",
+  "startedAt": "2026-11-27T18:35:48.521Z",
+  "jobs": [
+    "rel04-chromium-multitab"
+  ],
+  "extraEnvKeys": [],
+  "commands": [
+    {
+      "n": 1,
+      "job": "rel04-chromium-multitab",
+      "name": "Run REL-04 Chromium multi-tab test",
+      "run": "npx ts-node test/rel04Chromium.test.ts",
+      "env": {},
+      "exit": 0,
+      "signal": null,
+      "ms": 27936,
+      "log": "logs/001-test_rel04Chromium.test.ts.log",
+      "logSha256": "e4dbe0251af2b0e4a488bd2dc2fbe12da571d51935e1942d4179815b30d624b4"
+    }
+  ],
+  "skipped": [
+    {
+      "job": "rel04-chromium-multitab",
+      "name": "Install root deps",
+      "run": "npm install"
+    },
+    {
+      "job": "rel04-chromium-multitab",
+      "name": "Install web deps",
+      "run": "npm install"
+    },
+    {
+      "job": "rel04-chromium-multitab",
+      "name": "Install Chromium for Playwright",
+      "run": "npx playwright install --with-deps chromium"
+    }
+  ],
+  "finishedAt": "2026-11-27T18:36:16.459Z",
+  "summary": {
+    "run": 1,
+    "passed": 1,
+    "failed": []
+  }
+}

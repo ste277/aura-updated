@@ -1,0 +1,27 @@
+$ npx ts-node test/rel04R16HomeChromiumDb.test.ts
+# job=rel04-next-app-rendering step=Run REL-04 R16 closure test (production build, real Chromium, PostgreSQL; JSON 429, Calendar remount/restart, contradictory receipt) env={"REL04_SKIP_BUILD":"1"}
+OK   S0 the production build serves (next start)
+versions {"chromium":"151.0.7922.34","node":"v26.5.0"}
+R16-G5 {"original":"b3862570-c165-4cfe-b70c-2b5aa821da97","posts":["b3862570-c165-4cfe-b70c-2b5aa821da97","b3862570-c165-4cfe-b70c-2b5aa821da97","b3862570-c165-4cfe-b70c-2b5aa821da97"],"rows":[{"id":"91552b82-30b1-41e0-8f4a-8990b94cd272","userId":"916ed694-bc5f-44fb-9f88-4cf566375718","clientRequestId":"b3862570-c165-4cfe-b70c-2b5aa821da97","activityTitle":"Workout","logTimestamp":"2026-11-27T06:35:00.000Z","durationMinutes":30,"logSource":"AURA_DO_NOW"}],"mid":{"records":1,"tomb":[]},"afterReplay":1}
+OK   G5 real Home: a JSON 429 that never reached the writer is shown UNRESOLVED; the copy is KEPT under the original id; no rejection is recorded (direct path)
+OK   G5 real Home: the replay path answered by the same 429 keeps the copy too (no rejection, no deletion)
+OK   G5 real Home: the explicit Retry reaches the writer with the ORIGINAL id and body (3 POSTs, 1 id) -> exactly 1 row; its validated v2 receipt names the row
+R16-G6-remount {"original":"ec6f89e4-cadd-421f-9876-5154dab8a4d9","noticeOnReturn":true,"blocked":true,"first":{"rows":1,"copies":1},"posts":["ec6f89e4-cadd-421f-9876-5154dab8a4d9","ec6f89e4-cadd-421f-9876-5154dab8a4d9"],"rows":[{"id":"292f1ad2-73f1-436a-96a8-db7e564ccedc","userId":"bdafef7a-aabb-4ea2-ad0c-bd0661bbf14c","clientRequestId":"ec6f89e4-cadd-421f-9876-5154dab8a4d9","activityTitle":"Review same operation","logTimestamp":"2026-11-27T04:30:00.000Z","durationMinutes":30,"logSource":"MANUAL"}],"receipts":[["ec6f89e4-cadd-421f-9876-5154dab8a4d9",2,"accepted"]]}
+OK   G6 remount: the first save committed (1 row) but its acknowledgement was unverifiable -> UNRESOLVED, copy kept
+OK   G6 remount: after leaving and returning the identical re-entry is WITHHELD (no POST) with THAT operation's recovery offered; still 1 row (notice on return: true)
+OK   G6 remount: "Retry that entry" resumes the ORIGINAL id -> exactly 1 row, 1 id; every POST carried the original id (2)
+R16-G6-separate {"original":"7abd168b-c806-40fe-84dd-b4e8f04c9a12","noticeOnReturn":true,"blocked":true,"first":{"rows":1,"copies":1},"posts":["7abd168b-c806-40fe-84dd-b4e8f04c9a12","7672b013-a795-4fbf-a9d3-f52a4fcd363e"],"rows":[{"id":"a4e5e24b-fb12-4ed1-afe6-eb0a6bd83815","userId":"8b5ab201-1e5e-44ec-91b6-d071d1760614","clientRequestId":"7672b013-a795-4fbf-a9d3-f52a4fcd363e","activityTitle":"Review same operation","logTimestamp":"2026-11-27T04:30:00.000Z","durationMinutes":30,"logSource":"MANUAL"},{"id":"e390c1ea-cfc9-4cff-9743-010d6ddc7102","userId":"8b5ab201-1e5e-44ec-91b6-d071d1760614","clientRequestId":"7abd168b-c806-40fe-84dd-b4e8f04c9a12","activityTitle":"Review same operation","logTimestamp":"2026-11-27T04:30:00.000Z","durationMinutes":30,"logSource":"MANUAL"}],"receipts":[["7672b013-a795-4fbf-a9d3-f52a4fcd363e",2,"accepted"]]}
+OK   G6 separate: the first save committed (1 row) but its acknowledgement was unverifiable -> UNRESOLVED, copy kept
+OK   G6 separate: after leaving and returning the identical re-entry is WITHHELD (no POST) with THAT operation's recovery offered; still 1 row (notice on return: true)
+OK   G6 separate: "Save as a separate activity" deliberately creates a second activity with identical intent -> 2 rows, 2 ids (the original kept)
+R16-G6-restart {"original":"e997fb82-a4bf-47bb-b1a5-15017b179f0e","noticeOnReturn":false,"blocked":true,"first":{"rows":1,"copies":1},"posts":["e997fb82-a4bf-47bb-b1a5-15017b179f0e","e997fb82-a4bf-47bb-b1a5-15017b179f0e","e997fb82-a4bf-47bb-b1a5-15017b179f0e"],"rows":[{"id":"c122f864-a6ec-4d36-9643-8590461adf33","userId":"5d5912d0-3000-453a-bcc6-a8c1abd4e744","clientRequestId":"e997fb82-a4bf-47bb-b1a5-15017b179f0e","activityTitle":"Review same operation","logTimestamp":"2026-11-27T04:30:00.000Z","durationMinutes":30,"logSource":"MANUAL"}],"receipts":[["e997fb82-a4bf-47bb-b1a5-15017b179f0e",2,"accepted"]]}
+OK   G6 restart: the first save committed (1 row) but its acknowledgement was unverifiable -> UNRESOLVED, copy kept
+OK   G6 restart: after leaving and returning + a full reload the identical re-entry is WITHHELD (no POST) with THAT operation's recovery offered; still 1 row (notice on return: false)
+OK   G6 restart: "Retry that entry" resumes the ORIGINAL id -> exactly 1 row, 1 id; every POST carried the original id (3)
+R16-G4 {"seeded":"8b85234d-a09b-4b4a-a553-5b000af4f695","autoSent":0,"offered":true,"rows":[{"id":"39173f7d-b8cd-4a05-9d1d-380ad67c9992","userId":"ae966140-1209-4c4a-ad57-37bfe507d0d8","clientRequestId":"8b85234d-a09b-4b4a-a553-5b000af4f695","activityTitle":"Workout","logTimestamp":"2026-11-27T06:35:00.000Z","durationMinutes":30,"logSource":"AURA_DO_NOW"}],"final":[[2,"39173f7d-b8cd-4a05-9d1d-380ad67c9992"]]}
+OK   G4 real app: a v2 receipt whose row contradicts the intent (matching ids) beside the live copy -> never "Logged", shown unresolved with recovery; NOTHING sent automatically; the copy preserved
+OK   G4 real app: Retry sends the ORIGINAL id once -> exactly 1 row; the contradictory receipt is REPLACED by a valid v2 receipt naming that row
+
+15 passed, 0 failed
+
+# exit=0 signal=

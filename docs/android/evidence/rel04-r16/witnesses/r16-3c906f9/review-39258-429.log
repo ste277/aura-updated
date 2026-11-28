@@ -1,0 +1,6 @@
+OK   S0 the production build serves (next start)
+versions {"chromium":"151.0.7922.34","node":"v26.5.0"}
+INDEPENDENT-429 {"error":false,"posts":[{"account":"8dd2b40a-3d79-46e1-b62e-516740663dbf","body":{"activityTitle":"Workout","activityId":"workout","activeWindow":"ABHIJIT","logMinuteOfDay":725,"logTimestamp":"2026-11-27T06:35:00.000Z","durationMinutes":30,"logSource":"AURA_DO_NOW","activitySignificance":"MEDIUM","clientRequestId":"331ab735-8e5f-4d99-ad10-1c11ebe4364d"}}],"state":{"records":[{"recordId":"4d11822f2568eaf1","ownerUserId":"8dd2b40a-3d79-46e1-b62e-516740663dbf","clientRequestId":"331ab735-8e5f-4d99-ad10-1c11ebe4364d","item":{"activityTitle":"Workout","activityId":"workout","activeWindow":"ABHIJIT","logMinuteOfDay":725,"logTimestamp":"2026-11-27T06:35:00.000Z","durationMinutes":30,"logSource":"AURA_DO_NOW","activitySignificance":"MEDIUM","clientRequestId":"331ab735-8e5f-4d99-ad10-1c11ebe4364d","tempId":"temp-1795761300000","ownerUserId":"8dd2b40a-3d79-46e1-b62e-516740663dbf","recordId":"4d11822f2568eaf1"},"queuedAt":1795761300000,"fmt":"r8"}],"claims":[],"tombstones":[]},"rows":[]}
+OK   A temporary JSON 429 from the POST address must keep the exact retryable copy
+
+2 passed, 0 failed

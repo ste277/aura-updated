@@ -1,0 +1,56 @@
+$ npx ts-node test/panchangDay.test.ts
+# job=math-core-tests step=Run panchang day service test env={}
+OK   Pinned instant resolves to the expected Chennai local date
+OK   getPanchangForDate(referenceInstant=now).tithi matches calling getTithi(now) directly
+OK   getPanchangForDate(referenceInstant=now).nakshatra matches calling getNakshatra(now) directly
+OK   getPanchangForDate(referenceInstant=now).yoga matches calling getYoga(now) directly
+OK   getPanchangForDate(referenceInstant=now).karana matches calling getKarana(now) directly
+OK   Paksha is derived the same way the legacy /today route computed it (tithi index <= 15 -> Shukla)
+OK   Tithi endsAt is a valid future ISO instant (the TITHI transition search now works -- see completion report)
+OK   Sunrise matches the verified ephemeris.test.ts fixture (05:52 IST)
+OK   Sunset matches the verified ephemeris.test.ts fixture (18:39 IST)
+OK   Brahma matches the verified fixture (04:16-05:04 IST)
+OK   Abhijit matches the verified fixture (11:50-12:42 IST)
+OK   Rahu Kalam matches the verified fixture (15:27-17:03 IST)
+OK   Gulika matches the verified fixture (12:16-13:51 IST)
+OK   Yama matches the verified fixture (09:04-10:40 IST)
+OK   Future date does not throw and echoes the requested date exactly
+OK   Future date produces a valid Tithi
+OK   Past date does not throw and echoes the requested date exactly
+OK   Past date produces a valid Nakshatra
+OK   Two different locations on the same date produce different sunrise clock times
+OK   Location is echoed back per-request, not shared/global state
+OK   Chennai and New York produce different Abhijit window instants for the same calendar date (independent solar noon)
+OK   Positive UTC offset (IST, +5:30) resolves correctly
+OK   Negative UTC offset (New York, EST, -5:00) resolves correctly
+OK   Negative UTC offset shifts for DST (New York, EDT, -4:00 in July)
+OK   getPanchangForDate results span a real DST transition (EST before, EDT after)
+OK   Local sunrise clock time is plausible both before and after the DST transition (roughly 6-7am)
+OK   Requested date is echoed exactly (Tokyo, UTC+9, New Year's Day)
+OK   Computed sunrise for the requested date falls on that same local calendar date (no shift to Dec 31 or Jan 2)
+OK   UTC- timezone: requested date does not silently shift forward a day
+OK   isValidCalendarDateString accepts a real date
+OK   isValidCalendarDateString rejects a non-existent calendar date (Feb 30)
+OK   isValidCalendarDateString rejects a malformed string
+OK   getPanchangForDate throws a clear error for an invalid date string rather than silently shifting
+OK   sunrise < sunset
+OK   Rahu Kalam is contained within daytime (between sunrise and sunset)
+OK   Yama is contained within daytime
+OK   Gulika is contained within daytime
+OK   Abhijit is centered around solar midday (contains sunrise+sunset midpoint)
+OK   Brahma Muhurta ends before (or at) sunrise
+OK   All 5 currently-supported windows are present (BRAHMA, ABHIJIT, RAHU_KALAM, GULIKA, YAMA)
+OK   Abhijit and Gulika genuinely overlap on this fixture date (test premise check)
+OK   Both overlapping windows (Abhijit, Gulika) remain present as independent entries, not merged/deduplicated
+OK   Each overlapping window keeps its own distinct start/end (not collapsed to a shared span)
+OK   Tithi is present
+OK   Nakshatra is present
+OK   Yoga is present
+OK   Karana is present
+OK   Vara is present
+OK   Vara matches the local calendar day (2026-07-28 is a Tuesday -> Mangalavara)
+OK   Vara is consistent with getDatePartsInTimezone's weekday for the same local date
+
+ALL PANCHANG DAY CHECKS PASSED
+
+# exit=0 signal=

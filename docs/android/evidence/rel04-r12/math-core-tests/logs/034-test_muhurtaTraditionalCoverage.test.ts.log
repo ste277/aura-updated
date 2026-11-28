@@ -1,0 +1,37 @@
+$ npx ts-node test/muhurtaTraditionalCoverage.test.ts
+# job=math-core-tests step=Run Muhurta traditional coverage test (PCE-2A) env={}
+OK   1. Marriage resolves to OCCASION_SPECIFIC
+OK   2. Griha Pravesh resolves to OCCASION_SPECIFIC
+OK   3a. The five generic fallback ids are exactly the non-dedicated half of SUPPORTED_MUHURTHAM_ACTIVITY_IDS
+OK   3b. start-journey resolves to GENERAL_PANCHANGAM
+OK   3b. financial-decision resolves to GENERAL_PANCHANGAM
+OK   3b. new-beginning resolves to GENERAL_PANCHANGAM
+OK   3b. business-start resolves to GENERAL_PANCHANGAM
+OK   3b. property-purchase resolves to GENERAL_PANCHANGAM
+OK   4. start-journey's own rule pack is genuinely a reused family base (reusedFromLegacyFamily set), consistent with its GENERAL_PANCHANGAM classification
+OK   4. financial-decision's own rule pack is genuinely a reused family base (reusedFromLegacyFamily set), consistent with its GENERAL_PANCHANGAM classification
+OK   4. new-beginning's own rule pack is genuinely a reused family base (reusedFromLegacyFamily set), consistent with its GENERAL_PANCHANGAM classification
+OK   4. business-start's own rule pack is genuinely a reused family base (reusedFromLegacyFamily set), consistent with its GENERAL_PANCHANGAM classification
+OK   4. property-purchase's own rule pack is genuinely a reused family base (reusedFromLegacyFamily set), consistent with its GENERAL_PANCHANGAM classification
+OK   4b. Marriage and Griha Pravesh are NOT reused family bases (dedicated, not fallback)
+OK   5. No SUPPORTED Finder occasion resolves to TRADITIONALLY_VALIDATED
+OK   5b. deriveTraditionalCoverageLevel has no code path at all producing TRADITIONALLY_VALIDATED (tithi+nakshatra IMPLEMENTED is the ceiling: OCCASION_SPECIFIC)
+OK   6. AURA_MUHURTA_METHODOLOGY_ID is still the pre-existing constant
+OK   6b. findMuhurthams does not carry a provenance field of its own (GENERAL scope -- unchanged shape)
+OK   7a. findMuhurthams(marriage).activity.traditionalCoverage === OCCASION_SPECIFIC
+OK   7b. findMuhurthams(start-journey).activity.traditionalCoverage === GENERAL_PANCHANGAM
+OK   7c. findPersonalMuhurthams(marriage) carries traditionalCoverage === OCCASION_SPECIFIC when PERSONAL_PROFILE is complete
+OK   7d. findSharedMuhurthams(griha-pravesh) carries traditionalCoverage === OCCASION_SPECIFIC when both profiles are complete
+OK   7e. evaluateMuhurthamCandidateAt(property-purchase) carries traditionalCoverage === GENERAL_PANCHANGAM
+OK   7f. Coverage is consistent across every candidate date in a single search result (one value on `activity`, not per-date)
+OK   8a. traditionalCoverageExplanation(OCCASION_SPECIFIC) mentions occasion-specific rules and discloses incompleteness
+OK   8b. traditionalCoverageExplanation(GENERAL_PANCHANGAM) mentions general Panchangam factors and discloses non-validation
+OK   8c. Neither explanation ever POSITIVELY claims full validation (the proposed GENERAL_PANCHANGAM message correctly says the opposite -- "have not yet been fully validated" -- which must not trip this check) or uses defect/warning language
+OK   8d. explanation text matches the actual resolved tier for a real search result (marriage -> occasion-specific wording, start-journey -> general wording)
+OK   9a. An unresolvable classification (no rule pack data at all, MISSING coverage) still resolves to GENERAL_PANCHANGAM, never higher
+OK   9b. Partial dedication (only ONE of tithi/nakshatra IMPLEMENTED) still resolves to GENERAL_PANCHANGAM, never OCCASION_SPECIFIC
+OK   9c. traditionalCoverageExplanation falls back to the GENERAL_PANCHANGAM-tier message for an unrecognized level string, never an unsupported trust claim
+
+ALL MUHURTA TRADITIONAL COVERAGE CHECKS PASSED
+
+# exit=0 signal=

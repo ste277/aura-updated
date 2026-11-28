@@ -1,5 +1,21 @@
 apply plugin: 'com.android.application'
 
+// AURA-ANDROID-REL-04: validated version values (see defaultConfig).
+def auraVersionCode() {
+    def raw = (project.findProperty('auraVersionCode') ?: '1').toString().trim()
+    if (!(raw ==~ /[1-9][0-9]{0,9}/) || raw.toLong() > 2100000000L) {
+        throw new GradleException("auraVersionCode must be a whole number from 1 to 2100000000 (got '${raw}').")
+    }
+    return raw.toInteger()
+}
+def auraVersionName() {
+    def raw = (project.findProperty('auraVersionName') ?: '1.0').toString().trim()
+    if (!(raw ==~ /[0-9]+(\.[0-9]+){1,3}/)) {
+        throw new GradleException("auraVersionName must look like 1.0 or 1.0.1 (got '${raw}').")
+    }
+    return raw
+}
+
 android {
     namespace "com.greenarrow.auraschedule"
     compileSdk rootProject.ext.compileSdkVersion
@@ -7,8 +23,12 @@ android {
         applicationId "com.greenarrow.auraschedule"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        // AURA-ANDROID-REL-04: release versioning from Gradle properties, e.g.
+        //   ./gradlew bundleRelease -PauraVersionCode=2 -PauraVersionName=1.0.1
+        // versionCode must rise with every upload to Google Play. The defaults keep
+        // local debug builds unchanged.
+        versionCode auraVersionCode()
+        versionName auraVersionName()
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -79,3 +99,38 @@ tasks.register('verifyGeolocationCompatPatch') {
     }
 }
 tasks.named('preBuild') { dependsOn 'verifyGeolocationCompatPatch' }
+
+// AURA-ANDROID-REL-04: release-build configuration gate. A release APK/AAB must load
+// the hosted HTTPS app, never a development server, and must keep the WebView floor
+// page that only `npx cap sync android` (not a combined `npx cap sync`) writes. This
+// task reads the generated capacitor.config.json (gitignored, written by cap sync)
+// and fails the release build otherwise. Debug builds are not affected. Verification
+// only -- it never modifies files.
+tasks.register('verifyReleaseServerConfig') {
+    doLast {
+        def f = file('src/main/assets/capacitor.config.json')
+        if (!f.exists()) {
+            throw new GradleException("Release build: ${f} is missing. Run `CAP_SERVER_URL=https://<production-host> npx cap sync android` in apps/web first.")
+        }
+        def cfg = new groovy.json.JsonSlurper().parse(f)
+        def server = cfg.server ?: [:]
+        def url = (server.url ?: '').toString()
+        def problems = []
+        URI uri = null
+        try { uri = new URI(url) } catch (Exception ignored) { }
+        def host = uri?.host?.toLowerCase() ?: ''
+        if (uri == null || uri.scheme != 'https' || host.isEmpty()) {
+            problems << "server.url must be an https:// URL (got '${url}')"
+        } else if (host == 'localhost' || host.endsWith('.localhost') || host ==~ /(127|10)\.\d+\.\d+\.\d+/ ||
+                   host ==~ /192\.168\.\d+\.\d+/ || host ==~ /172\.(1[6-9]|2\d|3[01])\.\d+\.\d+/ || host.endsWith('.local')) {
+            problems << "server.url points at a local or private development host (${host})"
+        }
+        if (server.cleartext == true) problems << 'server.cleartext must not be true'
+        if (server.errorPath != 'unsupported-webview.html') problems << 'server.errorPath is missing: sync with `npx cap sync android`, not a combined `npx cap sync`'
+        if ((cfg.android ?: [:]).minWebViewVersion != 91) problems << 'android.minWebViewVersion must be 91'
+        if (!problems.isEmpty()) {
+            throw new GradleException('Release build blocked by AURA-ANDROID-REL-04 configuration gate:\n - ' + problems.join('\n - '))
+        }
+    }
+}
+tasks.matching { it.name == 'preReleaseBuild' }.configureEach { dependsOn 'verifyReleaseServerConfig' }

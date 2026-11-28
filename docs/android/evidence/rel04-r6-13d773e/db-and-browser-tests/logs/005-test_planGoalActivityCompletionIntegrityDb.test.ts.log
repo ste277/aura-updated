@@ -1,0 +1,17 @@
+$ npx ts-node test/planGoalActivityCompletionIntegrityDb.test.ts
+# job=day-constructor-acceptance-db-tests step=Run plan goal-activity completion integrity DB test env={}
+OK   setup: Goal-linked plan created via POST /api/plans
+OK   1. before completion: progress is 0/1 (scheduled, not yet completed)
+OK   2. Move succeeds for a Goal-linked plan created via the new entry point
+OK   2. GoalActivity now points at the Move SUCCESSOR plan, not the original (MOVED) one
+OK   2. the association survived the Move -- repointed, not lost and not duplicated
+OK   3. completion succeeds for the (moved) Goal-linked plan
+OK   3. exactly ONE GoalActivityExecution row exists for this GoalActivity (no double-count)
+OK   3. the execution row is attributed to the SUCCESSOR plan (the one actually completed), not the original
+OK   4. after completion: progress correctly shows 1/1
+OK   5. re-logging an already-LOGGED plan is a structural no-op (existing idempotency, unmodified)
+OK   5. still exactly ONE execution row after a repeated completion attempt -- no double-count
+OK   6. completing an UNLINKED plan never creates/affects this GoalActivity's execution record
+ALL HPG2 COMPLETION/PROGRESS INTEGRITY CHECKS PASSED
+
+# exit=0 signal=

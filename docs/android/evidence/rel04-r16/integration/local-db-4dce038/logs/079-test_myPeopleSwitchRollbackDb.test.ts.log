@@ -1,0 +1,32 @@
+$ npx ts-node test/myPeopleSwitchRollbackDb.test.ts
+# job=day-constructor-acceptance-db-tests step=Run AURA-MP-1 My People switch rollback DB test env={}
+OK   1.1 ON: name-only Meera (SIBLING, label, interests, notes) and chart person Priya created
+OK   1.2 ON: two special days saved for Meera (29 Feb, no year; OTHER with a year)
+OK   2.1 OFF: GET /api/people -> 200; the name-only person is listed with null chart fields and hasChartDetails false
+OK   2.2 OFF: the list response omits My People fields (notes, interests) -- legacy shape
+OK   2.3 OFF: GET detail -> 200 with natalContext null (no crash on null birth fields)
+OK   2.4 OFF: a legacy edit of a name-only person (name + relationship, no chart keys) -> 200
+OK   2.5 OFF: a legacy full-body edit of a chart person still replaces the chart (unchanged behaviour)
+OK   2.6 OFF: the legacy edit did NOT touch any My People data
+OK   2.7 OFF: writing a My People field is refused (400) and changes nothing
+OK   2.8 OFF: legacy create contract -- name-only POST is a 400
+OK   2.9 OFF: every special-day route is 404
+OK   2.10 OFF: ...and the special-day rows are still in the database
+OK   2.11 OFF: SHARED Muhurtham with a name-only person -> friendly 422 CHART_DETAILS_REQUIRED (never a 500)
+OK   2.12 OFF: SHARED Muhurtham with a chart person -> 200 (existing behaviour preserved)
+OK   2.13 OFF: everyday shared timing with a name-only person -> 200 (partner side neutral)
+OK   2.14 OFF: Day Builder with a name-only priority person runs without error
+OK   2.15 OFF: Ask Aura everyday shared find with a name-only person -> a normal answer (no throw)
+OK   2.16 OFF: Ask Aura SHARED Muhurtham search with a name-only person -> the friendly "add birth details" reply
+OK   2.17 OFF: Ask Aura SHARED Muhurtham check with a name-only person -> the friendly reply
+OK   2.18 OFF: /api/plans still creates the plan, and IGNORES savedPersonId (no link written)
+OK   2.19 OFF: export still includes the name-only person with notes and both special days
+OK   2.20 OFF: deleting a name-only person works (atomic delete is always on)
+OK   3.1 ON again: every My People field is back, unchanged
+OK   3.2 ON again: both special days are back, unchanged
+OK   3.3 ON again: the legacy edit made while off is kept (name Meera R, FRIEND)
+OK   3.4 ON again: special-day routes live again
+
+ALL MY PEOPLE SWITCH ROLLBACK CHECKS PASSED
+
+# exit=0 signal=

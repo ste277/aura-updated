@@ -1,0 +1,28 @@
+$ npx ts-node test/windowNotifications.test.ts
+# job=math-core-tests step=Run window notifications test env={}
+OK   defaults at 06:00 → exactly 1 spec (Abhijit)
+OK   Abhijit fires 10 min before start
+OK   Abhijit title mentions the window
+OK   all-on at 00:30 → 5 specs
+OK   sorted soonest first (Rahu first)
+OK   caution window says avoid
+OK   Gulika retains its "in N minutes" title format
+OK   Gulika body uses the approved replacement copy
+OK   Gulika body does not contain "Favorable window"
+OK   Gulika body does not suggest starting something important
+OK   Gulika body is distinct from Rahu Kalam/Yama's exact caution wording
+OK   Brahma title unchanged ("in N minutes" format)
+OK   Brahma body unchanged (favorable wording)
+OK   Abhijit title unchanged ("in N minutes" format)
+OK   Abhijit body unchanged (favorable wording)
+OK   Rahu Kalam title unchanged ("ahead" format)
+OK   Rahu Kalam body unchanged (caution wording)
+OK   Yama title unchanged ("ahead" format)
+OK   Yama body unchanged (caution wording)
+OK   no alert for already-started window
+OK   Gulika alert 32 min out
+OK   no alerts left at 23:00
+
+ALL NOTIFICATION CHECKS PASSED
+
+# exit=0 signal=

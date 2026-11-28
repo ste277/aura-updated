@@ -1,0 +1,39 @@
+$ npx ts-node test/schedulingDateMutatorArchitecture.test.ts
+# job=math-core-tests step=Run scheduling Date mutator architecture test env={}
+=== the scanner: real mutations are found, comments / strings / non-mutating use are not ===
+OK   LOCAL setters are found whatever the receiver is called: `someDate.setMinutes(1)`, `interval.start.setHours(0)`, `x.setTime(0)`, `d.setDate(1)`, `d.setMonth(0)`, `d.setFullYear(2020)`, `d.setSeconds(0)`, `d.setMilliseconds(0)`
+OK   UTC setters are found: `d.setUTCHours(0)`, `d.setUTCMinutes`, `d.setUTCSeconds`, `d.setUTCMilliseconds`, `d.setUTCDate`, `d.setUTCMonth`, `d.setUTCFullYear`, and the legacy `d.setYear`
+OK   indirect forms are found: optional chaining `d?.setHours(1)`, a method reference `const f = d.setHours`, a destructured binding `const { setTime } = d`, `Date.prototype.setHours.call(d, 1)`, and computed access `d['setMinutes'](1)` / d["setDate"](1)
+OK   a mutator inside a template-literal EXPRESSION is code and is found: `${d.setHours(1)}`; the surrounding template text is not
+OK   COMMENTS do not count: line, block and JSDoc comments mentioning `.setHours(` / `setUTCDate` are ignored
+OK   STRINGS do not count: single-, double-quoted and template strings mentioning a mutator are ignored (escaped quotes included)
+OK   NON-MUTATING and STATIC Date use is never flagged: `new Date(x)`, `getTime()`, `getHours()`, `getUTCDay()`, `toISOString()`, `Date.UTC(...)`, `Date.parse(...)`, `Date.now()`, `.setOf` / `Map.set(` / a property merely named `settings`
+OK   a mutation AFTER a string containing a quote-like comment marker is still found (the scanner does not lose its place): `const u = "http://x"; d.setHours(1);`
+=== the audited path conforms ===
+OK   THE REAL SCHEDULING PATH HAS ZERO DATE-MUTATOR VIOLATIONS (39 protected modules, 83 files in the entry-point import closure)
+OK   every protected module exists and is non-empty (a rename cannot silently shrink the guard)
+OK   ZERO EXCEPTIONS in the protected modules: none contains any mutator identifier, computed mutator access or `Date.prototype` reference
+OK   COMPLETENESS: of the 83 files the scheduling entry points can reach through value imports, the only one containing a Date mutator is exactly apps/web/lib/timezone.ts
+OK   THE ONE EXCEPTION IS VERIFIED, NOT TRUSTED: date.setUTCDate(date.getUTCDate() + days) sits in `addDaysToDateStr`, on a Date created inside that function by `new Date(Date.UTC(...))`, and the function returns a string. Reason: `addDaysToDateStr` builds its own `new Date(Date.UTC(...))`, mutates only that local instance and returns a string -- the mutated Date never escapes the function, so no scheduling Date can be aliased to it
+OK   the known setter modules outside the path are named and excluded -- not wildcarded: apps/web/lib/planFormatting.ts, apps/web/lib/prisma-db.ts, apps/web/lib/streak.ts, apps/web/components/PastActivityModal.tsx (each really contains a mutator, none is in the scheduling closure)
+=== INJECTED VIOLATIONS (on the real sources, in memory): each class is detected for the intended reason ===
+OK   LOCAL SETTER injected into a protected module (`someDate.setMinutes(...)`) -> D1, naming the mutator and the file
+OK   UTC SETTER injected into the Constructor and into the orchestrator -> D1 for each
+OK   every protected module is guarded: a setter appended to EACH of them is detected
+OK   aliasing-flavoured injection is detected: mutating a ProposedItem / candidate / blocker Date in place (`item.start.setHours(0)`, `candidate.end.setTime(1)`, `blocker.start.setUTCDate(1)`)
+OK   a computed-access and an optional-chained mutation are detected in a protected module
+OK   a mutator newly IMPORTED INTO the path is detected by the closure rule: a setter in a file the Constructor can reach but that is not on the protected list -> D2
+OK   the named exception cannot grow: a second setter in timezone.ts, or the setter no longer acting on the local Date, -> D3
+OK   a protected module that disappears fails (D0) rather than silently shrinking the guard
+=== FALSE-POSITIVE CONTROLS (on the real sources): allowed Date use and mere mentions stay green ===
+OK   a COMMENT mentioning `.setHours(` / `.setUTCDate(` added to a protected module is NOT a violation
+OK   a STRING / template literal mentioning a mutator added to a protected module is NOT a violation
+OK   NON-MUTATING / STATIC Date operations added to a protected module are NOT violations: `new Date(...)`, `getTime()`, `getHours()`, `Date.UTC(...)`, `Date.parse(...)`, `toISOString()`
+OK   the injected mutations above were applied to in-memory copies only: the real tree still has zero violations afterwards
+=== wiring and honest scope ===
+OK   both pre-P4b protections (the real-pipeline anomaly regression and this Date-mutator guard) run in the required PURE job
+OK   this guard is a pure function over source text: no database, network, clock, randomness or environment is read by the guard itself
+OK   SCOPE STATEMENT: the guard does not claim a future ConstructionBasis is detached or frozen (P4b1 must prove that separately); it pins only that the audited path contains no Date mutator
+ALL SCHEDULING DATE-MUTATOR ARCHITECTURE CHECKS PASSED
+
+# exit=0 signal=

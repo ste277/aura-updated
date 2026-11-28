@@ -6,6 +6,7 @@
  * terminal plan as actionable upcoming work. Requires DATABASE_URL.
  */
 import fs from 'fs';
+import { boundHeaders } from './rel04BoundTestHeaders';
 import path from 'path';
 import { upsertUserByEmail, cancelPlannedActivity, beginTransaction } from '../apps/web/lib/db';
 import { createSessionToken } from '../apps/web/lib/auth';
@@ -26,7 +27,7 @@ async function sql(t: string, p: unknown[] = []): Promise<any[]> {
   const c = await beginTransaction();
   try { const r = await c.query(t, p); await c.query('COMMIT'); return r.rows; } catch (e) { await c.query('ROLLBACK').catch(() => {}); throw e; } finally { c.release(); }
 }
-const req = (tok: string | null, body: any = {}): any => ({ cookies: { get: (n: string) => (tok && n === 'as_session' ? { value: tok } : undefined) }, json: async () => body, headers: new Headers() });
+const req = (tok: string | null, body: any = {}): any => ({ cookies: { get: (n: string) => (tok && n === 'as_session' ? { value: tok } : undefined) }, json: async () => body, headers: boundHeaders(tok) });
 
 // ---- pure: direct mapper, exhaustive ----
 const base = { id: 'x', title: 'T', plannedStartAt: '2026-06-10T17:00:00Z', plannedEndAt: '2026-06-10T18:00:00Z', durationMinutes: 60 };

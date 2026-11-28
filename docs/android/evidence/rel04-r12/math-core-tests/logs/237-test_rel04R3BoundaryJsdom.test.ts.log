@@ -1,0 +1,35 @@
+$ npx ts-node --project tsconfig.jsdom-tests.json test/rel04R3BoundaryJsdom.test.ts
+# job=math-core-tests step=Run REL-04 R3 shared account boundary test (route inventory, surfaces) env={"TS_NODE_COMPILER_OPTIONS":"{\"jsx\":\"react-jsx\"}"}
+OK   B1 inventory: 89 API route files, each classified
+OK   B1 every session-authenticated route is account-scoped, except the justified, listed exemptions
+OK   B1 Connected Apps management (/api/mcp/connections) is account-scoped; the MCP protocol endpoint stays exempt
+OK   B1 Goals, Captures, plans, habit logs, people, users settings are account-scoped
+OK   B1 every exemption carries a written reason
+OK   B1 (R4) data export is account-scoped for every method; calendar feed GET is optional (subscription contract), POST account
+OK   B2 headerless account-scoped read WITH a session -> 503 client_upgrade_required
+OK   B2 "signed out" statement while a session exists -> 409 account_mismatch
+OK   B2 stated account matches -> passes to the route
+OK   B2 no cookie -> passes (the route answers 401)
+OK   B2 exempt routes pass headerless (auth, guest, location); calendar feed headerless passes (subscription contract)
+OK   B2 (R4) headerless export download with a session -> 503; mismatched export -> 409; matching -> passes
+OK   B2 (R4) calendar download stating another account -> 409
+OK   B2 telemetry (optional): headerless passes, a mismatched statement is refused
+OK   B3 with the account UNKNOWN, a read first verifies the session, then states the verified account
+OK   B3 if verification fails, the request is REFUSED and never forwarded
+OK   B4 a tab that believes "signed out" states it; the server refuses B's data (409) and the tab re-verifies
+OK   B5 Goals: every account-scoped request states the verified account A
+OK   B5 Goals: shows A's data
+OK   B5 Goals (R5 verified page): no reload -- the tree is remounted for B and fetches B's data only (Alice's gone)
+OK   B5 Captures: every account-scoped request states the verified account A
+OK   B5 Captures: shows A's data
+OK   B5 Captures (R5 verified page): no reload -- the tree is remounted for B and fetches B's data only (Alice's gone)
+OK   B5 Goal detail: every account-scoped request states the verified account A
+OK   B5 Goal detail: shows A's data
+OK   B5 Goal detail (R5 verified page): no reload -- the tree is remounted for B and fetches B's data only (Alice's gone)
+OK   B5 Connected Apps: every account-scoped request states the verified account A
+OK   B5 Connected Apps: shows A's data
+OK   B5 Connected Apps: remounts and shows only B's data
+
+29 passed, 0 failed
+
+# exit=0 signal=

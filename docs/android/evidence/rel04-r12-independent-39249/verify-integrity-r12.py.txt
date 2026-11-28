@@ -1,0 +1,47 @@
+from pathlib import Path
+import collections, hashlib, json, re, subprocess, sys
+prior = Path(sys.argv[1])
+d = Path('docs/android/evidence')
+r11, r12 = d/'rel04-r11-independent-39247', d/'rel04-r12'
+original = prior/'AURA_ANDROID_REL_04_R11_INDEPENDENT_EVIDENCE_39247'
+impl = '02e283e836638bd86763cd8447b370538d8050e2'
+head = '6373fd9eac74aaac2596aefaeecfd147482dfb26'
+base = 'd1503278ae43dd7c0477f809b8af4c645b1b8725'
+digest = lambda p: hashlib.sha256(p.read_bytes()).hexdigest()
+git = lambda *a: subprocess.check_output(['git',*a])
+h = Path('docs/android/AURA_ANDROID_REL_04_R12_VERIFICATION_HANDOVER.md')
+matches = re.findall(r'^\| .([^\x60]+). \| .([0-9a-f]{64}). \|$',h.read_text(),re.M)
+assert len(matches) == 17
+for path, sha in matches:
+    assert digest(Path(path)) == sha, path
+    print(sha, path)
+names = (r11/'SHA256SUMS').read_text().splitlines()
+assert len(names)==27
+for line in names:
+    sha,name = line.split()
+    vendored = r11/name
+    if not vendored.exists(): vendored = r11/(name+'.txt')
+    assert digest(vendored) == sha and vendored.read_bytes() == (original/name).read_bytes()
+print('27 preserved R11 evidence files verified against independent originals, including two with added .txt suffix.')
+for name in ('offlineHabitQueue','activitySync','signOut'):
+    assert git('show',base+':apps/web/lib/'+name+'.ts') == Path('test/fixtures/rel04-r11-head',name+'.ts.txt').read_bytes()
+print('Three R11 runtime fixtures match the original commit.')
+assert git('rev-parse',head+'^').decode().strip()==impl
+assert git('rev-parse',impl+'^').decode().strip()==base
+final = git('diff','--name-only',impl,head).decode().splitlines()
+assert len(final)==341 and all(p.startswith(str(r12)+'/') or p in [str(h),'docs/android/AURA_ANDROID_REL_04_APPLICATION_READINESS_REPORT.md'] for p in final)
+runtime=git('diff','--name-only',base,impl,'--','apps').decode().splitlines()
+assert runtime == ['apps/web/lib/activitySync.ts','apps/web/lib/offlineHabitQueue.ts','apps/web/lib/signOut.ts']
+print('Runtime changes:', runtime, '| Handover paths:',len(final),'all reporting/evidence')
+steps=[json.loads(x) for x in subprocess.check_output(['python3','test/evidence-tools/ciCommands.py'],text=True).splitlines()]
+key=lambda v: tuple(v[k] for k in ('job','name','run','env'))
+for folder,n in [('math-core-tests',253),('db-and-browser-tests',78)]:
+    p=r12/folder/'manifest.json'
+    m=json.loads(p.read_text())
+    assert m['head']==impl and m['codeTreeClean'] and len(m['commands'])==n
+    assert [key(s) for s in steps if s['job'] in m['jobs'] and s['run'].startswith('npx ts-node ') and '\n' not in s['run']]==[key(c) for c in m['commands']]
+    assert set(c['log'] for c in m['commands'])=={str(x.relative_to(p.parent)) for x in (p.parent/'logs').glob('*.log')}
+    for c in m['commands']:
+        assert digest(p.parent/c['log'])==c['logSha256'] and c['exit']==0 and c['signal'] is None,c['log']
+    print(folder,n,'pinned workflow commands and SHA-256 verified',dict(collections.Counter(c['job'] for c in m['commands'])))
+

@@ -1,0 +1,28 @@
+$ npx ts-node test/dayConstructorBlockerOverlap.test.ts
+# job=math-core-tests step=Run Constructor blocker overlap behavior test env={}
+OK   a window inside the day: the range is the day itself
+OK   a window exactly equal to the day: the day
+OK   a window reaching past the END of the day extends the range end
+OK   a window starting BEFORE the day extends the range start
+OK   a window spanning both ends extends both
+OK   the inputs are never mutated
+OK   an overlapping plan that STARTED the previous day blocks exactly the overlapping portion (09:00-12:00 = 180 of 480)
+OK   a timing candidate inside it (10:30) is rejected, never proposed; the first clear candidate (12:00) is
+OK   the blocker load happens exactly once, over the day bounds for an ordinary window
+OK   a window crossing midnight loads blockers over day + window (the range reaches the window end), still ONE load
+OK   lifecycle unchanged: an overlapping UPCOMING plan blocks
+OK   lifecycle unchanged: an overlapping LOGGED plan blocks
+OK   lifecycle unchanged: an overlapping CANCELLED plan does not block
+OK   lifecycle unchanged: an overlapping SKIPPED plan does not block
+OK   lifecycle unchanged: an overlapping MOVED plan does not block
+OK   adjacent plans touching at a boundary merge: 180 blocked minutes, no phantom gap
+OK   a zero-length plan blocks nothing
+OK   a plan ending exactly at the window start does not touch the window (half-open)
+OK   a plan starting exactly at the window end does not touch the window (half-open)
+OK   New York spring forward (2027-03-14) is a 23-hour civil day
+OK   New York fall back (2026-11-01) is a 25-hour civil day
+OK   an ordinary day (Asia/Kolkata) is 24 hours
+OK   the day bounds do not depend on the process timezone (they are pure functions of the civil date and the user timezone)
+ALL BLOCKER OVERLAP CHECKS PASSED
+
+# exit=0 signal=

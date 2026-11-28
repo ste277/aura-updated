@@ -1,0 +1,27 @@
+$ npx ts-node test/panchangMonth.test.ts
+# job=math-core-tests step=Run panchang month service test env={}
+OK   31-day month (August) returns 31 summaries
+OK   30-day month (September) returns 30 summaries
+OK   28-day February (non-leap, 2026) returns 28 summaries
+OK   29-day February (leap year, 2028) returns 29 summaries
+OK   2028 is actually a leap year (test premise check)
+OK   2026 is actually not a leap year (test premise check)
+OK   No duplicate dates in a month's summaries
+OK   Every date 2026-08-01 .. 2026-08-31 is present exactly once, in order
+OK   First summary is the 1st of the month
+OK   Last summary is the last day of the month
+OK   New York (UTC-4/-5) August still has exactly 31 dates, Aug 01..31, no boundary shift
+OK   User location resolution: Chennai and New York summaries are both well-formed for the same month
+OK   Month 0 throws
+OK   Month 13 throws
+OK   Non-integer month throws
+OK   Summary carries date/vara/tithi.name/nakshatra.name
+OK   Summary carries notableWindows with hasAbhijit/hasBrahma/cautionCount
+OK   Summary does NOT carry the full windows array or solar times (lightweight, not a full PanchangDay)
+OK   At most one FULL_MOON marker in a calendar month
+OK   At most one NEW_MOON marker in a calendar month
+OK   moonPhaseMarker is undefined on ordinary days (not every day is marked)
+
+ALL PANCHANG MONTH CHECKS PASSED
+
+# exit=0 signal=

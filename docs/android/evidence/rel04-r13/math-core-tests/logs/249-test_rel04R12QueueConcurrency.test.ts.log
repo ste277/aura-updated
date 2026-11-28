@@ -1,0 +1,53 @@
+$ npx ts-node --project tsconfig.jsdom-tests.json test/rel04R12QueueConcurrency.test.ts
+# job=math-core-tests step=Run REL-04 R12 queue concurrency test (39247 witnesses on abdd9d8 vs current; per-boundary concurrency) env={"TS_NODE_COMPILER_OPTIONS":"{\"jsx\":\"react-jsx\"}"}
+OK   fixture rel04-r11-head/offlineHabitQueue.ts.txt == abdd9d8 apps/web/lib/offlineHabitQueue.ts
+OK   fixture rel04-r11-head/activitySync.ts.txt == abdd9d8 apps/web/lib/activitySync.ts
+OK   fixture rel04-r11-head/signOut.ts.txt == abdd9d8 apps/web/lib/signOut.ts
+OK   the 39247 reviewer evidence is preserved byte-for-byte (27 SHA256SUMS entries; probe/script stored as .txt)
+N1 same-account {"R11":{"attempted":1,"posted":["old-request"],"decisions":["A:replacement:settled"],"remaining":[]},"current":{"attempted":0,"posted":[],"decisions":[],"remaining":["reused-record:replacement:A"]}}
+OK   N1 R11 reproduces (A/new replacement after replay's read): a claim is taken for the replacement while the stale original is posted
+OK   N1 CORRECTED (same-account): the stale claim is refused ('changed'); nothing is posted; the replacement is neither claimed, settled nor deleted
+N1 cross-account {"R11":{"attempted":1,"posted":["old-request"],"decisions":[],"remaining":["reused-record:replacement:B"]},"current":{"attempted":0,"posted":[],"decisions":[],"remaining":["reused-record:replacement:B"]}}
+OK   N1 R11 reproduces (B/new replacement after replay's read): a claim is taken for the replacement while the stale original is posted
+OK   N1 CORRECTED (cross-account): the stale claim is refused ('changed'); nothing is posted; the replacement is neither claimed, settled nor deleted
+N2 direct {"R11":{"posts":1,"rows":1,"kind":"confirmed","retiredKept":true},"current":{"posts":0,"rows":0,"kind":"not-stored","retiredKept":true}}
+OK   N2 R11 reproduces (direct): a retired contradiction written inside the claim transaction is missed: 1 POST, 1 row
+OK   N2 CORRECTED (direct): the claim's linearization-point inspection sees it: 0 POSTs, 0 rows, the retired copy preserved
+N2 replay {"R11":{"posts":1,"rows":1,"kind":"attempted:1","retiredKept":true},"current":{"posts":0,"rows":0,"kind":"attempted:0","retiredKept":true}}
+OK   N2 R11 reproduces (replay): a retired contradiction written inside the claim transaction is missed: 1 POST, 1 row
+OK   N2 CORRECTED (replay): the claim's linearization-point inspection sees it: 0 POSTs, 0 rows, the retired copy preserved
+N3 {"R11":{"kind":"confirmed","rowsA":1,"contradictoryKept":false},"current":{"kind":"confirmed","rowsA":1,"contradictoryKept":true}}
+OK   N3 R11 reproduces: a successful response settles (deletes) a copy that became contradictory while the response was held
+OK   N3 CORRECTED: settlement is bound to the claim and re-resolves identity: the contradictory copy is preserved; 1 server row
+N4 readable-nested-id {"R11":{"removed":1,"unidentified":0,"decisions":1,"rawKept":false,"submit":"not-stored","rows":0},"current":{"removed":0,"unidentified":1,"decisions":0,"rawKept":true,"submit":"not-stored","rows":0}}
+OK   N4 R11 reproduces (readable-nested-id)
+OK   N4 CORRECTED (readable-nested-id): incomplete identity -> preserved, no decision, reported unidentified, its candidate refused (0 rows)
+N4 missing-record-id-after-colon {"R11":{"removed":0,"unidentified":1,"decisions":1,"rawKept":true,"submit":"confirmed","rows":1},"current":{"removed":0,"unidentified":1,"decisions":0,"rawKept":true,"submit":"not-stored","rows":0}}
+OK   N4 R11 reproduces (missing-record-id-after-colon)
+OK   N4 CORRECTED (missing-record-id-after-colon): incomplete identity -> preserved, no decision, reported unidentified, its candidate refused (0 rows)
+N4 outer-owner-absent {"R11":{"removed":0,"unidentified":0,"decisions":1,"rawKept":true,"submit":"confirmed","rows":1},"current":{"removed":0,"unidentified":1,"decisions":0,"rawKept":true,"submit":"not-stored","rows":0}}
+OK   N4 R11 reproduces (outer-owner-absent)
+OK   N4 CORRECTED (outer-owner-absent): incomplete identity -> preserved, no decision, reported unidentified, its candidate refused (0 rows)
+N5 new-key-same-id {"R11":{"owned":{"unknown":false,"removed":1,"removedPossiblySent":0,"keptInFlight":0,"failed":0,"cleanupPending":0,"cleanupPendingPossiblySent":0,"unidentified":0,"uncertain":0},"decisions":["A:confirmed:discarded"],"remaining":[],"retiredKept":true},"current":{"owned":{"unknown":false,"removed":0,"removedPossiblySent":0,"keptInFlight":0,"failed":0,"cleanupPending":1,"cleanupPendingPossiblySent":0,"unidentified":0,"uncertain":0,"discardedUnverified":0,"discardedUnverifiedPossiblySent":0},"decisions":["A:confirmed:discarded"],"remaining":[],"retiredKept":true}}
+OK   N5 R11 reproduces (new-key-same-id): reports removed=1 although a copy survives
+OK   N5 CORRECTED (new-key-same-id): removal is verified -> cleanup pending (the surviving copy kept); one durable decision
+N5 contradiction-same-record {"R11":{"owned":{"unknown":false,"removed":1,"removedPossiblySent":0,"keptInFlight":0,"failed":0,"cleanupPending":0,"cleanupPendingPossiblySent":0,"unidentified":0,"uncertain":0},"decisions":["A:confirmed:discarded"],"remaining":["confirmed-copy:confirmed:B"],"retiredKept":false},"current":{"owned":{"unknown":false,"removed":0,"removedPossiblySent":0,"keptInFlight":0,"failed":0,"cleanupPending":1,"cleanupPendingPossiblySent":0,"unidentified":1,"uncertain":0,"discardedUnverified":0,"discardedUnverifiedPossiblySent":0},"decisions":["A:confirmed:discarded"],"remaining":["confirmed-copy:confirmed:B"],"retiredKept":false}}
+OK   N5 R11 reproduces (contradiction-same-record): reports removed=1 although a copy survives
+OK   N5 CORRECTED (contradiction-same-record): removal is verified -> cleanup pending (the surviving copy kept) + the new contradictory copy reported unidentified; one durable decision
+N6 {"R11":{"out":{"removed":0,"removedPossiblySent":0,"cleanupPending":1,"cleanupPendingPossiblySent":0,"keptInFlight":0,"failed":0,"uncertain":0,"unidentified":0,"alreadyGone":0},"records":0},"current":{"out":{"removed":1,"removedPossiblySent":0,"cleanupPending":0,"cleanupPendingPossiblySent":0,"discardedUnverified":0,"discardedUnverifiedPossiblySent":0,"keptInFlight":0,"failed":0,"uncertain":0,"unidentified":0,"alreadyGone":0},"records":0},"failRead":{"out":{"removed":0,"removedPossiblySent":0,"cleanupPending":0,"cleanupPendingPossiblySent":0,"discardedUnverified":0,"discardedUnverifiedPossiblySent":0,"keptInFlight":0,"failed":0,"uncertain":1,"unidentified":0,"alreadyGone":0},"records":0}}
+OK   N6 R11 reproduces: a lost acknowledgement for an IndexedDB-only discard reports cleanup pending although no copy remains
+OK   N6 CORRECTED: verified -> removed (no copy remains); with the reconciliation read failing -> uncertain
+OK   B1 inspection->claim: a conflicting payload is refused, and a contradiction arriving during the claim blocks it: 0 POSTs, 0 rows
+OK   B2 claim->transmission: the record modified after the claim committed -> the CLAIMED payload is what is posted (never the later copy); exactly 1 row with the claimed title
+OK   B2 ... and settlement removes only the claimed identity+payload: the modified copy is preserved (paused as a conflicting payload), decision settled
+OK   B2 claim->transmission: a retired contradiction appearing after the claim, before the send, is caught by the synchronous transmission check: 0 POSTs, claim released
+OK   B3 transmission->response: a successful response for b3 never deletes the unsent replacement stored at the same record; decision only for b3
+OK   B4 response->settlement: equivalent copies of the claimed identity+payload are removed; a different-payload copy is preserved; 1 row
+OK   B5 decision->cleanup: the confirmed retired copy is removed, the copy that appeared afterwards is kept and the activity reported cleanup-pending (not removed); refused; 0 rows
+OK   B6 cleanup->reporting: the outcome is computed from what physically remains: a copy written after cleanup keeps it cleanup-pending
+OK   B7 B's record with the same request id never blocks, is never claimed, settled or deleted by A; A's own submission is sent once
+OK   B7 healthy: online submission confirmed once; offline submission queued then replayed once with its own payload
+
+36 passed, 0 failed
+
+# exit=0 signal=

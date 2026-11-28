@@ -1,0 +1,32 @@
+$ npx ts-node test/opportunityFactQualityDb.test.ts
+# job=day-constructor-acceptance-db-tests step=Run opportunity fact quality DB test env={}
+=== baseline: planning Wednesday, configured Mon-Fri ===
+OK   preview READY and carries all four new facts, explicitly
+OK   first day (Wed) KNOWN_FEASIBLE; 4 later days (Thu, Fri, Sat, Sun) of which 2 viable, 0 unknown
+OK   the ORIGINAL facts are unchanged in meaning: 5 evaluated, 3 viable, 0 unknown, COMPLETE, horizon 10-07..10-11
+OK   the new facts partition the totals exactly (real data)
+OK   constructed day byte-identical with and without the enrichment
+=== blockers: today only vs a future day only ===
+OK   blocking TODAY only: the first day turns KNOWN_INFEASIBLE; later counts are unchanged (2 viable of 4)
+OK   blocking THURSDAY only: the first day stays KNOWN_FEASIBLE; later viable drops to 1; evaluated unchanged
+=== horizon shapes: Monday (six later days), Sunday (period end, one-day horizon) ===
+OK   Monday: horizon Mon..Sun gives SIX later days; first day feasible; 4 later viable
+OK   Sunday (period end): ONE-day horizon; first day KNOWN_INFEASIBLE (configured, no Sunday window); later counts all zero -- a known empty set, never unknown
+=== unconfigured availability: UNKNOWN, never zero ===
+OK   UNCONFIGURED: first day UNKNOWN and every later day UNKNOWN (no Constructor fallback): 4 later, 0 viable, 4 unknown; coverage UNKNOWN
+=== DST: O2 uncertainty propagates (America/New_York, fall back Sunday 2026-11-01) ===
+OK   the ambiguous Sunday is a LATER UNKNOWN day: first day feasible; 6 later, 4 viable, 1 unknown; coverage PARTIAL
+OK   the ambiguous Sunday as the FIRST day of a one-day horizon: startDateState UNKNOWN, later counts zero
+=== timezones at the same instant (2026-10-11T20:00Z) ===
+OK   Los Angeles (still local Sunday): one-day horizon, no later days
+OK   Kolkata at the same instant (already Monday 10-12): the next period, six later days
+=== manual / automatic parity of the NEW facts (P0a canonical identity) ===
+OK   manual and automatic canonical entry receive IDENTICAL opportunity facts including all four new fields
+OK   a LEGACY manual row stays fact-free (P0b does not special-case it)
+=== queries, fail-open, writes ===
+OK   three candidates: every one carries the new facts, with exactly ONE availability load and ONE plan query (unchanged by P0b)
+OK   O2 failure keeps the existing fail-open behavior: preview READY, no opportunity facts, nothing fabricated
+OK   previews performed zero writes (no plan, occurrence or availability row changed)
+ALL OPPORTUNITY FACT QUALITY DB CHECKS PASSED
+
+# exit=0 signal=

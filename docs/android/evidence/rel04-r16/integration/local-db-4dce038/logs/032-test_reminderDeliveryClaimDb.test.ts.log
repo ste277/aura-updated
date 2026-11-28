@@ -1,0 +1,24 @@
+$ npx ts-node test/reminderDeliveryClaimDb.test.ts
+# job=day-constructor-acceptance-db-tests step=Run reminder delivery claim DB test env={}
+OK   Fixture delivery starts PENDING
+OK   Exactly ONE of 8 concurrent claim attempts on the same PENDING row wins (atomic UPDATE ... WHERE status = 'PENDING')
+OK   The winning claim transitions the row to PROCESSING
+OK   The winning claim increments attemptCount
+OK   A further claim attempt after the row is already PROCESSING also fails (not PENDING anymore)
+OK   A delivery was created for the eligible plan
+OK   sendReminderDelivery SKIPs (never throws/sends) when the owner has no active push subscription
+OK   The SKIPPED delivery is no longer claimable as PENDING
+OK   A delivery was created for the second eligible plan
+OK   sendReminderDelivery SKIPs when reminders were disabled after the PENDING row was created
+OK   A PENDING delivery exists for the plan's original occurrence
+OK   sendReminderDelivery SKIPs the stale PENDING delivery instead of sending a push for a moved occurrence (prevents the brief's "BAD" scenario)
+OK   The rescheduled occurrence gets its OWN independent PENDING delivery once it becomes due, unaffected by the old one being skipped
+OK   A PENDING delivery exists for the original (soon-to-be-superseded) Moment occurrence
+OK   sendReminderDelivery SKIPs the old Moment's PENDING delivery once it has a successor, even though the old row itself is still status ACTIVE
+OK   The successor Moment gets its OWN independent delivery, unaffected by the original being suppressed
+OK   sendReminderDelivery resolves to a clean terminal outcome (SENT or FAILED) with a real subscription present, never throws
+OK   After sending, the delivery is never left claimable as PENDING again
+
+ALL REMINDER DELIVERY CLAIM/RACE CHECKS PASSED
+
+# exit=0 signal=

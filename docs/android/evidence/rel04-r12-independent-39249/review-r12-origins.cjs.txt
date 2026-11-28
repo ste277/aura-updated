@@ -1,0 +1,75 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const http = require('node:http');
+const { execFileSync } = require('node:child_process');
+const root = process.cwd();
+const ts = require(require.resolve('typescript', { paths: [root] }));
+const { chromium } = require(require.resolve('@playwright/test', { paths: [root] }));
+const rev = 'd09449b';
+const source = file => execFileSync('git', ['show', rev + ':' + file], { encoding: 'utf8' });
+const code = ts.transpileModule(source('apps/web/lib/offlineHabitQueue.ts'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText;
+const worker = source('apps/web/public/sw.js');
+const legacy = '<!doctype html><script>var exports={};\n' + code + '\nwindow.legacyEnqueue=exports.enqueueOwned;</script>';
+const safe = '<!doctype html><title>Queue writer excluded</title>';
+let exposeLegacy = true;
+function makeOrigin(withLegacy) {
+  return http.createServer((req, res) => {
+    if (req.url === '/sw.js' && withLegacy) { res.writeHead(200, { 'content-type': 'application/javascript' }); res.end(worker); return; }
+    if (req.url !== '/') { res.writeHead(200); res.end('{}'); return; }
+    res.writeHead(200, { 'content-type': 'text/html', 'cache-control': 'no-store' });
+    res.end(withLegacy && exposeLegacy ? legacy : safe);
+  });
+}
+async function endpoint(server) {
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  return 'http://127.0.0.1:' + server.address().port;
+}
+(async () => {
+  const oldServer = makeOrigin(true), isolatedServer = makeOrigin(false);
+  const old = await endpoint(oldServer), isolated = await endpoint(isolatedServer);
+  const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'r12-origins-'));
+  let context;
+  const key = 'offline_habit_queue_v2:preview-a';
+  const add = (page, id) => page.evaluate(crid => window.legacyEnqueue({ ownerUserId: 'preview-a', clientRequestId: crid, activityTitle: 'Historical probe', logTimestamp: '2026-11-24T09:00:00Z', activeWindow: 'NEUTRAL', tempId: crid }), id);
+  const inspect = page => page.evaluate(k => JSON.parse(localStorage.getItem(k) ?? '[]').map(x => x.clientRequestId), key);
+  try {
+    context = await chromium.launchPersistentContext(profile, { headless: true });
+    const retained = await context.newPage();
+    await retained.goto(old);
+    await retained.evaluate(async () => {
+      await navigator.serviceWorker.register('/sw.js');
+      await navigator.serviceWorker.ready;
+      // Model a retained offline navigation response explicitly; no claim that production populated this entry.
+      const html = await fetch('/').then(r => r.text());
+      const cache = await caches.open('aura-v2');
+      await cache.put('/', new Response(html, { headers: { 'content-type': 'text/html' } }));
+    });
+    exposeLegacy = false;
+    const same = await context.newPage(), separate = await context.newPage();
+    await same.goto(old);
+    await separate.goto(isolated);
+    assert.equal(await same.evaluate(() => typeof window.legacyEnqueue), 'undefined');
+    assert(await add(retained, 'retained-tab'));
+    assert.deepEqual(await inspect(same), ['retained-tab']);
+    assert.deepEqual(await inspect(separate), []);
+    await context.close();
+    context = await chromium.launchPersistentContext(profile, { headless: true });
+    await context.setOffline(true);
+    const restored = await context.newPage();
+    await restored.goto(old);
+    assert(await add(restored, 'reopened-from-worker-cache'));
+    assert.deepEqual(await inspect(restored), ['retained-tab', 'reopened-from-worker-cache']);
+    await context.setOffline(false);
+    const different = await context.newPage();
+    await different.goto(isolated);
+    assert.deepEqual(await inspect(different), []);
+    console.log(JSON.stringify({ writer: rev, aliasChangedOldTabCanWrite: true, sameOriginSeesWrite: true, appReopenedFromSeededWorkerCacheAfterFullRestartCanWrite: true, newOriginSeesWritesAfterRestart: false, writeCountOldOrigin: 2 }));
+  } finally {
+    if (context) await context.close();
+    oldServer.close(); isolatedServer.close();
+    fs.rmSync(profile, { recursive: true, force: true });
+  }
+})().catch(e => { console.error(e); process.exitCode = 1; });
+

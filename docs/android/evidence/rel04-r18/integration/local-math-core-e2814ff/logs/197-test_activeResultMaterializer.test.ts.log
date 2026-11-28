@@ -1,0 +1,172 @@
+$ npx ts-node test/activeResultMaterializer.test.ts
+# job=math-core-tests step=Run active result materializer test env={}
+=== Part 1: the typed same-run accepted-counterfactual authority ===
+OK   MINT ON ACCEPT: the single ACCEPT observation carries a typed authority, trusted only by `isAcceptedCounterfactual`
+OK   the authority is a detached, deeply frozen, SCALAR-only snapshot (no Date, Map or Set), holding the exact same-run basis and baseline-placements outcomes
+OK   the snapshot content: P at 10:30, O displaced and relocated 10:00 -> 15:00, complete counterfactual rows (baseline O replaced in place, P last)
+OK   NO AUTHORITY WITHOUT ACCEPT: a REJECT / unavailable observation has no typed authority
+OK   FORGERY REJECTED: an object literal with the same fields is not an accepted counterfactual
+OK   FORGERY REJECTED: a Object.create(authority) delegate is not an accepted counterfactual
+OK   FORGERY REJECTED: a JSON round trip is not an accepted counterfactual
+OK   FORGERY REJECTED: a frozen copy is not an accepted counterfactual
+OK   FORGERY REJECTED: null is not an accepted counterfactual
+OK   FORGERY REJECTED: a string is not an accepted counterfactual
+OK   FORGERY REJECTED: an accepted flag object is not an accepted counterfactual
+OK   mintAcceptedCounterfactual over the real authorities: the predicate ACCEPTs and the authority exists
+OK   a predicate REJECT mints NOTHING (the brand is applied only when P4b3 itself returns ACCEPT)
+OK   a throwing predicate propagates exactly as before (the P4b4 composition isolates it per pair) and mints nothing
+OK   garbage input: P4b3 answers UNAVAILABLE / EVALUATION_FAILED, nothing is minted, nothing throws
+OK   an unrepresentable (non-finite) instant after an ACCEPT yields the acceptance WITHOUT an authority (consumers treat it as not accepted)
+OK   LINK RULES: an authority links only to an ACCEPT observation of the SAME candidate, and only a minted authority links
+OK   a legitimate link resolves to that exact authority
+OK   BASELINE BINDING: the authority is bound to the exact baseline result object it was minted with, and only that object
+OK   NOT A BASELINE: a non-object / null / undefined / forged authority never matches, and the question never throws
+OK   A MINT WITHOUT A BASELINE OBJECT MINTS NOTHING: the ACCEPT stands but no authority exists (fail closed)
+OK   IN-PLACE MODIFICATION: the genuine bound object, modified AFTER the mint, is no longer the run's baseline (the fingerprint taken at the mint differs)
+=== Part 2: the P4c1 V1 selector ===
+OK   ONE ACCEPT -> APPLY with that candidate, its typed authority and selectionReason LAST_KNOWN_OPPORTUNITY_RESCUED
+OK   ZERO ACCEPT (REJECT only) -> NO_CHANGE / NO_ACCEPT
+OK   READY with no observations -> NO_CHANGE / NO_ACCEPT
+OK   RUN-LEVEL failure / not READY (UNAVAILABLE run) -> NO_CHANGE / INCOMPLETE_OBSERVATION
+OK   every run-level unavailable reason is INCOMPLETE_OBSERVATION
+OK   a hostile / malformed run never throws and fails closed (INCOMPLETE_OBSERVATION)
+OK   an ACCEPT observation WITHOUT its typed authority (a copy of a real one) -> INCOMPLETE_OBSERVATION (never APPLY)
+OK   a real ACCEPT plus an authority-less ACCEPT could hide a second accept -> INCOMPLETE_OBSERVATION
+OK   MULTIPLE ACCEPTS (real run with 2 ACCEPTs): NO_CHANGE / MULTIPLE_ACCEPTS -- no ranking, no winner
+OK   ORDER-INDEPENDENT: all 2 permutations of the observation set give ONE decision
+OK   one ACCEPT among REJECTs: every permutation APPLYs the same candidate
+OK   DETERMINISTIC: repeated selection is byte-identical (same authority object)
+OK   NO SCORE, NO CLIENT FACTS: the selection is {status, reason | candidateIntentId, acceptedCounterfactual, selectionReason} and nothing else
+OK   an ORDINARY generation unavailable (NO_ACTIONABLE_PROMOTION_SLOT) is not a technical failure: the other single ACCEPT still APPLYs
+OK   an ORDINARY acceptance unavailable (INCONSISTENT_AUTHORITY from P4b3) is not a technical failure either
+OK   GENERATION_FAILED on one observation -> INCOMPLETE_OBSERVATION even though P1 is the only ACCEPT (the failure could hide a second ACCEPT)
+OK   EVALUATION_FAILED on one observation -> INCOMPLETE_OBSERVATION (fail closed)
+OK   and the clean run (both promotions observed) is MULTIPLE_ACCEPTS, not APPLY
+=== Part 3: the P4c2a materializability gate ===
+OK   P is the sole Deferred item with its own conflict -> MATERIALIZABLE
+OK   P is the sole Deferred item with no conflict entry -> MATERIALIZABLE
+OK   P absent from Deferred -> INCONSISTENT_AUTHORITY
+OK   P twice in Deferred -> INCONSISTENT_AUTHORITY
+OK   duplicate Deferred ids (another id twice) -> INCONSISTENT_AUTHORITY
+OK   duplicate conflict ids -> INCONSISTENT_AUTHORITY
+OK   a conflict whose intent is not Deferred -> INCONSISTENT_AUTHORITY (structural, checked before the unresolved rules)
+OK   another Deferred item -> DEFERRED_DIAGNOSTIC_UNRESOLVED
+OK   another conflict (belonging to another Deferred item) -> DEFERRED_DIAGNOSTIC_UNRESOLVED
+OK   ARRAY-ORDER INDEPENDENT: shuffling Deferred and conflicts never changes the decision
+OK   never throws on hostile input (fails closed to INCONSISTENT_AUTHORITY)
+OK   decisions are frozen records of strings
+=== Part 4: directed materializer cases over the real pipeline ===
+OK   BASELINE (before): O at 10:00, P Deferred (the exclusion-filtering search emits no conflict entry for it)
+OK   SINGLE OWNER: ACTIVE result has O relocated to 15:00 and P at 10:30, Proposed = baseline + 1, Deferred / conflicts empty, P conflict removed
+OK   SINGLE OWNER: every conservation / preservation / FIXED / owner / timing / order / capacity / window / overlap property holds
+OK   the P item: title / activityId from the basis, SELECTED_CANDIDATE, requiresConfirmation, NO candidateOrder; the relocated owner: no candidateOrder
+OK   capacity: requestedCapacity copied, proposedCapacity recomputed (60 -> 120 placed minutes)
+OK   top-level fields (targetDate, timezone, constructionWindow, resolvedIntents, warnings, date) are copied from the baseline
+OK   MULTI-OWNER: both owners relocated, P placed, nothing lost: O1@15:00-16:00 O2@16:00-17:00 P@10:30-11:30
+OK   MULTI-OWNER: all properties hold
+OK   P TIMING FIT EXCELLENT: ACTIVE -- the promoted item carries the counterfactual's own fit (BEST)
+OK   P TIMING FIT GOOD: ACTIVE -- the promoted item carries the counterfactual's own fit (GOOD)
+OK   P TIMING FIT USABLE: ACTIVE -- the promoted item carries the counterfactual's own fit (WORKABLE)
+OK   P TIMING FIT CAUTION: ACTIVE -- the promoted item carries the counterfactual's own fit (CAUTION)
+OK   OWNER LATER (10:00 -> 15:00) is the base case above
+OK   P CONFLICT REMOVED: a baseline with Deferred [P] and a conflict P -> O (["P->O"]) materializes with NO Deferred and NO conflict
+OK   FIXED + NON-OWNER: F stays at 12:00, N stays at 13:00, only O and P change: O@15:00-16:00 F@12:00-13:00 P@10:30-11:30 N@13:00-14:00
+OK   FIXED + NON-OWNER: all properties hold (unchanged items are byte-identical to the baseline, including candidateOrder)
+OK   the non-owner keeps its candidateOrder and every other field; the FIXED item keeps FIXED_CONSTRAINT with no timing fit
+OK   ORDER CORRECTED: P (originalOrder 2) is inserted BETWEEN the owner and the non-owner by the existing precedence, not appended (baseline order O, F, N)
+OK   BLOCKER present: the materialized result is active (or fails closed) and, when active, honors the blocker and recomputes capacity with its blocked minutes
+OK   P without LAST_KNOWN_OPPORTUNITY pressure: no promotion, the pipeline returns the BASELINE unchanged
+OK   an owner-loss REJECT never materializes: the pipeline returns the BASELINE object
+OK   another Deferred item D: the gate returns DEFERRED_DIAGNOSTIC_UNRESOLVED and the pipeline outputs the BASELINE: BASELINE:DEFERRED_DIAGNOSTIC_UNRESOLVED
+OK   ...even though the selector alone said APPLY (the gate is the materializer's own, behind the selector)
+=== Part 5: defense in depth -- forged authorities, other-run basis, tampered baseline, counterfactual violations ===
+OK   the real authority materializes (control)
+OK   FORGED AUTHORITY (an object literal with the same fields) -> INCONSISTENT_AUTHORITY
+OK   FORGED AUTHORITY (a Object.create(authority) delegate) -> INCONSISTENT_AUTHORITY
+OK   FORGED AUTHORITY (a JSON round trip) -> INCONSISTENT_AUTHORITY
+OK   FORGED AUTHORITY (a frozen copy) -> INCONSISTENT_AUTHORITY
+OK   a missing / null authority -> INCONSISTENT_AUTHORITY and never throws
+OK   OTHER-RUN BASIS: a basis from another (even identical-looking) run is not the authority's own -> INCONSISTENT_AUTHORITY
+OK   A-AUTHORITY + A-BOUND-BASELINE (control): the legitimate same-run materialization is unchanged -> READY
+OK   NOT READY: a non-READY foreign baseline result is not the run's baseline -> BASELINE_PROVENANCE_MISMATCH (a READY authority can only belong to a READY run)
+OK   NOT AN OBJECT: undefined / null / a string / a number as the baseline -> BASELINE_PROVENANCE_MISMATCH, never a throw
+OK   RUN B IS COHERENT AND DIFFERENT: its own baseline is a READY day in a window ending 16:30 with the owner at 10:00 (O@10:00-11:00), and its own pipeline does not materialize (the blocker removes the owner's relocation slot)
+OK   A-AUTHORITY + B-BASELINE (the P4c4 counterexample: previously READY with the owner on B's blocker): now BASELINE_PROVENANCE_MISMATCH -- got BASELINE_PROVENANCE_MISMATCH
+OK   A-AUTHORITY + a COHERENT OTHER-RUN BASELINE that is STRUCTURALLY IDENTICAL to A's (a second run of the same request): rejected by PROVENANCE, not by content -> BASELINE_PROVENANCE_MISMATCH -- yet that second run materializes with its OWN authority
+OK   A-AUTHORITY + a CLONED A-BASELINE (a structurally identical detached copy): structural equality cannot forge provenance -> BASELINE_PROVENANCE_MISMATCH
+OK   A-AUTHORITY + a MODIFIED A-BASELINE COPY: BASELINE_PROVENANCE_MISMATCH
+OK   A-AUTHORITY + the GENUINE A-BASELINE MODIFIED IN PLACE after the run: BASELINE_PROVENANCE_MISMATCH (it was READY before the modification)
+OK   THE PROVENANCE CHECK COMES FIRST: with a foreign baseline the gate, the cross-checks and every later step are never reached (the reason is never DEFERRED_DIAGNOSTIC_UNRESOLVED / INCONSISTENT_AUTHORITY from the baseline's content)
+OK   a baseline result of ANOTHER day (unrelated intents), even if the authority were bound to it, fails the content cross-checks -> INCONSISTENT_AUTHORITY
+OK   baseline Deferred missing P -> INCONSISTENT_AUTHORITY
+OK   baseline P Deferred twice -> INCONSISTENT_AUTHORITY
+OK   baseline carries another Deferred item -> DEFERRED_DIAGNOSTIC_UNRESOLVED
+OK   baseline carries an unknown Proposed intent -> INCONSISTENT_AUTHORITY
+OK   baseline already Proposes P -> INCONSISTENT_AUTHORITY
+OK   control: the untampered non-owner baseline materializes
+OK   a non-owner whose baseline start differs from the counterfactual row (a moved non-owner) -> INCONSISTENT_AUTHORITY
+OK   a non-owner whose baseline timing fit differs -> INCONSISTENT_AUTHORITY
+OK   CONTROL: the genuine counterfactual materializes (O@10:00-11:00 N@13:00-14:00 F@16:00-17:00 -> ...)
+OK   COUNTERFACTUAL VIOLATION: P overlaps a NON-OWNER (N at 13:00) -> INCONSISTENT_AUTHORITY
+OK   COUNTERFACTUAL VIOLATION: P overlaps a FIXED placement (F at 16:00) -> INCONSISTENT_AUTHORITY
+OK   COUNTERFACTUAL VIOLATION: P overlaps a BLOCKER (12:00-13:00) -> INCONSISTENT_AUTHORITY
+OK   COUNTERFACTUAL VIOLATION: P duration shortened by a minute -> INCONSISTENT_AUTHORITY
+OK   COUNTERFACTUAL VIOLATION: P duration lengthened by a minute -> INCONSISTENT_AUTHORITY
+OK   COUNTERFACTUAL VIOLATION: P outside the construction window (17:30) -> INCONSISTENT_AUTHORITY
+OK   COUNTERFACTUAL VIOLATION: P before the construction window (08:00) -> INCONSISTENT_AUTHORITY
+OK   COUNTERFACTUAL VIOLATION: a relocated owner overlaps P -> INCONSISTENT_AUTHORITY
+OK   COUNTERFACTUAL VIOLATION: a relocated owner in a blocker -> INCONSISTENT_AUTHORITY
+OK   COUNTERFACTUAL VIOLATION: a relocated owner with the wrong duration -> INCONSISTENT_AUTHORITY
+OK   COUNTERFACTUAL VIOLATION: an UNKNOWN intent id replaces P in the rows -> INCONSISTENT_AUTHORITY
+OK   COUNTERFACTUAL VIOLATION: an unknown extra row (count + 2) -> INCONSISTENT_AUTHORITY
+OK   COUNTERFACTUAL VIOLATION: a baseline row dropped (conservation) -> INCONSISTENT_AUTHORITY
+OK   COUNTERFACTUAL VIOLATION: a duplicated row -> INCONSISTENT_AUTHORITY
+OK   COUNTERFACTUAL VIOLATION: a NON-OWNER moved (N row BASELINE_UNCHANGED but 30 minutes later) -> INCONSISTENT_AUTHORITY
+OK   COUNTERFACTUAL VIOLATION: a NON-OWNER relabelled as relocated without being displaced -> INCONSISTENT_AUTHORITY
+OK   COUNTERFACTUAL VIOLATION: a FIXED placement displaced -> INCONSISTENT_AUTHORITY
+OK   COUNTERFACTUAL VIOLATION: a displaced owner with no relocated placement -> INCONSISTENT_AUTHORITY
+OK   COUNTERFACTUAL VIOLATION: a displaced id repeated -> INCONSISTENT_AUTHORITY
+OK   COUNTERFACTUAL VIOLATION: no displaced owner at all -> INCONSISTENT_AUTHORITY
+OK   COUNTERFACTUAL VIOLATION: P labelled BASELINE_UNCHANGED -> INCONSISTENT_AUTHORITY
+OK   COUNTERFACTUAL VIOLATION: the promoted row disagrees with the promoted placement -> INCONSISTENT_AUTHORITY
+OK   COUNTERFACTUAL VIOLATION: the candidate is not in the basis -> INCONSISTENT_AUTHORITY
+OK   COUNTERFACTUAL VIOLATION: the candidate is a baseline PROPOSED intent (not Deferred) -> INCONSISTENT_AUTHORITY
+OK   OWNER EARLIER (forged valid geometry 10:00 -> 09:00): materializes, order by precedence, all properties hold: O@09:00-10:00 P@10:30-11:30 N@13:00-14:00 F@16:00-17:00
+OK   all of the above never throw (each returned a typed status)
+=== Part 6: purity -- no mutation, detached, deeply frozen, deterministic, no Constructor / search / P4b2 / P4b3 call ===
+OK   NO CONSTRUCTOR / SEARCH / P4b2 / P4b3 / CLOCK / RANDOMNESS: the materializer called none of them
+OK   NEVER MUTATED: the baseline result, the construction basis, the baseline placements and the authority are byte-identical after two materializations
+OK   DEEPLY FROZEN output (result, preview, day, every item, every Date holder, window, capacity)
+OK   DETACHED: no object (including Dates) is shared with the baseline result, the basis or the authority, nor between two materializations
+OK   DETERMINISTIC: two materializations are byte-identical
+OK   the output is the READY result shape only: { status: READY, preview } with exactly the preview fields
+OK   all properties hold on the purity fixture
+OK   the output cannot be mutated by a consumer (push on the frozen Proposed array throws or is ignored)
+OK   hostile input never throws: a missing everything -> INCONSISTENT_AUTHORITY
+=== Part 8: compatibility -- signing and the existing acceptance evaluation accept a materialized result ===
+OK   SIGNING: signPreviewResultBody signs every materialized item (a token each, ids order preserved)
+OK   the acceptance-side token gate verifies every item of the signed materialized result
+OK   a tampered item no longer verifies (the materialized facts are what is signed)
+OK   EXISTING ACCEPTANCE VALIDATION: the materialized day is ACCEPTABLE with 4 write intents (one per item, FIXED not re-timed)
+OK   control: an overlapping day is REJECTED by the same existing acceptance evaluation
+=== Part 7/9: corpora -- the end-to-end pure pipeline and the property checks over every materialized result ===
+     A authoritative (700 runs): {"runs":700,"promotions":452,"accepts":23,"singleAccept":21,"materialized":20,"unavailable":{"DEFERRED_DIAGNOSTIC_UNRESOLVED":1},"multi":1,"violations":0,"baselineIdentity":680,"checkedIdempotent":4,"ownersEarlier":0,"ownersLater":21,"gateEligibleAccepts":20,"withConflictEntries":0}
+     B multi-region (1,500 runs): {"runs":1500,"promotions":3222,"accepts":844,"singleAccept":628,"materialized":75,"unavailable":{"DEFERRED_DIAGNOSTIC_UNRESOLVED":553},"multi":108,"violations":0,"baselineIdentity":1425,"checkedIdempotent":15,"ownersEarlier":0,"ownersLater":75,"gateEligibleAccepts":75,"withConflictEntries":0}
+     C adversarial Deferred (1,500 runs): {"runs":1500,"promotions":1406,"accepts":771,"singleAccept":480,"materialized":201,"unavailable":{"DEFERRED_DIAGNOSTIC_UNRESOLVED":279},"multi":137,"violations":0,"baselineIdentity":1299,"checkedIdempotent":40,"ownersEarlier":0,"ownersLater":201,"gateEligibleAccepts":201,"withConflictEntries":0}
+     D P-only family (+FIXED) (1,500 runs): {"runs":1500,"promotions":1244,"accepts":250,"singleAccept":250,"materialized":250,"unavailable":{},"multi":0,"violations":0,"baselineIdentity":1250,"checkedIdempotent":50,"ownersEarlier":0,"ownersLater":295,"gateEligibleAccepts":250,"withConflictEntries":0}
+     E no-exclusion P-only family (1,500 runs): {"runs":1500,"promotions":1820,"accepts":364,"singleAccept":200,"materialized":172,"unavailable":{"DEFERRED_DIAGNOSTIC_UNRESOLVED":28},"multi":82,"violations":0,"baselineIdentity":1328,"checkedIdempotent":34,"ownersEarlier":0,"ownersLater":203,"gateEligibleAccepts":172,"withConflictEntries":1359}
+OK   A authoritative: ZERO property violations over 20 materialized results (conservation, preservation, FIXED, owners, timing, order, capacity, window, overlap, frozen, detached), zero selector-order violations, and every non-materialized run returns the BASELINE object
+OK   B multi-region: ZERO property violations over 75 materialized results (conservation, preservation, FIXED, owners, timing, order, capacity, window, overlap, frozen, detached), zero selector-order violations, and every non-materialized run returns the BASELINE object
+OK   C adversarial: ZERO property violations over 201 materialized results (conservation, preservation, FIXED, owners, timing, order, capacity, window, overlap, frozen, detached), zero selector-order violations, and every non-materialized run returns the BASELINE object
+OK   D P-only family: ZERO property violations over 250 materialized results (conservation, preservation, FIXED, owners, timing, order, capacity, window, overlap, frozen, detached), zero selector-order violations, and every non-materialized run returns the BASELINE object
+OK   E no-exclusion: ZERO property violations over 172 materialized results (conservation, preservation, FIXED, owners, timing, order, capacity, window, overlap, frozen, detached), zero selector-order violations, and every non-materialized run returns the BASELINE object
+     CORPUS TABLE (runs / promotions / accepts / single-ACCEPT runs / materialized / not materialized by reason): {"A":{"runs":700,"promotions":452,"accepts":23,"singleAccept":21,"materialized":20,"unavailable":{"DEFERRED_DIAGNOSTIC_UNRESOLVED":1},"multi":1,"violations":0,"baselineIdentity":680,"checkedIdempotent":4,"ownersEarlier":0,"ownersLater":21,"gateEligibleAccepts":20,"withConflictEntries":0},"B":{"runs":1500,"promotions":3222,"accepts":844,"singleAccept":628,"materialized":75,"unavailable":{"DEFERRED_DIAGNOSTIC_UNRESOLVED":553},"multi":108,"violations":0,"baselineIdentity":1425,"checkedIdempotent":15,"ownersEarlier":0,"ownersLater":75,"gateEligibleAccepts":75,"withConflictEntries":0},"C":{"runs":1500,"promotions":1406,"accepts":771,"singleAccept":480,"materialized":201,"unavailable":{"DEFERRED_DIAGNOSTIC_UNRESOLVED":279},"multi":137,"violations":0,"baselineIdentity":1299,"checkedIdempotent":40,"ownersEarlier":0,"ownersLater":201,"gateEligibleAccepts":201,"withConflictEntries":0},"D":{"runs":1500,"promotions":1244,"accepts":250,"singleAccept":250,"materialized":250,"unavailable":{},"multi":0,"violations":0,"baselineIdentity":1250,"checkedIdempotent":50,"ownersEarlier":0,"ownersLater":295,"gateEligibleAccepts":250,"withConflictEntries":0},"E":{"runs":1500,"promotions":1820,"accepts":364,"singleAccept":200,"materialized":172,"unavailable":{"DEFERRED_DIAGNOSTIC_UNRESOLVED":28},"multi":82,"violations":0,"baselineIdentity":1328,"checkedIdempotent":34,"ownersEarlier":0,"ownersLater":203,"gateEligibleAccepts":172,"withConflictEntries":1359}}
+OK   AUTHORITATIVE: 20 of 23 ACCEPTs pass the gate (reference 20 / 23); 21 single-ACCEPT selector candidates -> 20 materialized (21 -> 20)
+OK   MULTI-REGION: 75 of 844 ACCEPTs pass the gate (reference 75 / 844); 628 single-ACCEPT candidates -> 75 materialized (628 -> 75)
+OK   ADVERSARIAL: 201 of 771 ACCEPTs pass the gate (reference 201 / 771); 201 runs materialize
+OK   P-ONLY FAMILY: 250 of 250 ACCEPTs pass the gate (reference 250 / 250); 250 runs materialize
+OK   NO-EXCLUSION (1359 runs with conflict entries): 172 of 364 ACCEPTs pass the gate (reference 172 / 364); 200 single-ACCEPT runs -> 172 materialized (the difference is runs with several ACCEPTs, which the selector never applies)
+OK   every non-eligible ACCEPT is a failed gate, never a crash: materialized runs never exceed gate-eligible ACCEPTs in any corpus
+ALL ACTIVE RESULT MATERIALIZER CHECKS PASSED
+
+# exit=0 signal=

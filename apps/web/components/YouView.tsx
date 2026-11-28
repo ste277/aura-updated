@@ -13,6 +13,7 @@ import type { NotificationPrefs } from '../lib/windowNotifications';
 import * as theme from './theme';
 import { colors, spacing, typography, radius } from './theme';
 import { PageHeader, SectionHeader, SurfaceCard, DestructiveButton } from './ui';
+import { downloadBound, downloadResultMessage } from '../lib/boundDownload';
 import { isMyPeoplePresentationEnabled } from '../lib/myPeopleGate';
 
 interface YouViewProps {
@@ -114,6 +115,23 @@ export function YouView({
     'location' | 'calendar' | 'checkIn' | 'help' | 'about' | null
   >(initialOpenPanel ?? null);
   const [calendarCopyState, setCalendarCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
+  // AURA-ANDROID-REL-04 IR-01 (R4): in-app downloads are bound to the account
+  // tapped under (lib/boundDownload.ts), never an ambient-cookie navigation.
+  const [downloadNotice, setDownloadNotice] = useState<string | null>(null);
+  const [downloading, setDownloading] = useState<'export' | 'calendar' | null>(null);
+  const runDownload = async (kind: 'export' | 'calendar') => {
+    if (downloading) return;
+    setDownloading(kind);
+    setDownloadNotice(null);
+    try {
+      const r = kind === 'export'
+        ? await downloadBound('/api/users/export', 'myauramoment-export.json')
+        : await downloadBound('/api/calendar/feed', 'auraschedule.ics');
+      setDownloadNotice(downloadResultMessage(r));
+    } finally {
+      setDownloading(null);
+    }
+  };
   const calendarFeedUrl = useMemo(() => {
     if (typeof window === 'undefined') return '/api/calendar/feed';
     return `${window.location.origin}/api/calendar/feed`;
@@ -212,9 +230,9 @@ export function YouView({
                 Export your upcoming Aura plans and today&apos;s Panchang windows as an `.ics` calendar file.
               </div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.md }}>
-                <a href="/api/calendar/feed" target="_blank" rel="noreferrer" style={calendarPrimaryActionStyle}>
-                  Open calendar
-                </a>
+                <button type="button" onClick={() => void runDownload('calendar')} disabled={downloading !== null} style={calendarPrimaryActionStyle}>
+                  {downloading === 'calendar' ? 'Downloading…' : 'Download calendar'}
+                </button>
                 <button type="button" onClick={handleCopyCalendarFeed} style={calendarSecondaryActionStyle}>
                   {calendarCopyState === 'copied' ? 'Copied' : calendarCopyState === 'failed' ? 'Copy failed' : 'Copy link'}
                 </button>
@@ -283,7 +301,10 @@ export function YouView({
       <div>
         <div style={{ ...typography.caption, marginBottom: spacing.sm }}>Data &amp; Support</div>
         <div style={{ border: `1px solid ${colors.borderSubtle}`, borderRadius: radius.lg, overflow: 'hidden' }}>
-          <SettingsLinkRow icon="⬇️" title="Export Data" detail="Download your timing data" href="/api/users/export" />
+          <SettingsLinkRow icon="⬇️" title="Export Data" detail={downloading === 'export' ? 'Preparing your download…' : 'Download your timing data'} onClick={() => void runDownload('export')} />
+          {downloadNotice && (
+            <div role="status" style={{ padding: '8px 14px', color: '#fbbf24', fontSize: 12 }}>{downloadNotice}</div>
+          )}
           <SettingsRow icon="❔" title="Help & FAQ" detail="Learn more about myAuraMoment" expanded={openSettingsPanel === 'help'} onClick={() => toggleSettingsPanel('help')} />
           {openSettingsPanel === 'help' && (
             <div style={settingsPanelStyle}>
@@ -409,11 +430,12 @@ function SettingsRow({
   );
 }
 
-function SettingsLinkRow({ icon, title, detail, href }: { icon: string; title: string; detail: string; href: string }) {
+function SettingsLinkRow({ icon, title, detail, onClick }: { icon: string; title: string; detail: string; onClick: () => void }) {
   return (
-    <a
-      href={href}
-      style={{ width: '100%', minHeight: 58, borderBottom: '1px solid rgba(255, 255, 255, 0.06)', background: 'transparent', color: '#f8fafc', display: 'grid', gridTemplateColumns: '28px 1fr auto', alignItems: 'center', gap: 10, padding: '10px 14px', textAlign: 'left', cursor: 'pointer', boxSizing: 'border-box', textDecoration: 'none' }}
+    <button
+      type="button"
+      onClick={onClick}
+      style={{ width: '100%', minHeight: 58, border: 'none', borderBottom: '1px solid rgba(255, 255, 255, 0.06)', background: 'transparent', color: '#f8fafc', display: 'grid', gridTemplateColumns: '28px 1fr auto', alignItems: 'center', gap: 10, padding: '10px 14px', textAlign: 'left', cursor: 'pointer', boxSizing: 'border-box', textDecoration: 'none', font: 'inherit' }}
     >
       <span style={{ fontSize: 16 }}>{icon}</span>
       <span style={{ minWidth: 0 }}>
@@ -421,7 +443,7 @@ function SettingsLinkRow({ icon, title, detail, href }: { icon: string; title: s
         <span style={{ display: 'block', fontSize: 11, color: '#94a3b8', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{detail}</span>
       </span>
       <span style={{ color: '#94a3b8', fontSize: 16 }}>›</span>
-    </a>
+    </button>
   );
 }
 

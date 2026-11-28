@@ -1,0 +1,20 @@
+OK   S0 the production build serves (next start)
+versions {"chromium":"151.0.7922.34","node":"v26.5.0"}
+OK   A g3-original: the other tab replayed and persisted a VALIDATED accepted receipt for the original request
+A-g3 {"original":"37612ead-7e16-46f6-a155-94f3e9695704","postsA":[],"postsB":[{"account":"c98f8e4c-1769-4dd9-a288-1599cd138246","body":{"activityTitle":"Workout","activityId":"workout","activeWindow":"ABHIJIT","logMinuteOfDay":725,"logTimestamp":"2026-11-27T06:35:00.000Z","durationMinutes":30,"logSource":"AURA_DO_NOW","activitySignificance":"MEDIUM","clientRequestId":"37612ead-7e16-46f6-a155-94f3e9695704"}}],"rows":[{"id":"seed-1795865743153","userId":"c98f8e4c-1769-4dd9-a288-1599cd138246","clientRequestId":"seed-1795865743153","activityTitle":"Workout","logTimestamp":"2026-11-26T06:35:00.000Z","durationMinutes":30,"logSource":"AURA_DO_NOW"},{"id":"5fb85068-12ed-4022-a638-47f049570aa2","userId":"c98f8e4c-1769-4dd9-a288-1599cd138246","clientRequestId":"37612ead-7e16-46f6-a155-94f3e9695704","activityTitle":"Workout","logTimestamp":"2026-11-27T06:35:00.000Z","durationMinutes":30,"logSource":"AURA_DO_NOW"}],"decision":[{"crid":"37612ead-7e16-46f6-a155-94f3e9695704","decision":"settled","receipt":"accepted","serverRecordId":"5fb85068-12ed-4022-a638-47f049570aa2"}],"copies":0}
+OK   A g3-original: the original tab reports the outcome as UNRESOLVED or confirmed (never "not saved", never a retry invitation) after the lost acknowledgement + failed decision read
+OK   A g3-original: the stale pre-save list (and the same-title unrelated row) never releases the operation: no fresh "Start now" on that card after it, after refresh and after remount
+OK   A g3-original: exactly ONE row for the operation, under the ORIGINAL request id (1 rows; ids 37612ead), plus the untouched unrelated row
+OK   A g3-original: zero POSTs from the original tab; one bound replay POST from the other tab carrying the original id, the account header and the canonical body
+OK   A g3-original (after restart): the durable decision carries the validated receipt (server record id == the PostgreSQL row); no copy or claim remains
+OK   A settled-before: the other tab replayed and persisted a VALIDATED accepted receipt for the original request
+OK   A' settled-before control: one row under the original id, one bound replay POST, zero original-tab POSTs, no error or retry invitation
+OK   A' settled-during control: one row under the original id, one bound replay POST, zero original-tab POSTs, no error or retry invitation
+B-html200 {"original":"b6ffaf96-6f6e-412b-9779-f7af934a92a9","posts":["b6ffaf96-6f6e-412b-9779-f7af934a92a9","b6ffaf96-6f6e-412b-9779-f7af934a92a9","b6ffaf96-6f6e-412b-9779-f7af934a92a9"],"rows":[{"id":"516f5728-8332-4ecd-8d47-0104db9fe40e","userId":"ef4bdda8-385f-4291-a317-78c5b516efaa","clientRequestId":"b6ffaf96-6f6e-412b-9779-f7af934a92a9","activityTitle":"Workout","logTimestamp":"2026-11-27T06:35:00.000Z","durationMinutes":30,"logSource":"AURA_DO_NOW"}],"receipts":[["b6ffaf96-6f6e-412b-9779-f7af934a92a9","accepted","516f5728-8332-4ecd-8d47-0104db9fe40e"]]}
+OK   B real Home: an HTML 200 shows "Couldn't verify whether this activity was saved." (no false success); the copy is kept; no accepted receipt
+OK   B a Retry answered by another HTML 200 stays UNRESOLVED (no row, no receipt)
+OK   B explicit Retry resends the ORIGINAL id and body every time (3 POSTs, 1 distinct bodies); exactly 1 row; validated receipt == row
+OK   E real Home: the route committed (1 row) but the response was cut -> pending under the same id; the replay converges on the SAME row (1 row, 1 id; 2 POSTs with one id)
+OK   H real Home: an unreadable operations store blocks NEW logging (shown unresolved; 0 POSTs, 0 records, 0 rows) -- no replacement id is generated
+
+15 passed, 0 failed

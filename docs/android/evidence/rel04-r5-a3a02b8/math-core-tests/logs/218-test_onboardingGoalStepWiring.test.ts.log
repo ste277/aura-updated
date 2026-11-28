@@ -1,0 +1,39 @@
+$ npx ts-node test/onboardingGoalStepWiring.test.ts
+# job=math-core-tests step=Run onboarding Goal step wiring test env={}
+OK   A1. Goal creation reuses the EXISTING POST /api/goals contract -- no second Goal-creation endpoint
+OK   A2. the first-activity step reuses the EXISTING DayPlanPreviewController/DayPlanPreview UNMODIFIED -- imported, never redefined in this file
+OK   A3. reuses the EXISTING previewConstructedDay client helper -- no second preview request implementation (no second "/api/day-constructor/preview" fetch literal in this file)
+OK   A4. reuses the EXISTING RhythmPicker component for the one Goal activity's rhythm -- no second rhythm-input control
+OK   A5. no second Goal/GoalActivity persistence path -- this file never imports db.ts/createGoalWithActivities/persistAcceptedConstructedDay directly (every write goes through the existing API routes / DayPlanPreviewController)
+OK   A6. onboardingGoalStep.ts itself never calls fetch/constructs a second Day Constructor engine -- purely request/response shaping around the EXISTING pipeline
+OK   B1. the Goal offer's own prompt matches the ticket verbatim
+OK   B2. category chips come from the shared ONBOARDING_GOAL_CATEGORIES list, never a second inline hardcoded list
+OK   B3. a custom/freeform intention entry point exists distinct from the category chips
+OK   B4. category selection never submits anything by itself -- it only sets the editable title and moves to COMPOSE, the user still explicitly taps Create goal
+OK   B5. Skip for now is present in BOTH the category-choice screen and the compose screen (never a dead end at either point)
+OK   B6. the Goal step's Skip is wired to the SAME onSkip/onExit exit used by the rest of onboarding, never a bespoke second exit mechanism
+OK   C1. no targetDate/deadline field is ever collected or sent by this step
+OK   C2. no duration field is ever collected for the Goal activity itself (Day Constructor resolves duration downstream, exactly as it already does for every other typed row)
+OK   C3. the rhythm picker is ALWAYS rendered (never hidden/conditionally omitted) -- the "Once" default stays visible and editable, never a silent server-side default the user never saw
+OK   C4. a currently-invalid rhythm (e.g. empty Custom) disables Create goal rather than silently falling back to NONE
+OK   C5. the title input enforces the SAME max length the server itself enforces (ONBOARDING_GOAL_TITLE_MAX_LENGTH, mirroring MAX_TITLE_LENGTH in app/api/goals/route.ts) -- never a second, independently-chosen limit
+OK   D1. the first-activity preview is requested automatically on mount (so the user sees it immediately after creating a Goal) but NEVER auto-accepted -- onSaved only fires from the reused controller's own explicit user action
+OK   D2. the created GoalActivity is linked via goalActivityLinks exactly as the EXISTING Goal -> Planning handoff already does (buildOnboardingFirstActivityGoalLinks / buildGoalActivityLinksForAccept), never a bespoke linking mechanism
+OK   D3. onDiscard/onSaved on the reused controller both resolve onboarding via onDone -- declining and accepting are both treated as a complete, valid outcome (never an error)
+OK   D4. a failed/non-READY preview explicitly states the Goal is still saved, never implying it was lost or that nothing happened
+OK   D5. a retryable failure offers Try again using the SAME runPreview function, never a hand-rolled duplicate request
+OK   D6. this file never constructs a ProposedItem/PlannedActivity object literal itself -- scheduling facts only ever come back from the reused preview/accept pipeline
+OK   E1. a fresh clientRequestId is generated once per GoalStep mount and reused across retries -- the SAME idempotency lifecycle CreateGoalModal already establishes, never regenerated per keystroke/attempt (AURA-MOBILE-01-M2-B/AND-01: generateClientRequestId(), not crypto.randomUUID() directly, which throws outside a secure context)
+OK   E2. Create goal is disabled while a request is in flight (double-submit UI guard) -- the REAL protection is still the server-side clientRequestId, this is defense-in-depth only
+OK   E3. no onboarding step anywhere persists its own position/progress to localStorage/sessionStorage -- a refresh mid-Goal-flow behaves exactly like a refresh mid-Location-step already does today (restarts at WELCOME, never a half-resolved state)
+OK   E4. exiting from GOAL or FIRST_STEP always funnels through the ONE existing onExit (handleExitOnboarding) -- never a second resolution path, never reopens onboarding based on Goal count
+OK   E5. GOAL/FIRST_STEP are excluded from the 3-step progress indicator (never shown as "Step 4 of 3") -- they are an optional continuation, not additional required setup
+OK   F1. no birth-detail concept anywhere in the Goal/first-activity steps
+OK   F2. no availability-configuration concept anywhere in the Goal/first-activity steps (the reused Day Constructor pipeline resolves this server-side exactly as it already does for Plan My Day -- this file never gates on it)
+OK   F3. onboardingGoalStep.ts itself never references birth or availability concepts
+OK   a confirm/creation failure is rendered with role="alert" in the Goal step, same convention as the existing LocationStep error
+OK   every new primary/secondary action in the Goal/first-activity steps meets the 44px touch-target minimum
+
+ALL ONBOARDING GOAL STEP WIRING CHECKS PASSED
+
+# exit=0 signal=

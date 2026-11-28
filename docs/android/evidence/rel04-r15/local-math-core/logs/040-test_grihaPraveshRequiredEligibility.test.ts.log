@@ -1,0 +1,34 @@
+$ npx ts-node test/grihaPraveshRequiredEligibility.test.ts
+# job=math-core-tests step=Run Griha Pravesh required eligibility test (PCE-3E) env={}
+OK   0. The known 2026 Adhika Jyeshtha neighborhood genuinely classifies ADHIKA (sanity check on the probe instant itself, not assumed)
+OK   A1. A Griha Pravesh candidate clearly inside Adhika Masa is ineligible
+OK   A2. The rejection reason is ADHIKA_MASA
+OK   A3. A real Griha Pravesh search range fully inside the Adhika window returns zero ranked candidates (exclusion happens before ranking, no candidate survives to be ranked)
+OK   B0. The outside-probe month genuinely classifies NORMAL (sanity check)
+OK   B1. A Griha Pravesh candidate clearly outside Adhika Masa is not rejected on Adhika Masa grounds
+OK   C1. Entirely inside: already covered by A1/A2 above
+OK   C2. Entirely outside: already covered by B1 above
+OK   C3. A candidate beginning before and ending inside Adhika Masa is rejected (full-span safety, not just start-instant)
+OK   C4. A candidate beginning inside and ending after Adhika Masa is rejected (the start instant alone is inside ADHIKA)
+OK   C5. Half-open semantics: a candidate ENDING exactly at the Adhika Masa start has no overlap (same convention Marriage already relies on)
+OK   C6. The exact Adhika Masa end instant still resolves into the Adhika month itself (pre-existing shared-function precision characteristic, verified directly, not a half-open boundary this PR controls)
+OK   C6b. A candidate safely (1+ minute) after the Adhika Masa end is correctly not rejected
+OK   D1. The Griha Pravesh classification carries no occasion-subtype field at all -- the exclusion is applied at the occasion level uniformly, exactly as D2 specifies, not conditioned on a type this API cannot represent
+OK   D2. Repeated evaluation of the identical Griha Pravesh classification+instant is deterministic (no hidden per-call type branching)
+OK   E1. Marriage 2026-05-20 remains ADHIKA_MASA-excluded, unchanged by this PR
+OK   E2. Marriage 2026-06-01 remains ADHIKA_MASA-excluded, unchanged by this PR
+OK   E3. Marriage 2026-06-20 remains eligible (no Adhika Masa exclusion), unchanged by this PR
+OK   F. start-journey still has no period-exclusion coverage (unaffected by Griha Pravesh's new periodRules)
+OK   F. financial-decision still has no period-exclusion coverage (unaffected by Griha Pravesh's new periodRules)
+OK   F. business-start still has no period-exclusion coverage (unaffected by Griha Pravesh's new periodRules)
+OK   F. property-purchase still has no period-exclusion coverage (unaffected by Griha Pravesh's new periodRules)
+OK   F. new-beginning still has no period-exclusion coverage (unaffected by Griha Pravesh's new periodRules)
+OK   G1. Griha Pravesh remains OCCASION_SPECIFIC (not promoted to TRADITIONALLY_VALIDATED)
+OK   G2. Griha Pravesh support level is SUPPORTED (coverage.periodExclusion correctly derives to IMPLEMENTED now that periodRules exists)
+OK   G3. Griha Pravesh does NOT inherit Marriage's Kharmas/Chaturmas rules
+OK   G4. Griha Pravesh carries no combustionRules (Marriage-only, not sourced for this occasion)
+OK   Location invariance: Griha Pravesh Adhika Masa eligibility is identical across Delhi/Dubai for the same UTC instant
+
+ALL GRIHA PRAVESH REQUIRED ELIGIBILITY CHECKS PASSED
+
+# exit=0 signal=

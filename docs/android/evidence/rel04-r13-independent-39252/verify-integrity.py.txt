@@ -1,0 +1,47 @@
+from pathlib import Path
+import collections, hashlib, json, re, subprocess, sys
+original = Path(sys.argv[1])/'AURA_ANDROID_REL_04_R12_INDEPENDENT_EVIDENCE_39249'
+root = Path('docs/android/evidence')
+prior, current = root/'rel04-r12-independent-39249', root/'rel04-r13'
+impl='a8a976733d73d8acc5eb13e2af687f3648204471'
+head='f6a8cbeff26ac344828201a80082cbf8bab662aa'
+old='6373fd9eac74aaac2596aefaeecfd147482dfb26'
+h=Path('docs/android/AURA_ANDROID_REL_04_R13_VERIFICATION_HANDOVER.md')
+digest=lambda p: hashlib.sha256(p.read_bytes()).hexdigest()
+git=lambda *a: subprocess.check_output(['git',*a])
+entries=re.findall(r'^\| .([^\x60]+). \| .([0-9a-f]{64}). \|$',h.read_text(),re.M)
+assert len(entries)==16
+for name,sha in entries:
+    assert digest(Path(name))==sha,name
+    print(sha,name)
+names=(prior/'SHA256SUMS').read_text().splitlines()
+assert len(names)==34
+for line in names:
+    sha,name=line.split()
+    recorded=prior/name
+    if not recorded.exists(): recorded=prior/(name+'.txt')
+    assert digest(recorded)==sha and recorded.read_bytes()==(original/name).read_bytes(),name
+print('34 preserved R12 manifest entries and original bytes verified')
+for n in ('offlineHabitQueue','activitySync','signOut'):
+    assert git('show',old+':apps/web/lib/'+n+'.ts')==Path('test/fixtures/rel04-r12-head',n+'.ts.txt').read_bytes(),n
+assert git('rev-parse',head+'^').decode().strip()==impl
+assert git('rev-parse',impl+'^').decode().strip()==old
+changed=git('diff','--name-only',impl,head).decode().splitlines()
+assert len(changed)==343 and all(p.startswith(str(current)+'/') or p in [str(h),'docs/android/AURA_ANDROID_REL_04_APPLICATION_READINESS_REPORT.md'] for p in changed)
+runtime=git('diff','--name-only',old,impl,'--','apps').decode().splitlines()
+assert runtime==['apps/web/app/page.tsx','apps/web/lib/activitySync.ts','apps/web/lib/offlineHabitQueue.ts','apps/web/lib/signOut.ts']
+assert git('diff','--name-only',old,impl,'--','test').decode().splitlines()==['test/fixtures/rel04-r12-head/activitySync.ts.txt','test/fixtures/rel04-r12-head/offlineHabitQueue.ts.txt','test/fixtures/rel04-r12-head/signOut.ts.txt','test/rel04R13QueueIntegrity.test.ts']
+print('Changed runtime files:',runtime)
+print('All 343 handover paths are reports/evidence. No historical assertion edited; 3 fixture sources match unchanged R12.')
+steps=[json.loads(l) for l in subprocess.check_output(['python3','test/evidence-tools/ciCommands.py'],text=True).splitlines()]
+signature=lambda z:tuple(z[k] for k in ('job','name','run','env'))
+for folder,n in [('math-core-tests',254),('db-and-browser-tests',78)]:
+    p=current/folder/'manifest.json'
+    m=json.loads(p.read_text())
+    assert m['head']==impl and m['codeTreeClean'] and len(m['commands'])==n
+    assert [signature(z) for z in steps if z['job'] in m['jobs'] and z['run'].startswith('npx ts-node ') and '\n' not in z['run']]==[signature(z) for z in m['commands']]
+    assert {x['log'] for x in m['commands']}=={str(x.relative_to(p.parent)) for x in (p.parent/'logs').glob('*.log')}
+    for c in m['commands']:
+        assert c['exit']==0 and c['signal'] is None and digest(p.parent/c['log'])==c['logSha256'],c['log']
+    print(folder,n,'pinned workflow commands with zero exits and matching log hashes',dict(collections.Counter(c['job'] for c in m['commands'])))
+

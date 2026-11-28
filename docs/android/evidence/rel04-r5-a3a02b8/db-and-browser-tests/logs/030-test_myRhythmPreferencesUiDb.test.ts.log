@@ -1,0 +1,39 @@
+$ npx ts-node test/myRhythmPreferencesUiDb.test.ts
+# job=day-constructor-acceptance-db-tests step=Run MR3 My Rhythm preferences UI DB test env={}
+OK   D0. a rhythm without preferences reads back as active with empty preferences
+OK   D1. the editor sends one PATCH with rhythm + all three preferences, accepted (200)
+OK   D2. reload: frequency and every preference persisted
+OK   D3. re-saving an untouched draft sends nothing (no spurious write)
+OK   D4. editing only the time sends only preferredTimeOfDay
+OK   D5. ...and days/duration are untouched
+OK   D6. duration-only and days-only edits each persist alone
+OK   D7. clearing days/time/duration sends [] / null / null and reads back flexible
+OK   D8. clearing preferences keeps the weekly frequency
+OK   D9. editor refuses 3x/week on 2 days (no body built)
+OK   D10. the same requests sent directly are rejected 400 and change nothing
+OK   D11. next-week proposal OK with 3 sessions
+OK   D12. every proposed session is on Mon/Wed/Fri
+OK   D13. every proposed session is 45 minutes
+OK   D14. matched sessions are in the morning; any fallback is flagged
+OK   D15. proposing (and then cancelling) creates no plan
+OK   D16. "Just today" / Plan with Aura handoff carries the 45-minute duration and Morning preference
+OK   D17. setup: a confirmed goal-linked plan exists
+OK   D18. Pause (the editor's { paused: true }) -> 200 and reads back paused
+OK   D19. pausing preserved every preference and the frequency
+OK   D20. paused: no weekly suggestions for either week
+OK   D21. paused: the Plan My Day handoff is suppressed
+OK   D22. pausing left the confirmed plan byte-identical
+OK   D23. editing while paused saves but does not resume
+OK   D24. Resume -> 200; preferences restored exactly
+OK   D25. resuming created no plan and changed no confirmed plan
+OK   D26. resumed: next-week suggestions are eligible again
+OK   D27. a duplicate Resume is harmless (200, still active, no plan change)
+OK   D28. after editing, next-week sessions use Tue/Thu/Sat and 30 min
+OK   D29. ...and matched sessions are now in the evening
+OK   D30. a no-preference rhythm still proposes sessions with no preference constraint
+OK   D31. a frequency-only edit sends only { rhythm } (preferences never touched)
+OK   D32. "Once" sends only { rhythm: NONE }; server clears preferences and keeps the confirmed plan
+
+ALL MR3 UI DB CHECKS PASSED
+
+# exit=0 signal=

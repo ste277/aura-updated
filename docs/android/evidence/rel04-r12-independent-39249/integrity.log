@@ -1,0 +1,22 @@
+a324c91738a00b7d3227e15059dc8a5b25645a6065b8eeb79bb4a15f9c5d94b1 apps/web/lib/offlineHabitQueue.ts
+a827609e6909800448c4f6fd9f6a98fa118f7826d1bda2cd34716fae8a3f47c1 apps/web/lib/activitySync.ts
+4334527a9ec98fd72f6a6be7ce19ddac7297252125262686fc44056cbd1f7508 apps/web/lib/signOut.ts
+1d419f3c6bafa4c05f40be29bd3919d2333377afcfae7dec2fad1be2adcf2fc8 test/rel04R12QueueConcurrency.test.ts
+7cf8faf1dbfa90fc18a118f99c490b1cf06ce1994fd28240ad7da36d8d021bf3 test/fixtures/rel04-r11-head/offlineHabitQueue.ts.txt
+bcf78bfe4b668f50e4ecc9b72117104df67795a58ad2bb8633c0c0dcf22ae96a test/fixtures/rel04-r11-head/activitySync.ts.txt
+fc75da09a3893c6e9cfa414823fa384063c97f1aa7075dbc0ddc7fd5043e512e test/fixtures/rel04-r11-head/signOut.ts.txt
+3ac6edf74cb06add5b2b0701445940b8b909868d06fd62471abfe0a0571ea494 docs/android/evidence/rel04-r11-independent-39247/SHA256SUMS
+ad6af1c5a056a076563634566829b3b2d4ca561fdf05e6cfb535466ca265ffe7 docs/android/evidence/rel04-r12/README.md
+d80f0caa64d2d1036936e2b76c6a3e9d8c0d08d46eecddeb3cc5d245464fa023 docs/android/evidence/rel04-r12/math-core-tests/manifest.json
+5bdb50f18e3e68fa9f73aa8464aeda10e0122c97c945064d84cc96f7ada0c336 docs/android/evidence/rel04-r12/db-and-browser-tests/manifest.json
+632fc201a886715673c91c20e25dac647912f95f9913f90f477aa349ddd2b0df docs/android/evidence/rel04-r12/typecheck/typecheck.log
+38398b9df682c177ba40d05fc1ccc56c5ae584f1799ad48a45aeec75ece575f4 docs/android/evidence/rel04-r12/math-core-tests/logs/249-test_rel04R12QueueConcurrency.test.ts.log
+1ed6aa9dcabddccd8d6a017df21a08cf36a8418a7bb352411da673ddba40d5a5 docs/android/evidence/rel04-r12/review-r11-independent.on-d150327.log
+56edd006ab89e7d303af344d170b79d51b1db03ec5fb45a5e9c2abc66a35a3d7 docs/android/evidence/rel04-r12/review-r11-independent.on-r12.log
+63c2ba8a4fbb9eeaf9998c8e758a1117f98cfaea5df9d5757fde9e3c3bfd6ed0 docs/android/evidence/rel04-r12/review-r10-edge.on-r12.log
+07a726dc8ca5f5c43408a1df9c5761088722c22d0a31fb07266833093544445e docs/android/evidence/rel04-r12/review-r10-browser.on-r12.log
+27 preserved R11 evidence files verified against independent originals, including two with added .txt suffix.
+Three R11 runtime fixtures match the original commit.
+Runtime changes: ['apps/web/lib/activitySync.ts', 'apps/web/lib/offlineHabitQueue.ts', 'apps/web/lib/signOut.ts'] | Handover paths: 341 all reporting/evidence
+math-core-tests 253 pinned workflow commands and SHA-256 verified {'math-core-tests': 253}
+db-and-browser-tests 78 pinned workflow commands and SHA-256 verified {'rel04-chromium-multitab': 1, 'rel04-next-app-rendering': 1, 'day-constructor-acceptance-db-tests': 76}

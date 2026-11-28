@@ -1,0 +1,53 @@
+$ npx ts-node test/authLogRedactionDb.test.ts
+# job=day-constructor-acceptance-db-tests step=Run sign-in log redaction DB test (AURA-SEC-01) env={"TS_NODE_COMPILER_OPTIONS":"{\"jsx\":\"react\"}"}
+OK   emailLogRef: 16 hex chars, case/whitespace-insensitive, no address content
+OK   emailLogRef: different addresses give different references
+OK   errorForLog: keeps name and code, redacts the address, drops detail
+OK   errorForLog: non-Error values are reduced to a redacted string
+OK   redactEmails: every address in a string is replaced
+OK   redactEmails: internationalised address is redacted
+OK   redactEmails: non-Latin address is redacted
+OK   redactEmails: localhost address is redacted
+OK   redactEmails: IP-literal domain address is redacted
+OK   redactEmails: quoted local part address is redacted
+OK   redactEmails: URL-encoded @ address is redacted
+OK   redactEmails: double-encoded @ address is redacted
+OK   redactEmails: inside a URL address is redacted
+OK   redactEmails: one-letter TLD address is redacted
+OK   redactEmails: in angle brackets address is redacted
+OK   redactEmails: apostrophe local part address is redacted
+OK   redactEmails: comma local part address is redacted
+OK   redactEmails: quoted local part with a newline address is redacted
+OK   redactEmails: commented local part address is redacted
+OK   redactEmails: fullwidth at sign address is redacted
+OK   redactEmails: text without an address is left unchanged
+OK   errorForLog: name and code are redacted too (and bounded)
+OK   redactEmails: 1 MB of "a" is processed in bounded time (24 ms < 500)
+OK   redactEmails: 1 MB of "%4" is processed in bounded time (31 ms < 500)
+OK   redactEmails: 1 MB of "a@" is processed in bounded time (0 ms < 500)
+OK   errorForLog: never throws on a hostile getter or toString
+OK   errorForLog: a normal Postgres code is kept as-is
+OK   email-code sign-in still works: request 200, verify 200 with a session cookie
+OK   a used code is refused (401) and logged without the address
+OK   email-link sign-in still works: 307 redirect home with a session cookie
+OK   wrong codes: 401 x5 then 429 (attempt cap), unchanged
+OK   rate limit unchanged: 3 x 200 then 429 for one address
+OK   send failure for an internationalised address: 502, and its echo is redacted
+OK   send failure: 502 with the existing message
+OK   no plaintext address (or its local part) in 10 captured log lines
+OK   no email-shaped string at all in the logs
+OK   no sign-in code or magic-link token in the logs
+OK   diagnostic event kept: verify-code "no active code" with the reference for that address
+OK   diagnostic event kept: verify-code "incorrect code" with the reference
+OK   diagnostic event kept: verify-code "attempt cap reached" with the reference
+OK   diagnostic event kept: request-link "rate-limited" with the reference, IP and count
+OK   diagnostic event kept: "sign-in email send failed" with the reference and a redacted provider error
+OK   source guard: request-link logs no raw email, raw error object, code or token (4 log calls)
+OK   source guard: verify-code logs no raw email, raw error object, code or token (5 log calls)
+OK   source guard: verify logs no raw email, raw error object, code or token (0 log calls)
+OK   source guard: session logs no raw email, raw error object, code or token (0 log calls)
+OK   source guard: logout logs no raw email, raw error object, code or token (0 log calls)
+
+47 checks, all passed
+
+# exit=0 signal=

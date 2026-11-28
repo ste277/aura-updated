@@ -1,0 +1,66 @@
+$ npx ts-node test/opportunityRangeAdapter.test.ts
+# job=math-core-tests step=Run opportunity range adapter test env={}
+OK   configured week: Monday window is the canonical instants of 09:00-12:00 IST
+OK   configured week: Wednesday 18:00-19:00
+OK   configured week: Friday has two windows in order
+OK   configured week: one entry for every date in the range, no more
+OK   configured week: weekdays without a window are known empty (Tue/Thu/Sat/Sun)
+OK   mixed weekdays: Mon known windows, Tue KNOWN EMPTY (not unknown), Wed known windows
+OK   configured-empty: a configured user with an all-empty week is KNOWN empty for every day
+OK   unconfigured: every date in the range is UNKNOWN
+OK   unconfigured: stored period rows are ignored when the user is not configured -- still UNKNOWN, no synthesized window
+OK   unconfigured TODAY: UNKNOWN -- the constructor's remaining-today fallback is NOT used
+OK   today (now inside the window): the adapter supplies the FULL canonical window, not a clipped one
+OK   composition: now before / inside / after the window -> the engine clips (feasible / 90 left for 90 / infeasible)
+OK   future/same-day windows are identical whether or not the date is "today" (no clipping inside the adapter)
+OK   UTC: windows are the literal wall times, civil boundaries preserved
+OK   UTC is accepted as a timezone (the runtime contract), not rejected
+OK   positive offset (Kolkata): the window belongs to local date 10-06 although its UTC instants fall on 10-05
+OK   negative offset (Los Angeles): the window belongs to local date 10-06 although its UTC instants fall on 10-07
+OK   UTC bounds: local start of the first date through local start of the day AFTER the last date
+OK   Kolkata bounds: 2026-10-04T18:30Z .. 2026-10-05T18:30Z
+OK   DST spring-forward range (NY 03-07..03-08): the range is 47 hours, not 48
+OK   DST fall-back range (NY 10-31..11-01): the range is 49 hours, not 48
+OK   Los Angeles bounds: 2026-10-06T07:00Z .. 2026-10-07T07:00Z
+OK   canonical (characterized): NY 2026-03-08 01:59 and 03:00 are exact; 02:30 is NONEXISTENT
+OK   canonical (characterized): NY 2026-11-01 00:30 and 02:00 are exact; 01:30 is AMBIGUOUS
+OK   spring-forward: an ordinary daytime window on the transition day is exact (EDT: 13:00Z..14:00Z)
+OK   spring-forward: a window spanning the skipped hour keeps real elapsed time (01:00 EST..04:00 EDT = 06:00Z..08:00Z, 120 real minutes)
+OK   spring-forward: a window boundary INSIDE the nonexistent hour (02:30) is UNKNOWN, never a guessed instant
+OK   fall-back: a window spanning the repeated hour is exact and 240 real minutes (00:30 EDT..03:30 EST = 04:30Z..08:30Z)
+OK   fall-back: a window boundary INSIDE the ambiguous hour (01:30) is UNKNOWN, never a guessed occurrence
+OK   every zone/transition: a boundary in the transition hour is UNKNOWN regardless of the zone-dependent legacy conversion
+OK   non-DST zone: the same wall time is just exact (Kolkata 02:30, UTC 02:30)
+OK   a transition elsewhere in the range does not affect other dates (Sat/Mon exact, Sun exact)
+OK   within-day blocker: the exact absolute interval, tagged as a fixed plan
+OK   cross-midnight blocker: kept once as one absolute interval (not split, not lost)
+OK   cross-midnight blocker: BOTH local dates see the overlap (day 1 keeps 30 min, day 2 keeps 60 min)
+OK   range edges: starts-before/ends-inside, starts-inside/ends-after and range-spanning plans are kept; plans merely touching the range or wholly outside are dropped (half-open)
+OK   inactive statuses never block: CANCELLED, SKIPPED, MOVED (future)
+OK   UPCOMING (not yet elapsed) blocks; LOGGED blocks
+OK   lifecycle reuse: an ELAPSED UPCOMING plan does not block (opportunity blocking semantics, unlike a recurrence count) while an elapsed LOGGED plan still does
+OK   lifecycle reuse: results equal isActivePlanBlocker itself for every status
+OK   query count: 1 day -> 1 availability load + 1 plan query, 1 in-memory day resolution
+OK   query count: 2 days -> 1 + 1, 2 day resolutions
+OK   query count: 7 days -> 1 + 1, 7 day resolutions
+OK   query count does not scale with the range (90 days -> still 1 + 1)
+OK   invalid date -> INVALID_DATE (no rollover): 2026-02-30, 2026-13-01, not-a-date
+OK   reversed range -> INVALID_RANGE (never swapped)
+OK   range longer than the projection engine's single authoritative bound -> RANGE_TOO_LONG
+OK   invalid timezone and invalid now are typed failures
+OK   every invalid request failed BEFORE any load (loads happen only for the one valid 366-day request: 2)
+OK   determinism: the same range/timezone/now/configuration/plans produce identical output
+OK   immutability: frozen configuration and plans are accepted (nothing is mutated)
+OK   unsorted periods for one weekday come back merged and ordered (Monday 14-15 then 09-12 -> 09-12, 14-15)
+OK   composition with the engine: Mon fits 60, Tue too short, Wed blocked by a plan, Thu/Fri known empty -> viable 1, unknown 0, COMPLETE
+OK   composition: an unconfigured range yields coverage UNKNOWN (never zero opportunities)
+OK   merge: overlapping spans merge
+OK   merge: touching (adjacent) spans merge into one contiguous span
+OK   merge: duplicate spans collapse
+OK   merge: a contained span is absorbed
+OK   merge: unsorted input is sorted; a separated span stays separate
+OK   merge: a one-minute gap is preserved
+OK   merge: never mutates its input (frozen input accepted, original order unchanged)
+ALL OPPORTUNITY RANGE ADAPTER CHECKS PASSED
+
+# exit=0 signal=

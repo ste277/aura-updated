@@ -1,0 +1,28 @@
+$ npx ts-node test/goalsWiring.test.ts
+# job=math-core-tests step=Run Goals wiring test env={}
+OK   1. Day Constructor core (apps/web/lib/dayConstructor.ts) has zero mention of Goal/GoalActivity
+OK   2. Day Constructor orchestrator (apps/web/lib/dayConstructorOrchestrator.ts) has zero mention of Goal/GoalActivity
+OK   3. DayIntent domain contract (apps/web/lib/dayIntent.ts) has zero mention of Goal/GoalActivity
+OK   4. Timing search (packages/recommendation/src/timingSearch.ts) has zero mention of Goal/GoalActivity
+OK   5. Preview request parsing (wire contract) (apps/web/lib/dayConstructorPreviewRequest.ts) has zero mention of Goal/GoalActivity
+OK   6. Preview client (wire contract) (apps/web/lib/dayConstructorPreviewClient.ts) has zero mention of Goal/GoalActivity
+OK   7. Acceptance evaluation (E1) (apps/web/lib/dayConstructorAcceptance.ts) has zero mention of Goal/GoalActivity
+OK   8. Availability context (apps/web/lib/availabilityContext.ts) has zero mention of Goal/GoalActivity
+OK   9. Home timeline composer (apps/web/lib/homeTimelineComposer.ts) has zero mention of Goal/GoalActivity
+OK   10. Day Builder (apps/web/lib/dayBuilder.ts) has zero mention of Goal/GoalActivity
+OK   11. Day Builder card component (apps/web/components/DayBuilderCard.tsx) has zero mention of Goal/GoalActivity
+OK   17. PlannedActivity model block is present and extractable
+OK   17. every non-comment line in the PlannedActivity model block mentioning Goal is a back-relation-only field (no @relation(fields:...) attribute, i.e. no real column/FK)
+OK   18. migration 0035_goals contains no ALTER TABLE "PlannedActivity" statement
+OK   18. migration 0035_goals creates exactly the two new tables (Goal, GoalActivity), nothing else
+OK   19. db.ts never imports dayConstructor/dayConstructorOrchestrator/timingSearch
+OK   20. lib/goals.ts imports only the activity catalog (value import) and two type-only imports (CompletionRequirement, GoalActivityRhythm) from its own sibling Goals-domain modules -- nothing from the Day Constructor/acceptance/Plan-My-Day stack
+OK   21. goals/route.ts imports nothing from dayConstructor*/acceptConstructedDay/planDay*
+OK   21. [goalId]/route.ts imports nothing from dayConstructor*/acceptConstructedDay/planDay*
+OK   21. archive/route.ts imports nothing from dayConstructor*/acceptConstructedDay/planDay*
+OK   21. activities/route.ts imports nothing from dayConstructor*/acceptConstructedDay/planDay*
+OK   21. dismiss/route.ts imports nothing from dayConstructor*/acceptConstructedDay/planDay*
+OK   22. no GoalCard/GoalReviewCard component exists directly under components/
+ALL GOALS WIRING CHECKS PASSED
+
+# exit=0 signal=

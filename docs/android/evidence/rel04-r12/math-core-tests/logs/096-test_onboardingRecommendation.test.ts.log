@@ -1,0 +1,32 @@
+$ npx ts-node test/onboardingRecommendation.test.ts
+# job=math-core-tests step=Run onboarding recommendation test env={"TS_NODE_COMPILER_OPTIONS":"{\"jsx\":\"react-jsx\"}"}
+OK   fixture: on Saturday Rahu Kalam starts after 8:01 and before Abhijit
+OK   NEGATIVE (pre-fix behaviour reproduced): the any-type nextShift onboarding used to show is Rahu Kalam
+OK   NEGATIVE: that pre-fix card claimed Rahu Kalam was suitable (the defect)
+OK   1. Rahu Kalam next: the recommendation is NOT Rahu Kalam
+OK   2. favourable window after Rahu Kalam: Abhijit is recommended, at its real start
+OK   2. starts-in text is computed from the fixed clock
+OK   2. no caution is reported at 8:01 (nothing unfavourable is active)
+OK   2. card: "Your next favourable window" + Peak Clarity (Abhijit), never Rahu Kalam
+OK   2. card: the old "suitable period" claim is gone
+OK   3. after Abhijit (3:00 PM) there is no favourable window left today
+OK   3. NEGATIVE: at 3:00 PM the legacy nextShift wrapped to a window that has already passed today (Brahma), which the old card showed as "Today"; the fix shows no window instead
+OK   3. card: honest "No favourable window left today", no window presented as favourable or suitable
+OK   3. only unfavourable windows ahead -> NONE_TODAY (never one of them)
+OK   3. Abhijit fully covered by Gulika + Rahu Kalam is not offered (inauspicious precedence)
+OK   3. empty windows -> existing "No timing window available" branch still renders
+OK   4. inside Rahu Kalam (9:30): cautionNow names Rahu Kalam and its end
+OK   4. inside Rahu Kalam: the recommendation is still Abhijit, not "now"
+OK   4. card states Rahu Kalam is in effect as a period to avoid, and recommends Abhijit
+OK   4. card never calls Rahu Kalam favourable/suitable
+OK   4. inside Abhijit overlapped by Rahu Kalam: only the caution-free part (after Rahu ends) is offered
+OK   4. inside a clean Abhijit: "now until <end>"
+OK   5. week sweep: every FAVOURABLE claim is a non-inauspicious window with no caution minute in its span (favourable=945, none=1071, trimmed=316)
+OK   5. week sweep exercised the overlap-trim path on a real day (Abhijit overlapping a caution window)
+OK   NEGATIVE guard: OnboardingJourney no longer renders nextShift or the "suitable period" claim
+OK   page.tsx feeds onboarding from computeOnboardingRecommendation over the real windows
+OK   unchanged: computeDailyEnergyInsight nextShift startTime/startsIn format
+
+All onboarding recommendation checks passed.
+
+# exit=0 signal=

@@ -1,0 +1,49 @@
+$ npx ts-node test/skipPlannedActivityDb.test.ts
+# job=day-constructor-acceptance-db-tests step=Run Skip planned activity DB test env={}
+OK   30/9/29. Skip returns 200 with { plan } that is unambiguously SKIPPED with skippedAt and no loggedAt/habitLogId
+OK   30. persisted: SKIPPED, skippedAt set, loggedAt null, habitLogId null
+OK   10/30. Skip creates ZERO HabitLogs
+OK   28. skippedAt is a server instant near now (not client-supplied) and equals the response value
+OK   8. invariants hold for the skipped row
+OK   36/5. retry returns 200, still SKIPPED, with the ORIGINAL skippedAt (not a retry timestamp)
+OK   36. retry created no HabitLog
+OK   33/26. precondition: the elapsed UPCOMING plan derives MISSED
+OK   33/26. Missed -> POST skip persists SKIPPED + skippedAt
+OK   26/11. that plan now derives agenda SKIPPED (not MISSED)
+OK   34/6. LOGGED -> Skip is rejected (409)
+OK   34. the LOGGED plan, loggedAt, habitLogId and HabitLog are unchanged; no skippedAt
+OK   35/6. CANCELLED -> Skip is rejected (409), still CANCELLED, no skippedAt
+OK   6/9. SKIPPED -> Log and SKIPPED -> Cancel are rejected; the row stays SKIPPED with no HabitLog
+OK   40/6. cross-user Skip -> 404 and the plan stays UPCOMING
+OK   40. unauthenticated -> 401 and nothing changes
+OK   40. unknown plan id -> 404
+OK   37. Skip/Skip race (x16): one durable SKIPPED outcome, stable skippedAt, both callers see it, zero HabitLogs
+OK   38. Skip/Log race (x16): exactly one terminal outcome, never mixed (skip won 7, log won 9); Log winner => exactly one HabitLog, Skip winner => zero
+OK   39. Skip/Cancel race (x16): exactly one terminal outcome, never a hybrid (skip won 8, cancel won 8)
+OK   7/8. after every scenario no row violates the invariant table and no SKIPPED plan has a HabitLog
+OK   31. precondition: Capture derives PLANNED
+OK   31/13. Capture-linked plan: plan SKIPPED, Capture OPEN, completedAt null, link retained, no HabitLog
+OK   15/18/31/46. replan after Skip: acceptance succeeds and the Capture link moves to the new plan
+OK   46. the old plan remains historical SKIPPED with its skippedAt
+OK   32/14. GoalActivity-linked plan: plan SKIPPED, GoalActivity SUGGESTED (never PLANNED/COMPLETED), link retained
+OK   15/19/32/46. Goal replan after Skip succeeds: link moves to the new plan and derives PLANNED; the old plan stays SKIPPED
+OK   27. direct plan: retained as historical SKIPPED; no source object exists or was created
+OK   41. before Skip: the UPCOMING plan blocks its interval
+OK   41/12. after Skip: the same interval no longer blocks (even though the row is returned by the day query)
+OK   42. precondition: an active plan is ACTIVE_PLAN in Right Now
+OK   42/17. a SKIPPED active plan can never be ACTIVE_PLAN; Right Now moves to the imminent plan
+OK   11. agenda derives SKIPPED for it regardless of the current time window, and it is neither currentItem nor nextItem
+OK   42/17. with both skipped, neither can win ACTIVE_PLAN or IMMINENT_PLAN
+OK   18. the Composer projects SKIPPED as resolved history (isPast, not current, not completed)
+OK   16/43. the Plan tab list never returns SKIPPED plans as upcoming/actionable work
+OK   19/44. DailyReflection: a skipped plan is not completed, missed or upcoming
+OK   19/44. DailyStory: a skipped plan is never counted or named as pending/completed work
+OK   45. precondition: the UPCOMING plan is a reminder candidate
+OK   20/45. a SKIPPED plan is excluded from the reminder query and derives no reminder
+OK   24. skipped history does not block legitimately re-planning the same title/time (a NEW UPCOMING plan is created)
+OK   25. the current DELETE route does not remove or alter a SKIPPED plan (400), documented V1 behavior
+OK   4. skipPlannedActivity(userId, planId) returns the SKIPPED row
+OK   4/6. logPlannedActivity on a SKIPPED plan throws and writes nothing
+ALL SKIP DB CHECKS PASSED
+
+# exit=0 signal=

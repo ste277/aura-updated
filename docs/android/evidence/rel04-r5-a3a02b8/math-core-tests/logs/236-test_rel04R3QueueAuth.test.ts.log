@@ -1,0 +1,32 @@
+$ npx ts-node --project tsconfig.jsdom-tests.json test/rel04R3QueueAuth.test.ts
+# job=math-core-tests step=Run REL-04 R3 queue durability and auth-transition test env={"TS_NODE_COMPILER_OPTIONS":"{\"jsx\":\"react-jsx\"}"}
+OK   Q1 a direct 502 is ambiguous: the outbox entry is KEPT (queued), not deleted
+OK   Q1 later replay with the same clientRequestId stores it exactly once
+OK   Q2 a read failure is UNREADABLE, never an empty queue
+OK   Q2 replay of an unreadable queue sends nothing
+OK   Q2 sign-out asks (cannot check) and, after acknowledgement, reports the owned discard as UNKNOWN (not a clean zero)
+OK   Q2 nothing was removed (it stays for A)
+OK   Q3 a different payload can never take an existing request identity (refused: conflict)
+OK   Q3 the identical payload reuses the existing record (no second record)
+OK   Q3 conflicting records under one identity are QUARANTINED: reported, never sent, never removed
+OK   Q4 settlement removed only the snapshotted record; a record written meanwhile is untouched
+OK   Q5 a record discarded after replay took its snapshot is never sent
+OK   Q6 a failed migration reports unreadable, keeps the source, and copied NOTHING (one atomic transaction)
+OK   Q6 re-running completes it: 2 records, no duplicates, source removed after commit
+OK   Q7 migrated records settle once
+OK   Q7 a concurrent/repeated migration can NOT recreate settled records (tombstones checked in the same transaction)
+OK   Q8 there is no API to assign unowned legacy entries to an account, nor to rewrite/remove the shared array
+OK   Q8 the legacy entries are counted
+OK   Q8 legacy entries are never replayed for the signed-in account
+OK   Q8 sign-out leaves the shared legacy array byte-identical and reports it as kept
+OK   Q9 an upgrade refusal during AUTOMATIC replay is surfaced (reload prompt raised) and the entry is kept
+OK   A1 a sign-in 4xx is reconciled: the session actually changed to B, so the prior state is NOT restored
+OK   A1 a 4xx with the session verified unchanged -> REJECTED, still signed out
+OK   A2 precondition: the marker could not be written
+OK   A2 with Web Locks, tab2 is suspended by the HELD auth lock even though no marker exists
+OK   A3 the transition still completes in its own tab and records that coordination was unavailable
+OK   A3 the uncoordinated tab2 still cannot write into B: the server refuses (409) and nothing is stored for B
+
+26 passed, 0 failed
+
+# exit=0 signal=

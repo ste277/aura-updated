@@ -1,0 +1,125 @@
+$ npx ts-node test/goalsUiWiring.test.ts
+# job=math-core-tests step=Run Goals UI wiring test env={"TS_NODE_COMPILER_OPTIONS":"{\"jsx\":\"react\"}"}
+OK   AA/38. Goals list page (server) does not import planDayEntry
+OK   AA/38. Goals list page (server) does not import planDayBootstrap
+OK   AA/38. Goals list page (server) does not import planDayQuickPicks
+OK   AA/38. Goals list page (server) does not import planningHorizon
+OK   AA/38. Goals list page (server) does not import dayIntent
+OK   AA/38. Goals list page (server) does not import dayConstructor
+OK   AA/38. Goals list page (server) does not import dayConstructorOrchestrator
+OK   AA/38. Goals list page (server) does not import dayConstructorPreviewRequest
+OK   AA/38. Goals list page (server) does not import dayConstructorPreviewClient
+OK   AA/38. Goals list page (server) does not import acceptConstructedDay
+OK   AA/38. Goals list page (server) does not import dayConstructorAcceptance
+OK   AA/38. Goals list page (server) does not import timingSearch
+OK   AA/38. Goals list page (server) does not import availabilityContext
+OK   AA/38. Goals list page (server) does not import PlanDayClient
+OK   AA/38. Goals list page (server) does not import DayPlanPreviewController
+OK   AA/38. Goals list client does not import planDayEntry
+OK   AA/38. Goals list client does not import planDayBootstrap
+OK   AA/38. Goals list client does not import planDayQuickPicks
+OK   AA/38. Goals list client does not import planningHorizon
+OK   AA/38. Goals list client does not import dayIntent
+OK   AA/38. Goals list client does not import dayConstructor
+OK   AA/38. Goals list client does not import dayConstructorOrchestrator
+OK   AA/38. Goals list client does not import dayConstructorPreviewRequest
+OK   AA/38. Goals list client does not import dayConstructorPreviewClient
+OK   AA/38. Goals list client does not import acceptConstructedDay
+OK   AA/38. Goals list client does not import dayConstructorAcceptance
+OK   AA/38. Goals list client does not import timingSearch
+OK   AA/38. Goals list client does not import availabilityContext
+OK   AA/38. Goals list client does not import PlanDayClient
+OK   AA/38. Goals list client does not import DayPlanPreviewController
+OK   AA/38. Goal detail page (server) does not import planDayEntry
+OK   AA/38. Goal detail page (server) does not import planDayBootstrap
+OK   AA/38. Goal detail page (server) does not import planDayQuickPicks
+OK   AA/38. Goal detail page (server) does not import planningHorizon
+OK   AA/38. Goal detail page (server) does not import dayIntent
+OK   AA/38. Goal detail page (server) does not import dayConstructor
+OK   AA/38. Goal detail page (server) does not import dayConstructorOrchestrator
+OK   AA/38. Goal detail page (server) does not import dayConstructorPreviewRequest
+OK   AA/38. Goal detail page (server) does not import dayConstructorPreviewClient
+OK   AA/38. Goal detail page (server) does not import acceptConstructedDay
+OK   AA/38. Goal detail page (server) does not import dayConstructorAcceptance
+OK   AA/38. Goal detail page (server) does not import timingSearch
+OK   AA/38. Goal detail page (server) does not import availabilityContext
+OK   AA/38. Goal detail page (server) does not import PlanDayClient
+OK   AA/38. Goal detail page (server) does not import DayPlanPreviewController
+OK   AA/38. Goal detail client does not import planDayEntry
+OK   AA/38. Goal detail client does not import planDayBootstrap
+OK   AA/38. Goal detail client does not import planDayQuickPicks
+OK   AA/38. Goal detail client does not import planningHorizon
+OK   AA/38. Goal detail client does not import dayIntent
+OK   AA/38. Goal detail client does not import dayConstructor
+OK   AA/38. Goal detail client does not import dayConstructorOrchestrator
+OK   AA/38. Goal detail client does not import dayConstructorPreviewRequest
+OK   AA/38. Goal detail client does not import dayConstructorPreviewClient
+OK   AA/38. Goal detail client does not import acceptConstructedDay
+OK   AA/38. Goal detail client does not import dayConstructorAcceptance
+OK   AA/38. Goal detail client does not import timingSearch
+OK   AA/38. Goal detail client does not import availabilityContext
+OK   AA/38. Goal detail client does not import PlanDayClient
+OK   AA/38. Goal detail client does not import DayPlanPreviewController
+OK   AA/38. Goals presentation helpers does not import planDayEntry
+OK   AA/38. Goals presentation helpers does not import planDayBootstrap
+OK   AA/38. Goals presentation helpers does not import planDayQuickPicks
+OK   AA/38. Goals presentation helpers does not import planningHorizon
+OK   AA/38. Goals presentation helpers does not import dayIntent
+OK   AA/38. Goals presentation helpers does not import dayConstructor
+OK   AA/38. Goals presentation helpers does not import dayConstructorOrchestrator
+OK   AA/38. Goals presentation helpers does not import dayConstructorPreviewRequest
+OK   AA/38. Goals presentation helpers does not import dayConstructorPreviewClient
+OK   AA/38. Goals presentation helpers does not import acceptConstructedDay
+OK   AA/38. Goals presentation helpers does not import dayConstructorAcceptance
+OK   AA/38. Goals presentation helpers does not import timingSearch
+OK   AA/38. Goals presentation helpers does not import availabilityContext
+OK   AA/38. Goals presentation helpers does not import PlanDayClient
+OK   AA/38. Goals presentation helpers does not import DayPlanPreviewController
+OK   40. no Goals CLIENT file imports lib/db.ts directly (all persistence stays behind the existing API routes)
+OK   40. every fetch() call targets an existing /api/goals path
+OK   AB. no Habit creation/reference anywhere in the Goals UI
+OK   AC/35. no Vedic term "Panchang" anywhere in the Goals UI
+OK   AC/35. no Vedic term "Muhurta" anywhere in the Goals UI
+OK   AC/35. no Vedic term "Rahu" anywhere in the Goals UI
+OK   AC/35. no Vedic term "Gulika" anywhere in the Goals UI
+OK   AC/35. no Vedic term "Yama" anywhere in the Goals UI
+OK   AC/35. no Vedic term "Abhijit" anywhere in the Goals UI
+OK   AC/35. no Vedic term "auspicious" anywhere in the Goals UI
+OK   AC/35. no Vedic term "lunar" anywhere in the Goals UI
+OK   AC/36. no LLM/AI SDK reference anywhere in the Goals UI
+OK   36. copy never claims Aura "generated a personalized plan" for the deterministic templates
+OK   39. HomeDashboard.tsx has no Goal BROWSING surface (no Goal card/section/list component, no fetch to the Goals list/detail API, no new "/goals" navigation) -- Goals V2 G3.3's own minimal, read-only Right Now context line is the one intentional exception
+OK   39. app/page.tsx has zero mention of "/goals" (no new activeTab/navigation wired there)
+OK   4. YouView.tsx contains exactly one FUNCTIONAL navigation to /goals (the single nav entry this ticket asks for -- doc-comment mentions of "/goals" are excluded, not a second entry)
+OK   4. the Goals nav entry navigates via a plain window.location.href, same mechanism as every other cross-route link in this app (no new prop threaded through page.tsx)
+OK   Y. no raw `{activity.status}` / `{activity.derivedState}` / `{goal.status}` interpolated directly into JSX
+OK   Y. no raw `{activity.status}` / `{activity.derivedState}` / `{goal.status}` interpolated directly into JSX
+OK   Y. GoalDetailClient renders activity state labels only via presentGoalActivityStateLabel
+OK   Y. GoalsListClient/CreateGoalModal renders template choices only via GOAL_TEMPLATE_OPTIONS/presentGoalTemplateCategory, never a raw GoalTemplateCategory literal in JSX text
+OK   34. no literal "GoalActivity" word rendered as user-facing copy (it appears only as a TypeScript type name, never inside a JSX text node)
+OK   34. no literal "templateCategory"/"plannedActivityId"/"derivedState" word appears inside a JSX text node
+OK   34. no internal field name is ever passed as a literal string into JSX children
+OK   18/19. no "Plan selected" action exists anywhere in the Goals UI (PR C uses "Plan with Aura" instead, per this ticket's own section 5 preferred wording)
+OK   24. no reschedule/cancel action on any activity row
+OK   25. no second "mark complete" action anywhere (completion is derived, never a Goal-side action)
+OK   29. no unarchive/restore action anywhere in the Goals UI
+OK   23. no dismissed-activity restore action anywhere in the Goals UI
+OK   W/31. GoalDetailClient has exactly one not-found branch (status === 404), no separate ownership-specific copy
+OK   W/31. no "belongs to" / "another user" / "not yours" copy rendered anywhere (real code, not doc comments)
+OK   B3.1: clientRequestId is generated via exactly one useState lazy initializer calling generateClientRequestId() (generated once per mount, not per submit) -- AURA-MOBILE-01-M2-B/AND-01: not crypto.randomUUID() directly, which throws outside a secure context
+OK   B3.1: clientRequestId is never reassigned/regenerated inside handleSubmit (no second generateClientRequestId() call anywhere in the file)
+OK   B3.1/AND-01: no direct crypto.randomUUID() call anywhere in the file (every id generation goes through the secure-context-safe wrapper)
+OK   B3.1: the submit request body includes clientRequestId
+OK   B3.1: the SUBMITTING double-click guard is explicitly documented as NOT the idempotency mechanism (never silently conflated with it)
+OK   B4: GOAL_DECOMPOSITION_SHOWN is tracked
+OK   B4: GOAL_DECOMPOSITION_CONFIRMED is tracked exactly once (only the genuine-success branch)
+OK   B4: GOAL_DECOMPOSITION_CREATE_FAILED is tracked (both the non-ok-response and network-error branches)
+OK   B4: GOAL_DECOMPOSITION_SHOWN/CONFIRMED build their metadata via the dedicated observability helpers, never an ad hoc inline object (which could accidentally carry title/text fields)
+OK   B4: no GOAL_DECOMPOSITION_* trackEvent call site passes `title`/`trimmedTitle`/a row `.title` as a metadata value (structural, not just code-review)
+OK   B4: no GOAL_DECOMPOSITION_* trackEvent call site passes clientRequestId as a metadata value
+OK   B4: "Refresh suggestions" deliberately fires no SHOWN event (documented, not merely absent by oversight)
+OK   B4: GOAL_DECOMPOSITION_CREATE_FAILED is called at least twice with a metadata object (both failure branches)
+OK   B4: neither GOAL_DECOMPOSITION_CREATE_FAILED call's OWN metadata object includes the raw response error message/body
+ALL GOALS UI WIRING CHECKS PASSED
+
+# exit=0 signal=

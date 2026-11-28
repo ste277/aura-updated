@@ -1,0 +1,51 @@
+$ npx ts-node test/opportunityDecisionFacts.test.ts
+# job=math-core-tests step=Run opportunity decision facts test env={}
+OK   horizon: planning date inside the period starts the horizon AT the planning date (elapsed days excluded) and ends at the inclusive period end
+OK   horizon: a planning date equal to the period start starts at the period start
+OK   horizon: a planning date BEFORE the period starts at the period start (the later of the two)
+OK   horizon: a planning date after the period end yields no horizon
+OK   horizon: facts without a horizon-defining entry, or no facts, yield none
+OK   COMPLETE: configured week, Mon-Fri 09-17, 30 min -> 7 evaluated, 5 viable, 0 unknown, COMPLETE
+OK   contract: the eight original fact fields (unchanged order) then the four additive P0b fields, horizon dates echoed as civil dates
+OK   one availability load and one plan query for one candidate
+OK   effective start: planning on Wednesday evaluates Wed..Sun only (5 days), viable Wed/Thu/Fri = 3
+OK   PARTIAL + DST: the ambiguous Sunday is UNKNOWN (never zero): 7 evaluated, 5 viable (lower bound), 1 unknown, PARTIAL
+OK   UNKNOWN: unconfigured availability -> every day unknown, viableDays 0, coverage UNKNOWN (not a COMPLETE zero)
+OK   CONFIGURED EMPTY: known-infeasible days, COMPLETE with viableDays 0 (a factual zero, not unknown)
+OK   KNOWN ZERO: configured availability fully consumed by persisted blockers -> COMPLETE, viableDays 0, no classification field
+OK   multiple candidates: ONE availability load and ONE plan query regardless of candidate count
+OK   different durations are projected independently: 30 min -> 5, 240 min -> 5 (Tuesday 13-17 fits), 300 min -> 4 (Tuesday breaks), 600 min -> 0 (COMPLETE)
+OK   candidate-local overlap: every candidate may report the same viable day (no capacity is allocated among them)
+OK   different horizons: still ONE load, covering the widest range 2026-10-07 .. 2026-10-18
+OK   different horizons: each candidate is evaluated over its OWN horizon (a: 10-07..10-11 viable 3; b: 10-12..10-18 viable 5)
+OK   FUTURE planning date: horizon is the planning date through ITS period end (10-14..10-18), not the wall-clock week
+OK   PAST planning date: Mon/Tue elapsed (known infeasible), Wed clipped to the remaining window, Thu/Fri full -> viable 3 of 7, COMPLETE
+OK   PAST planning date, whole period elapsed: every day known-infeasible -> viable 0, COMPLETE (no unknown added by elapsed days)
+OK   demand 3 > supply 2: both facts present and independent (remaining 3, viable 2); no shortfall/deficit/pressure/classification anywhere
+OK   demand 3 > supply 2: the opportunity entry never repeats the recurrence requirement
+OK   demand 2 = supply 2: both facts present and independent (remaining 2, viable 2); no shortfall/deficit/pressure/classification anywhere
+OK   demand 2 = supply 2: the opportunity entry never repeats the recurrence requirement
+OK   demand 1 < supply 2: both facts present and independent (remaining 1, viable 2); no shortfall/deficit/pressure/classification anywhere
+OK   demand 1 < supply 2: the opportunity entry never repeats the recurrence requirement
+OK   unknown supply with a known remaining count: coverage UNKNOWN and no inferred scarcity (viableDays 0 is a lower bound, never "none")
+OK   no candidates, no horizon, or no duration: no facts and ZERO loads
+OK   an invalid range request (bad timezone) yields no facts and loads nothing
+OK   fallback duration: projected over the 45-minute fallback AND labelled GENERIC_FALLBACK (never passed off as RESOLVED)
+OK   cross-user: independent timezone and availability configuration give independent facts (UTC configured COMPLETE vs Kolkata unconfigured UNKNOWN)
+OK   handler: a recurrence-backed intent gets opportunity facts from its horizon (planning Wed 10-07: 10-07..10-11, 3 viable) with the RESOLVED explicit duration
+OK   handler: the recurrence entry the provider supplied is carried through unchanged beside the opportunity entry
+OK   handler: a typed intent without recurrence facts gets NO facts at all (non-recurrent / manual stay untouched)
+OK   handler: ONE load for the preview
+OK   handler: the constructed day, warnings and every other field are BYTE-IDENTICAL with and without enrichment
+OK   handler: an intent resolved to the generic fallback duration is labelled GENERIC_FALLBACK (45 min) -- matching the preview's own warning
+OK   handler: a FIXED intent without a horizon gets no opportunity facts and triggers no load
+OK   forged client opportunity/range/timezone are ignored: the fact is server-derived (2026-10-07..2026-10-11, 3 viable, 30 min)
+OK   forged client opportunity on an intent with no server facts never appears
+OK   forged client opportunity with no provider and no range deps: no facts at all
+OK   failure isolation: an availability-load failure leaves a READY preview identical to the no-enrichment preview (no opportunity facts, no zero fabricated)
+OK   failure isolation: a plan-load failure behaves the same
+OK   no provider facts (provider failure / zero-remaining excluded upstream): no opportunity facts and no range load
+OK   a non-READY outcome (future date, unconfigured availability) is returned verbatim with no range load
+ALL OPPORTUNITY DECISION FACTS CHECKS PASSED
+
+# exit=0 signal=

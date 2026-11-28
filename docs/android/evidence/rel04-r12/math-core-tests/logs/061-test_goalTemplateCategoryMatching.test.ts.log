@@ -1,0 +1,55 @@
+$ npx ts-node test/goalTemplateCategoryMatching.test.ts
+# job=math-core-tests step=Run Goal template category matching test env={}
+OK   GET_FITTER: canonical phrase
+OK   GET_FITTER: case-insensitive
+OK   GET_FITTER: collapsed/irregular whitespace
+OK   GET_FITTER: embedded in a longer natural sentence
+OK   GET_FITTER: "I really want to get fitter this year" (ticket example)
+OK   GET_FITTER: alternate phrase "get fit"
+OK   GET_FITTER: alternate phrase "exercise regularly"
+OK   MEDITATE_REGULARLY: canonical phrase
+OK   MEDITATE_REGULARLY: case-insensitive
+OK   MEDITATE_REGULARLY: whitespace variation
+OK   MEDITATE_REGULARLY: embedded in a longer sentence
+OK   MEDITATE_REGULARLY: alternate phrase "start meditating"
+OK   MEDITATE_REGULARLY: alternate phrase "build a meditation habit"
+OK   FINISH_PROJECT: canonical phrase
+OK   FINISH_PROJECT: case-insensitive
+OK   FINISH_PROJECT: whitespace variation
+OK   FINISH_PROJECT: embedded in a longer sentence
+OK   FINISH_PROJECT: alternate phrase "complete my project"
+OK   FINISH_PROJECT: alternate phrase "finish a project" (no possessive)
+OK   STUDY_CONSISTENTLY: canonical phrase
+OK   STUDY_CONSISTENTLY: case-insensitive
+OK   STUDY_CONSISTENTLY: whitespace variation
+OK   STUDY_CONSISTENTLY: embedded in a longer sentence
+OK   STUDY_CONSISTENTLY: alternate phrase "study regularly"
+OK   STUDY_CONSISTENTLY: alternate phrase "build a study habit"
+OK   Unknown: "Learn Spanish" -> null (no LANGUAGE_LEARNING category; never forced into STUDY_CONSISTENTLY)
+OK   Unknown: "Save for a house" -> null
+OK   Unknown: "Plan our wedding" -> null
+OK   Unknown: "Spend more time with my parents" -> null
+OK   Empty string -> null
+OK   Whitespace-only -> null
+OK   Punctuation-only -> null
+OK   Random unrelated prose -> null
+OK   Ambiguous multi-intent: "I want to get fitter and study consistently" -> null (never silently picks one)
+OK   Ambiguous multi-intent: "I need to finish my project and meditate regularly" -> null
+OK   Ambiguous multi-intent: three categories in one sentence -> null
+OK   Near-miss: "get fitterish" does not match GET_FITTER (longer unrelated word, not a real word-boundary match)
+OK   Near-miss: a bare fragment of a multi-word phrase does not match on its own (e.g. "study" alone, without "consistently"/"regularly"/"habit")
+OK   Near-miss: "misstudyconsistently" (no real word boundaries at all) does not match STUDY_CONSISTENTLY
+OK   Near-miss: "unfit" / "outfitter" style words containing "fit" fragments do not match GET_FITTER
+OK   Near-miss: "project finisher" (words present but not in the matched phrase order/shape) does not match FINISH_PROJECT
+OK   Category-completeness: every GoalTemplateCategory has a non-empty phrase list
+OK   Category-completeness: every GoalTemplateCategory has at least one phrase that genuinely resolves back to it through matchGoalTemplateCategory
+OK   Category-completeness: the phrase table has exactly the four currently-shipped categories, no silent drift
+OK   Template-source-of-truth: no matcher phrase is identical to (or contains) a GOAL_TEMPLATES activity title
+OK   Template-source-of-truth: no matcher phrase contains a digit (no durations/targets leaking into the matcher)
+OK   Purity: goals.ts never imports pg/db.ts/Prisma/fetch/React/next in real code
+OK   Purity: goals.ts never references Date.now() or `new Date()` from matchGoalTemplateCategory's own code path
+OK   Zero-write/determinism: calling the matcher twice with the same input returns the identical result both times
+OK   Zero-write: matchGoalTemplateCategory is synchronous (does not return a Promise)
+ALL GOAL TEMPLATE CATEGORY MATCHING CHECKS PASSED
+
+# exit=0 signal=

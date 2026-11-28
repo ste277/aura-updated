@@ -1,0 +1,29 @@
+$ npx ts-node test/goalPlanningHandoffWiring.test.ts
+# job=math-core-tests step=Run Goal planning handoff wiring test env={}
+OK   16. DayIntent domain contract (apps/web/lib/dayIntent.ts) has zero mention of Goal/GoalActivity in real code
+OK   17. Day Constructor core (apps/web/lib/dayConstructor.ts) has zero mention of Goal/GoalActivity in real code
+OK   18. Timing search (packages/recommendation/src/timingSearch.ts) has zero mention of Goal/GoalActivity in real code
+OK   19. Preview request parsing (wire contract) (apps/web/lib/dayConstructorPreviewRequest.ts) has zero mention of Goal/GoalActivity in real code
+OK   20. Preview client (wire contract) (apps/web/lib/dayConstructorPreviewClient.ts) has zero mention of Goal/GoalActivity in real code
+OK   21. Acceptance evaluation (E1) (apps/web/lib/dayConstructorAcceptance.ts) has zero mention of Goal/GoalActivity in real code
+OK   19. dayConstructorOrchestrator.ts (placement/candidate-generation/availability/precedence/replenishment) has zero mention of Goal/GoalActivity
+OK   20. AcceptConstructedDayRequestBody declares goalActivityLinks as a top-level sibling field
+OK   20. AcceptConstructedDayRequest (E1's own type) has zero mention of goalActivityLinks/GoalActivity -- the Goal envelope never enters E1's contract
+OK   20. route.ts parses goalActivityLinks SEPARATELY from parseAcceptRequest, never folding it into the AcceptConstructedDayRequest object literal
+OK   16. PreviewRequestIntentBody (dayConstructorPreviewClient.ts) declares no goalActivityId/goalId field
+OK   16. the F1 preview request parser (dayConstructorPreviewRequest.ts) never reads/validates a goalActivityId/goalId field
+OK   16. buildRequestedIntentsForSubmission function body never reads row.goalActivityId
+OK   26. linkGoalActivityToPlannedActivity is called INSIDE the existing writeIntents loop (same transaction), not after COMMIT
+OK   26. the linkage call passes the SAME `client` the PlannedActivity insert itself used, never a fresh pool query
+OK   27. a failed linkage throws (causing the existing outer catch/ROLLBACK to fire), never silently continues
+OK   no post-accept client-side linking call exists (no fetch to a "/link"-shaped Goal endpoint anywhere)
+OK   37/38. PlannedActivity model block is unchanged from PR A/B (still no Goal-data column, still only the back-relation field)
+OK   39. no new migration directory exists beyond 0035_goals
+OK   39. 0035_goals is present and no handoff/goal-link migration was added by PR C (count-independent -- holds regardless of how many unrelated migrations exist)
+OK   36. no Habit/HabitLog mention anywhere in the new handoff files
+OK   34. no Capture/InboxItem/Intention/generic-Task model or import exists anywhere in the touched files
+OK   37. dayBuilder.ts has zero mention of Goal/GoalActivity
+OK   37. homeTimelineComposer.ts has zero mention of Goal/GoalActivity
+ALL GOAL PLANNING HANDOFF WIRING CHECKS PASSED
+
+# exit=0 signal=

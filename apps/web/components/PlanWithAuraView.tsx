@@ -59,6 +59,7 @@ import {
 // Plan's own eligibility derivation and its own fetch/skip transport stay
 // fully independent of Home's, unchanged from the original HPG4-2 PR).
 import { summarizeSkipAllOutcome, collectSkipAllOutcomes } from '../lib/homeMissedRecovery';
+import { boundFetch, captureAccountBinding, type AccountBinding } from '../lib/accountBoundFetch';
 
 export type { PlanEventLocation };
 export { RESULT_LABEL_TEXT, findCandidateKey, planPayloadFromCandidate };
@@ -377,9 +378,12 @@ function getHorizonHelper(horizon: PlanningHorizon, timezone?: string): string {
  */
 
 export async function saveUpcomingPlanFromCandidate(candidate: TimingCandidate, durationMinutes: number, options: SaveUpcomingPlanOptions = {}): Promise<UpcomingPlan> {
+  // AURA-ANDROID-REL-04 IR-01 (R2) -- bound before any await: the account
+  // the user acted under (or, if the caller didn't capture one, now).
+  const binding = options.binding ?? captureAccountBinding();
   const { sharedWithName, guestConversionToken, clientRequestId, eventLocation, activityId, overlapPolicy } = options;
   const plan = planPayloadFromCandidate(candidate, durationMinutes, sharedWithName, eventLocation);
-  const res = await fetch('/api/plans', {
+  const res = await boundFetch(binding, '/api/plans', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -411,7 +415,7 @@ export async function saveUpcomingPlanFromCandidate(candidate: TimingCandidate, 
     // failure. Every other non-2xx keeps the exact previous behaviour.
     if (res.status === 409) {
       const body = await res.json().catch(() => null);
-      if (isPlanOverlapResponse(body)) throw new PlanOverlapSaveError(parsePlanOverlapConflict(body), plan);
+      if (isPlanOverlapResponse(body)) throw new PlanOverlapSaveError(parsePlanOverlapConflict(body), plan, binding);
     }
     throw new Error('Unable to save plan.');
   }
@@ -423,7 +427,7 @@ export async function saveUpcomingPlanFromCandidate(candidate: TimingCandidate, 
  * and the exact refused plan payload, so the caller can show both sides and
  * offer an explicit override of the SAME payload. */
 export class PlanOverlapSaveError extends Error {
-  constructor(public readonly conflict: PlanOverlapConflictView | null, public readonly proposed: UpcomingPlan) {
+  constructor(public readonly conflict: PlanOverlapConflictView | null, public readonly proposed: UpcomingPlan, public readonly binding?: AccountBinding) {
     super('That time overlaps another plan.');
     this.name = 'PlanOverlapSaveError';
   }
@@ -447,7 +451,7 @@ class PlanOverlapActionError extends PlanActionError {
   // AURA-HPG5-V2-I2 -- `sentGoalActivityId` is the goal link the REFUSED
   // request actually carried, so "Save anyway" can prove it re-sends the
   // identical payload (see handleSaveAnyway).
-  constructor(message: string, public readonly conflict: PlanOverlapConflictView | null, public readonly sentGoalActivityId: string | null = null) {
+  constructor(message: string, public readonly conflict: PlanOverlapConflictView | null, public readonly sentGoalActivityId: string | null = null, public readonly binding?: AccountBinding) {
     super(message, 'PLAN_OVERLAP');
     this.name = 'PlanOverlapActionError';
   }
@@ -456,6 +460,9 @@ class PlanOverlapActionError extends PlanActionError {
 type PlanSaveOptions = {
   /** Omitted -> field not sent (server default ALLOW, unchanged contract). */
   overlapPolicy?: 'ALLOW' | 'REJECT_ACTIVE_OVERLAP';
+  /** AURA-ANDROID-REL-04 (R3) -- the account of the ORIGINAL action; "Save
+   * anyway" re-sends with it instead of capturing a new one. */
+  binding?: AccountBinding;
 };
 
 type PendingPlanOverlap = {
@@ -466,6 +473,8 @@ type PendingPlanOverlap = {
   /** AURA-HPG5-V2-I2 -- the goal link the refused request carried. */
   goalActivityId: string | null;
   conflict: PlanOverlapConflictView | null;
+  /** AURA-ANDROID-REL-04 (R3) -- the account the refused save was bound to. */
+  binding?: AccountBinding;
 };
 
 export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, timezone, initialActivity, initialActivityKey, initialActivityId, initialHorizon, onOpenPeople, initialPersonId, initialCustomStartDate, initialCustomEndDate, focusMomentsKey, onMomentSeen, focusMomentToken, focusPlansKey, focusPlanId, focusPlansFilter }: PlanWithAuraViewProps) {
@@ -1020,6 +1029,9 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
   };
 
   const handleSavePlan = async (plan: UpcomingPlan, activityId?: string | null, options?: PlanSaveOptions): Promise<UpcomingPlan> => {
+    // AURA-ANDROID-REL-04 IR-01 (R2/R3) -- the account the user acted under:
+    // the original action's binding when re-sent (Save anyway), else captured now.
+    const binding = options?.binding ?? captureAccountBinding();
     const replacedPlanId = reschedulingPlanId;
     if (replacedPlanId) {
       try {
@@ -1049,7 +1061,7 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
       }
     }
     try {
-      const res = await fetch('/api/plans', {
+      const res = await boundFetch(binding, '/api/plans', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1099,7 +1111,7 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
         // improvement, not a changed success flow.
         const body = await res.json().catch(() => null);
         if (res.status === 409 && isPlanOverlapResponse(body)) {
-          throw new PlanOverlapActionError((body && typeof body.error === 'string' && body.error) || 'That time overlaps another plan.', parsePlanOverlapConflict(body), selectedGoalActivityId ?? null);
+          throw new PlanOverlapActionError((body && typeof body.error === 'string' && body.error) || 'That time overlaps another plan.', parsePlanOverlapConflict(body), selectedGoalActivityId ?? null, binding);
         }
         throw new PlanActionError((body && typeof body.error === 'string' && body.error) || 'Unable to save plan.', typeof body?.code === 'string' ? body.code : undefined);
       }
@@ -1642,7 +1654,7 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
       // AURA-HPG5-V2-I1 -- except an overlap refusal, which becomes the
       // explicit choice below (same plan payload and goal link preserved).
       if (err instanceof PlanOverlapActionError) {
-        setPlanOverlap({ key, plan, activityId, goalActivityId: err.sentGoalActivityId, conflict: err.conflict });
+        setPlanOverlap({ key, plan, activityId, goalActivityId: err.sentGoalActivityId, conflict: err.conflict, binding: err.binding });
       }
     } finally {
       savingOpportunityRef.current = false;
@@ -1733,7 +1745,8 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
     // explicit selection -- a refusal never clears it (only a successful save
     // does), and changing the selection clears the result and hides this
     // choice, so it is the same link the refused attempt carried.
-    void saveOpportunity(pending.key, pending.plan, pending.activityId, { overlapPolicy: 'ALLOW' });
+    // AURA-ANDROID-REL-04 (R3) -- re-sent for the ORIGINAL action's account.
+    void saveOpportunity(pending.key, pending.plan, pending.activityId, { overlapPolicy: 'ALLOW', binding: pending.binding });
   };
   const planOverlapPresentation = visiblePlanOverlap
     ? presentProposedPlanOverlap({ title: visiblePlanOverlap.plan.title, plannedStartAt: visiblePlanOverlap.plan.plannedStartAt, plannedEndAt: visiblePlanOverlap.plan.plannedEndAt }, visiblePlanOverlap.conflict, timezone || 'UTC')

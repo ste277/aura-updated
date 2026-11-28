@@ -1,0 +1,81 @@
+$ npx ts-node test/dayBuilder.test.ts
+# job=math-core-tests step=Run Intentional Day Builder domain test env={}
+OK   Empty agenda -> exactly one opening covering the rest of the day
+OK   Empty agenda opening starts at now
+OK   Empty agenda opening ends at midnight (1440)
+OK   One mid-day plan -> two openings (before and after)
+OK   First opening ends exactly at the plan start (10:00 = 600min)
+OK   Second opening starts exactly at the plan end (11:00 = 660min)
+OK   A 10-minute gap between two plans is dropped as unusably short
+OK   A candidate fully inside an opening fits
+OK   A candidate that starts after the opening ends does not fit
+OK   A candidate on a different local date never fits, even at a matching time of day
+OK   Empty agenda -> isEmpty
+OK   Empty agenda -> not busy
+OK   Empty agenda -> evening open
+OK   Empty agenda -> no groups present
+OK   3 upcoming plans -> isBusy
+OK   WORK activity title resolves into presentActivityIds
+OK   WORK group marked present via resolved activity
+OK   An evening plan -> hasEveningOpen is false
+OK   An evening plan -> RELATIONSHIPS group marked present
+OK   A real 7pm New York Plan -> hasEveningOpen is correctly false (timezone-correct, not server-local)
+OK   A busy day (3+ upcoming items) -> zero candidates, not fewer
+OK   Every real group muted -> zero candidates
+OK   Open day produces at least one candidate
+OK   No group appears twice (one activity per group -- diversity)
+OK   No activityId appears twice across groups (level-1 exact-id dedup)
+OK   Every candidate has a non-null activityId
+OK   isPeopleOriented is true only for RELATIONSHIPS/FAMILY/SOCIAL
+OK   WORK already on the agenda -> WORK is never suggested again
+OK   Muting SELF -> SELF never appears
+OK   Muting SELF -> other groups can still appear
+OK   Evening open -> a people-oriented candidate is prioritized ahead of WORK
+OK   No real openings left today -> zero candidates
+OK   Initial suggestion set has no duplicate activityId (nothing to accidentally re-show)
+OK   Swap replaces a suggestion -- visible count stays the same
+OK   Swap removes the outgoing suggestion
+OK   Swap's replacement comes from the already-resolved reserve pool (was NOT visible before)
+OK   Swap never introduces an id absent from the original resolved set
+OK   Replacement does not duplicate another still-visible suggestion (no repeated activityId)
+OK   A second swap still succeeds while total exceeds the visible count
+OK   After a second swap, still no duplicate activityId among visible suggestions
+OK   No reserve candidates -> swap just removes the outgoing suggestion, nothing added
+OK   USER_PRIORITY_GROUPS has exactly 6 entries
+OK   USER_PRIORITY_GROUPS ids are all unique
+OK   RELATIONSHIPS priority resolves to the people-oriented taxonomy groups
+OK   WORK priority resolves to exactly {WORK}
+OK   WELLBEING priority resolves to the SELF taxonomy group (reuse, not a new one)
+OK   PERSONAL_GROWTH priority reuses WORK (Learning lives there, no dedicated growth group exists)
+OK   ROUTINE priority resolves to the LIFE taxonomy group
+OK   No priorities selected -> empty prioritized-group set (a fully valid state)
+OK   Empty prioritized set -> applyUserPriorities is a no-op (same order back)
+OK   Prioritized groups move to the front
+OK   Prioritized groups keep THEIR OWN relative order from baseOrder (SELF before WORK in base, so SELF before WORK here too)
+OK   Non-prioritized groups keep their own relative order too, just pushed after
+OK   applyUserPriorities never adds or removes a group -- same 6 groups, just reordered
+OK   Selected priorities change candidate ordering -- WORK moves to the front when prioritized
+OK   Without priorities, WORK is NOT first (evening-open day's own default order puts people-time first)
+OK   Priorities change ORDERING only -- the same set of candidate groups is produced either way (no group added/removed by prioritizing)
+OK   A muted group is never suggested even when it is also the user's #1 priority
+OK   No priorities -> empty coverage array
+OK   A COMPLETED (LOGGED) item counts as covered
+OK   A MISSED item (elapsed, never logged) is OPEN, never falsely COVERED
+OK   An UPCOMING (not yet happened) matching item still counts as covered
+OK   Nothing on the agenda -> every priority is OPEN
+OK   coveredIntentionGroupIds of an all-OPEN coverage is empty
+OK   coveredIntentionGroupIds expands a covered UserPriorityGroup to its FULL taxonomy-group mapping
+OK   An open prioritized group (WORK) still comes first
+OK   A covered prioritized group (RELATIONSHIPS) is demoted below the unprioritized groups, not removed
+OK   Do not completely suppress the covered priority -- it is still present in the output
+OK   No coverage -> applyUserPriorities behaves exactly as before (backward compatible)
+OK   Sanity: this agenda has evening NOT open
+OK   A prioritized candidate gets different reason text than the generic one
+OK   The personalized reason never spells out the internal group/priority name
+OK   "walk-together", selected from a people-oriented group (RELATIONSHIPS/FAMILY/SOCIAL) -> EVENING
+OK   "walk-together", selected from SELF (not people-oriented) -> no override (undefined)
+OK   Any OTHER activityId, even if people-oriented, is untouched here -- it relies on its own catalog default instead
+
+ALL DAY BUILDER DOMAIN CHECKS PASSED
+
+# exit=0 signal=

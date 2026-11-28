@@ -1,0 +1,37 @@
+$ npx ts-node test/shadowPolicyExecutionArchitecture.test.ts
+# job=math-core-tests step=Run shadow policy execution architecture test env={}
+=== the real tree conforms ===
+OK   THE REAL PRODUCTION TREE HAS ZERO SHADOW-EXECUTION ARCHITECTURE VIOLATIONS (589 production files scanned)
+=== consumers, confinement, unaware upstream ===
+OK   EXACT PRODUCTION CONSUMERS (2): the execution boundary is imported only by the Plan Day preview request boundary and the preview route; the boundary function is called only by the preview request boundary; the server settings are read only by the route
+OK   P4b4 HAS ONE PRODUCTION CONSUMER: the composition is referenced only by itself and the execution boundary, which uses it INSTEAD of the plain orchestration (ONE orchestration call site -- the OFF return -- and no baseline-rerun closure: a shadow failure never re-runs the baseline)
+OK   NO ACCIDENTAL SECOND EXECUTION PATH: the plain orchestration is defined in the orchestrator and called only by recomposition and (once) the boundary; the Plan Day preview no longer calls it directly
+OK   UNAWARE UPSTREAM: P4b2, P4b3, P4b4, the preparation boundary, the orchestrator, the Constructor, acceptance, recomposition, persistence, signing, the database module and the product-event taxonomy know nothing of modes, the environment variable, sinks, metrics or latency
+OK   NO NEW DATABASE, NO SCHEMA, NO PRODUCT-EVENT WRITE: the Prisma schema and every migration directory's own contents mention no shadow policy; the boundary imports no database or product-event module (count-independent)
+OK   SERVER-ONLY: no client component imports the boundary or the preview request, and the boundary imports no browser API
+OK   REQUIRED CI: the P4b5 behavior, architecture and real-DB OFF / SHADOW parity suites and the seeded-fixture reproducibility suite are mandatory steps
+=== OFF by default, server-controlled, no ACTIVE; one orchestration; isolated; synchronous ===
+OK   MODES: the type is exactly 'OFF' | 'SHADOW' (no ACTIVE); the parser selects SHADOW only for exactly SHADOW and is OFF otherwise; the ONE environment read is the only source; nothing reads a request, header, cookie, query or the database
+OK   OFF = NOTHING BUT THE MODE LOOKUP: the first statement after the baseline closure returns the plain `orchestrateConstructDay` call, before any composer, timer or sink is touched
+OK   SHADOW = ONE ORCHESTRATION: one plain-orchestration call site, one awaited composer call (the composition is called INSTEAD of the plain call), no preparation, generator, predicate, Constructor, search, load, query or signing of its own; the baseline result is returned untouched
+OK   FAIL-OPEN RELATIVE TO PLAN DAY: the composer, the metric derivation, the timer and the sink are each isolated (try / catch); a composer failure serves the unchanged baseline; the shadow outcome never escapes into the return value
+OK   SYNCHRONOUS AND AWAITED: no unawaited promise (no `void`, `.then`, `.catch`, timer, queue, race, waitUntil); exactly one `await`; the sink is a one-way function returning nothing
+OK   MINIMAL OBSERVATION: the sink payload is a separate type with exactly the nine reviewed fields of closed categories and counts; the module names no user / intent / owner / goal / activity / plan identifier, title, instant, placement, stack or error text and reads none of the composition's summaries; the default sink writes ONE aggregate line
+OK   OBSERVABILITY-ONLY CLOCK, NO POLICY: the only clock is `performance.now()` (twice, in the timer path), no wall clock, no pressure / timing / importance / deadline / originalOrder, latency never enters the returned result, no module state
+OK   THE WIRING IS THE REVIEWED SEAM: the preview request makes its one orchestration through the boundary with a SERVER-supplied settings accessor, returns only { httpStatus, body: result } (no header, cookie or field), its parser reads no mode, and the route passes only `createServerShadowPolicyExecution`
+=== MUTATIONS: each violation, injected into an in-memory copy, is detected ===
+OK   MUTATION: OFF calls the composer / sink / timer before the OFF return; the OFF return is not the plain call -> detected
+OK   MUTATION: an unknown or missing configuration selects SHADOW; the parser is loosened (case-insensitive, truthy); an ACTIVE mode appears; the mode reads a request -> detected
+OK   MUTATION: a CLIENT OVERRIDE (the request parser reads a mode / the settings accessor is fed from the body / the route reads a header) -> detected
+OK   MUTATION: DOUBLE PREPARATION / DOUBLE SEARCH / a second orchestration, a load or a query (the boundary runs the plain call AND the composition; a second preparation, search or query is added) -> detected
+OK   MUTATION: ACCEPT REPLACES THE BASELINE / changes the signature (the shadow outcome escapes into the returned result or the HTTP body) -> detected
+OK   MUTATION: A SHADOW THROW / SINK THROW / TIMER THROW FAILS THE REQUEST (the isolation removed or the failure rethrown) -> detected
+OK   MUTATION: AN UNAWAITED PROMISE / fire-and-forget / timer / queue / waitUntil -> detected
+OK   MUTATION: A RESPONSE LEAK / header / cookie / the full P4b4 object to the sink / a placement, a user id, an owner id, an exact time label or free text in the payload -> detected
+OK   MUTATION: policy reads the mode / the timer affects the result / a policy module learns about modes, sinks or latency -> detected
+OK   MUTATION: a second production consumer / another caller of the boundary, the server settings or the composer / a mode read outside the boundary / a client import -> detected
+OK   MUTATION: a new database write / product event / schema in the boundary -> detected
+OK   the mutations were applied to in-memory copies only: the real tree still has zero violations afterwards
+ALL SHADOW EXECUTION ARCHITECTURE CHECKS PASSED
+
+# exit=0 signal=

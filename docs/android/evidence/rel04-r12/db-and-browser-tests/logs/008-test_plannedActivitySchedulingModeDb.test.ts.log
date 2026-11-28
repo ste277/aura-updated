@@ -1,0 +1,36 @@
+$ npx ts-node test/plannedActivitySchedulingModeDb.test.ts
+# job=day-constructor-acceptance-db-tests step=Run planned activity scheduling mode DB test env={}
+OK   5/40. the column exists, is NULLABLE, has NO default, and is the PlannedActivitySchedulingMode enum
+OK   3/48. the DB enum has exactly FIXED and FLEXIBLE (same vocabulary as DayIntent, its own DB type)
+OK   49. the database itself rejects an unknown scheduling mode value
+OK   4/39. a row created without a scheduling mode reads back as NULL through every read path (no crash, no mapper default, never FLEXIBLE)
+OK   20/49. NULL / undefined / unknown values are never flexible
+OK   7/13. an accepted FIXED intent persists FIXED
+OK   7/12. an accepted FLEXIBLE intent persists FLEXIBLE -- accepting Aura's proposed time does NOT make it FIXED
+OK   12. exactly one plan per intent, none NULL: the constraint is always known for a Constructor-created plan
+OK   8. a Capture planned through Plan My Day (flexible intent) persists FLEXIBLE and stays linked
+OK   8. a Capture planned with an exact time (fixed intent) persists FIXED
+OK   8. a GoalActivity planned through Plan My Day (flexible intent) persists FLEXIBLE
+OK   8. a GoalActivity planned with an exact time (fixed intent) persists FIXED
+OK   9/10/11. POST /api/plans (every direct caller) persists FIXED -- an explicit exact-time choice outside the Constructor flow
+OK   18/38. a client submitting schedulingMode: FLEXIBLE to POST /api/plans cannot grant it -- the row is FIXED
+OK   4/49. createPlannedActivity with no mode stated persists NULL (the DB helper never grants FLEXIBLE by default)
+OK   49. an unrecognised mode handed to the DB helper degrades to NULL (protected), never to FLEXIBLE and never a crash
+OK   18/38. the accept route ignores a client schedulingMode field: a verified FIXED_CONSTRAINT item stays FIXED even when the body says FLEXIBLE
+OK   10/11. a forged placementSource (FIXED_CONSTRAINT -> SELECTED_CANDIDATE) with the original token is REJECTED, so it can never persist FLEXIBLE
+OK   26. an unsigned acceptance (no acceptanceToken) is REJECTED -- there is no compatibility path
+OK   14. Move FIXED -> the successor inherits it exactly (FIXED); the original keeps its own
+OK   14. Move FLEXIBLE -> the successor inherits it exactly (FLEXIBLE); the original keeps its own
+OK   14. Move NULL -> the successor inherits it exactly (NULL); the original keeps its own
+OK   15. A -> B -> C (user Moves): A == B == C for FIXED, FLEXIBLE and NULL, with the lineage intact
+OK   23. an explicit user Move of a FIXED plan is still allowed (scheduling mode does not gate Move); the successor stays FIXED
+OK   24. a FLEXIBLE plan with an active linked AuraMoment is still refused (HAS_LINKED_MOMENT): scheduling mode is independent of that restriction
+OK   16. Done / Skip / Cancel leave a FIXED scheduling mode untouched (statuses LOGGED/SKIPPED/CANCELLED)
+OK   16. Done / Skip / Cancel leave a FLEXIBLE scheduling mode untouched (statuses LOGGED/SKIPPED/CANCELLED)
+OK   16. Done / Skip / Cancel leave a NULL scheduling mode untouched (statuses LOGGED/SKIPPED/CANCELLED)
+OK   33. Move of a Capture-linked FLEXIBLE plan: successor FLEXIBLE, the Capture is repointed to B and still PLANNED (completedAt null)
+OK   33. Move of a GoalActivity-linked FIXED plan: successor FIXED, the GoalActivity is repointed to B and still PLANNED
+OK   34. replaying an acceptance (even claiming a different placementSource) returns the original plan and never rewrites its scheduling mode
+ALL SCHEDULING MODE DB CHECKS PASSED
+
+# exit=0 signal=

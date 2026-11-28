@@ -1,0 +1,144 @@
+$ npx ts-node test/mcpOAuthS10.test.ts
+# job=math-core-tests step=Run I2b-S10 offline activation-readiness test env={}
+OK   SEC policy-aware: hex, 16 bytes (openssl rand -hex 16) (20000 fixed-seed samples; every verdict matches the documented policy; 0 refused by policy)
+OK   SEC policy-aware: HEX upper case, 16 bytes (20000 fixed-seed samples; every verdict matches the documented policy; 0 refused by policy)
+OK   SEC policy-aware: hex, 20 bytes (20000 fixed-seed samples; every verdict matches the documented policy; 0 refused by policy)
+OK   SEC policy-aware: hex, 32 bytes (openssl rand -hex 32) (20000 fixed-seed samples; every verdict matches the documented policy; 0 refused by policy)
+OK   SEC policy-aware: base64, 24 bytes (openssl rand -base64 24) (20000 fixed-seed samples; every verdict matches the documented policy; 0 refused by policy)
+OK   SEC policy-aware: base64, 32 bytes with padding (openssl rand -base64 32) (20000 fixed-seed samples; every verdict matches the documented policy; 0 refused by policy)
+OK   SEC policy-aware: base64url, 24 bytes (20000 fixed-seed samples; every verdict matches the documented policy; 0 refused by policy)
+OK   SEC policy-aware: base64url, 32 bytes (20000 fixed-seed samples; every verdict matches the documented policy; 0 refused by policy)
+OK   SEC reproduction: the recorded digits-only 16-byte hex value is refused untagged (legacy text rule) -- the old "always accepted" assertion fails on it
+OK   SEC the same digits-only value is ACCEPTED when explicitly tagged "hex:" (128 bits)
+OK   SEC representative untagged hex value accepted per policy: 7f3a9c0e... (32 chars)
+OK   SEC representative untagged hex value accepted per policy: 0B5E7D2A... (32 chars)
+OK   SEC representative untagged hex value accepted per policy: 3c9e1f7a... (40 chars)
+OK   SEC refused legacy value stays refused: 32 x "a"
+OK   SEC refused legacy value stays refused: balanced counting hex
+OK   SEC refused legacy value stays refused: low-variety mixed case
+OK   SEC refused legacy value stays refused: odd-length hex-lexical, 8 symbols (S11 overlap class)
+OK   SEC mistagged hex under "base64:" stays refused (ambiguous_encoding)
+OK   SEC strength is format-aware: hex 4 bits/char, base64 6 bits/char
+OK   SEC CI-01: the fixed loader hex sample has an a-f letter (hex credit)
+OK   SEC loader accepts a 16-byte hex current cookie key (declared hex:)
+OK   SEC loader accepts a 24-byte base64 current cookie key (declared base64:)
+OK   SEC untagged 16-byte hex as current cookie key: refused (format required)
+OK   SEC loader accepts a 16-byte hex retained (older) cookie key (declared hex:)
+OK   SEC loader accepts a 24-byte base64 retained (older) cookie key (declared base64:)
+OK   SEC untagged 16-byte hex as retained (older) cookie key: accepted (legacy path)
+OK   SEC loader accepts a 16-byte hex pairwise salt (declared hex:)
+OK   SEC loader accepts a 24-byte base64 pairwise salt (declared base64:)
+OK   SEC untagged 16-byte hex as pairwise salt: refused (format required)
+OK   SEC loader accepts a 16-byte hex audit key (declared hex:)
+OK   SEC loader accepts a 24-byte base64 audit key (declared base64:)
+OK   SEC untagged 16-byte hex as audit key: refused (format required)
+OK   SEC refused: 32 x "a"
+OK   SEC loader refuses it as current cookie key, without echoing the value
+OK   SEC loader refuses it as retained (older) cookie key, without echoing the value
+OK   SEC loader refuses it as pairwise salt, without echoing the value
+OK   SEC loader refuses it as audit key, without echoing the value
+OK   SEC refused: 32 x "0"
+OK   SEC loader refuses it as current cookie key, without echoing the value
+OK   SEC loader refuses it as retained (older) cookie key, without echoing the value
+OK   SEC loader refuses it as pairwise salt, without echoing the value
+OK   SEC loader refuses it as audit key, without echoing the value
+OK   SEC refused: "ab" repeated
+OK   SEC loader refuses it as current cookie key, without echoing the value
+OK   SEC loader refuses it as retained (older) cookie key, without echoing the value
+OK   SEC loader refuses it as pairwise salt, without echoing the value
+OK   SEC loader refuses it as audit key, without echoing the value
+OK   SEC refused: "0123456789" repeated
+OK   SEC loader refuses it as current cookie key, without echoing the value
+OK   SEC loader refuses it as retained (older) cookie key, without echoing the value
+OK   SEC loader refuses it as pairwise salt, without echoing the value
+OK   SEC loader refuses it as audit key, without echoing the value
+OK   SEC refused: a short word repeated
+OK   SEC loader refuses it as current cookie key, without echoing the value
+OK   SEC loader refuses it as retained (older) cookie key, without echoing the value
+OK   SEC loader refuses it as pairwise salt, without echoing the value
+OK   SEC loader refuses it as audit key, without echoing the value
+OK   SEC refused: predictable balanced hex (S9 sample class)
+OK   SEC loader refuses it as current cookie key, without echoing the value
+OK   SEC loader refuses it as retained (older) cookie key, without echoing the value
+OK   SEC loader refuses it as pairwise salt, without echoing the value
+OK   SEC loader refuses it as audit key, without echoing the value
+OK   SEC refused: predictable balanced HEX
+OK   SEC loader refuses it as current cookie key, without echoing the value
+OK   SEC loader refuses it as retained (older) cookie key, without echoing the value
+OK   SEC loader refuses it as pairwise salt, without echoing the value
+OK   SEC loader refuses it as audit key, without echoing the value
+OK   SEC refused: hex counting run
+OK   SEC loader refuses it as current cookie key, without echoing the value
+OK   SEC loader refuses it as retained (older) cookie key, without echoing the value
+OK   SEC loader refuses it as pairwise salt, without echoing the value
+OK   SEC loader refuses it as audit key, without echoing the value
+OK   SEC refused: alphabet run (base64 order)
+OK   SEC loader refuses it as current cookie key, without echoing the value
+OK   SEC loader refuses it as retained (older) cookie key, without echoing the value
+OK   SEC loader refuses it as pairwise salt, without echoing the value
+OK   SEC loader refuses it as audit key, without echoing the value
+OK   SEC refused: one character then zeros
+OK   SEC loader refuses it as current cookie key, without echoing the value
+OK   SEC loader refuses it as retained (older) cookie key, without echoing the value
+OK   SEC loader refuses it as pairwise salt, without echoing the value
+OK   SEC loader refuses it as audit key, without echoing the value
+OK   SEC refused: mostly one character
+OK   SEC loader refuses it as current cookie key, without echoing the value
+OK   SEC loader refuses it as retained (older) cookie key, without echoing the value
+OK   SEC loader refuses it as pairwise salt, without echoing the value
+OK   SEC loader refuses it as audit key, without echoing the value
+OK   SEC refused: digits only (106 bits for 32)
+OK   SEC loader refuses it as current cookie key, without echoing the value
+OK   SEC loader refuses it as retained (older) cookie key, without echoing the value
+OK   SEC loader refuses it as pairwise salt, without echoing the value
+OK   SEC loader refuses it as audit key, without echoing the value
+OK   SEC refused: lower-case words (S8 rule)
+OK   SEC loader refuses it as current cookie key, without echoing the value
+OK   SEC loader refuses it as retained (older) cookie key, without echoing the value
+OK   SEC loader refuses it as pairwise salt, without echoing the value
+OK   SEC loader refuses it as audit key, without echoing the value
+OK   SEC refused: hex, 15 bytes (30 chars, 120 bits)
+OK   SEC loader refuses it as current cookie key, without echoing the value
+OK   SEC loader refuses it as retained (older) cookie key, without echoing the value
+OK   SEC loader refuses it as pairwise salt, without echoing the value
+OK   SEC loader refuses it as audit key, without echoing the value
+OK   SEC refused: base64, 16 bytes (too short)
+OK   SEC loader refuses it as current cookie key, without echoing the value
+OK   SEC loader refuses it as retained (older) cookie key, without echoing the value
+OK   SEC loader refuses it as pairwise salt, without echoing the value
+OK   SEC loader refuses it as audit key, without echoing the value
+OK   SEC compatibility: synthetic / human-made strings the S8 rule accepted are still accepted
+OK   SEC compatibility: of 28699 fixed-seed mixed-alphabet strings the S8 rule accepted, every refusal is the documented low-variety veto (0 refused, 0 unexplained)
+OK   SEC CI-01 reproduction: a recorded S8-accepted value is refused by the documented low-variety veto (the old assertion fails on it)
+OK   SEC a 15-byte hex secret is refused for length, a 16-byte one is accepted (the floor is exactly 128 bits)
+OK   BUD two 200 ms calls fit a 500 ms budget; the third is cut by what is left, not by its own 3 s deadline
+OK   BUD the whole request stays within its budget (+ timer slack)
+OK   BUD a call after the budget is spent fails at once and never touches the database
+OK   BUD work run outside the budget (the post-hand-off COMMIT) is not cut by it
+OK   BUD outside any budget nothing changes (Infinity left)
+OK   BUD invalid budgets are refused
+OK   DL a hanging COMMIT after a 200 ms statement fails at the ONE 300 ms deadline (S8 restarted the clock: ~500 ms)
+OK   DL the uncertain connection is destroyed, never returned to the pool
+OK   DL commitDeadlineMs can only tighten the COMMIT phase
+OK   DL connection recovery: a failed COMMIT destroys that connection; the next call checks out a fresh one and succeeds
+OK   DL a ROLLBACK tag is never a success
+OK   HOLD the statement ran but nothing was committed before commit()
+OK   HOLD commit() -> committed on the COMMIT tag; connection returned cleanly
+OK   HOLD a second commit() is a no-op (not_committed)
+OK   HOLD a ROLLBACK tag -> unknown, connection destroyed
+OK   HOLD a COMMIT that never answers -> unknown after its bound, connection destroyed
+OK   HOLD abort() destroys the connection once (server rolls back), never sends COMMIT; later commit() -> not_committed
+OK   HOLD a hold that is never decided is aborted at holdMs (no COMMIT ever sent)
+OK   HOLD a failing statement rejects with StoreUnavailableError and destroys the connection
+OK   HOLD phase 1 is bounded by deadlineMs (cancellation): timeout, connection destroyed, nothing committed
+OK   HOLD a spent request budget never starts an activation
+OK   HOLD invalid holdMs refused
+OK   QO query-only db: begin only READS (no write before hand-off)
+OK   QO abort writes nothing; commit after abort -> not_committed
+OK   QO commit writes the activation exactly once -> committed
+OK   QO non-code models have no activation
+
+All 137 AURA-MCP-02-I2b-S10 offline checks passed.
+oidc-provider WARNING: Unsupported runtime. Use Node.js v22.x LTS, or a later LTS release.
+
+# exit=0 signal=

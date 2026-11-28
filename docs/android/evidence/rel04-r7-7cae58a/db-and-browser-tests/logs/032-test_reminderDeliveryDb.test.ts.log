@@ -1,0 +1,18 @@
+$ npx ts-node test/reminderDeliveryDb.test.ts
+# job=day-constructor-acceptance-db-tests step=Run reminder delivery DB test env={}
+OK   ensureReminderDelivery creates a PENDING row for a new occurrence
+OK   Calling ensureReminderDelivery again for the SAME occurrence returns the SAME row (idempotent claim, not a new one)
+OK   Two concurrent calls for the SAME occurrence resolve to the SAME delivery id (DB constraint, not an in-memory check)
+OK   markReminderDeliveryStatus(SENT) sets status and sentAt
+OK   markReminderDeliveryStatus(SENT) never touches failedAt/failureReason
+OK   markReminderDeliveryStatus(FAILED) sets status, failedAt, and a short reason
+OK   An overlong failureReason is truncated, never stored as a huge provider payload
+OK   ensureDueReminderDeliveries creates exactly one delivery for the eligible plan
+OK   The delivery reminderAt matches deriveAuraReminders' own math (start - 15min)
+OK   Calling ensureDueReminderDeliveries a second time returns the SAME delivery id, not a new one
+OK   A CANCELLED plan is no longer returned as a due reminder delivery
+OK   ReminderDelivery rows never contain any birth/natal/person/token field name
+
+ALL REMINDER DELIVERY DB CHECKS PASSED
+
+# exit=0 signal=
