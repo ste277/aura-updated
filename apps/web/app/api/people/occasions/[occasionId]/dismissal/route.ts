@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionFromRequest } from '../../../../../../lib/session';
-import { getPersonOccasionByIdForOwner, markPersonOccasionDismissed } from '../../../../../../lib/db';
+import { dismissPersonOccasionForOwner } from '../../../../../../lib/db';
 import { parseJsonObject } from '../../../../../../lib/request';
 import { isMyPeopleServerEnabled } from '../../../../../../lib/myPeopleGate';
 import { dismissalKeyFor, isOccasionSurfaced, nextOccurrence, type OccasionDismissScope } from '../../../../../../lib/personOccasions';
@@ -32,16 +32,19 @@ export async function POST(req: NextRequest, { params }: { params: { occasionId:
   const scope = body.scope as OccasionDismissScope;
   if (!SCOPES.has(scope)) return NextResponse.json({ error: 'scope must be NOT_NOW or NOT_THIS_YEAR.' }, { status: 400 });
 
-  const occasion = await getPersonOccasionByIdForOwner(session.userId, params.occasionId);
-  if (!occasion) return NextResponse.json({ error: 'Special day not found.' }, { status: 404 });
+  // The owner's local today (their stored timezone) is read first; the
+  // occasion check, key derivation and write are then one transaction
+  // (AURA-MP-3-R1 F1, db.ts dismissPersonOccasionForOwner), so a concurrent
+  // delete of the day or the person can never leave an orphan dismissal.
   const today = await userLocalToday(session.userId);
   if (!today) return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 });
 
-  const next = nextOccurrence(occasion, today.date);
-  if (!next || !isOccasionSurfaced(next.daysUntil, occasion.remindDaysBefore)) {
-    return NextResponse.json({ error: 'This special day is not being shown right now.' }, { status: 409 });
-  }
-
-  await markPersonOccasionDismissed(session.userId, occasion.id, new Date(dismissalKeyFor(next.date, next.daysUntil, scope)));
-  return NextResponse.json({ ok: true, date: next.date });
+  const outcome = await dismissPersonOccasionForOwner(session.userId, params.occasionId, (occasion) => {
+    const next = nextOccurrence(occasion, today.date);
+    if (!next || !isOccasionSurfaced(next.daysUntil, occasion.remindDaysBefore)) return null;
+    return { reminderAt: new Date(dismissalKeyFor(next.date, next.daysUntil, scope)), value: next.date };
+  });
+  if (outcome.status === 'NOT_FOUND') return NextResponse.json({ error: 'Special day not found.' }, { status: 404 });
+  if (outcome.status === 'NOT_SURFACED') return NextResponse.json({ error: 'This special day is not being shown right now.' }, { status: 409 });
+  return NextResponse.json({ ok: true, date: outcome.value });
 }

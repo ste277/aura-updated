@@ -480,6 +480,15 @@ export async function deleteSavedPerson(ownerUserId: string, personId: string): 
       [personId, ownerUserId]
     );
     if (locked.rows.length === 0) throw new Error('Person not found.');
+    // AURA-MP-3-R1 F1: lock the person's special days BEFORE removing their
+    // dismissals. A dismissal in flight holds its day FOR SHARE; waiting here
+    // for it to COMMIT means the DELETE below (a new READ COMMITTED snapshot)
+    // sees and removes its row. Without this the dismissal could commit after
+    // that DELETE ran and outlive the day (62019).
+    await client.query(
+      `SELECT id FROM "PersonOccasion" WHERE "savedPersonId" = $1 AND "ownerUserId" = $2 ORDER BY id FOR UPDATE`,
+      [personId, ownerUserId]
+    );
 
     await client.query(
       `UPDATE "User" SET "dayBuilderPriorityPersonIds" = array_remove("dayBuilderPriorityPersonIds", $2) WHERE id = $1`,
@@ -641,28 +650,57 @@ export async function getPersonOccasionForOwner(ownerUserId: string, personId: s
   return result.rows[0] ?? null;
 }
 
-/** AURA-MP-3 -- one special day by id, owner-scoped (under any of the
- * owner's people). Another owner's or an unknown id -> null (route: 404). */
-export async function getPersonOccasionByIdForOwner(ownerUserId: string, occasionId: string): Promise<PersonOccasion | null> {
-  const result = await pool.query(`SELECT * FROM "PersonOccasion" WHERE id = $1 AND "ownerUserId" = $2`, [occasionId, ownerUserId]);
-  return result.rows[0] ?? null;
-}
-
 /**
  * AURA-MP-3 -- Home special-day dismissals (design 4.4). Stored as
  * ReminderAttention rows with scheduledItemType 'PERSON_OCCASION' (a plain
  * string column: no migration), keyed by the occurrence (see
  * lib/personOccasions.ts occasionDismissalKeys). Deleted with the special
  * day or the person (deletePersonOccasion / deleteSavedPerson above).
- * The caller has already verified the occasion is the owner's.
+ *
+ * AURA-MP-3-R1 F1: the ownership check and the write are ONE transaction.
+ * The special day is read owner-scoped FOR SHARE, `decide` derives the key
+ * from that locked row (null = not surfaced), and the row is inserted before
+ * COMMIT. A concurrent delete of the day (DELETE) or of its person (which
+ * locks the person's days FOR UPDATE before removing their dismissals)
+ * therefore either runs entirely before -- the read finds nothing: NOT_FOUND --
+ * or waits for this COMMIT and then removes the new row too. No dismissal can
+ * outlive its special day. Unrelated ReminderAttention rows are never read.
  */
-export async function markPersonOccasionDismissed(userId: string, occasionId: string, reminderAt: Date): Promise<void> {
-  await pool.query(
-    `INSERT INTO "ReminderAttention" (id, "userId", "scheduledItemType", "scheduledItemId", "reminderAt")
-     VALUES ($1, $2, 'PERSON_OCCASION', $3, $4)
-     ON CONFLICT ("userId", "scheduledItemType", "scheduledItemId", "reminderAt") DO UPDATE SET "seenAt" = now()`,
-    [randomUUID(), userId, occasionId, reminderAt]
-  );
+export type PersonOccasionDismissOutcome<T> = { status: 'NOT_FOUND' } | { status: 'NOT_SURFACED' } | { status: 'DISMISSED'; value: T };
+
+export async function dismissPersonOccasionForOwner<T>(
+  userId: string,
+  occasionId: string,
+  decide: (occasion: PersonOccasion) => { reminderAt: Date; value: T } | null
+): Promise<PersonOccasionDismissOutcome<T>> {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const found = await client.query(`SELECT * FROM "PersonOccasion" WHERE id = $1 AND "ownerUserId" = $2 FOR SHARE`, [occasionId, userId]);
+    const occasion: PersonOccasion | undefined = found.rows[0];
+    if (!occasion) {
+      await client.query('ROLLBACK');
+      return { status: 'NOT_FOUND' };
+    }
+    const decision = decide(occasion);
+    if (!decision) {
+      await client.query('ROLLBACK');
+      return { status: 'NOT_SURFACED' };
+    }
+    await client.query(
+      `INSERT INTO "ReminderAttention" (id, "userId", "scheduledItemType", "scheduledItemId", "reminderAt")
+       VALUES ($1, $2, 'PERSON_OCCASION', $3, $4)
+       ON CONFLICT ("userId", "scheduledItemType", "scheduledItemId", "reminderAt") DO UPDATE SET "seenAt" = now()`,
+      [randomUUID(), userId, occasion.id, decision.reminderAt]
+    );
+    await client.query('COMMIT');
+    return { status: 'DISMISSED', value: decision.value };
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 /** AURA-MP-3 -- the owner's dismissal keys for these special days. */
@@ -734,7 +772,11 @@ export async function updatePersonOccasion(
 }
 
 /** Deletes the special day and its dismissal (ReminderAttention) rows in
- * one transaction. Returns false when not found for this owner and person. */
+ * one transaction. Returns false when not found for this owner and person.
+ * AURA-MP-3-R1 F1: the DELETE takes the day's row lock first, so a dismissal
+ * in flight (FOR SHARE, dismissPersonOccasionForOwner) either commits before
+ * it -- and its row is removed by the second statement, which runs on a fresh
+ * snapshot -- or finds the day gone (NOT_FOUND). */
 export async function deletePersonOccasion(ownerUserId: string, personId: string, occasionId: string): Promise<boolean> {
   const client = await pool.connect();
   try {

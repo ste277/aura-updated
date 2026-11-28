@@ -1768,3 +1768,8 @@ jobs:
       # keeping the link, deletion, isolation and the switch (real routes + DB).
       - name: Run AURA-MP-3 My People linked plans and Home guidance DB test
         run: npx ts-node --project tsconfig.jsdom-tests.json test/myPeopleMp3Db.test.ts
+      # AURA-MP-3-R1 (62020) -- forced interleavings, both orders: dismissal vs
+      # special-day / person DELETE (no orphan), person DELETE vs Move, Home
+      # Move and Recomposition (person-before-plan lock order: no deadlock).
+      - name: Run AURA-MP-3-R1 My People concurrency DB test
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/myPeopleMp3R1ConcurrencyDb.test.ts

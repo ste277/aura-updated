@@ -33,6 +33,24 @@ MP-3 builds on MP-1/MP-2 and design AURA-MP-01 §4.3, §4.4, §5.5–5.7 and §6
   - the Home card's optional "good time to call" line (design 5.7, "if computed cheaply").
 - **Independent verification requested** for the two authorization and data-integrity changes: the dismissal route, and Move keeping the link.
 
+## R1 — concurrency and data integrity (62020)
+
+Independent verification 62019 found two races on 31b7daf; both reproduced here before the fix. No schema or migration change.
+
+- **F1, orphan dismissal.** The route now checks the special day and writes the dismissal in **one transaction** (`dismissPersonOccasionForOwner`). It reads the day owner-scoped `FOR SHARE` and derives the key from that locked row.
+  - Deleting a person now locks that person's special days `FOR UPDATE` **before** it removes their dismissals.
+  - A concurrent delete either runs first, so the dismissal returns 404, or waits for the dismissal's COMMIT and then removes the new row.
+  - Unrelated reminder rows are untouched.
+- **F2, person delete vs plan replacement deadlock.** The lock order is now **person before plan** everywhere.
+  - Move (and Home Move through it) and Recomposition take `FOR KEY SHARE` on the people their source plans link to, sorted by id, before `FOR UPDATE` on the plans (`lockLinkedPeopleBeforePlans`). That is the same order a person DELETE uses: the person, then the SET NULL cascade to the plans.
+  - `applyMoveWrites` requires that lock and refuses an owned link it does not hold.
+  - The fix uses no retries, timeouts or deadlock catching.
+- **Audit.** These paths take no plan lock before writing a person link, so they have no equivalent inversion:
+  - plan create (`/api/plans`), which writes the link at insert;
+  - Day Constructor acceptance, which writes no link;
+  - AuraMoment creation, a single statement that only takes a compatible `KEY SHARE` on the plan.
+  - The person DELETE's `User` row update conflicts with no Move-side lock.
+
 ## Tests
 
 | Test | Job | Checks | Covers |
@@ -40,5 +58,6 @@ MP-3 builds on MP-1/MP-2 and design AURA-MP-01 §4.3, §4.4, §5.5–5.7 and §6
 | `test/myPeopleMp3Ui.test.ts` | math-core | 19 | Home selection, dismissal keys, hand-offs, wording |
 | `test/myPeopleMp3PlanJsdom.test.ts` | math-core | 18 | The real Plan tab with the real timing engine, in both switch states |
 | `test/myPeopleMp3Db.test.ts` | Day Constructor DB | 33 | Real routes, Home card, People screen and database |
+| `test/myPeopleMp3R1ConcurrencyDb.test.ts` | Day Constructor DB | 25 | Forced interleavings in both orders, using real routes: dismissal vs day/person DELETE, and person DELETE vs Move, Home Move and Recomposition |
 
 All MP-1/MP-2, Find a Time, Move and Recomposition suites run unchanged.

@@ -12,7 +12,8 @@
  *
  * Concurrency: the per-user advisory lock is the SAME key Day Constructor
  * acceptance takes (so conflict checks serialize against acceptance), then
- * `SELECT ... FOR UPDATE` on A (the row lock logPlannedActivity holds), then a
+ * FOR KEY SHARE on A's linked person (AURA-MP-3-R1, lockLinkedPeopleBeforePlans
+ * below), then `SELECT ... FOR UPDATE` on A (the row lock logPlannedActivity holds), then a
  * conditional UPCOMING -> MOVED update. UNIQUE("rescheduledFromPlanId") is the
  * database backstop against a forked successor.
  */
@@ -91,6 +92,8 @@ export async function movePlannedActivity(userId: string, planId: string, input:
   try {
     await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`day-constructor-accept:${userId}`]);
 
+    // AURA-MP-3-R1 F2: the linked person BEFORE the plan (see lockLinkedPeopleBeforePlans).
+    const linkedPeople = await lockLinkedPeopleBeforePlans(client, userId, [planId]);
     const aRes = await client.query(`SELECT * FROM "PlannedActivity" WHERE id = $1 AND "userId" = $2 FOR UPDATE`, [planId, userId]);
     if (aRes.rows.length === 0) throw new MovePlanError('NOT_FOUND', 'Plan not found.');
     const a: PlannedActivity = aRes.rows[0];
@@ -120,7 +123,7 @@ export async function movePlannedActivity(userId: string, planId: string, input:
     const conflict = await findBlockingPlanForRange(client, userId, [planId], newStartAt, newEndAt, now);
     if (conflict) throw new MovePlanError('CONFLICT', 'That time overlaps another plan.');
 
-    const result = await applyMoveWrites(client, userId, a, newStartAt, newEndAt);
+    const result = await applyMoveWrites(client, userId, a, newStartAt, newEndAt, linkedPeople);
 
     await client.query('COMMIT');
     return result;
@@ -290,6 +293,39 @@ async function enforceDestinationWeekCapacity(
 }
 
 /**
+ * AURA-MP-3-R1 F2 -- lock order for a plan replacement: SavedPerson BEFORE PlannedActivity, the same order a person
+ * DELETE uses (deleteSavedPerson locks the person FOR UPDATE, then its SET NULL cascade updates every linked plan).
+ * Locking the source plan first and only then letting the successor INSERT's foreign key take the person's KEY SHARE
+ * lock is the inverted order that deadlocked (62019). So every caller of applyMoveWrites first takes FOR KEY SHARE on
+ * the people its source plans link to (owner-scoped, ordered by id), and only then locks the plans.
+ *
+ * The links are read here before the plans are locked. A plan's link is written only when the plan is created, and is
+ * otherwise only ever cleared (the SET NULL cascade), so the link a locked plan holds is either one locked here or
+ * NULL. applyMoveWrites re-checks that and refuses (no partial write) rather than take a person lock out of order.
+ * FOR KEY SHARE does not block a person edit; it blocks only that person's deletion until this transaction ends.
+ */
+export interface LinkedPeopleLock {
+  readonly personIds: ReadonlySet<string>;
+}
+
+export async function lockLinkedPeopleBeforePlans(
+  client: { query: (text: string, params?: unknown[]) => Promise<{ rows: any[] }> },
+  userId: string,
+  planIds: string[]
+): Promise<LinkedPeopleLock> {
+  const res = await client.query(
+    `SELECT sp.id FROM "SavedPerson" sp
+      WHERE sp."ownerUserId" = $2
+        AND sp.id IN (SELECT pa."savedPersonId" FROM "PlannedActivity" pa
+                       WHERE pa.id = ANY($1::text[]) AND pa."userId" = $2 AND pa."savedPersonId" IS NOT NULL)
+      ORDER BY sp.id
+      FOR KEY SHARE OF sp`,
+    [planIds, userId]
+  );
+  return { personIds: new Set(res.rows.map((r: { id: string }) => r.id)) };
+}
+
+/**
  * SHARED with recomposition acceptance (F3): the writes of ONE Move inside the caller's transaction -- successor B
  * inserted directly (never through createPlannedActivity, whose same-title/same-time dedupe could hand back someone
  * else's plan), A transitioned UPCOMING -> MOVED (conditional), and the source (Capture / GoalActivity) repointed to B.
@@ -303,8 +339,16 @@ export async function applyMoveWrites(
   userId: string,
   a: PlannedActivity,
   newStartAt: Date,
-  newEndAt: Date
+  newEndAt: Date,
+  linkedPeople: LinkedPeopleLock
 ): Promise<MovePlanResult> {
+  // AURA-MP-3-R1 F2: the successor's person link must already be locked (lockLinkedPeopleBeforePlans). A link that
+  // is not locked is carried only if it is not this owner's person (the subselect below writes NULL for it, so the
+  // INSERT takes no person lock); an owned, unlocked link is refused rather than locked out of order.
+  if (a.savedPersonId && !linkedPeople.personIds.has(a.savedPersonId)) {
+    const owned = await client.query(`SELECT 1 FROM "SavedPerson" WHERE id = $1 AND "ownerUserId" = $2`, [a.savedPersonId, userId]);
+    if (owned.rows.length > 0) throw new MovePlanError('INVALID_STATE', 'Plan cannot be moved.');
+  }
   const occurrenceContext = await enforceDestinationWeekCapacity(client, userId, a, newStartAt);
 
   const bId = randomUUID();
