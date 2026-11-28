@@ -39,6 +39,8 @@ export interface UpcomingRow {
   turning: number | null;
   observedFromLeapDay: boolean;
   surfaced: boolean;
+  /** AURA-MP-3: hidden from the Home card right now ("Not now" / "Not this year"). */
+  dismissed?: boolean;
 }
 
 export const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -202,4 +204,68 @@ export function personNextOccasionLine(
 ): string {
   const observedFromLeapDay = upcoming.find((u) => u.occasionId === next.id)?.observedFromLeapDay ?? false;
   return nextLine({ date: next.date, daysUntil: next.daysUntil, observedFromLeapDay });
+}
+
+/* ------------------------------------------------------------------ */
+/* AURA-MP-3 -- planning with a person and the Home special-day card     */
+/* ------------------------------------------------------------------ */
+
+/**
+ * A hand-off into Plan's normal Find a Time flow. It only PRE-FILLS the
+ * form: the user still runs Find, reviews the results and explicitly saves
+ * one. `personId` becomes the plan's My People link; the person's own
+ * availability is never assumed (Find uses the user's own availability,
+ * Daily Rhythm and Panchang ranking only).
+ */
+export interface PersonPlanHandoff {
+  personId: string;
+  activityId: string;
+  /** Optional date window (YYYY-MM-DD, inclusive) -> Plan's custom range. */
+  startDate?: string;
+  endDate?: string;
+}
+
+/** Catalog activities used to start a plan (all allow a companion). */
+export const PLAN_WITH_PERSON_ACTIVITY = 'catch-up';
+const CELEBRATION_ACTIVITY: Record<OccasionKind, string> = { BIRTHDAY: 'birthday-party', ANNIVERSARY: 'anniversary-dinner', OTHER: 'celebration-dinner' };
+
+/** "Plan time with Ravi": a catch-up, any time (Plan's default horizon). */
+export function planHandoffForPerson(personId: string): PersonPlanHandoff {
+  return { personId, activityId: PLAN_WITH_PERSON_ACTIVITY };
+}
+
+function shiftCivilDate(date: string, days: number): string {
+  const [y, m, d] = date.split('-').map((n) => parseInt(n, 10));
+  return new Date(Date.UTC(y, m - 1, d + days)).toISOString().slice(0, 10);
+}
+
+/**
+ * Occasion -> plan (design 5.6). The occasion date is respected: the window
+ * is the day itself and the day either side, never starting before today
+ * (`daysUntil` days before the occurrence).
+ */
+export function planHandoffForOccasion(o: { personId: string; kind: OccasionKind; date: string; daysUntil: number }): PersonPlanHandoff {
+  const today = shiftCivilDate(o.date, -o.daysUntil);
+  const start = shiftCivilDate(o.date, -1) < today ? today : shiftCivilDate(o.date, -1);
+  return { personId: o.personId, activityId: CELEBRATION_ACTIVITY[o.kind], startDate: start, endDate: shiftCivilDate(o.date, 1) };
+}
+
+/**
+ * The ONE Home card (design 5.7): the soonest special day inside its own
+ * reminder window that has not been dismissed for now. `moreCount` = other
+ * such days (shown as "+N more", linking to My People). Never a card for a
+ * day outside its window, and never more than one.
+ */
+export function selectHomeOccasion(upcoming: UpcomingRow[]): { item: UpcomingRow; moreCount: number } | null {
+  const eligible = upcoming.filter((u) => u.surfaced && !u.dismissed).sort((a, b) => a.daysUntil - b.daysUntil || a.personName.localeCompare(b.personName));
+  if (eligible.length === 0) return null;
+  return { item: eligible[0], moreCount: eligible.length - 1 };
+}
+
+/** Warm, factual Home wording -- no counts of neglect, no scores. */
+export function homeOccasionHeadline(item: Pick<UpcomingRow, 'kind' | 'label' | 'personName' | 'daysUntil'>): string {
+  const what = occasionTitle(item.kind, item.label, item.personName);
+  if (item.daysUntil === 0) return `${what} is today`;
+  if (item.daysUntil === 1) return `${what} is tomorrow`;
+  return `${what} is in ${item.daysUntil} days`;
 }

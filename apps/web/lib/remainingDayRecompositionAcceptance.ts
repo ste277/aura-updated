@@ -15,6 +15,8 @@
  *   1. verify the token (no DB, before anything is opened) -> INVALID_TOKEN
  *   2. BEGIN; per-user advisory lock `day-constructor-accept:<userId>` (the SAME namespace movePlannedActivity and
  *      persistAcceptedConstructedDay use, so all three serialize per user)
+ *   2b. AURA-MP-3-R1: FOR KEY SHARE on the people those plans link to, ordered by id (lockLinkedPeopleBeforePlans,
+ *      planMove.ts): person before plan, the order a person DELETE uses
  *   3. SELECT ... FOR UPDATE on EVERY reconsidered plan (MOVE, KEEP and UNRESOLVED), ordered by id -- a deterministic
  *      lock order, so two acceptances sharing plans can never deadlock, and Done/Skip/Cancel (which take only row
  *      locks, never the advisory lock) cannot slip in between validation and writes
@@ -28,7 +30,8 @@
  *      collision blocker rule). A failure to read it fails the acceptance (SAVE_FAILED, rolled back) -- no fallback.
  *   6. staleness validation, then FINAL-STATE validation
  *   7. writes (sorted by plan id) through the SAME internals as a manual Move (`applyMoveWrites`), COMMIT
- * A manual Move takes the advisory lock and then one row lock, in that same order, so no lock-order inversion exists.
+ * A manual Move takes the advisory lock, its linked person and then one row lock, in that same order, so no lock-order
+ * inversion exists.
  *
  * FINAL-STATE VALIDATION: all MOVE source slots are released together and all destinations are validated together
  * against current blockers, availability and each other, so a swap (A<->B) or a rotation is valid as a FINAL schedule
@@ -68,7 +71,7 @@ import {
   type ConstructDayRequest,
   type DayConstructorOrchestratorDeps,
 } from './dayConstructorOrchestrator';
-import { findBlockingPlanForRange, applyMoveWrites, MovePlanError, type MovePlanErrorCode } from './planMove';
+import { findBlockingPlanForRange, applyMoveWrites, lockLinkedPeopleBeforePlans, MovePlanError, type MovePlanErrorCode } from './planMove';
 import { hasFlexibleScheduling } from './plannedActivitySchedulingMode';
 import { localDayBoundsUTC } from './myDayOrchestrator';
 import { getDatePartsInTimezone } from './timezone';
@@ -204,6 +207,8 @@ export async function acceptRemainingDayRecomposition(userId: string, proposalTo
 
     // Lock EVERY reconsidered plan in id order (deterministic; see the lock hierarchy above).
     const ids = proposal.decisions.map((d) => d.planId); // canonical: strictly ascending
+    // AURA-MP-3-R1 F2: linked people BEFORE plans -- the order a person DELETE uses (planMove.ts).
+    const linkedPeople = await lockLinkedPeopleBeforePlans(client, userId, ids);
     const locked = await client.query(`SELECT * FROM "PlannedActivity" WHERE id = ANY($1::text[]) AND "userId" = $2 ORDER BY id FOR UPDATE`, [ids, userId]);
     const rows = new Map<string, PlannedActivity>(locked.rows.map((row: PlannedActivity) => [row.id, row]));
     for (const decision of proposal.decisions) if (!rows.has(decision.planId)) return finish(stale('SOURCE_NOT_FOUND', decision.planId), false);
@@ -274,7 +279,7 @@ export async function acceptRemainingDayRecomposition(userId: string, proposalTo
     // ---- writes: the same internals as a manual Move, one transaction, deterministic order ----
     const accepted: AcceptedRecompositionMove[] = [];
     for (const move of moves) {
-      const { to } = await applyMoveWrites(client, userId, rows.get(move.planId)!, move.to.start, move.to.end);
+      const { to } = await applyMoveWrites(client, userId, rows.get(move.planId)!, move.to.start, move.to.end, linkedPeople);
       accepted.push({ sourcePlanId: move.planId, successorPlanId: to.id, from: move.current, to: move.to, successor: to });
     }
     return finish({ status: 'ACCEPTED', targetDate: proposal.targetDate, moves: accepted }, true);

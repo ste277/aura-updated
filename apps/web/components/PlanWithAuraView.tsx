@@ -7,7 +7,8 @@ import { buildGoogleCalendarUrl } from '../../../packages/recommendation/src/dai
 import { FULL_ACTIVITY_CATALOG } from '../../../packages/recommendation/src/personalizedTasks';
 import { getActivityDefinition } from '../../../packages/recommendation/src/activityDefinitions';
 import type { EverydaySharedCandidate } from '../../../packages/recommendation/src/everydayTimingFit';
-import { RELATIONSHIP_ICON, SavedPersonRow } from './PeopleView';
+import { RELATIONSHIP_ICON, SavedPersonRow, PersonForm } from './PeopleView';
+import { isMyPeopleClientEffective, isMyPeoplePresentationEnabled, MY_PEOPLE_CAPABILITY_HEADER } from '../lib/myPeopleGate';
 import { SharedMomentsView } from './SharedMomentsView';
 import * as theme from './theme';
 import { colors, spacing, typography } from './theme';
@@ -116,6 +117,13 @@ interface PlanWithAuraViewProps {
    * Who's-this-with picker navigates to the existing People screen; Plan
    * itself never builds a second Add Person UI. */
   onOpenPeople?: () => void;
+  /** AURA-MP-3 -- a My People hand-off (Home card / person / special day):
+   * preselects this person in "Who's this with?" and, when both dates are
+   * given, the custom date range. Applied with initialActivityKey, like the
+   * activity prefill. It only pre-fills; nothing is searched or saved. */
+  initialPersonId?: string | null;
+  initialCustomStartDate?: string | null;
+  initialCustomEndDate?: string | null;
   /** Product Structure V2 (brief section 19) -- jump straight to the
    * bottom-of-Plan "Your Moments" section. */
   focusMomentsKey?: number;
@@ -460,7 +468,7 @@ type PendingPlanOverlap = {
   conflict: PlanOverlapConflictView | null;
 };
 
-export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, timezone, initialActivity, initialActivityKey, initialActivityId, initialHorizon, onOpenPeople, focusMomentsKey, onMomentSeen, focusMomentToken, focusPlansKey, focusPlanId, focusPlansFilter }: PlanWithAuraViewProps) {
+export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, timezone, initialActivity, initialActivityKey, initialActivityId, initialHorizon, onOpenPeople, initialPersonId, initialCustomStartDate, initialCustomEndDate, focusMomentsKey, onMomentSeen, focusMomentToken, focusPlansKey, focusPlanId, focusPlansFilter }: PlanWithAuraViewProps) {
   const [planMode, setPlanMode] = useState<TimingSearchMode>('FIND');
   const [taskTitle, setTaskTitle] = useState('');
   const [, setIsCustomTask] = useState(false);
@@ -527,6 +535,14 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
   const [savedPeople, setSavedPeople] = useState<SavedPersonRow[] | null>(null);
   const [loadingPeople, setLoadingPeople] = useState(false);
   const [selectedPersonId, setSelectedPersonId] = useState<string>('');
+  // AURA-MP-3 -- My People is effective (public flag AND the server's
+  // x-aura-my-people: enabled on GET /api/people). Then a selected person
+  // uses the MAIN Find a Time route (Panchang ranking + the user's own
+  // availability and Daily Rhythm) and becomes the saved plan's link; the
+  // person's availability is never assumed. Otherwise the pre-existing
+  // shared route is used, unchanged.
+  const [peopleEffective, setPeopleEffective] = useState(false);
+  const [quickAddOpen, setQuickAddOpen] = useState(false);
   const [sharedFindResult, setSharedFindResult] = useState<EverydaySharedCandidate[] | null>(null);
   const [momentSavingKey, setMomentSavingKey] = useState<string | null>(null);
   const [momentSavedKeys, setMomentSavedKeys] = useState<Set<string>>(() => new Set());
@@ -668,6 +684,21 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
     if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'smooth' });
   }, [initialActivity, initialActivityKey, initialActivityId, initialHorizon]);
 
+  // AURA-MP-3 -- the My People part of a hand-off (same key as the activity
+  // prefill above). Only fields the hand-off carries are applied.
+  useEffect(() => {
+    if (!initialPersonId) return;
+    setSelectedPersonId(initialPersonId);
+    if (initialCustomStartDate && initialCustomEndDate) {
+      setHorizon('CUSTOM');
+      setCustomStartDate(initialCustomStartDate);
+      setCustomEndDate(initialCustomEndDate);
+    }
+    setSharedFindResult(null);
+    setQuickAddOpen(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialActivityKey, initialPersonId]);
+
   useEffect(() => {
     let cancelled = false;
     const loadPlans = async () => {
@@ -724,12 +755,19 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
     return selection.activityId ? getActivityDefinition(selection.activityId) : undefined;
   }, [taskTitle, prefillActivityId]);
   const showPersonPicker = planMode === 'FIND' && resolvedActivityDefinition?.socialMode !== undefined && resolvedActivityDefinition.socialMode !== 'SOLO';
+  // AURA-MP-3 -- the person a saved plan is linked to: only a VISIBLE,
+  // explicit selection, and only while My People is effective.
+  const linkedPerson = peopleEffective && showPersonPicker && selectedPersonId ? savedPeople?.find((p) => p.id === selectedPersonId) ?? null : null;
 
   useEffect(() => {
     if (!showPersonPicker || savedPeople !== null || loadingPeople) return;
     setLoadingPeople(true);
     fetch('/api/people')
-      .then((res) => (res.ok ? res.json() : Promise.reject(new Error('Unable to load people.'))))
+      .then((res) => {
+        if (!res.ok) return Promise.reject(new Error('Unable to load people.'));
+        setPeopleEffective(isMyPeopleClientEffective(isMyPeoplePresentationEnabled(), res.headers?.get(MY_PEOPLE_CAPABILITY_HEADER) ?? null));
+        return res.json();
+      })
       .then((data: SavedPersonRow[]) => setSavedPeople(data))
       .catch(() => setSavedPeople([]))
       .finally(() => setLoadingPeople(false));
@@ -1041,6 +1079,10 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
           // longer holds (see POST /api/plans's own handling) -- this is
           // advisory intent, not a trusted fact.
           goalActivityId: selectedGoalActivityId ?? null,
+          // AURA-MP-3 -- the explicitly selected person (My People effective
+          // only). The server owner-validates it (404) and ignores it while
+          // My People is disabled.
+          ...(linkedPerson ? { savedPersonId: linkedPerson.id } : {}),
           // AURA-HPG5-V2-I1 -- only Find a Time's "Use this time" opts in to
           // REJECT_ACTIVE_OVERLAP; "Save anyway" sends ALLOW. Every other
           // save omits the field (manual-overlap contract unchanged).
@@ -1332,7 +1374,9 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
       // never findSharedMuhurthams (see everydayTimingFit.ts's own doc
       // comment for why). Otherwise, existing GENERAL/personalized FIND is
       // completely unchanged.
-      if (selectedPersonId && selection.activityId) {
+      // AURA-MP-3 -- with My People effective the selected person is only the
+      // plan's link: the MAIN route below ranks the user's own times.
+      if (selectedPersonId && selection.activityId && !peopleEffective) {
         const res = await withFindTimeTimeout(fetch('/api/timing-search/shared', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1656,7 +1700,12 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
     // (another plan created since the search): the server re-checks overlap
     // inside the save transaction and refuses with PLAN_OVERLAP instead of
     // saving silently.
-    void saveOpportunity(findCandidateKey(candidate), planPayloadFromCandidate(candidate, durationMinutes, undefined, undefined, taskTitle), resolvedActivityDefinition?.id, { overlapPolicy: 'REJECT_ACTIVE_OVERLAP' });
+    // AURA-MP-3 -- a linked person adds the existing "Planned with {name}" note (D6);
+    // the user's own title (taskTitle) is passed either way (HPG-FIX-01).
+    const payload = linkedPerson
+      ? planPayloadFromCandidate(candidate, durationMinutes, linkedPerson.name, undefined, taskTitle)
+      : planPayloadFromCandidate(candidate, durationMinutes, undefined, undefined, taskTitle);
+    void saveOpportunity(findCandidateKey(candidate), payload, resolvedActivityDefinition?.id, { overlapPolicy: 'REJECT_ACTIVE_OVERLAP' });
   };
 
   // AURA-HPG5-V2-I1 -- the two explicit choices after a PLAN_OVERLAP refusal.
@@ -1914,10 +1963,38 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
                 onClick={() => { setSelectedPersonId(person.id); setFindResult(null); setSharedFindResult(null); bumpRequestGeneration(); }}
               />
             ))}
-            <button type="button" onClick={onOpenPeople} style={moreChipStyle}>
-              + Choose someone
-            </button>
+            {peopleEffective ? (
+              // AURA-MP-3 -- quick-add reuses the My People form in place, so the
+              // activity, dates and preferences on this screen are kept.
+              <button type="button" onClick={() => setQuickAddOpen(true)} style={moreChipStyle} aria-expanded={quickAddOpen}>
+                + Add someone
+              </button>
+            ) : (
+              <button type="button" onClick={onOpenPeople} style={moreChipStyle}>
+                + Choose someone
+              </button>
+            )}
           </div>
+          {peopleEffective && quickAddOpen && (
+            <div data-testid="plan-quick-add" style={{ marginTop: 12 }}>
+              <PersonForm
+                mode="ADD"
+                myPeopleEffective
+                serverEnabled
+                onSaved={(createdId?: string) => {
+                  setQuickAddOpen(false);
+                  setSavedPeople(null); // re-fetch, then select the new person
+                  if (createdId) { setSelectedPersonId(createdId); setFindResult(null); setSharedFindResult(null); bumpRequestGeneration(); }
+                }}
+                onCancel={() => setQuickAddOpen(false)}
+              />
+            </div>
+          )}
+          {linkedPerson && (
+            <p data-testid="plan-with-person-note" style={{ fontSize: 12, color: '#94a3b8', marginTop: 10, lineHeight: 1.5 }}>
+              Planning with {linkedPerson.name}. Aura suggests times from your own calendar, rhythm and Panchang. Check that it works for {linkedPerson.name} too.
+            </p>
+          )}
           {savedPeople && savedPeople.length === 0 && (
             <p style={{ fontSize: 12, color: '#94a3b8', marginTop: 10, lineHeight: 1.5 }}>
               Add someone to find timings that work well for both of you.
