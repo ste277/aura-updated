@@ -75,6 +75,9 @@ const IMAGE_INPUT_SENTINELS = [
   // AURA-PALM-04-I3 -- the feature review and confirmation (same file, same production stub); used at runtime
   'palm-04-feature-review@0.1.0', // PalmImageInput.tsx review (data-version)
   'Confirming records these features for this photo only, in this browser tab. Nothing is stored or sent, and no reading is produced in this version.', // review scope note
+  // AURA-PALM-04-I5 -- the camera adapter (lib/palm-analysis/camera.ts) and its UI note (PalmImageInput.tsx); used at runtime
+  'palm-04-camera@0.1.0', // camera.ts (toJSON kind) and PalmImageInput.tsx camera note (data-version)
+  'The camera turns on only when you choose Use camera, takes one still photo on this device and then turns off. No video is recorded, the microphone is not used, and nothing is uploaded or saved.', // PalmImageInput.tsx camera note
 ];
 
 // AURA-PALM-G5-I1-R2 (R1-F3) -- signatures of the MediaPipe runtime itself.

@@ -137,9 +137,15 @@ async function run() {
   // ============================================================ B. structure + a11y
   const ctl = makeDetectorControl();
   const deps = { detectorFactory: ctl.factory, normalizeEnv: { createCanvas, decode }, yieldToUi: () => Promise.resolve() };
-  const h = await mount(React.createElement(PalmImageInput, { sessionDeps: deps }));
+  // AURA-PALM-04-I5-R1 (50362 F3): this G5 upload suite runs with an EXPLICITLY camera-unsupported fixture (no browser
+  // camera API), instead of relying on jsdom happening to lack one. The camera-capable cases -- development gate closed
+  // and open, mount / upload / restart, explicit start -- are in test/palm04I5CameraJsdom.test.ts (J20-J27).
+  const UNSUPPORTED_CAMERA = Object.freeze({ secureContext: true, getUserMedia: null });
+  const h = await mount(React.createElement(PalmImageInput, { sessionDeps: deps, cameraEnv: UNSUPPORTED_CAMERA }));
   const c = h.container;
   const uploadBtn = () => q(c, 'palm-upload-button') as HTMLButtonElement;
+  await flush();
+  check('B6-fixture. (P4-I5-R1) the fixture is explicitly camera-unsupported, and the page says only upload is offered', q(c, 'palm-camera-unavailable')?.getAttribute('data-support') === 'unsupported');
   const input = c.querySelector<HTMLInputElement>('input[type="file"]')!;
   check('B1. section is labelled by its heading', (() => { const s = q(c, 'palm-image-input')!; const id = s.getAttribute('aria-labelledby'); return Boolean(id) && document.getElementById(id!)?.textContent === 'Check a palm photo'; })());
   check('B2. Upload photo is a native button with a visible name', uploadBtn().tagName === 'BUTTON' && uploadBtn().getAttribute('type') === 'button' && uploadBtn().textContent === 'Upload photo');

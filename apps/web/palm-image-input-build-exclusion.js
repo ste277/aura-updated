@@ -7,7 +7,8 @@
 //   - image input enabled for local development (`next dev` +
 //     NEXT_PUBLIC_AURA_PALM_IMAGE_INPUT=g5-i1-dev, lib/palm-analysis/gate.ts)
 //     -> does NOT imply production release;
-//   - camera input (G5-I2, not implemented) -> does NOT imply release.
+//   - camera input (AURA-PALM-04-I5, lib/palm-analysis/camera.ts, development only)
+//     -> does NOT imply release; it is removed with the rest of lib/palm-analysis.
 //
 // Production release of image input is NOT authorised. So every production
 // build (next build: CI, Vercel Preview/Production, Docker) unconditionally:
