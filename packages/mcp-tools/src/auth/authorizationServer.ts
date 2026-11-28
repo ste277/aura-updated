@@ -869,7 +869,9 @@ ${duration}${manage}
     const origin = req.headers.origin;
     if (origin !== undefined && origin !== issuer) return sendPage(res, 403, 'Forbidden', '<h1>Forbidden</h1>');
     const form = await readForm(req, requestBudgetRemainingMs());
-    if (form === BODY_TIMED_OUT) {
+    // I2-R4 (39254): the absolute monotonic deadline is authoritative, not the body-read timer (a
+    // stalled event loop runs it late). Recheck it after the body completed, before any form use.
+    if (form === BODY_TIMED_OUT || !(requestBudgetRemainingMs() > 0)) {
       // I2-R3: the body did not arrive inside the consent deadline. Answer 503 and close the
       // connection, so a late body is never read or processed; nothing has been written.
       audit({ event: 'oauth.error', outcome: 'store_unavailable', clientId: client.client_id, errorCode: 'ConsentBodyDeadline' });

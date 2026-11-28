@@ -1407,6 +1407,14 @@ jobs:
           AURA_MCP_OAUTH_DATABASE_URL: postgresql://aura_ci:aura_ci@localhost:5432/aura_ci_mcp_oauth
           AUTH_SECRET: ci-i2r3-synthetic-session-secret-0123456789
         run: npx ts-node test/authSessionI2R3Db.test.ts
+      # AURA-AUTH-SESSION-01-I2-R4 (39255): absolute consent deadline rechecked
+      # after body completion (late timer), and the initial session-outage 503
+      # + Retry-After on GET/POST /api/mcp/connections. Same two databases.
+      - name: Run session I2-R4 focused regression DB test (AUTH-SESSION-01-I2-R4)
+        env:
+          AURA_MCP_OAUTH_DATABASE_URL: postgresql://aura_ci:aura_ci@localhost:5432/aura_ci_mcp_oauth
+          AUTH_SECRET: ci-i2r4-synthetic-session-secret-0123456789
+        run: npx ts-node test/authSessionI2R4Db.test.ts
       - name: Verify every repository migration was recorded as applied
         run: |
           set -euo pipefail

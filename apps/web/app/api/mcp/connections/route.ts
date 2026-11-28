@@ -36,11 +36,13 @@ async function handle(req: Request): Promise<Response> {
     if (config && gate.mode === 'local') {
       const { getLocalMcpAuth, sessionUserFromCookie } = await import('../../../../lib/mcpLocalOAuth');
       // AURA-AUTH-SESSION-01-I2 (D6): database-backed session; an outage is 503, never 401.
+      // I2-R4 (39254): the initial verification uses the same typed mapping (503 + Retry-After).
       let userId: string | null;
       try {
         userId = await sessionUserFromCookie(req.headers.get('cookie'));
-      } catch {
-        return json(503, { error: 'session_unavailable' });
+      } catch (err) {
+        if (isUnavailable(err)) return unavailable();
+        throw err;
       }
       if (!userId) return json(401, { error: 'sign_in_required' });
       const local = getLocalMcpAuth(config);
