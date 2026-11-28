@@ -13,6 +13,7 @@ import type { NotificationPrefs } from '../lib/windowNotifications';
 import * as theme from './theme';
 import { colors, spacing, typography, radius } from './theme';
 import { PageHeader, SectionHeader, SurfaceCard, DestructiveButton } from './ui';
+import { isMyPeoplePresentationEnabled } from '../lib/myPeopleGate';
 
 interface YouViewProps {
   userName: string;
@@ -175,7 +176,12 @@ export function YouView({
         <SectionHeader label="Your Aura" />
         <SurfaceCard padding={0} style={{ overflow: 'hidden' }}>
           <SettingsRow icon="✨" title="Birth Chart" detail="View personal timing map" onClick={onOpenChart} />
-          <SettingsRow icon="👥" title="People" detail="Manage the people you plan with" onClick={onOpenPeople} />
+          {/* AURA-MP-2 (D10): renamed only where the My People presentation flag is on (off in Production). */}
+          {isMyPeoplePresentationEnabled() ? (
+            <SettingsRow icon="👥" title="My People" detail="The people who matter most" onClick={onOpenPeople} />
+          ) : (
+            <SettingsRow icon="👥" title="People" detail="Manage the people you plan with" onClick={onOpenPeople} />
+          )}
           <SettingsRow icon="🔗" title="Your Moments" detail="Moments you've created and their responses" onClick={onOpenSharedMoments} badgeCount={sharedMomentsUnreadCount} />
         </SurfaceCard>
       </div>
