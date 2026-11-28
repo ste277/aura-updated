@@ -80,7 +80,7 @@ Local on `11dad48` (clean tree; PostgreSQL 16, Chromium 151.0.7922.34, Node v26.
 | R18 jsdom | 27/27 |
 | R18 Chromium + PostgreSQL | **7/7** |
 | R17 / R16 browser regressions on R18 | 11/11, 15/15 |
-| R15 browser regression | 15/15 after the test-only cut-acknowledgement adaptation (§5 item 4) in `82d5f51` |
+| R15 browser regression | 15/15 after the test-only cut-acknowledgement adaptation (§5 item 4, the follow-up commit) |
 
 Logs: `docs/android/evidence/rel04-r18/local-*-11dad48/`, `local-r18/`. The follow-up commit changes only `test/rel04ActivityOperationHomeChromiumDb.test.ts` and docs. Hosted CI: §6.1, added after the run.
 
