@@ -15,6 +15,7 @@
 | `src/library.mjs`, `src/schema-validate.mjs`, `src/packaged.mjs` | Loader and lint. `packaged.mjs` reads the two library files once, as bytes; checks them against the C1 rev. 4 SHA-256 digests; parses and deep-freezes them at initialization; and validates them once. No raw catalogue or schema object is exported (R4). |
 | `src/descriptors.mjs`, `src/grid.mjs` | Descriptors and the I1 numerical contract |
 | `reference/` | The C1 reference oracle and checker, corrected in R2. The originals are byte-identical in `reference/original-c1-rev4/`; see `reference/README.md`. |
+| `preview/` | **PALM-04-I4 standalone reading preview harness (G-6, D1).** It replays confirmed synthetic scanner-journey fixtures into a reading (JSON or HTML). See `preview/README.md`. |
 | `test/` | `node --test test/*.test.mjs`. Needs `python3`. End-to-end tests: `test/palm03E1Engine.test.ts` at the repo root. |
 
 ## Interface and guarantees (R3)

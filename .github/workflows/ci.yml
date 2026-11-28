@@ -159,6 +159,11 @@ jobs:
       # switch itself, and special-day validation. Pure, no database.
       - name: Run AURA-MP-1 My People request validation test
         run: npx ts-node test/myPeopleRequest.test.ts
+      # AURA-MP-2 (62016) -- pure special-day UI helpers: formatting, optional
+      # year, 29 February, reminder choices and the untouched / changed /
+      # cleared payload contract.
+      - name: Run AURA-MP-2 My People special-day UI helpers test
+        run: npx ts-node test/myPeopleMp2Ui.test.ts
       # AURA-MP-1 -- special-day date logic: unknown year, 29 Feb, rollover,
       # the user's local midnight, surfacing windows. Pure, no database.
       - name: Run AURA-MP-1 special-day date logic test
@@ -348,6 +353,12 @@ jobs:
       # sending chart keys, chart people unchanged.
       - name: Run AURA-MP-1 People screen null-chart (jsdom) test
         run: npx ts-node --project tsconfig.jsdom-tests.json test/peopleViewNullChartJsdom.test.ts
+      # AURA-MP-2 (62016 completion) -- the people list annotates a 29 February
+      # day observed on 28 February "(for 29 Feb)" like Coming up and detail.
+      # (jsdom: must run after the apps/web dependency install, like the
+      # People null-chart test above.)
+      - name: Run AURA-MP-2 My People leap-day list (jsdom) test
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/myPeopleMp2LeapDayJsdom.test.ts
       # AURA-REM-01 (PV-F03) -- mounted DeviceNotificationSettings in every
       # permission/availability state (never "on" without a running
       # scheduler), dispatch auth, too-late cutoff, no page-load prompt.
@@ -1150,6 +1161,14 @@ jobs:
         env:
           PALM_BROWSER_CHANNEL: chrome
         run: npx ts-node test/palm04I3ReviewBrowser.test.ts
+      - name: Run integrated scanner journey component tests (PALM-04-I4, jsdom)
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/palm04I4JourneyJsdom.test.ts
+      - name: Run integrated scanner journey browser tests (PALM-04-I4, runner's installed Google Chrome, synthetic, no network)
+        env:
+          PALM_BROWSER_CHANNEL: chrome
+        run: npx ts-node test/palm04I4JourneyBrowser.test.ts
+      - name: Run synthetic feature-to-reading journey through the standalone E1 preview harness (PALM-04-I4)
+        run: npx ts-node test/palm04I4FeatureToReading.test.ts
       # PALM-03-E1: development-only personalised interpretation engine (synthetic
       # observations only; unreviewed content). The package suite compares the engine
       # with the unmodified C1 reference oracle (python3, preinstalled on the runner):
@@ -1954,3 +1973,9 @@ jobs:
       # submits a timezone + location combination the API rejects (bare UTC).
       - name: Run AURA-MP-1 R4 form contract and chart preservation DB test
         run: npx ts-node --project tsconfig.jsdom-tests.json test/myPeopleR4Db.test.ts
+      # AURA-MP-2 (62016) -- My People journeys on the real screen + real API +
+      # real database: Add / View / Edit / Delete, special days (optional year,
+      # 29 February, reminders), explicit birthday copy, Coming up, owner
+      # isolation, deletion cascade and the feature switch.
+      - name: Run AURA-MP-2 My People journeys DB test
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/myPeopleMp2Db.test.ts

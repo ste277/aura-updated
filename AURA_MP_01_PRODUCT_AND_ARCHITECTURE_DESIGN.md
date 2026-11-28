@@ -430,12 +430,14 @@ Each PR can ship dark behind the My People switch (D9, §11.5). None of them tou
 | PR | Scope | Migration | Risk |
 |---|---|---|---|
 | **MP-1 Foundation** | See ticket. Schema, partial PATCH, occasions API, null-guards at all 9 read sites, null-safe legacy People screen, atomic delete, export, switch | `0056_my_people_foundation` (additive) | Low–medium: relaxing NOT NULL is the only behavioural change. Covered by the null-guard and switch-rollback tests |
-| **MP-2 My People UI** | Overview, add/edit (progressive), detail, upcoming list; You row rename; Plan quick-add | none | Low |
-| **MP-3 Plan with a person** | `call`/`video-call` catalog entries, `savedPersonId` on `/api/plans`, Person → Find a Time and Occasion → prepare flows, Home occasion card + dismissal via `ReminderAttention` | none (column from MP-1) | Low–medium: Home placement. Reuse Home recomposition tests |
+| **MP-2 My People UI** | Overview, add/edit, detail, upcoming list, special days with in-app reminder choice; You row rename. **Scope decisions (62016, 2026-11-28):** relationship dropdown and non-collapsible form accepted; Plan quick-add moved to MP-3; location/interests editing deferred (existing stored values preserved) | none | Low |
+| **MP-3 Plan with a person** | Plan "Who's this with?" + Add someone quick-add (moved from MP-2), `call`/`video-call` catalog entries, `savedPersonId` on `/api/plans`, Person → Find a Time and Occasion → prepare flows, Home occasion card + dismissal via `ReminderAttention` | none (column from MP-1) | Low–medium: Home placement. Reuse Home recomposition tests |
 | — | **Validation read-out** (PV-01 style, 5–8 users): do people add dates? do occasion cards lead to plans? any guilt signals? | | |
 | **MP-4 Relationship Rhythms** | `GoalActivity.savedPersonId`, "Keep in touch" from person detail, parent-goal rule (D8), pause rhythm on person delete (D7) | `0056` additive | Medium |
 
 Tests per PR: unit (validation, occasion maths incl. Feb 29, year-boundary, user-tz edge at midnight), DB (cross-owner isolation for every route, deletion transaction, export), jsdom (forms: name-only save, chart section clear), Home recomposition (card absent or present). Each file is wired explicitly into `.github/workflows/ci.yml`.
+
+**Deferred, not scheduled:** editing a person's location label / timezone and interests in the My People UI. The API and stored values are unchanged and preserved; the UI neither shows nor sends them.
 
 ---
 
