@@ -66,11 +66,14 @@ export function KeepInTouchSection({ personId, personName }: { personId: string;
     setBusy(row.id);
     try {
       if (what === 'REMOVE') await send('POST', `/api/goals/${row.goalId}/activities/${row.id}/dismiss`);
-      else await send('PATCH', `/api/goals/${row.goalId}/activities/${row.id}/rhythm`, { paused: what === 'PAUSE' });
+      // savedPersonId: the person this was done for -- if they were removed
+      // meanwhile, the server refuses (409) instead of resuming a paused rhythm.
+      else await send('PATCH', `/api/goals/${row.goalId}/activities/${row.id}/rhythm`, { paused: what === 'PAUSE', savedPersonId: personId });
       setConfirmingRemove(null);
       reload();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong. Nothing was changed.');
+      reload();
     } finally {
       setBusy(null);
     }
@@ -87,7 +90,7 @@ export function KeepInTouchSection({ personId, personName }: { personId: string;
       <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.md, marginTop: spacing.sm }}>
         {(rows ?? []).map((r) =>
           editingId === r.id ? (
-            <EditRhythmForm key={r.id} row={r} onDone={() => { setEditingId(null); reload(); }} onCancel={() => setEditingId(null)} />
+            <EditRhythmForm key={r.id} row={r} personId={personId} onDone={() => { setEditingId(null); reload(); }} onCancel={() => setEditingId(null)} />
           ) : (
             <div key={r.id} data-testid="person-rhythm" style={{ display: 'flex', gap: spacing.md, alignItems: 'flex-start' }}>
               <span aria-hidden style={{ fontSize: 20, lineHeight: '24px' }}>🔁</span>
@@ -229,7 +232,7 @@ function NewRhythmForm({ personId, personName, onDone, onCancel }: { personId: s
   );
 }
 
-function EditRhythmForm({ row, onDone, onCancel }: { row: PersonRhythmRow; onDone: () => void; onCancel: () => void }) {
+function EditRhythmForm({ row, personId, onDone, onCancel }: { row: PersonRhythmRow; personId: string; onDone: () => void; onCancel: () => void }) {
   const [target, setTarget] = useState(row.targetPerWeek ?? 1);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -239,7 +242,7 @@ function EditRhythmForm({ row, onDone, onCancel }: { row: PersonRhythmRow; onDon
     setSaving(true);
     setError('');
     try {
-      await send('PATCH', `/api/goals/${row.goalId}/activities/${row.id}/rhythm`, { rhythm: { kind: 'N_PER_WEEK', targetPerWeek: target } });
+      await send('PATCH', `/api/goals/${row.goalId}/activities/${row.id}/rhythm`, { rhythm: { kind: 'N_PER_WEEK', targetPerWeek: target }, savedPersonId: personId });
       onDone();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not save. Nothing was changed.');

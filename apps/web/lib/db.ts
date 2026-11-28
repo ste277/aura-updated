@@ -3866,20 +3866,29 @@ export async function listPersonRhythms(ownerUserId: string, personId: string): 
  * plan's foreign-key check takes no lock out of order; if the person was
  * deleted first, the rhythm is unlinked and this writes nothing.
  */
-export async function carryGoalActivityPersonToPlan(userId: string, goalActivityId: string, plannedActivityId: string, client: PoolClient): Promise<void> {
-  await client.query(
+export async function carryGoalActivityPersonToPlan(userId: string, goalActivityId: string, plannedActivityId: string, client: PoolClient): Promise<PlannedActivity | null> {
+  const carried = await client.query(
     `UPDATE "PlannedActivity" p
         SET "savedPersonId" = ga."savedPersonId", "updatedAt" = now()
        FROM "GoalActivity" ga
       WHERE p.id = $1 AND p."userId" = $2 AND p."savedPersonId" IS NULL
-        AND ga.id = $3 AND ga."userId" = $2 AND ga."savedPersonId" IS NOT NULL`,
+        AND ga.id = $3 AND ga."userId" = $2 AND ga."savedPersonId" IS NOT NULL
+      RETURNING p.*`,
     [plannedActivityId, userId, goalActivityId]
   );
+  // AURA-MP-4-R1 (F2): the persisted row when a person was carried, so the
+  // caller's success response reports the committed association; null when
+  // nothing changed (the plan as inserted is already current).
+  return carried.rows[0] ?? null;
 }
 
 export type UpdateGoalActivityRhythmSettingsResult =
   | { status: 'UPDATED'; activity: GoalActivity }
   | { status: 'NOT_FOUND' }
+  // AURA-MP-4-R1 -- the request was made for a person-linked rhythm whose
+  // person was removed (and the rhythm paused, D7) before this update could
+  // apply. Nothing is written; the caller answers 409.
+  | { status: 'PERSON_LINK_CHANGED' }
   | { status: 'INVALID'; error: string };
 
 /**
@@ -3905,11 +3914,28 @@ export type UpdateGoalActivityRhythmSettingsResult =
  * client value first (validateGoalActivityRhythm,
  * parseGoalActivityRhythmPreferencesPatch).
  */
-export async function updateGoalActivityRhythmSettings(userId: string, goalId: string, goalActivityId: string, update: GoalActivityRhythmSettingsUpdate): Promise<UpdateGoalActivityRhythmSettingsResult> {
+/** AURA-MP-4-R1 -- the person the caller acted for (My People passes it). */
+export interface UpdateGoalActivityRhythmSettingsOptions {
+  expectedSavedPersonId?: string;
+}
+
+export async function updateGoalActivityRhythmSettings(userId: string, goalId: string, goalActivityId: string, update: GoalActivityRhythmSettingsUpdate, options?: UpdateGoalActivityRhythmSettingsOptions): Promise<UpdateGoalActivityRhythmSettingsResult> {
   const client = await beginTransaction();
   try {
+    // AURA-MP-4-R1 (D7): a person DELETE pauses and unlinks this rhythm while
+    // holding its row lock. This update must not undo that pause after waiting
+    // for the lock, so the person link is read BEFORE the lock and compared
+    // with the locked row: a link that vanished in between means the request
+    // was based on a person who no longer exists -> PERSON_LINK_CHANGED, no
+    // write. READ COMMITTED is explicit (MP-3-R2) so the locked read sees the
+    // committed deletion rather than failing on a REPEATABLE READ default. A
+    // rhythm already unlinked when the request starts can still be resumed
+    // deliberately; a caller that knows the person it acted for (My People)
+    // also passes expectedSavedPersonId, which covers a stale screen.
+    await client.query('SET TRANSACTION ISOLATION LEVEL READ COMMITTED');
+    const linkBeforeLock = await client.query(`SELECT "savedPersonId" FROM "GoalActivity" WHERE id = $1 AND "goalId" = $2 AND "userId" = $3`, [goalActivityId, goalId, userId]);
     const current = await client.query(
-      `SELECT "rhythmKind", "rhythmTargetPerWeek", "rhythmPreferredWeekdays", "rhythmPreferredTimeOfDay", "rhythmPreferredDurationMinutes", "dailyFrequencyKind", "dailyFrequencyLimit"
+      `SELECT "rhythmKind", "rhythmTargetPerWeek", "rhythmPreferredWeekdays", "rhythmPreferredTimeOfDay", "rhythmPreferredDurationMinutes", "dailyFrequencyKind", "dailyFrequencyLimit", "savedPersonId"
        FROM "GoalActivity" WHERE id = $1 AND "goalId" = $2 AND "userId" = $3 FOR UPDATE`,
       [goalActivityId, goalId, userId]
     );
@@ -3918,6 +3944,12 @@ export async function updateGoalActivityRhythmSettings(userId: string, goalId: s
       return { status: 'NOT_FOUND' };
     }
     const row = current.rows[0];
+    const linkedBefore: string | null = linkBeforeLock.rows[0]?.savedPersonId ?? null;
+    const linkedNow: string | null = row.savedPersonId ?? null;
+    if ((linkedBefore !== null && linkedNow !== linkedBefore) || (options?.expectedSavedPersonId !== undefined && linkedNow !== options.expectedSavedPersonId)) {
+      await client.query('ROLLBACK');
+      return { status: 'PERSON_LINK_CHANGED' };
+    }
     const resolved = resolveGoalActivityRhythmSettingsUpdate(
       {
         rhythm: normalizeGoalActivityRhythm({ rhythmKind: row.rhythmKind, rhythmTargetPerWeek: row.rhythmTargetPerWeek }),

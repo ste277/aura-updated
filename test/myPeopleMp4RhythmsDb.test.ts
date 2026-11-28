@@ -63,7 +63,11 @@ async function installBarriers() {
     BEGIN
       -- Nested IFs: PL/pgSQL does not short-circuit AND, and NEW.title
       -- exists only on GoalActivity.
-      IF TG_TABLE_NAME = 'GoalActivity' THEN
+      IF TG_TABLE_NAME = 'GoalActivity' AND TG_OP = 'UPDATE' THEN
+        -- R1: gate a rhythm-settings write (it keeps the link) but never the
+        -- person delete's own pause+unlink (which clears it).
+        IF NEW."savedPersonId" IS NOT NULL THEN target := NEW.id; END IF;
+      ELSIF TG_TABLE_NAME = 'GoalActivity' THEN
         target := NEW.title;
         IF NEW.title LIKE 'mp4-observe %' THEN
           INSERT INTO mp4_isolation VALUES (NEW.title, current_setting('transaction_isolation'));
@@ -81,11 +85,13 @@ async function installBarriers() {
   await q(`CREATE TRIGGER mp4_pause_rhythm_insert BEFORE INSERT ON "GoalActivity" FOR EACH ROW EXECUTE FUNCTION mp4_pause('rhythm-insert')`);
   await q(`CREATE TRIGGER mp4_pause_occurrence_insert BEFORE INSERT ON "GoalActivityOccurrence" FOR EACH ROW EXECUTE FUNCTION mp4_pause('occurrence-insert')`);
   await q(`CREATE TRIGGER mp4_pause_person_delete BEFORE DELETE ON "SavedPerson" FOR EACH ROW EXECUTE FUNCTION mp4_pause('person-delete')`);
+  await q(`CREATE TRIGGER mp4_pause_rhythm_update BEFORE UPDATE ON "GoalActivity" FOR EACH ROW EXECUTE FUNCTION mp4_pause('rhythm-update')`);
 }
 async function removeBarriers() {
   await q(`DROP TRIGGER IF EXISTS mp4_pause_rhythm_insert ON "GoalActivity"`);
   await q(`DROP TRIGGER IF EXISTS mp4_pause_occurrence_insert ON "GoalActivityOccurrence"`);
   await q(`DROP TRIGGER IF EXISTS mp4_pause_person_delete ON "SavedPerson"`);
+  await q(`DROP TRIGGER IF EXISTS mp4_pause_rhythm_update ON "GoalActivity"`);
   await q(`DROP FUNCTION IF EXISTS mp4_pause()`);
   await q(`DROP TABLE IF EXISTS mp4_gate`);
   await q(`DROP TABLE IF EXISTS mp4_isolation`);
@@ -164,8 +170,9 @@ async function main() {
     const legacyGoal = await call(goalsRoute.POST(req(token, { title: `${tag} legacy goal` })));
     const legacyAct = await call(goalActivitiesRoute.POST(req(token, { title: 'Read', rhythm: { kind: 'N_PER_WEEK', targetPerWeek: 2 } }), { params: { goalId: legacyGoal.body.id ?? legacyGoal.body.goal?.id } }));
     check('Existing Goals paths are unchanged: a goal and rhythm created the old way have no person (no backfill, no association)', legacyGoal.status < 300 && legacyAct.status < 300 && (await ga(legacyAct.body.id))?.savedPersonId === null, { legacyGoal, legacyAct });
-    const nonNull = Number((await q(`SELECT count(*) FROM "GoalActivity" WHERE "savedPersonId" IS NOT NULL`)).rows[0].count);
-    check('0058: no existing GoalActivity row carries a person before MP-4 creates one', nonNull === 0, nonNull);
+    // Scoped to this test's own accounts: other suites in the same CI database may legitimately hold linked rows.
+    const nonNull = Number((await q(`SELECT count(*) FROM "GoalActivity" WHERE "savedPersonId" IS NOT NULL AND "userId" = ANY($1::text[])`, [[user.id, other.id]])).rows[0].count);
+    check('0058: none of this account\'s GoalActivity rows carries a person before MP-4 creates one', nonNull === 0, nonNull);
   }
 
   // ================= switch off =================
@@ -257,6 +264,7 @@ async function main() {
     const p = raviPlanId ? await plan(raviPlanId) : null;
     const occ = (await q(`SELECT 1 FROM "GoalActivityOccurrence" WHERE "goalActivityId" = $1`, [raviRhythm.id])).rowCount;
     check('A plan made for the rhythm (POST /api/plans with goalActivityId) is linked to the person and counts as an occurrence', made.status === 200 && p?.savedPersonId === ravi && occ === 1, { made: made.status, body: made.body, link: p?.savedPersonId });
+    check('R1 F2: the Plan success response reports the COMMITTED person association (same as the stored row)', made.body?.savedPersonId === p?.savedPersonId && made.body?.savedPersonId === ravi, { response: made.body?.savedPersonId, stored: p?.savedPersonId });
     const moved = await call(moveRoute.POST(req(token, { newStartAt: nextStart().toISOString() }), { params: { planId: raviPlanId } }));
     const succ = (await q(`SELECT * FROM "PlannedActivity" WHERE "rescheduledFromPlanId" = $1`, [raviPlanId])).rows[0];
     check('Moving that plan keeps the person on the new plan (MP-3 Move contract)', moved.status === 200 && succ?.savedPersonId === ravi, { moved: moved.status });
@@ -321,31 +329,74 @@ async function main() {
       check('Person DELETE first, planning second: planning waits on the person, then the now-paused rhythm refuses the plan (4xx, never a deadlock 500); no plan written', r.paused && r.secondBlockedOn !== null && /FOR KEY SHARE/.test(r.secondBlockedOn) && r.first.status === 200 && r.second.status >= 400 && r.second.status < 500 && plans1 === plans0 && (await ga(rh.id)).rhythmPausedAt !== null, { r: { first: r.first.status, second: r.second.status, body: r.second.body } });
     }
 
-    // ================= concurrency: person DELETE vs resume / edit =================
-    {
-      const p = await mkPerson('Race resume A');
-      const rh = (await createRhythm(p, newGoalBody('A', `${tag} resume A`))()).body;
+    // ================= concurrency: person DELETE vs resume / edit (R1, D7) =================
+    // Final state after EVERY ordering: the rhythm stays PAUSED and unlinked, and planning for it is refused.
+    const planningRefused = async (rh: any) => { const r = await planFor(rh.id, 'Plan after race')(); return r.status >= 400 && r.status < 500; };
+    const linkedPaused = async (personName: string, title: string) => {
+      const p = await mkPerson(personName);
+      const rh = (await createRhythm(p, newGoalBody(personName, title, { targetPerWeek: 4 }))()).body;
       await settings(rh.goalId, rh.id, { paused: true })();
-      const r = await race({ kind: 'person-delete', id: p, at: /DELETE FROM "SavedPerson"/ }, deletePerson(p), settings(rh.goalId, rh.id, { paused: false, rhythm: { kind: 'N_PER_WEEK', targetPerWeek: 2 } }), /"GoalActivity"/);
+      return { p, rh };
+    };
+    {
+      // Resume first: the resume's UPDATE is paused holding the rhythm row; the DELETE then waits on it.
+      const { p, rh } = await linkedPaused('Race resume A', `${tag} resume A`);
+      const r = await race({ kind: 'rhythm-update', id: rh.id, at: /UPDATE "GoalActivity" SET/ }, settings(rh.goalId, rh.id, { paused: false }), deletePerson(p), /UPDATE "GoalActivity"/);
       const row = await ga(rh.id);
-      check('Person DELETE first, resume + edit second: the edit waits on the rhythm row, then applies; no link to the deleted person remains', r.paused && r.secondBlockedOn !== null && r.first.status === 200 && r.second.status === 200 && row.savedPersonId === null && row.rhythmTargetPerWeek === 2, { r: { first: r.first.status, second: r.second.status }, link: row.savedPersonId });
+      check('Resume first, person DELETE second: the DELETE waits on the rhythm row; both 200; the rhythm ends PAUSED and unlinked (D7); planning is refused', r.paused && r.secondBlockedOn !== null && r.first.status === 200 && r.second.status === 200 && row.savedPersonId === null && row.rhythmPausedAt !== null && (await planningRefused(rh)), { r: { first: r.first.status, second: r.second.status, blocked: r.secondBlockedOn }, link: row.savedPersonId, paused: row.rhythmPausedAt });
     }
     {
-      // Resume / edit cannot be paused mid-way by the gate (no insert), so this order is
-      // exercised by holding the rhythm row lock in a separate transaction, as an edit does.
-      const p = await mkPerson('Race resume B');
-      const rh = (await createRhythm(p, newGoalBody('B', `${tag} resume B`))()).body;
-      await settings(rh.goalId, rh.id, { paused: true })();
-      const editor = await pool.connect();
-      await editor.query('BEGIN');
-      await editor.query(`SELECT 1 FROM "GoalActivity" WHERE id = $1 FOR UPDATE`, [rh.id]);
-      await editor.query(`UPDATE "GoalActivity" SET "rhythmPausedAt" = NULL WHERE id = $1`, [rh.id]);
-      const deleting = deletePerson(p)();
-      const blocked = await waitForLockWait('row', /"GoalActivity"/, 3000);
-      await editor.query('COMMIT'); editor.release();
-      const del = await deleting;
+      // Person DELETE first (paused after it paused+unlinked the rhythm); a resume sent for the linked rhythm waits, then must not reactivate it.
+      const { p, rh } = await linkedPaused('Race resume B', `${tag} resume B`);
+      const r = await race({ kind: 'person-delete', id: p, at: /DELETE FROM "SavedPerson"/ }, deletePerson(p), settings(rh.goalId, rh.id, { paused: false }), /"GoalActivity"/);
       const row = await ga(rh.id);
-      check('Resume first (rhythm row held), person DELETE second: DELETE waits on the rhythm, then pauses and unlinks it -- never an active rhythm linked to a deleted person', blocked !== null && del.status === 200 && row.savedPersonId === null && row.rhythmPausedAt !== null, { blocked, del: del.status, link: row.savedPersonId, paused: row.rhythmPausedAt });
+      check('Person DELETE first, resume second (62027): the resume waits on the rhythm row, then 409 PERSON_LINK_CHANGED; the rhythm stays PAUSED and unlinked, cadence unchanged; planning is refused', r.paused && r.secondBlockedOn !== null && r.first.status === 200 && r.second.status === 409 && r.second.body?.code === 'PERSON_LINK_CHANGED' && row.savedPersonId === null && row.rhythmPausedAt !== null && row.rhythmTargetPerWeek === 4 && (await planningRefused(rh)), { r: { first: r.first.status, second: r.second.status, body: r.second.body }, link: row.savedPersonId, paused: row.rhythmPausedAt });
+    }
+    {
+      // Edit only, edit first: the edit applies, then the DELETE pauses and unlinks.
+      const p = await mkPerson('Race edit A');
+      const rh = (await createRhythm(p, newGoalBody('A', `${tag} edit A`, { targetPerWeek: 4 }))()).body;
+      const r = await race({ kind: 'rhythm-update', id: rh.id, at: /UPDATE "GoalActivity" SET/ }, settings(rh.goalId, rh.id, { rhythm: { kind: 'N_PER_WEEK', targetPerWeek: 3 } }), deletePerson(p), /UPDATE "GoalActivity"/);
+      const row = await ga(rh.id);
+      check('Edit first, person DELETE second: both 200; the new cadence is kept and the rhythm ends PAUSED and unlinked; planning is refused', r.paused && r.secondBlockedOn !== null && r.first.status === 200 && r.second.status === 200 && row.rhythmTargetPerWeek === 3 && row.savedPersonId === null && row.rhythmPausedAt !== null && (await planningRefused(rh)), { r: { first: r.first.status, second: r.second.status }, row: { t: row.rhythmTargetPerWeek, link: row.savedPersonId, paused: row.rhythmPausedAt } });
+    }
+    {
+      // Person DELETE first, edit only second.
+      const p = await mkPerson('Race edit B');
+      const rh = (await createRhythm(p, newGoalBody('B', `${tag} edit B`, { targetPerWeek: 4 }))()).body;
+      const r = await race({ kind: 'person-delete', id: p, at: /DELETE FROM "SavedPerson"/ }, deletePerson(p), settings(rh.goalId, rh.id, { rhythm: { kind: 'N_PER_WEEK', targetPerWeek: 3 } }), /"GoalActivity"/);
+      const row = await ga(rh.id);
+      check('Person DELETE first, edit second: the edit waits, then 409 (its person is gone) and writes nothing; the rhythm stays PAUSED and unlinked; planning is refused', r.paused && r.secondBlockedOn !== null && r.first.status === 200 && r.second.status === 409 && row.rhythmTargetPerWeek === 4 && row.savedPersonId === null && row.rhythmPausedAt !== null && (await planningRefused(rh)), { r: { first: r.first.status, second: r.second.status }, row: { t: row.rhythmTargetPerWeek, link: row.savedPersonId, paused: row.rhythmPausedAt } });
+    }
+    {
+      // A stale person screen: the deletion already committed; My People sends the person it acted for.
+      const { p, rh } = await linkedPaused('Stale screen', `${tag} stale`);
+      await deletePerson(p)();
+      const stale = await settings(rh.goalId, rh.id, { paused: false, savedPersonId: p })();
+      const row = await ga(rh.id);
+      check('Stale person screen (deletion already committed, savedPersonId sent): 409, the rhythm stays PAUSED', stale.status === 409 && stale.body?.code === 'PERSON_LINK_CHANGED' && row.rhythmPausedAt !== null, stale);
+      // Deliberately resuming an already-unlinked rhythm (e.g. from Goals) is still allowed.
+      const deliberate = await settings(rh.goalId, rh.id, { paused: false })();
+      const after = await ga(rh.id);
+      const replanned = await planFor(rh.id, 'Plan after deliberate resume')();
+      const replannedRow = replanned.body?.id ? await plan(replanned.body.id) : null;
+      check('A deliberate resume of the already-unlinked rhythm still works (no permanent ban): active again; planning allowed; the plan has no person (response = stored)', deliberate.status === 200 && after.rhythmPausedAt === null && after.savedPersonId === null && replanned.status === 200 && replannedRow?.savedPersonId === null && replanned.body?.savedPersonId === null, { deliberate: deliberate.status, replanned: replanned.status });
+    }
+    {
+      // Unrelated rhythms and other accounts are unaffected.
+      const legacyGoal = (await call(goalsRoute.POST(req(token, { title: `${tag} legacy R1` })))).body;
+      const legacyId = legacyGoal.id ?? legacyGoal.goal?.id;
+      const legacy = (await call(goalActivitiesRoute.POST(req(token, { title: 'Read R1', rhythm: { kind: 'N_PER_WEEK', targetPerWeek: 2 } }), { params: { goalId: legacyId } }))).body;
+      const pz = await settings(legacyId, legacy.id, { paused: true })();
+      const rz = await settings(legacyId, legacy.id, { paused: false })();
+      check('An unrelated rhythm (no person) pauses and resumes exactly as before', pz.status === 200 && rz.status === 200 && (await ga(legacy.id)).rhythmPausedAt === null);
+      const op = await mkPerson('Other R1', otherToken);
+      const orh = (await call(rhythmsRoute.POST(req(otherToken, newGoalBody('Other', 'Call Other R1')), { params: { personId: op } }))).body;
+      const mine = await mkPerson('Mine R1');
+      await createRhythm(mine, newGoalBody('Mine', 'Call Mine R1'))();
+      await deletePerson(mine)();
+      const orow = await ga(orh.id);
+      check('Another account\'s linked rhythm is untouched by this owner\'s person deletion', orow.savedPersonId === op && orow.rhythmPausedAt === null);
     }
 
     // ================= atomicity and isolation =================

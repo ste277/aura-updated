@@ -433,7 +433,8 @@ export async function POST(req: NextRequest) {
         if (!linked) throw goalActivityNotAvailableError();
       }
       // AURA-MP-4 -- a plan for a person-linked rhythm keeps that person.
-      await carryGoalActivityPersonToPlan(session.userId, goalActivityId, plan.id, client);
+      const carried = await carryGoalActivityPersonToPlan(session.userId, goalActivityId, plan.id, client);
+      if (carried) plan = carried; // AURA-MP-4-R1 (F2): respond with the persisted association
     }
     await client.query('COMMIT');
   } catch (err) {

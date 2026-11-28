@@ -526,7 +526,12 @@ export async function persistAcceptedConstructedDay(
           }
         }
         // AURA-MP-4 -- a plan for a person-linked rhythm keeps that person.
-        await carryGoalActivityPersonToPlan(userId, goalActivityId, plan.id, client);
+        const carried = await carryGoalActivityPersonToPlan(userId, goalActivityId, plan.id, client);
+        // AURA-MP-4-R1 (F2): the response reports the persisted association.
+        if (carried) {
+          plans.push(carried);
+          continue;
+        }
       }
 
       plans.push(plan);

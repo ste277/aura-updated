@@ -31,9 +31,18 @@ MP-4 implements design §6.2, D7 and D8/R1 of `AURA_MP_01_PRODUCT_AND_ARCHITECTU
   - Resume and edit lock only the rhythm row and never the person.
 - **Not changed:** the MP-3 lock order (Move and Recomposition) and its READ COMMITTED guarantees.
 
+## R1 — focused corrections (62029)
+- **F1 (D7):** a resume or edit no longer undoes a concurrent person deletion. `updateGoalActivityRhythmSettings` now:
+  - reads the person link before taking the row lock and again under it, at an explicit READ COMMITTED;
+  - answers **409 `PERSON_LINK_CHANGED`** and writes nothing if the link vanished in between, or if it differs from the `savedPersonId` My People sends.
+  - The rhythm therefore stays paused and its plans are refused.
+  - Deliberately resuming a rhythm that was already unlinked (from Goals) still works, and unrelated rhythms behave as before.
+- **F2:** Plan and Plan My Day success responses return the committed `savedPersonId`, because `carryGoalActivityPersonToPlan` now returns the updated row.
+- **Unchanged:** migration 0058, the lock order, weekly acceptance and Move.
+
 ## Tests
 | Test | Job | Checks |
 |---|---|---|
 | `test/myPeopleMp4Rules.test.ts` | math-core | 10 |
-| `test/myPeopleMp4RhythmsDb.test.ts` | Day Constructor DB | 35: migration, ownership (API and FK), lifecycle, carry and Move, deletion, both orderings of person DELETE vs creation, planning and resume, atomicity, isolation, switch |
+| `test/myPeopleMp4RhythmsDb.test.ts` | Day Constructor DB | 42: migration, ownership (API and FK), lifecycle, carry and Move, deletion, both orderings of person DELETE vs creation, planning, resume and edit (final state paused, planning refused), atomicity, isolation, switch |
 | `test/myPeopleMp4UiDb.test.ts` | Day Constructor DB | 13: the real person screen, explicit create and attach, pause, resume, edit and remove, switch off |
