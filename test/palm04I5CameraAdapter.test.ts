@@ -7,7 +7,7 @@
  *
  *   npx ts-node test/palm04I5CameraAdapter.test.ts
  */
-import { cameraErrorCode, createPalmCamera, palmCameraSupport, PALM_CAMERA_CONSTRAINTS, PALM_CAMERA_VERSION, type PalmCameraEnv, type PalmStreamLike, type PalmTrackLike, type PalmVideoLike } from '../apps/web/lib/palm-analysis/camera';
+import { cameraErrorCode, createPalmCamera, palmCameraSupport, PALM_CAMERA_CONSTRAINTS, PALM_CAMERA_PREVIEW_TIMEOUT_MS, PALM_CAMERA_VERSION, type PalmCameraEnv, type PalmStreamLike, type PalmTrackLike, type PalmVideoLike } from '../apps/web/lib/palm-analysis/camera';
 import { createPalmAnalysisSession } from '../apps/web/lib/palm-analysis/session';
 
 let passed = 0;
@@ -383,6 +383,75 @@ async function run() {
     } finally {
       if (savedNav) Object.defineProperty(globalThis, 'navigator', savedNav); else delete g.navigator;
       if (savedSecure) Object.defineProperty(globalThis, 'isSecureContext', savedSecure); else delete g.isSecureContext;
+    }
+  }
+  // ------------------------------------------------------------------ K. D6-I1 DR-1: bounded preview start-up (fake timers)
+  {
+    /** Fake timers; `honourClear: false` simulates a late callback delivered after it was cancelled. */
+    const timers = (honourClear = true) => {
+      const list: Array<{ fn: () => void; ms: number; cleared: boolean }> = [];
+      return { list, setTimer: (fn: () => void, ms: number) => { const t = { fn, ms, cleared: false }; list.push(t); return t; }, clearTimer: (h: any) => { if (honourClear) h.cleared = true; }, fire: (k: number) => { const t = list[k]; if (t && !t.cleared) t.fn(); } };
+    };
+    const liveCamera = async (T: ReturnType<typeof timers>, extra: Record<string, unknown> = {}) => {
+      const g = controllableEnv({ setTimer: T.setTimer, clearTimer: T.clearTimer, ...extra } as any);
+      const cam = createPalmCamera(g.env);
+      const video = new FakeVideo();
+      cam.attach(video);
+      const p = cam.start(); const s = streamOf('video'); g.pending[0].resolve(s.stream); await p;
+      return { g, cam, video, s };
+    };
+    check('K0. the DR-1 limit is 8 seconds', PALM_CAMERA_PREVIEW_TIMEOUT_MS === 8000);
+    {
+      const T = timers(); const { cam, video, s } = await liveCamera(T);
+      check('K1. once the stream is acquired and live, one start-up timer is set at the 8 s default', T.list.length === 1 && T.list[0].ms === 8000 && cam.getState().phase === 'live');
+      T.fire(0);
+      const st = cam.getState();
+      check('K2. no usable frame by the deadline: every track stopped, the stream detached, camera-preview-timeout (retryable)', st.phase === 'error' && st.error?.code === 'camera-preview-timeout' && st.error?.retryable === true && s.tracks.every((t) => t.readyState === 'ended' && t.stops === 1) && video.srcObject === null && cam.liveTrackCount() === 0);
+      cam.dispose();
+    }
+    {
+      const T = timers(); const { cam, video, s } = await liveCamera(T);
+      video.ready();
+      T.fire(0);
+      check('K3. a usable frame before the deadline: the timer does nothing (still live, attached)', cam.getState().phase === 'live' && cam.getState().error === null && video.srcObject === s.stream && s.tracks[0].readyState === 'live');
+      cam.dispose();
+    }
+    {
+      const T = timers(); const { cam, s } = await liveCamera(T);
+      cam.stop('cancel');
+      check('K4. Cancel clears the timer', T.list[0].cleared === true && s.tracks[0].readyState === 'ended');
+      cam.dispose();
+    }
+    {
+      const T = timers(false); // a late callback is delivered even though it was cancelled
+      const { g, cam, video } = await liveCamera(T);
+      cam.stop('cancel');
+      const p2 = cam.start(); const s2 = streamOf('video'); g.pending[1].resolve(s2.stream); await p2;
+      T.fire(0); // session 1's late timer
+      check('K5. a stale timer from an earlier camera session cannot stop, detach or fail the newer session', cam.getState().phase === 'live' && cam.getState().error === null && video.srcObject === s2.stream && s2.tracks[0].readyState === 'live');
+      T.fire(1);
+      check('K6. the newer session\'s own timer still applies to it (no usable frame -> timeout)', cam.getState().error?.code === 'camera-preview-timeout' && s2.tracks[0].readyState === 'ended');
+      cam.dispose();
+    }
+    {
+      const T = timers(false); const { cam, video, s } = await liveCamera(T);
+      video.ready(); const f = cam.frame(); cam.stop('done');
+      video.videoWidth = 0; T.fire(0);
+      check('K7. a photo cancels it: a late timer after the photo changes nothing (idle, no error)', !!f && cam.getState().phase === 'idle' && cam.getState().error === null && s.tracks[0].readyState === 'ended');
+      cam.dispose();
+    }
+    {
+      const T = timers(); const { cam } = await liveCamera(T);
+      cam.dispose();
+      check('K8. dispose cancels the timer', T.list[0].cleared === true);
+    }
+    {
+      const T = timers(); const { g, cam, video } = await liveCamera(T, { previewTimeoutMs: 600 });
+      check('K9. the limit is configurable for tests only through the camera environment', T.list[0].ms === 600);
+      T.fire(0);
+      const p2 = cam.start(); const s2 = streamOf('video'); g.pending[1].resolve(s2.stream); await p2;
+      check('K10. after a timeout the user can try again: a fresh, live session with its own timer', cam.getState().phase === 'live' && video.srcObject === s2.stream && T.list.length === 2);
+      cam.dispose();
     }
   }
   await tick();

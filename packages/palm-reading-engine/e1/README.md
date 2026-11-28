@@ -2,7 +2,7 @@
 
 `aura.palm.e1-reading` 0.1.0 is a separate engine identity from the frozen G6 engine (`prototype/`). It composes a structured, tradition-attributed reading from a PALM-03-I1 feature set, using the C1 rev. 4 interpretation catalogue.
 
-> **Content status.** The catalogue is `UNREVIEWED_RESEARCH_CONTENT`, and E1 never treats research eligibility as publication approval. The engine is unreachable from any route or UI. The `check-palm-e1-bundle.js` guard fails a production build that contains it, and that guard is unconditional.
+> **Content status.** The catalogue is `UNREVIEWED_RESEARCH_CONTENT`, and E1 never treats research eligibility as publication approval. No route reaches the engine. Since D6-I1 (ticket 50368), exactly one UI module, the development-gated scanner (`PalmImageInput.tsx`, which every production build swaps for a stub), calls `generateConfirmedScannerReading`; that entry point refuses unless `NODE_ENV` is `development` and the image-input flag is set. The `check-palm-e1-bundle.js` guard fails a production build that contains E1, and that guard is unconditional. The library is loaded from `library/packaged-content.mjs`, a generated, byte-checked copy of the two JSON files, so the same loader runs in Node and in a browser.
 
 ## Layout
 

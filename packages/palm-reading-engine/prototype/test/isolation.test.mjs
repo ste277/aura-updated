@@ -45,23 +45,66 @@ test('runtime: generating every sample performs no network or filesystem writes'
   assert.deepEqual(calls, []);
 });
 
-test('no production code imports or references the G6-D0 prototype', () => {
+// AURA-PALM-D6-I1 (owner-approved, ticket 50368) -- ONE exact exception: the development-gated scanner may import the
+// E1 reading interface (NOT the G6-D0 prototype) with exactly this one line. Only that line is removed from only that
+// file before the unchanged pattern is applied, so any other reading-engine reference in it -- and every reference in
+// any other file, and every G6-D0 / palm-g6 reference anywhere -- is still a violation. The file is not exempt.
+const APPROVED_E1_IMPORT = Object.freeze({
+  file: 'apps/web/components/palm-scan/PalmImageInput.tsx',
+  line: "import { generateConfirmedScannerReading } from '../../../../packages/palm-reading-engine/e1/src/reading';",
+});
+const ISOLATION_PATTERN = /AURA_PALM_G6_D0|palm-g6|reading-engine|g6d0/i;
+/** Files (repo-relative) outside the engine package whose text references the engine, after the one approved line. */
+function isolationViolations(files) {
   const hits = [];
+  for (const [rel, text] of files) {
+    if (path.resolve(REPO, rel).startsWith(PKG + path.sep)) continue;
+    let t = text;
+    if (rel === APPROVED_E1_IMPORT.file) {
+      const lines = t.split('\n');
+      const k = lines.findIndex((l) => l === APPROVED_E1_IMPORT.line);
+      if (k >= 0) { lines.splice(k, 1); t = lines.join('\n'); }
+    }
+    if (ISOLATION_PATTERN.test(t)) hits.push(rel);
+  }
+  return hits;
+}
+function productionFiles() {
+  const out = new Map();
   const walk = (d) => {
     for (const e of fs.readdirSync(d, { withFileTypes: true })) {
-      if (['node_modules', '.next', '.git', 'dist', 'build', '.turbo'].includes(e.name)) continue;
+      if (['node_modules', '.next', '.next-dev', '.git', 'dist', 'build', '.turbo'].includes(e.name)) continue;
       const p = path.join(d, e.name);
       if (e.isDirectory()) walk(p);
-      else if (/\.(m?[jt]sx?|json)$/.test(e.name)) {
-        const s = fs.readFileSync(p, 'utf8');
-        if (/AURA_PALM_G6_D0|palm-g6|reading-engine|g6d0/i.test(s)) hits.push(path.relative(REPO, p));
-      }
+      else if (/\.(m?[jt]sx?|json)$/.test(e.name)) out.set(path.relative(REPO, p).split(path.sep).join('/'), fs.readFileSync(p, 'utf8'));
     }
   };
-  // G6-I1: the engine package itself is the only place allowed to name the engine; every other file under apps/ and
-  // packages/ (all production code) must not import or reference it.
   for (const d of ['apps', 'packages']) if (fs.existsSync(path.join(REPO, d))) walk(path.join(REPO, d));
-  assert.deepEqual(hits.filter((h) => !path.resolve(REPO, h).startsWith(PKG + path.sep)), []);
+  return out;
+}
+
+test('no production code imports or references the G6-D0 prototype', () => {
+  // G6-I1: the engine package itself is the only place allowed to name the engine; every other file under apps/ and
+  // packages/ (all production code) must not import or reference it -- except the one approved E1 line above.
+  assert.deepEqual(isolationViolations(productionFiles()), []);
+});
+
+test('D6-I1: the one-line exception is exact -- every other reference is still detected (negative controls)', () => {
+  const files = productionFiles();
+  const scanner = files.get(APPROVED_E1_IMPORT.file);
+  assert.ok(scanner && scanner.split('\n').filter((l) => l === APPROVED_E1_IMPORT.line).length === 1, 'the approved line is present exactly once');
+  const variant = (rel, text) => { const m = new Map(files); m.set(rel, text); return isolationViolations(m); };
+  // 1. an unauthorised E1 import in another app file
+  assert.deepEqual(variant('apps/web/components/PalmistryView.tsx', `${files.get('apps/web/components/PalmistryView.tsx')}\n${APPROVED_E1_IMPORT.line.replace('../../../../', '../../../')}`), ['apps/web/components/PalmistryView.tsx']);
+  assert.deepEqual(variant('apps/web/lib/new-helper.ts', APPROVED_E1_IMPORT.line), ['apps/web/lib/new-helper.ts']);
+  // 2. an additional reading-engine reference in the scanner itself (the file is not exempt)
+  assert.deepEqual(variant(APPROVED_E1_IMPORT.file, `${scanner}\nconst e1 = require('../../../../packages/palm-reading-engine/e1/src/packaged.mjs');`), [APPROVED_E1_IMPORT.file]);
+  assert.deepEqual(variant(APPROVED_E1_IMPORT.file, `${scanner}\n${APPROVED_E1_IMPORT.line}`), [APPROVED_E1_IMPORT.file]); // a duplicate of the approved line
+  assert.deepEqual(variant(APPROVED_E1_IMPORT.file, scanner.replace(APPROVED_E1_IMPORT.line, `${APPROVED_E1_IMPORT.line} // altered`)), [APPROVED_E1_IMPORT.file]); // an altered line (no longer the exact approved line)
+  // 3. a G6-D0 prototype reference, in the scanner or elsewhere
+  assert.deepEqual(variant(APPROVED_E1_IMPORT.file, `${scanner}\nimport { generateReading } from '../../../../packages/palm-reading-engine/prototype/src/engine.mjs';`), [APPROVED_E1_IMPORT.file]);
+  assert.deepEqual(variant('apps/web/app/page.tsx', `${files.get('apps/web/app/page.tsx')}\n// see AURA_PALM_G6_D0`), ['apps/web/app/page.tsx']);
+  assert.deepEqual(variant('apps/web/lib/x.ts', "export const id = 'palm-g6';"), ['apps/web/lib/x.ts']);
 });
 
 test('prototype lives outside production import paths', () => {

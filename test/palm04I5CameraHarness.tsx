@@ -94,7 +94,9 @@ if (MODE === 'native' && navigator.mediaDevices?.getUserMedia) {
     return s;
   };
 }
-const cameraEnv = MODE === 'mock' ? { secureContext: true, getUserMedia: mockGetUserMedia as any } : MODE === 'none' ? { secureContext: true, getUserMedia: null } : undefined;
+// D6-I1 (DR-1): a test may shorten the preview start-up limit (window.__previewTimeoutMs) for the mocked camera
+const previewTimeoutMs = typeof W.__previewTimeoutMs === 'number' ? W.__previewTimeoutMs : undefined;
+const cameraEnv = MODE === 'mock' ? { secureContext: true, getUserMedia: mockGetUserMedia as any, ...(previewTimeoutMs ? { previewTimeoutMs } : {}) } : MODE === 'none' ? { secureContext: true, getUserMedia: null } : undefined;
 
 const detDelay = Number(W.__detDelay ?? 0);
 const sessionDeps = {

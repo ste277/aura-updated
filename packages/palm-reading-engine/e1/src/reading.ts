@@ -22,6 +22,18 @@
  *
  * Guarantee: the reading is internally consistent with the one supplied synthetic input. It does not prove that the
  * input came from a physical hand or a real image (later scanner / real-image validation milestone).
+ *
+ * AURA-PALM-D6-I1 (owner-approved B1, ticket 50368): ONE more entry point for ONE more input source,
+ *
+ *   generateConfirmedScannerReading(input, { confirmedScanner: true, mode })
+ *
+ * for the explicitly confirmed scanner journey (apps/web PalmImageInput, the only app module the G5 privacy gate lets
+ * import it). It runs the SAME module-private pipeline below -- snapshot, bound I1 builder, construction check,
+ * observations, plan, text, full output validation -- with the same pinned library; the only differences are the
+ * declaration it requires (identity.mjs requireConfirmedScannerOptions), the development gate (it refuses unless
+ * NODE_ENV is 'development' AND the G5 image-input flag is 'g5-i1-dev', the same gate as the scanner), and the
+ * output's `synthetic` field, which is false (honest provenance). It is not a general bypass of the synthetic
+ * restriction, and E1 stays excluded from every release build (apps/web/scripts/check-palm-e1-bundle.js).
  */
 import { buildPalmFeatureSet, type PalmFeatureSetInput } from '../../../../apps/web/lib/palm-analysis/features';
 
@@ -39,7 +51,7 @@ const adapter = require('../../adapter/feature-set-adapter.mjs');
 type Any = any; // eslint-disable-line @typescript-eslint/no-explicit-any
 export type ReadingMode = 'combined' | 'indian-only' | 'western-only';
 
-const { E1Error: E1ErrorClass, E1_ENGINE: ENGINE, MODES, requireSyntheticOptions, captureOwnData } = identity;
+const { E1Error: E1ErrorClass, E1_ENGINE: ENGINE, MODES, requireSyntheticOptions, requireConfirmedScannerOptions, captureOwnData } = identity;
 /** Bound once, at load: the feature-set builder is never a parameter. */
 const BUILD: (input: PalmFeatureSetInput) => Any = buildPalmFeatureSet;
 
@@ -220,13 +232,13 @@ function buildItem(library: Any, rec: Any, obs: Any, rank: number, section: stri
   };
 }
 
-function composeReading(library: Any, derived: Any, mode: string): Any {
+function composeReading(library: Any, derived: Any, mode: string, synthetic: boolean): Any {
   const plan = capture(compose.planSelection(library, derived.observations, { synthetic: true, mode, qualityAccepted: derived.qualityAccepted, qualityDetail: derived.qualityDetail }), 'plan');
   const cat = library.catalogue;
   const render = (it: Any) => buildItem(library, library.byId[it.recordId], derived.observations, it.rank, it.section);
   const reading = {
     engine: { id: ENGINE.id, version: ENGINE.version, library: cat.libraryVersion, descriptors: ENGINE.descriptorVersion },
-    synthetic: true,
+    synthetic,
     contentStatus: ENGINE.contentStatus,
     publicationApproved: false,
     mode: plan.mode,
@@ -245,11 +257,9 @@ function composeReading(library: Any, derived: Any, mode: string): Any {
   return deepFreeze(reading);
 }
 
-// ---------------------------------------------------------------- the interface
-/** options: an own data property { synthetic: true } (exactly true) and an optional mode. Nothing else. */
-export function generateSyntheticReading(input: PalmFeatureSetInput, options: { synthetic: true; mode?: ReadingMode }): unknown {
-  const opts = requireSyntheticOptions(options, ['synthetic', 'mode']); // 1. before any work
-  const mode = opts.mode ?? 'combined';
+// ---------------------------------------------------------------- the pipeline (module-private, one for both sources)
+function readingFor(input: unknown, modeOption: unknown, synthetic: boolean): unknown {
+  const mode = modeOption ?? 'combined';
   if (!MODES.includes(mode)) throw new E1ErrorClass('invalid-option', `mode must be one of ${MODES.join(', ')}`);
   const snap = snapshotInput(input); // 2.
   let built: Any;
@@ -266,7 +276,33 @@ export function generateSyntheticReading(input: PalmFeatureSetInput, options: { 
     throw new E1ErrorClass('invalid-input', `the I1 builder refused the input: ${errors}`);
   }
   const library = packaged.pinnedLibrary();
-  return composeReading(library, deriveObservations(library, snap, result.featureSet), mode); // 4. + 5.
+  return composeReading(library, deriveObservations(library, snap, result.featureSet), mode as string, synthetic); // 4. + 5.
+}
+
+// ---------------------------------------------------------------- the interface
+/** options: an own data property { synthetic: true } (exactly true) and an optional mode. Nothing else. */
+export function generateSyntheticReading(input: PalmFeatureSetInput, options: { synthetic: true; mode?: ReadingMode }): unknown {
+  const opts = requireSyntheticOptions(options, ['synthetic', 'mode']); // 1. before any work
+  return readingFor(input, opts.mode, true);
+}
+
+/**
+ * D6-I1: the development gate, read from the two LITERAL environment expressions the Next.js build inlines (the same
+ * values as apps/web/lib/palm-analysis/gate.ts). Anything unreadable counts as closed.
+ */
+function confirmedScannerGateOpen(): boolean {
+  try {
+    return process.env.NODE_ENV === 'development' && process.env.NEXT_PUBLIC_AURA_PALM_IMAGE_INPUT === 'g5-i1-dev';
+  } catch {
+    return false;
+  }
+}
+
+/** options: an own data property { confirmedScanner: true } (exactly true) and an optional mode. Development only. */
+export function generateConfirmedScannerReading(input: PalmFeatureSetInput, options: { confirmedScanner: true; mode?: ReadingMode }): unknown {
+  const opts = requireConfirmedScannerOptions(options, ['confirmedScanner', 'mode']); // 1. before any work
+  if (!confirmedScannerGateOpen()) throw new E1ErrorClass('development-only', 'confirmed-scanner readings exist only in development with the image-input gate open');
+  return readingFor(input, opts.mode, false);
 }
 
 export const E1Error = E1ErrorClass;

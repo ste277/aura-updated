@@ -225,7 +225,9 @@ async function run() {
   check('S2. the camera starts only from the Use camera button (one start() call site, in openCamera)', (ui.match(/\.start\(\)/g) ?? []).length === 1 && /const openCamera = useCallback\(\(\) => \{[\s\S]{0,120}cameraRef\.current\?\.start\(\)/.test(ui) && /onClick=\{openCamera\}/.test(ui));
   check('S3. the photo is taken by submitDrawable and the camera is stopped right after it', /void session\.submitDrawable\(shot\.drawable, shot\.width, shot\.height, 'camera'\);\s*cam\.stop\('done'\);/.test(ui));
   check('S4. unmount stops the camera before the session is disposed', /cam\.dispose\(\);[\s\S]{0,200}session\.dispose\(\);/.test(ui));
-  check('S5. the cleared tracing panel drops its landmark copy (not only on unmount)', /const markCleared = useCallback\(\(\) => \{[\s\S]{0,300}setHeld\(\(h\) => \(h\.data === null \? h : \{ context: h\.context, data: null \}\)\)/.test(ui));
+  // D6-I1-R1 (50369 F1): strengthened -- the panel never keeps a landmark copy; it keeps only the image size, which
+  // clearing drops too (behaviourally verified on mounted React state in test/palmD6I1R1RetentionJsdom.test.ts)
+  check('S5. the tracing panel keeps no landmark copy (only the image size), and clearing drops even that', /const markCleared = useCallback\(\(\) => \{[\s\S]{0,300}setHeld\(\(h\) => \(h\.size === null \? h : \{ context: h\.context, size: null \}\)\)/.test(ui) && /return d \? Object\.freeze\(\{ width: d\.imageWidth, height: d\.imageHeight \}\) : null;/.test(ui) && !/held\.data|context\.read\(\)\s*\}\)\);|data: context\.read\(\)/.test(ui));
   check('S6. the panel checks revocation on lifecycle events as well as the 250 ms poll', /addEventListener\('visibilitychange', onLifecycle\)/.test(ui) && /addEventListener\('pagehide', onLeave\)/.test(ui) && /addEventListener\('freeze', onLeave\)/.test(ui) && /setInterval\(watch, 250\)/.test(ui));
   check('S7. no image or camera data is logged, stored or sent from the component', privacy.length === 0, privacy);
 }
