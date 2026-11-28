@@ -25,6 +25,7 @@ import {
   type TracingUnassessedReason as LineUnassessedReason,
 } from '../../lib/palm-analysis';
 import { PALM_UPLOAD_ACCEPT } from '../../lib/palm-analysis/validate';
+import { generateConfirmedScannerReading } from '../../../../packages/palm-reading-engine/e1/src/reading';
 import { colors, radius, spacing, typography } from '../theme';
 import { SectionHeader, StatusBadge, SurfaceCard } from '../ui';
 
@@ -513,12 +514,101 @@ export const GESTURE_OFF_PHOTO_TEXT = 'The pointer went outside the photo, so no
  * generation), the exact line states and the hand answers, and is withdrawn by any later change.
  */
 export const PALM_FEATURE_REVIEW_VERSION = 'palm-04-feature-review@0.1.0';
-export const REVIEW_SCOPE_NOTE = 'Confirming records these features for this photo only, in this browser tab. Nothing is stored or sent, and no reading is produced in this version.';
+export const REVIEW_SCOPE_NOTE = 'Confirming records these features and prepares a reading for this photo only, in this browser tab. Nothing is stored or sent.';
 export const REVIEW_PRIMARY_LINES: readonly PalmLineId[] = ['heart', 'head', 'life'];
 type ReviewHand = 'left' | 'right';
 type ReviewDominant = 'left' | 'right' | 'unknown';
 type FeatureSetResult = ReturnType<TracingModel['buildFeatureSet']>;
-type ConfirmedFeatures = { readonly key: string; readonly featureSet: unknown; readonly at: number };
+/** D6-I1: the confirmed record keeps I1's feature set and E1's validated reading output only (no landmarks, no photo, no E1 input). */
+type ConfirmedFeatures = { readonly key: string; readonly featureSet: unknown; readonly reading: E1Reading | null; readonly at: number };
+
+// ================================================================ AURA-PALM-D6-I1 personalised reading (development only)
+/**
+ * The reading is E1's own validated output (its confirmed-scanner entry point, generateConfirmedScannerReading), made
+ * once, locally, at confirmation from the confirmed tracing input, which is then dropped. Everything a reading item
+ * says is E1 text; this file adds only headings, labels and "not assessed" states, never an interpretation.
+ */
+export const PALM_READING_UI_VERSION = 'palm-d6-reading-ui@0.1.0';
+export const READING_DEV_NOTE = 'Development preview. The reading text is unreviewed research content from the traditions and is not published.';
+type E1Item = { recordId: string; section: string; traditionTag: string; confidence: { tier: string }; text: { observation: string; reading: string; reflection: string; applicationNote?: string } };
+type E1Reading = {
+  synthetic: boolean; contentStatus: string; publicationApproved: boolean; tierCeiling: string; frame: string; emptyResult: string | null;
+  sections: ReadonlyArray<{ category: string; items: readonly E1Item[] }>; moreFromYourReading: readonly E1Item[];
+  domains: ReadonlyArray<{ domain: string; status: string }>; notAssessed: ReadonlyArray<{ feature: string; code: string; wording: string }>;
+};
+// <reading-topics> D6-I1: the five topic HEADINGS and the E1 section categories / domains each one shows. Headings only:
+// no interpretation text may be written here (the privacy gate F7 accepts exactly this block and nothing else).
+export const READING_TOPICS = Object.freeze([
+  Object.freeze({ id: 'personality', label: 'Personality', categories: Object.freeze(['personality']), domain: 'personality' }),
+  Object.freeze({ id: 'strengths', label: 'Personal strengths', categories: Object.freeze(['strengths', 'growth']), domain: null }),
+  Object.freeze({ id: 'relationships', label: 'Relationships', categories: Object.freeze(['emotional-relational']), domain: 'relationships' }),
+  Object.freeze({ id: 'career', label: 'Career and work', categories: Object.freeze(['career-working-style']), domain: 'career' }),
+  Object.freeze({ id: 'life-direction', label: 'Life direction', categories: Object.freeze(['life-direction']), domain: 'life-direction' }),
+]);
+// </reading-topics>
+const TOPIC_NOT_ASSESSED = 'Not assessed: there are not enough confirmed features for this topic.';
+const TOPIC_NO_CONTENT = 'Not assessed: this version has no reading for this topic.';
+const featureLabel = (f: string): string => {
+  const [kind, id] = f.split('.');
+  if (kind === 'lines' && id in LINE_COPY) return LINE_COPY[id as PalmLineId].title.replace(' (optional)', '');
+  if (kind === 'measurements') return MEASUREMENT_LABELS[id] ?? id;
+  if (kind === 'marks') return `Palm mark (${id})`;
+  if (f === 'proposed.origin.gap') return 'Where the head and life lines begin';
+  return f;
+};
+
+function ReadingItem({ it }: { it: E1Item }) {
+  return (
+    <li data-testid="palm-reading-item" data-record={it.recordId} data-tier={it.confidence.tier} style={{ border: `1px solid ${colors.borderSubtle}`, borderRadius: radius.md, padding: spacing.sm, listStyle: 'none' }}>
+      <p style={{ ...typography.caption, margin: 0 }}>{it.traditionTag} · tentative</p>
+      <p style={{ ...typography.body, margin: `${spacing.xs}px 0 0` }}><strong>What you traced or we measured: </strong>{it.text.observation}</p>
+      <p style={{ ...typography.body, margin: `${spacing.xs}px 0 0` }}><strong>What the tradition says: </strong>{it.text.reading}</p>
+      {it.text.applicationNote && <p style={{ ...typography.caption, margin: `${spacing.xs}px 0 0` }}>{it.text.applicationNote}</p>}
+      <p style={{ ...typography.body, margin: `${spacing.xs}px 0 0`, fontStyle: 'italic' }}><strong>To reflect on: </strong>{it.text.reflection}</p>
+    </li>
+  );
+}
+
+/** The personalised reading: E1's frame first, then the five topics, then what was not assessed. */
+export function PalmReadingView({ reading }: { reading: E1Reading }) {
+  const items = [...reading.sections.flatMap((x) => x.items.map((it) => ({ ...it, section: x.category }))), ...reading.moreFromYourReading];
+  const topicCats = new Set(READING_TOPICS.flatMap((t) => t.categories as readonly string[]));
+  const other = items.filter((it) => !topicCats.has(it.section));
+  return (
+    <section data-testid="palm-reading" data-version={PALM_READING_UI_VERSION} aria-label="Your palm reading" style={{ display: 'flex', flexDirection: 'column', gap: spacing.md }}>
+      <div data-testid="palm-reading-frame" style={{ borderLeft: `3px solid ${colors.caution}`, paddingLeft: spacing.sm }}>
+        <p style={{ ...typography.bodyStrong, margin: 0 }}>{reading.frame}</p>
+        <p style={{ ...typography.caption, margin: `${spacing.xs}px 0 0` }} data-testid="palm-reading-dev-note" data-content-status={reading.contentStatus} data-publication-approved={String(reading.publicationApproved)}>{READING_DEV_NOTE}</p>
+      </div>
+      {reading.emptyResult !== null && <p data-testid="palm-reading-empty" data-e1-code={reading.emptyResult} style={{ ...typography.body, margin: 0 }}>No reading in this version matches the confirmed features. See what was not assessed below.</p>}
+      {READING_TOPICS.map((t) => {
+        const own = items.filter((it) => (t.categories as readonly string[]).includes(it.section));
+        const dom = t.domain ? reading.domains.find((d) => d.domain === t.domain) : undefined;
+        const state = own.length ? 'shown' : dom?.status === 'no-supported-content' ? 'no-content' : 'not-assessed';
+        return (
+          <section key={t.id} data-testid={`palm-reading-topic-${t.id}`} data-state={state} aria-labelledby={`palm-reading-h-${t.id}`}>
+            <h4 id={`palm-reading-h-${t.id}`} style={{ ...typography.bodyStrong, margin: `0 0 ${spacing.xs}px` }}>{t.label}</h4>
+            {own.length
+              ? <ul style={{ margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: spacing.sm }}>{own.map((it) => <ReadingItem key={it.recordId} it={it} />)}</ul>
+              : <p style={{ ...typography.caption, margin: 0 }} data-testid="palm-reading-topic-empty">{state === 'no-content' ? TOPIC_NO_CONTENT : TOPIC_NOT_ASSESSED}</p>}
+          </section>
+        );
+      })}
+      {other.length > 0 && (
+        <section data-testid="palm-reading-topic-other" data-state="shown">
+          <h4 style={{ ...typography.bodyStrong, margin: `0 0 ${spacing.xs}px` }}>Other notes from the traditions</h4>
+          <ul style={{ margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: spacing.sm }}>{other.map((it) => <ReadingItem key={it.recordId} it={it} />)}</ul>
+        </section>
+      )}
+      <section data-testid="palm-reading-not-assessed">
+        <h4 style={{ ...typography.bodyStrong, margin: `0 0 ${spacing.xs}px` }}>Not assessed</h4>
+        <ul style={{ margin: 0, paddingLeft: spacing.lg }}>
+          {reading.notAssessed.map((n) => <li key={n.feature} data-feature={n.feature} data-e1-code={n.code} style={typography.caption}><strong>{featureLabel(n.feature)}:</strong> {n.wording}</li>)}
+        </ul>
+      </section>
+    </section>
+  );
+}
 /** What a review is about: the photo, the exact line states and the hand answers. Any change makes a new key. */
 export const lineSignature = (views: readonly TracingLineView[]): string => JSON.stringify(views.map((v) => [v.line, v.status, v.skipReason, v.points]));
 const MEASUREMENT_LABELS: Record<string, string> = {
@@ -962,9 +1052,19 @@ export function PalmTracingPanel({ context, imageSource, onClose, onRestart }: P
     let r: FeatureSetResult;
     try { r = m.buildFeatureSet({ hand, dominantHand: dominant }); } catch (e) { if (isCleared(e)) { markCleared(); return; } throw e; }
     if (!r.ok) { setMessage('The features could not be put together. Nothing was confirmed.'); return; }
-    // keep only I1's feature set (no landmarks, no photo), frozen; in memory only
-    setConfirmed(Object.freeze({ key: reviewKey, featureSet: deepFreeze(JSON.parse(JSON.stringify(r.featureSet))), at: Date.now() }));
-    setMessage('Features confirmed for this photo.');
+    // D6-I1: the reading is made HERE, once, locally, from the confirmed tracing input, which is not kept (it holds the
+    // landmarks). Only E1's validated output is kept with I1's feature set; any later change withdraws both.
+    let reading: E1Reading | null = null;
+    try {
+      const out = generateConfirmedScannerReading(m.toFeatureSetInput({ hand, dominantHand: dominant }), { confirmedScanner: true });
+      reading = deepFreeze(JSON.parse(JSON.stringify(out))) as E1Reading;
+    } catch (e) {
+      if (isCleared(e)) { markCleared(); return; }
+      reading = null; // E1 refused: the features stay confirmed, and the result says no reading could be made
+    }
+    // keep only I1's feature set and E1's output (no landmarks, no photo, no E1 input), frozen; in memory only
+    setConfirmed(Object.freeze({ key: reviewKey, featureSet: deepFreeze(JSON.parse(JSON.stringify(r.featureSet))), reading, at: Date.now() }));
+    setMessage(reading ? 'Features confirmed for this photo. Your reading is ready.' : 'Features confirmed for this photo. A reading could not be prepared.');
   };
 
   // ---------------------------------------------------------------- render
@@ -996,8 +1096,12 @@ export function PalmTracingPanel({ context, imageSource, onClose, onRestart }: P
       <section data-testid="palm-scanner-result" data-version={PALM_FEATURE_REVIEW_VERSION} aria-labelledby={`${ids}-result-title`} style={panelStyle} className="aura-palm-tracing" data-lines={confirmedLineSummary(fs)}>
         <style>{FOCUS_CSS}</style>
         <ScannerSteps current={4} />
+        <h3 id={`${ids}-result-title`} style={{ ...typography.cardTitle, margin: 0 }}>Your palm reading</h3>
+        {confirmed.reading
+          ? <PalmReadingView reading={confirmed.reading} />
+          : <p data-testid="palm-reading-unavailable" style={{ ...typography.body, margin: 0 }}>A reading could not be prepared for these features. Your confirmed features are shown below.</p>}
         <div>
-          <h3 id={`${ids}-result-title`} style={{ ...typography.bodyStrong, margin: 0 }}><span aria-hidden="true">✓ </span>Your confirmed palm features</h3>
+          <h3 style={{ ...typography.bodyStrong, margin: 0 }}><span aria-hidden="true">✓ </span>Your confirmed palm features</h3>
           <p style={{ ...typography.body, margin: `${spacing.xs}px 0 0` }}>{fs.hand.value === 'left' ? 'Left' : 'Right'} hand · dominant hand: {fs.dominantHand === 'unknown' ? 'not sure' : fs.dominantHand}.</p>
         </div>
         <div>
@@ -1025,7 +1129,7 @@ export function PalmTracingPanel({ context, imageSource, onClose, onRestart }: P
           <ReasonList codes={fs.frame.qualityIssues} testid="palm-result-quality-reasons" />
         </div>
         {hasNotAssessed && <p style={{ ...typography.caption, margin: 0 }} data-testid="palm-result-not-assessed-note">Anything skipped, not visible, uncertain or not available stays that way. Nothing is guessed or filled in.</p>}
-        <p style={{ ...typography.caption, margin: 0 }} data-testid="palm-result-scope">{REVIEW_SCOPE_NOTE} A reading preview exists only as a separate development tool.</p>
+        <p style={{ ...typography.caption, margin: 0 }} data-testid="palm-result-scope">{REVIEW_SCOPE_NOTE}</p>
         <p role="status" aria-live="polite" data-testid="palm-tracing-status" style={{ ...typography.caption, margin: 0, minHeight: '1.2em' }}>{message}</p>
         <div style={actionsRow}>
           <button type="button" onClick={() => { setMode('review'); setMessage(''); }} data-testid="palm-result-edit" style={secondaryButton}>Review or edit</button>

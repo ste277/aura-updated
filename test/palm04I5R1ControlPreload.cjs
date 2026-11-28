@@ -1,7 +1,7 @@
 'use strict';
 /**
- * AURA-PALM-04-I5-R1 -- in-memory source mutation for negative controls (test tooling only). Preloaded with
- * `node -r` by test/palm04I5R1Controls.test.ts; PALM_I5_CONTROL names one mutation. It rewrites what ts-node reads
+ * AURA-PALM-04-I5-R1 / D6-I1 -- in-memory source mutation for negative controls (test tooling only). Preloaded with
+ * `node -r` by test/palm04I5R1Controls.test.ts and test/palmD6I1Controls.test.ts; PALM_I5_CONTROL names one mutation. It rewrites what ts-node reads
  * for ONE source file in this process; nothing on disk changes. An unknown name or a mutation whose target text is
  * missing throws, so a control can never pass vacuously.
  */
@@ -9,6 +9,7 @@ const fs = require('fs');
 const path = require('path');
 const ROOT = path.join(__dirname, '..');
 const CAMERA = path.join(ROOT, 'apps/web/lib/palm-analysis/camera.ts');
+const READING = path.join(ROOT, 'packages/palm-reading-engine/e1/src/reading.ts');
 const UI = path.join(ROOT, 'apps/web/components/palm-scan/PalmImageInput.tsx');
 // The first three are the independent reviewer's 50362 controls, verbatim.
 const CONTROLS = {
@@ -16,6 +17,14 @@ const CONTROLS = {
   'nonvideo-disabled': [CAMERA, "tracks.some((t) => t.kind !== 'video')", "(false && tracks.some((t) => t.kind !== 'video'))"],
   'automatic-start': [UI, 'const unsubscribeCamera = cam.subscribe(setCamera);', "const unsubscribeCamera = cam.subscribe(setCamera); if (cam.support() === 'available') void cam.start();"],
   'preview-failure-ignored': [CAMERA, '(p as Promise<void>).then(undefined, failed);', '(p as Promise<void>).then(undefined, () => undefined);'],
+  // D6-I1 controls
+  'd6-app-interpretation': [UI, '<strong>What the tradition says: </strong>{it.text.reading}</p>', '<strong>What the tradition says: </strong>{it.text.reading} This shows you will succeed.</p>'],
+  'd6-stale-reading': [UI, 'const confirmedValid = !!confirmed && confirmed.key === reviewKey && !cleared;', 'const confirmedValid = !!confirmed && !cleared;'],
+  'd6-keep-input': [UI, 'featureSet: deepFreeze(JSON.parse(JSON.stringify(r.featureSet))), reading, at: Date.now() }));', 'featureSet: deepFreeze(JSON.parse(JSON.stringify(r.featureSet))), reading, input: m.toFeatureSetInput({ hand, dominantHand: dominant }), at: Date.now() } as ConfirmedFeatures));'],
+  'd6-gate-bypass': [READING, "  if (!confirmedScannerGateOpen()) throw new E1ErrorClass('development-only', 'confirmed-scanner readings exist only in development with the image-input gate open');\n", ''],
+  'd6-synthetic-provenance': [READING, 'return readingFor(input, opts.mode, false);', 'return readingFor(input, opts.mode, true);'],
+  'dr1-timeout-removed': [CAMERA, '      previewTimer = timer;\n', ''],
+  'dr1-timeout-unguarded': [CAMERA, "        if (previewTimer !== timer) return; // superseded\n        previewTimer = null;\n        if (stream === s && state.epoch === epoch && state.phase === 'live' && !usableFrame(video)) release('error', 'camera-preview-timeout');", "        previewTimer = null;\n        if (state.phase === 'live' && !usableFrame(video)) release('error', 'camera-preview-timeout');"],
   'stale-playback-unguarded': [CAMERA, "if (stream === s && video === el && state.epoch === epoch && showSeq === seq && state.phase === 'live') release('error', 'camera-preview-failed');", "release('error', 'camera-preview-failed');"],
 };
 const name = process.env.PALM_I5_CONTROL;

@@ -76,8 +76,13 @@ test('F2 altered packaged bytes make the engine fail to load (fail closed), even
   const t = tmpdir('r4-bytes');
   try {
     for (const d of ['src', 'library']) fs.cpSync(path.join(E1, d), path.join(t, 'e1', d), { recursive: true });
-    const p = path.join(t, 'e1', 'library', 'catalogue.json');
-    fs.writeFileSync(p, fs.readFileSync(p, 'utf8').replace('The texts name this line after knowledge', 'The texts name this line after learning'));
+    // D6-I1: the bytes the loader actually reads are the embedded copy (library/packaged-content.mjs, byte-identical
+    // to catalogue.json by test/browser-loader.test.mjs), so that is what is altered here
+    const p = path.join(t, 'e1', 'library', 'packaged-content.mjs');
+    const before = fs.readFileSync(p, 'utf8');
+    const after = before.replace('The texts name this line after knowledge', 'The texts name this line after learning');
+    assert.notEqual(after, before);
+    fs.writeFileSync(p, after);
     const r = spawnSync(process.execPath, ['--input-type=module', '-e', `await import(${JSON.stringify(pathToFileURL(path.join(t, 'e1', 'src', 'packaged.mjs')).href)})`], { encoding: 'utf8' });
     assert.notEqual(r.status, 0);
     assert.match(r.stderr, /invalid-catalogue.*not the C1 rev\. 4 deliverable/);
@@ -148,6 +153,7 @@ test('F6 R5: no package module exports a pipeline, a claim, or any function taki
     for (const k of Object.keys(m)) assert.ok(!forbidden.test(k), `${f} exports ${k}`);
   }
   const reading = fs.readFileSync(path.join(E1, 'src', 'reading.ts'), 'utf8');
-  assert.deepEqual([...reading.matchAll(/^export (?:function|const|type) (\w+)/gm)].map((x) => x[1]).sort(), ['E1Error', 'E1_ENGINE', 'ReadingMode', 'generateSyntheticReading']);
+  // D6-I1 (owner-approved B1): exactly one more entry point, for the development-gated confirmed scanner journey
+  assert.deepEqual([...reading.matchAll(/^export (?:function|const|type) (\w+)/gm)].map((x) => x[1]).sort(), ['E1Error', 'E1_ENGINE', 'ReadingMode', 'generateConfirmedScannerReading', 'generateSyntheticReading']);
   assert.match(reading, /^const BUILD: \(input: PalmFeatureSetInput\) => Any = buildPalmFeatureSet;$/m); // bound at load, never a parameter
 });

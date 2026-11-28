@@ -38,6 +38,7 @@ export type PalmCameraErrorCode =
   | 'camera-failed' // any other failure, or a stream that is not video-only
   | 'camera-ended' // the camera stopped by itself while it was on
   | 'camera-preview-failed' // R1: the live preview could not be started (playback refused or the stream could not be attached)
+  | 'camera-preview-timeout' // D6-I1 DR-1: no usable frame arrived within the bounded preview start-up time
   | 'camera-not-ready'; // a photo was requested before the first frame arrived
 
 export const PALM_CAMERA_ERROR_TEXT: Readonly<Record<PalmCameraErrorCode, string>> = Object.freeze({
@@ -49,11 +50,15 @@ export const PALM_CAMERA_ERROR_TEXT: Readonly<Record<PalmCameraErrorCode, string
   'camera-failed': 'The camera could not be used. Try again, or upload a photo instead.',
   'camera-ended': 'The camera stopped. Try again, or upload a photo instead.',
   'camera-preview-failed': 'The camera preview could not be started, so the camera was turned off. Try again, or upload a photo instead.',
+  'camera-preview-timeout': 'The camera preview did not start in time, so the camera was turned off. Try again, or upload a photo instead.',
   'camera-not-ready': 'The camera is still starting. Wait a moment, then take the photo again.',
 });
 
 /** Errors after which trying the camera again can help (denied, unsupported, insecure and not-found cannot). */
-export const PALM_CAMERA_RETRYABLE: readonly PalmCameraErrorCode[] = Object.freeze(['camera-busy', 'camera-failed', 'camera-ended', 'camera-preview-failed', 'camera-not-ready']);
+export const PALM_CAMERA_RETRYABLE: readonly PalmCameraErrorCode[] = Object.freeze(['camera-busy', 'camera-failed', 'camera-ended', 'camera-preview-failed', 'camera-preview-timeout', 'camera-not-ready']);
+
+/** D6-I1 (DR-1): once the stream is acquired, a usable preview frame must arrive within this time. */
+export const PALM_CAMERA_PREVIEW_TIMEOUT_MS = 8000;
 
 export type PalmCameraPhase = 'idle' | 'requesting' | 'live' | 'error';
 export type PalmCameraStopReason = 'cancel' | 'done' | 'hidden' | 'pagehide' | 'error' | 'unmount' | 'restart';
@@ -92,6 +97,10 @@ export interface PalmCameraEnv {
   getUserMedia?: ((constraints: typeof PALM_CAMERA_CONSTRAINTS) => Promise<PalmStreamLike>) | null;
   /** window.isSecureContext. */
   secureContext?: boolean;
+  /** D6-I1 test seams: the preview start-up limit (default PALM_CAMERA_PREVIEW_TIMEOUT_MS) and the timer functions. */
+  previewTimeoutMs?: number;
+  setTimer?: (fn: () => void, ms: number) => unknown;
+  clearTimer?: (handle: unknown) => void;
 }
 
 export type PalmCameraSupport = 'available' | 'insecure-context' | 'unsupported';
@@ -148,6 +157,13 @@ export function createPalmCamera(env: PalmCameraEnv = defaultPalmCameraEnv()): P
   let video: PalmVideoLike | null = null;
   let onEnded: (() => void) | null = null;
   let showSeq = 0; // R1: each preview start; a failure from an earlier one is ignored
+  // D6-I1 (DR-1): the bounded preview start-up timer of the CURRENT stream (null when none is pending)
+  let previewTimer: unknown = null;
+  const setTimer = env.setTimer ?? ((fn: () => void, ms: number) => setTimeout(fn, ms));
+  const clearTimer = env.clearTimer ?? ((h: unknown) => clearTimeout(h as ReturnType<typeof setTimeout>));
+  const previewLimit = typeof env.previewTimeoutMs === 'number' && env.previewTimeoutMs > 0 ? env.previewTimeoutMs : PALM_CAMERA_PREVIEW_TIMEOUT_MS;
+  const cancelPreviewTimer = () => { if (previewTimer !== null) { try { clearTimer(previewTimer); } catch { /* ignore */ } previewTimer = null; } };
+  const usableFrame = (el: PalmVideoLike | null) => !!el && el.videoWidth > 0 && el.videoHeight > 0 && (typeof el.readyState !== 'number' || el.readyState >= 2);
   const live = new Set<PalmTrackLike>();
   const listeners = new Set<(s: PalmCameraState) => void>();
 
@@ -204,6 +220,7 @@ export function createPalmCamera(env: PalmCameraEnv = defaultPalmCameraEnv()): P
 
   /** Release everything this camera holds; `phase` is what the camera shows afterwards. */
   const release = (reason: PalmCameraStopReason, error: PalmCameraErrorCode | null) => {
+    cancelPreviewTimer();
     const s = stream;
     stream = null;
     stopTracks(s);
@@ -248,6 +265,15 @@ export function createPalmCamera(env: PalmCameraEnv = defaultPalmCameraEnv()): P
       onEnded = ended;
       for (const t of tracks) { try { t.addEventListener?.('ended', ended); } catch { /* ignore */ } }
       set({ phase: 'live', error: null });
+      // D6-I1 (DR-1): from here, the preview has a bounded time to deliver a usable frame. The check runs only for THIS
+      // stream and epoch; stop, photo, error and dispose cancel it, and a newer session ignores an old timer.
+      cancelPreviewTimer();
+      const timer = setTimer(() => {
+        if (previewTimer !== timer) return; // superseded
+        previewTimer = null;
+        if (stream === s && state.epoch === epoch && state.phase === 'live' && !usableFrame(video)) release('error', 'camera-preview-timeout');
+      }, previewLimit);
+      previewTimer = timer;
       show();
     },
     attach(el) {

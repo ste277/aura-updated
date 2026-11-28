@@ -375,7 +375,13 @@ if (mode === 'crash') process.exit(42);`;
 test('G2 nothing outside the engine package imports or names E1; no manifest, alias or config resolves to it', () => {
   const outside = code(['apps', 'packages'].flatMap((d) => read(path.join(REPO, d)))).filter((f) => !path.resolve(f).startsWith(PKG + path.sep) && path.resolve(f) !== GUARD);
   const hits = outside.filter((f) => /palm-reading-engine\/e1|aura\.palm\.e1|composeFromObservations|generateE1Reading/.test(fs.readFileSync(f, 'utf8')));
-  assert.deepEqual(hits.map((f) => path.relative(REPO, f)), []);
+  // D6-I1 (owner-approved B3): exactly ONE app module -- the dev-gated scanner, swapped for a stub in every production
+  // build -- names E1, in exactly one statement importing only the development-gated confirmed-scanner entry point
+  const APP = path.join('apps', 'web', 'components', 'palm-scan', 'PalmImageInput.tsx');
+  const IMPORT = "import { generateConfirmedScannerReading } from '../../../../packages/palm-reading-engine/e1/src/reading';";
+  assert.deepEqual(hits.map((f) => path.relative(REPO, f)), [APP]);
+  const appLines = fs.readFileSync(path.join(REPO, APP), 'utf8').split('\n').filter((l) => /palm-reading-engine|aura\.palm\.e1/.test(l));
+  assert.deepEqual(appLines.map((l) => l.trim()), [IMPORT]);
   const manifests = read(REPO).filter((f) => /(^|\/)(package\.json|tsconfig[\w.-]*\.json|next\.config\.[cm]?js)$/.test(f) && !f.includes(`${path.sep}node_modules${path.sep}`) && !path.resolve(f).startsWith(PKG + path.sep));
   for (const m of manifests) assert.ok(!/palm-reading-engine/.test(fs.readFileSync(m, 'utf8')), `${path.relative(REPO, m)} references the engine package`);
 });
@@ -386,6 +392,11 @@ test('G3 E1 source has no network, storage, console, camera, process, file-syste
     // R5: reading.ts (the pipeline) loads the E1 modules and the I1 contract adapter through the CommonJS loader --
     // exactly these local requires, nothing else
     if (path.basename(f) === 'reading.ts') {
+      // D6-I1 (owner-approved B1): the development gate of the confirmed-scanner entry point -- exactly this one literal
+      // expression may read process.env (the two values the Next.js build inlines); nothing else in E1 touches process
+      const GATE = "process.env.NODE_ENV === 'development' && process.env.NEXT_PUBLIC_AURA_PALM_IMAGE_INPUT === 'g5-i1-dev'";
+      assert.equal(s.split(GATE).length, 2, 'reading.ts: exactly one development-gate expression');
+      s = s.replace(GATE, '');
       const allowedRequires = ["require('./identity.mjs')", "require('./packaged.mjs')", "require('./compose.mjs')", "require('./construction.mjs')", "require('./descriptors.mjs')", "require('./grid.mjs')", "require('../../adapter/feature-set-adapter.mjs')"];
       assert.deepEqual([...s.matchAll(/require\([^)]*\)/g)].map((m) => m[0]).sort(), [...allowedRequires].sort(), 'reading.ts requires');
       for (const r of allowedRequires) s = s.replace(r, '');
@@ -393,12 +404,14 @@ test('G3 E1 source has no network, storage, console, camera, process, file-syste
     // R4 (F2): packaged.mjs reads exactly its two vendored library files once, as bytes, and checks their digests --
     // only these two imports and this one read are allowed; no other file-system or crypto use anywhere.
     if (path.basename(f) === 'packaged.mjs') {
-      for (const allowed of ["import { readFileSync } from 'node:fs';", "import { createHash } from 'node:crypto';", 'readFileSync(new URL(`../library/${name}.json`, import.meta.url))']) {
+      // D6-I1 (owner-approved B2): browser-compatible loader -- the pinned text comes from the generated, byte-checked
+      // library/packaged-content.mjs and is digest-checked with the local SHA-256; no file system, no node:crypto
+      for (const allowed of ["import { CATALOGUE_TEXT, SCHEMA_TEXT } from '../library/packaged-content.mjs';", "import { sha256Hex } from './sha256.mjs';", 'sha256Hex(new TextEncoder().encode(text))']) {
         assert.equal(s.split(allowed).length, 2, `packaged.mjs: expected exactly one ${allowed}`);
         s = s.replace(allowed, '');
       }
-      assert.deepEqual([...s.matchAll(/readPinned\('([a-z]+)'/g)].map((m) => m[1]), ['catalogue', 'schema']);
-      assert.ok(!/readFileSync|createHash\(\)\.update\(\w+\)\.digest\('hex'\)[\s\S]*createHash/.test(s), 'packaged.mjs: one read only');
+      assert.deepEqual([...s.matchAll(/readPinned\('([a-z]+)', ([A-Z_]+), C1_REV4_DIGESTS\.([a-z]+)\)/g)].map((m) => m.slice(1).join(':')), ['catalogue:CATALOGUE_TEXT:catalogue', 'schema:SCHEMA_TEXT:schema']);
+      assert.ok(!/readFileSync|createHash|import\.meta|fetch/.test(s), 'packaged.mjs: no file system, node:crypto, import.meta or fetch');
     }
     assert.ok(!/\bfetch\s*\(|XMLHttpRequest|WebSocket|localStorage|sessionStorage|indexedDB|document\.|navigator\.|getUserMedia|console\.|process\.|node:fs|node:child_process|node:net|node:http|node:crypto|require\(|Date\.now|new Date|Math\.random|https?:\/\//.test(s), path.basename(f));
     assert.ok(!/prototype\/src/.test(s), `${path.basename(f)} imports the frozen G6 engine`);

@@ -106,8 +106,10 @@ function bundle(entry: string, mutation: Mutation): string {
       src = src.replace(m.from, m.to);
       used.add(k);
     });
-    let out: string = ts.transpileModule(src, { fileName: file, compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2019, jsx: ts.JsxEmit.React, esModuleInterop: true } }).outputText;
-    out = out.replace(/require\("([^"]+)"\)/g, (_m: string, spec: string) => {
+    let out: string = ts.transpileModule(src, { fileName: file.replace(/\.mjs$/, '.js'), compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2019, jsx: ts.JsxEmit.React, esModuleInterop: true } }).outputText;
+    // D6-I1: also single-quoted requires (E1's reading.ts loads its .mjs modules with require('./x.mjs'))
+    out = out.replace(/require\((?:"([^"]+)"|'([^']+)')\)/g, (_m: string, dq: string | undefined, sq: string | undefined) => {
+      const spec = (dq ?? sq) as string;
       if (spec in EXTERNAL) return `__ext(${JSON.stringify(spec)})`;
       if (!spec.startsWith('.')) throw new Error(`unexpected external import ${spec} in ${file}`);
       return `__req(${visit(resolve(spec, file))})`;

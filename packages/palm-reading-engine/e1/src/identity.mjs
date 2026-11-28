@@ -121,3 +121,24 @@ export function requireSyntheticOptions(options, allowed) {
   for (const k of Object.keys(snap)) if (!allowed.includes(k)) throw new E1Error('invalid-option', `unsupported option: ${k}`);
   return snap;
 }
+
+/**
+ * AURA-PALM-D6-I1 (owner-approved B1, ticket 50368) -- the declaration for the ONE non-synthetic input source: the
+ * development-gated, explicitly confirmed scanner journey (apps/web PalmImageInput, behind the G5 image-input gate).
+ * Same capture and refusal rules as requireSyntheticOptions: the captured `confirmedScanner` must be an own data
+ * property exactly equal to the primitive boolean true, and every other own key must be listed in `allowed`. It is
+ * NOT a general bypass: reading.ts additionally requires the development gate to be open (see there), the G5 privacy
+ * gate allows exactly one app module to call it, and the E1 build guard keeps E1 out of every release build.
+ */
+export function requireConfirmedScannerOptions(options, allowed) {
+  const refuse = (why) => { throw new E1Error('confirmed-scanner-required', `pass an own { confirmedScanner: true } declaration (${why})`); };
+  if (options === null || typeof options !== 'object' || Array.isArray(options)) refuse('options must be a plain object');
+  let snap;
+  try { snap = captureOwnData(options, { code: 'confirmed-scanner-required', maxDepth: 1, at: 'options' }); } catch (e) { refuse(`options could not be captured: ${String(e?.message ?? e)}`); }
+  if (Array.isArray(snap)) refuse('options must be a plain object');
+  if (!Object.prototype.hasOwnProperty.call(snap, 'confirmedScanner')) refuse('no own confirmedScanner property');
+  if (snap.confirmedScanner !== true) refuse('confirmedScanner must be exactly true');
+  if (Object.prototype.hasOwnProperty.call(snap, 'synthetic')) refuse('a confirmed-scanner reading is not a synthetic reading');
+  for (const k of Object.keys(snap)) if (!allowed.includes(k)) throw new E1Error('invalid-option', `unsupported option: ${k}`);
+  return snap;
+}
