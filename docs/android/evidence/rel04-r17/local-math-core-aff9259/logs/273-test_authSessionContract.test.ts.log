@@ -1,0 +1,27 @@
+$ npx ts-node test/authSessionContract.test.ts
+# job=math-core-tests step=Run session provisional/committed contract test (AUTH-SESSION-01-I1 R1) env={}
+PASS  compile-time contract type-checked (no sid on provisional / decision / label; no forged session or authorization; only a narrowed committed decision authorizes)
+PASS  run: acknowledged COMMIT of the originating transaction -> committed + authorization (no sid on either)
+PASS  run (R3): exactly two queries -- the INSERT, then ONE combined binding-check + COMMIT message
+PASS  run (R3): binding check raises (different / no transaction, or row missing) -> rolled_back (transaction_mismatch), no authorization
+PASS  run: aborted transaction (25P02) -> rolled_back (aborted_transaction), no authorization
+PASS  run: COMMIT answered ROLLBACK -> rolled_back, no authorization
+PASS  run: COMMIT rejected (40001) -> rolled_back (rejected_at_commit), no authorization
+PASS  run: socket error, no SQLSTATE -> ambiguous, no authorization
+PASS  run: socket error, no SQLSTATE -> the provisional can never be committed again
+PASS  run: connection exception 08006 -> ambiguous, no authorization
+PASS  run: connection exception 08006 -> the provisional can never be committed again
+PASS  run: admin shutdown 57P01 -> ambiguous, no authorization
+PASS  run: admin shutdown 57P01 -> the provisional can never be committed again
+PASS  run: unexpected single reply -> ambiguous, no authorization
+PASS  run: unexpected single reply -> the provisional can never be committed again
+PASS  run: unexpected reply shape (3 results) -> ambiguous, no authorization
+PASS  run: unexpected reply shape (3 results) -> the provisional can never be committed again
+PASS  run (R3): an INSERT reply without the originating transaction id never yields a provisional session
+PASS  run: a forged authorization is refused
+PASS  run: a hand-made provisional object cannot be committed / authorized
+PASS  run: classification is refused unless the commit was ambiguous
+
+21 passed, 0 failed
+
+# exit=0 signal=

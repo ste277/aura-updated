@@ -1,0 +1,41 @@
+$ npx ts-node --project tsconfig.jsdom-tests.json test/findATimeErrorStatesJsdom.test.ts
+# job=math-core-tests step=Run Find a Time error-state component test (AURA-READY-02-F4) env={}
+OK   U1. fetch network TypeError (Chrome/Safari/Firefox wording) -> NETWORK
+OK   U2. non-2xx thrown by the transport ("Unable to run timing search.") -> SERVER
+OK   U3. unparseable body (SyntaxError) -> MALFORMED
+OK   U4. an unrelated TypeError (a bug) is NOT called a connection problem -> SERVER
+OK   U5. typed FindTimeError keeps its kind
+OK   U6. a body without a candidates array is MALFORMED (never an empty result)
+OK   U7. an empty candidates array is a valid (genuine no-results) response
+OK   U8. user-facing copy matches the ticket and leaks no internals
+OK   1. one request sent for "Study"
+OK   1. success: recommendations render, no error box
+OK   2. zero results: the existing genuine no-results message is shown
+OK   2. zero results is NOT presented as a failure (no error box, no Try again)
+OK   3. network: "Connection problem" with the connection copy
+OK   3. network: role="alert" and a Try again button (>= 44 px)
+OK   3. network: the old misleading "try a shorter duration" text is gone
+OK   9. rapid Try again / Find taps while in flight -> exactly one new request
+OK   7. retry clears the stale error while loading
+OK   8. retry re-sends the identical inputs (activity, duration, time preference, horizon)
+OK   7. retry success shows recommendations
+OK   9b. two same-tick taps -> one request
+OK   4. server error: "Search unavailable" + generic copy, no internals
+OK   6. malformed response: safe generic error, never an empty/no-results state
+OK   5. (setup) search in flight
+OK   5. timeout: "Request timed out" with Try again
+OK   5. timeout: loading ends so the user can retry
+OK   10. (setup) retry after timeout sends a new request
+OK   10. the late answer of the timed-out request does NOT overwrite the newer result
+OK   5b. (setup) second timeout shown
+OK   5b. a late answer after a timeout (no retry) is ignored: timeout message stays, no results appear underneath it
+OK   10. a failure from an abandoned request is not shown after the inputs changed
+OK   S1. the misleading catch-all message is removed from Find a Time
+OK   S2. CHECK / COMPARE paths untouched (no timeout/classification added there)
+OK   11. guest /find still calls the unauthenticated guest endpoint and keeps its own SEARCH_ERROR / NO_RESULT states
+OK   12. guest save still goes through email sign-in (Continue with email -> verify-code, now via lib/signInCode.ts verifySignInCode, AURA-ANDROID-REL-04 R2)
+
+34 checks
+All Find a Time error-state checks passed.
+
+# exit=0 signal=

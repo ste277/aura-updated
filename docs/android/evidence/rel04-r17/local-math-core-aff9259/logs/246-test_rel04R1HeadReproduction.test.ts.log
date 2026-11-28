@@ -1,0 +1,28 @@
+$ npx ts-node --project tsconfig.jsdom-tests.json test/rel04R1HeadReproduction.test.ts
+# job=math-core-tests step=Run REL-04 R1-head reproduction and mixed-version test (R2) env={"TS_NODE_COMPILER_OPTIONS":"{\"jsx\":\"react-jsx\"}"}
+OK   fixture habit-logs.route.ts.txt == d09449b apps/web/app/api/habit-logs/route.ts
+OK   fixture plans.route.ts.txt == d09449b apps/web/app/api/plans/route.ts
+OK   fixture logout.route.ts.txt == d09449b apps/web/app/api/auth/logout/route.ts
+OK   fixture expectedAccount.ts.txt == d09449b apps/web/lib/expectedAccount.ts
+OK   fixture offlineHabitQueue.ts.txt == d09449b apps/web/lib/offlineHabitQueue.ts
+OK   fixture accountSession.ts.txt == d09449b apps/web/lib/accountSession.ts
+OK   fixture LocationPicker.tsx.txt == d09449b apps/web/components/LocationPicker.tsx
+OK   D1 R1 HEAD (valid session): old client's 3 pending entries are DELETED (428,428,428)
+OK   D1 CORRECTED (valid session): every request refused 503 upgrade, nothing written, entries kept BYTE FOR BYTE
+OK   D1 R1 HEAD (expired session): old client's 3 pending entries are DELETED (401,401,401)
+OK   D1 CORRECTED (expired session): every request refused 503 upgrade, nothing written, entries kept BYTE FOR BYTE
+OK   D1 CORRECTED new client: legacy entries are not replayed or assigned automatically (quarantined)
+OK   D1 CORRECTED (R3): there is no way to assign unowned legacy entries to an account (no adopt API)
+OK   D1 CORRECTED (R4): they are counted, kept unchanged (never rewritten while older writers may be active), and nothing is stored for any account
+OK   D2 R1 HEAD: unbound plan creation passes the account boundary (reaches body validation; status 400, not 409/428/503)
+OK   D2 CORRECTED: unbound plan creation refused (503 upgrade) before any read or write
+OK   D3 R1 HEAD: A's logout carrying B's session clears B's cookie
+OK   D3 CORRECTED: refused (409), B's cookie untouched
+OK   D4 R1 HEAD: interleaved enqueues lose an entry (kept: ["crid-ctx1"])
+OK   D4 CORRECTED (R4): concurrent enqueues are atomic transactions -- both kept
+OK   D5 R1 HEAD: the late older answer (A) overrides the newer one (B) -> account synthetic-user-a
+OK   D5 CORRECTED: the newer answer (B) stands
+
+22 passed, 0 failed
+
+# exit=0 signal=

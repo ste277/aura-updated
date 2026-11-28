@@ -1,0 +1,44 @@
+$ npx ts-node test/manualGoalProvenanceParityDb.test.ts
+# job=day-constructor-acceptance-db-tests step=Run manual Goal provenance parity DB test env={}
+=== server marking through the REAL handoff + bootstrap ===
+OK   manual handoff admits the recurring and finite activities and NOT the exhausted one (existing zero-remaining behavior)
+OK   the single real eligible-demand load recognizes ONLY the recurring handoff activity as canonical demand
+OK   marking: recurring item canonical; finite item left as the legacy manual item
+OK   an activity of an ARCHIVED Goal is not recognized as canonical demand (manual parity does NOT broaden eligibility): it stays a legacy manual row
+OK   cross-user: B cannot hand off A's activity at all
+=== SOURCE-PATH PRIVILEGE: identical facts via both entry paths ===
+OK   the two entry paths produce the SAME client row (same canonical identity, same provenance field)
+OK   both previews are READY through the real boundary
+OK   PERMANENT PRIVILEGE GUARD: recurrence AND opportunity decision facts are IDENTICAL for the automatic and manual entry
+OK   ...including horizon, coverage and duration basis
+OK   ...and the recurrence period is the planning date's own week (Monday .. Sunday of the anchored week)
+OK   ...and an identical constructed day (facts are inert; entry path changes no Constructor output)
+OK   query parity: the same Goal queries for the manual and the automatic preview (1 discovery + 1 facts), no per-intent lookup
+=== other manual rows stay fact-free ===
+OK   finite manual row: legacy id, NO facts (non-recurrent behavior preserved)
+OK   freeform row: no facts
+OK   exhausted activity with a FORGED canonical id: no facts (zero-remaining exclusion cannot be bypassed)
+OK   archived-goal activity: no facts
+OK   another user's canonical id supplied by A: no facts for A
+OK   forged body facts / period bounds / timezone are ignored: facts equal the server-derived ones
+OK   a legitimate canonical id with an altered title still resolves to the same facts (identity is the id)
+OK   the LEGACY manual id (stale tab / old link) for the SAME recurring activity stays fact-free -- never promoted by title or activity matching
+=== acceptance of the canonical MANUAL row ===
+OK   the real client accept body links the canonical manual row exactly as it links an automatic row
+OK   acceptance is SAVED (signed canonical id -> provenance authorization -> persistence)
+OK   exactly ONE occurrence and ONE PlannedActivity created
+OK   provenance is correct: the occurrence points at R and the accepted plan; the GoalActivity link follows
+OK   idempotency: replaying the same acceptance returns the original plan and creates nothing new
+OK   automatic discovery STILL offers R while its occurrence is live, with capacity correctly reduced (remainingThisWeek=2) -- Multi-Occurrence Rhythm PR 2
+OK   ...and the manual handoff (resolveGoalActivityHandoff) STILL admits it too -- Multi-Occurrence Rhythm PR 2 parity fix (PLANNED with remaining capacity is now admitted, matching automatic discovery)
+=== reverse order: automatic first, then a manual attempt ===
+OK   automatic acceptance of R2 saves one occurrence
+OK   a second acceptance for the same activity (here forced through the manual shape), with real remaining capacity, SUCCEEDS as a distinct second occurrence -- Multi-Occurrence Rhythm PR 2
+=== legacy finite manual path still works exactly as before ===
+OK   the legacy finite manual row is accepted and links the GoalActivity (unchanged behavior)
+=== cross-user acceptance ===
+OK   user B carrying user A's canonical id gets NO facts from the server
+OK   ...and B's acceptance cannot link or consume A's activity: not SAVED, B has no new plan, A's counts unchanged
+ALL MANUAL GOAL PROVENANCE PARITY DB CHECKS PASSED
+
+# exit=0 signal=

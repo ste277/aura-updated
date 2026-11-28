@@ -1,0 +1,22 @@
+$ npx ts-node test/decisionPressureDb.test.ts
+# job=day-constructor-acceptance-db-tests step=Run decision pressure DB test env={}
+=== FRIDAY: today is the last known opportunity ===
+OK   the canonical manual row is exactly the automatic row (P0a identity)
+OK   REAL DEFAULT ROW: a hand-off / automatic row with no chosen duration resolves to the generic fallback, so its evidence says GENERIC_FALLBACK and its pressure is NONE even though every other fact is scarce (fallback is weaker knowledge)
+OK   both previews are READY and each prepared real evidence with recurrence AND opportunity
+OK   the real producers' evidence is what the pressure model expects: aligned horizon (Fri .. Sun), RESOLVED duration, first day KNOWN_FEASIBLE, Saturday and Sunday known infeasible, COMPLETE coverage, remaining 3
+OK   PRESSURE: the automatic candidate on Friday is LAST_KNOWN_OPPORTUNITY
+OK   CANONICAL MANUAL PARITY: the canonical manual hand-off candidate has deeply equal evidence (distinct objects) and IDENTICAL pressure
+OK   FIXED: the very same evidence for a FIXED candidate is NONE (pressure is for deferrable work)
+=== LEGACY / FACT-FREE rows ===
+OK   the legacy non-canonical hand-off row (a finite activity) has no evidence and NONE pressure (nothing is fabricated for a fact-free row)
+=== WEDNESDAY: later viable days -> NONE ===
+OK   Wednesday: Thursday and Friday are still known viable (afterStartViableDays 2) -> NONE
+OK   Wednesday canonical manual: identical evidence and identical (NONE) pressure
+OK   the planning date is part of the input: Friday evidence read against a Wednesday planning date is NONE (it must lie inside, and be aligned with, its own horizon)
+=== inert: the preview is unchanged and nothing was written ===
+OK   previews carry no pressure anywhere (P2b is unwired): no response, resolved intent or item mentions it
+OK   ZERO WRITES: no plan, occurrence or goal-activity row changed across all previews and derivations
+ALL DECISION PRESSURE DB CHECKS PASSED
+
+# exit=0 signal=

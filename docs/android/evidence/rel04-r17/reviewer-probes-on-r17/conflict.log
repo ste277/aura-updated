@@ -1,0 +1,9 @@
+OK   S0 the production build serves (next start)
+versions {"chromium":"151.0.7922.34","node":"v26.5.0"}
+FAIL unexpected error locator.click: Timeout 30000ms exceeded.
+Call log:
+  - waiting for locator('[data-operation-id="d3d51e1e-d114-4113-9fbf-6adb158508dc"]').getByRole('button', { name: 'Retry', exact: true })
+
+    at main (/Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/android-rel-04-app/test/review-39260-conflict.local.ts:166:75)
+
+1 passed, 1 failed

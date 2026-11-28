@@ -1,0 +1,20 @@
+$ npx ts-node test/goalTemplateCompletionDb.test.ts
+# job=day-constructor-acceptance-db-tests step=Run Goal template completion DB test env={}
+OK   26. GET_FITTER "Go for a run" persists DONE via the canonical all-null convention (completionKind/TargetValue/Unit all null)
+OK   12/27. MEDITATE_REGULARLY persists DURATION targetValue=10
+OK   12. DURATION persists with NO unit (implicit minutes)
+OK   34. newly-created templated activity is SUGGESTED (no plannedActivityId)
+OK   36. Goal Detail read model normalizes the persisted row to DURATION targetValue=10 (same helper the real route.ts uses)
+OK   36. Goal Detail's own canonical formatter (unmodified by G3.4) renders "10 min" for a not-yet-completed templated activity
+OK   37. Right Now read model (loadGoalContextsForPlanIds) sees the SAME DURATION targetValue=10 requirement the template resolved
+OK   37. Right Now read model sees the logged actual value (6)
+OK   37. Right Now's own canonical formatter (G3.3, unmodified by G3.4) renders "6 / 10 min"
+OK   37. Right Now context carries the correct Goal title
+OK   29. Start-from-scratch manual activity (no template, no explicit requirement) persists DONE via the unchanged default -- all three columns null
+OK   38. an explicitly-supplied, non-template MEASURED_TARGET requirement persists verbatim, untouched by any template default
+OK   15/30. fixture persisted as DONE (simulating a pre-G3.4-equivalent row)
+OK   15/30. re-resolving the current template still yields DURATION targetValue=10 (the template itself did change)
+OK   22/23/30. the EXISTING row, read back from the DB, is STILL DONE -- template re-resolution never mutated it (no backfill, no retroactive reinterpretation)
+ALL GOAL TEMPLATE COMPLETION DB CHECKS PASSED
+
+# exit=0 signal=

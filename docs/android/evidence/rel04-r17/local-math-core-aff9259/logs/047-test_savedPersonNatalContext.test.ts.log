@@ -1,0 +1,17 @@
+$ npx ts-node test/savedPersonNatalContext.test.ts
+# job=math-core-tests step=Run SavedPerson natal context test env={}
+OK   The exact same birth details produce an identical natal context on repeated calls (deterministic, no hidden state)
+OK   natalContextFromBirthDetails() matches buildNatalContext() called directly on the same resolved instant (one shared implementation, not two)
+OK   The natal context's Janma Nakshatra index matches getNakshatra() called directly
+OK   The natal context's Janma Nakshatra name matches getNakshatra() called directly
+OK   Janma Nakshatra is a non-empty recognizable name
+OK   Janma Rashi is a non-empty recognizable name
+OK   natalNakshatraIndex is within the valid 1-27 range
+OK   moonElement is one of the four recognized elements
+OK   A different birth date produces a different natal context
+OK   A birth time in a different timezone still matches its own direct getNakshatra() calculation (timezone-correct)
+OK   The same clock time in two different timezones resolves to two different UTC instants (sanity: the two Date objects differ)
+
+ALL SAVED PERSON NATAL CONTEXT CHECKS PASSED
+
+# exit=0 signal=

@@ -1,0 +1,38 @@
+$ npx ts-node test/pa2cTithiKaranaAberrationFix.test.ts
+# job=math-core-tests step=Run PA-2C Tithi/Karana aberration fix test env={}
+OK   Aberration-on vs aberration-off Moon-Sun elongation gap is ~20.8 arcsec (the root-cause magnitude), not zero
+OK   KARANA: findNextTransition and findNextNamedTransition agree within 2s at 2026-01-15T00:00:00Z (diffMs=1)
+OK   KARANA: findNextTransition and findNextNamedTransition agree within 2s at 2026-03-01T00:00:00Z (diffMs=1)
+OK   KARANA: findNextTransition and findNextNamedTransition agree within 2s at 2026-07-04T00:00:00Z (diffMs=2)
+OK   KARANA: findNextTransition and findNextNamedTransition agree within 2s at 2026-11-20T00:00:00Z (diffMs=0)
+OK   KARANA: findNextTransition and findNextNamedTransition agree within 2s at 2030-06-01T00:00:00Z (diffMs=1)
+OK   TITHI: classification differs 1s before vs. 1s after the found transition at 2026-01-15T00:00:00Z (Krishna Dvadashi -> Krishna Trayodashi)
+OK   TITHI: findNextTransition and findNextNamedTransition agree within 2s at 2026-01-15T00:00:00Z (diffMs=2)
+OK   TITHI: classification differs 1s before vs. 1s after the found transition at 2026-03-01T00:00:00Z (Shukla Trayodashi -> Shukla Chaturdashi)
+OK   TITHI: findNextTransition and findNextNamedTransition agree within 2s at 2026-03-01T00:00:00Z (diffMs=1)
+OK   TITHI: classification differs 1s before vs. 1s after the found transition at 2026-07-04T00:00:00Z (Krishna Chaturthi -> Krishna Panchami)
+OK   TITHI: findNextTransition and findNextNamedTransition agree within 2s at 2026-07-04T00:00:00Z (diffMs=1)
+OK   TITHI: classification differs 1s before vs. 1s after the found transition at 2026-11-20T00:00:00Z (Shukla Dashami -> Shukla Ekadashi)
+OK   TITHI: findNextTransition and findNextNamedTransition agree within 2s at 2026-11-20T00:00:00Z (diffMs=2)
+OK   TITHI: classification differs 1s before vs. 1s after the found transition at 2030-06-01T00:00:00Z (Amavasya -> Shukla Pratipada)
+OK   TITHI: findNextTransition and findNextNamedTransition agree within 2s at 2030-06-01T00:00:00Z (diffMs=3)
+OK   YOGA (control, untouched): findNextTransition and findNextNamedTransition still agree within 1s at 2026-01-15T00:00:00Z (diffMs=13)
+OK   YOGA (control, untouched): findNextTransition and findNextNamedTransition still agree within 1s at 2026-03-01T00:00:00Z (diffMs=9)
+OK   YOGA (control, untouched): findNextTransition and findNextNamedTransition still agree within 1s at 2026-07-04T00:00:00Z (diffMs=44)
+OK   YOGA (control, untouched): findNextTransition and findNextNamedTransition still agree within 1s at 2026-11-20T00:00:00Z (diffMs=26)
+OK   YOGA (control, untouched): findNextTransition and findNextNamedTransition still agree within 1s at 2030-06-01T00:00:00Z (diffMs=27)
+OK   Every Tithi boundary is also a Karana boundary (Karana classification changes across it too)
+OK   The first Karana transition after a Tithi-boundary-containing instant occurs at or before the Tithi boundary itself
+OK   A transition into an avoid-Karana (Vishti/Shakuni/Chatushpada/Naga) is found within 80 Karana periods of 2026-01-01
+OK   A candidate genuinely overlapping an avoid-Karana for its final 10 seconds is correctly flagged by spanOverlapsAuthoritativeEventAvoid
+OK   Marriage May 20 2026 remains ADHIKA_MASA-excluded (unaffected by this fix)
+OK   Marriage June 1 2026 remains ADHIKA_MASA-excluded (unaffected by this fix)
+OK   Marriage June 20 2026 remains eligible, no Adhika Masa exclusion (unaffected by this fix)
+OK   findNextTransition(KARANA) is deterministic across repeated calls
+OK   findNextTransition(TITHI) is deterministic across repeated calls
+
+30 passed, 0 failed.
+
+ALL PA-2C TITHI/KARANA ABERRATION FIX CHECKS PASSED
+
+# exit=0 signal=
