@@ -1,5 +1,6 @@
 import type { LoggedEntryItem } from '../components/CalendarViewSection';
 import { bindServerRow, definitiveRefusal, DEFINITIVE_REFUSALS, type BoundServerRow, type DefinitiveRefusal } from './habitLogSyncPolicy';
+import { matchesActivityIntent, type RecoveryIntent } from './pendingReplayReconciliation';
 
 /**
  * Pending Activity Reload Visibility V1 -- the shape page.tsx's own
@@ -700,6 +701,11 @@ export type EnqueueResult =
    */
   | { status: 'unknown' }
   | { status: 'conflict' }
+  /**
+   * R17 (39260 G8): a NEW operation was refused inside the claiming transaction because THE recovery decision holds
+   * an open operation for the same activity (nothing written). The caller offers that operation's recovery.
+   */
+  | { status: 'recovery-required'; operation: RecoveryOperation }
   | { status: 'failed' };
 
 /**
@@ -795,6 +801,122 @@ async function requestState(st: Stores, owner: string, crid: string, payload: st
   return scan.paused ? { kind: 'paused' } : { kind: 'absent' };
 }
 
+// ------------------------------------------------------------------ R17 (39260): THE recovery decision
+/**
+ * R17 -- the ONE account-scoped recovery decision. Every consumer reads it instead of interpreting markers,
+ * receipts or copies itself: the UI projection (readActivityOperations), a NEW submission (enqueueOwned
+ * `newOperation`, inside the claiming transaction), the user's explicit Retry (eligibilityGate, inside the claiming
+ * transaction) and automatic replay (eligibilityGate for a live copy).
+ *
+ * For each request id of the account, the durable DECISION MARKER (validated by decisionAuthority, incl. its
+ * receipt), the surviving COPIES (resolved by resolveIdentity) and the retired localStorage state are evaluated
+ * TOGETHER:
+ *   confirmed / failed / discarded   a validated decision, and no surviving copy carries a different payload
+ *   conflict      the evidence names more than one payload under this id (marker vs copy, copy vs copy, a decision
+ *                 vs a later copy): open and unresolved; NO payload may be sent under the id (39260 G7)
+ *   unresolved    a marker that proves no outcome (incomplete, proofless, malformed receipt) -- it never hides a
+ *                 live copy: the one payload the evidence names is the operation's intent (39260 G9)
+ *   pending       a queued copy without a decision
+ * `dispatchPayload` is the ONE canonical payload that may be sent under the id: a pending copy's payload
+ * (automatically), or an unresolved operation's single payload when it comes from a live copy or a correctly bound
+ * marker (explicit Retry only). Anything else -- conflicting bodies, a paused / damaged / contradictory / retired
+ * copy, an unbound marker's payload, no payload at all -- yields null: never sent, every copy preserved.
+ */
+export type RecoveryStatus = 'pending' | 'unresolved' | 'conflict' | 'confirmed' | 'failed' | 'discarded';
+export interface RecoveryOperation {
+  clientRequestId: string;
+  status: RecoveryStatus;
+  dispatchPayload: string | null;
+  /** The operation's own intent for display: the dispatch payload, else the single payload the evidence names (a live copy first). */
+  body: Record<string, unknown> | null;
+  /** Every activity intent the evidence names under this id (incl. paused copies): a NEW submission matching any is withheld. */
+  intents: RecoveryIntent[];
+  receipt?: AcceptedReceipt;
+  at: number;
+}
+export const isOpenRecovery = (op: RecoveryOperation) => op.status === 'pending' || op.status === 'unresolved' || op.status === 'conflict';
+const parseObject = (p: unknown): Record<string, unknown> | null => { if (typeof p !== 'string') return null; try { const v = JSON.parse(p); return v && typeof v === 'object' && !Array.isArray(v) ? v : null; } catch { return null; } };
+const intentOf = (v: unknown): RecoveryIntent | null => {
+  const o = v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
+  if (!o || typeof o.activityTitle !== 'string' || !o.activityTitle.trim()) return null;
+  return typeof o.activityId === 'string' && o.activityId ? { activityTitle: o.activityTitle, activityId: o.activityId } : { activityTitle: o.activityTitle };
+};
+async function decideOperations(st: Stores, owner: string, q: Extract<Quarantine, { state: 'ok' }>, only?: string): Promise<Map<string, RecoveryOperation>> {
+  const records = await relevantRecords(st, owner);
+  const markers = new Map<string, Partial<Decision>>();
+  if (only !== undefined) {
+    const d = (await asPromise(st.tombstones.get(decisionKey(owner, only)))) as Partial<Decision> | undefined;
+    if (d !== undefined && d !== null) markers.set(only, d);
+  } else {
+    const prefix = decisionKey(owner, '');
+    for (const d of (await asPromise(st.tombstones.getAll())) as Array<Partial<Decision>>) {
+      if (typeof d?.recordId === 'string' && d.recordId.startsWith(prefix)) markers.set(d.recordId.slice(prefix.length), d);
+    }
+  }
+  const crids = new Set<string>(only !== undefined ? [only] : markers.keys());
+  if (only === undefined) for (const r of records) { const id = recordIdentity(owner, r); if (id.crid) crids.add(id.crid); }
+  const out = new Map<string, RecoveryOperation>();
+  for (const crid of crids) {
+    const marker = markers.get(crid);
+    const a = decisionAuthority(marker, owner, crid);
+    const live: Stored[] = [];
+    let blocked = q.opaque || q.crids.has(crid); // a quarantined / blocked retired copy
+    const intents: RecoveryIntent[] = [];
+    let at = typeof marker?.at === 'number' ? marker.at : 0;
+    for (const r of records) {
+      const id = recordIdentity(owner, r);
+      if (id.crid !== crid && !id.candidates.includes(crid)) continue;
+      if (id.kind === 'valid' && id.crid === crid && isActive(r)) live.push(r);
+      else { blocked = true; const i = intentOf(r.item); if (i) intents.push(i); } // damaged, contradictory, incomplete or retired copy
+      if (!at && typeof r.queuedAt === 'number') at = r.queuedAt;
+    }
+    if (a.kind === 'none' && live.length === 0 && !blocked) continue; // nothing names this id
+    const livePayloads = [...new Set(live.map((r) => canonicalPayload(r.item)))];
+    const markerPayload = typeof marker?.payload === 'string' ? marker.payload : null; // any payload a marker names (bound or not)
+    for (const p of [...livePayloads, ...(markerPayload !== null ? [markerPayload] : [])]) { const i = intentOf(parseObject(p)); if (i && !intents.some((x) => x.activityTitle === i.activityTitle && x.activityId === i.activityId)) intents.unshift(i); }
+    const single = livePayloads.length === 1 ? livePayloads[0] : null;
+    const display = (p: string | null) => parseObject(p);
+    const op = (status: RecoveryStatus, dispatchPayload: string | null, shown: string | null, receipt?: AcceptedReceipt): RecoveryOperation =>
+      ({ clientRequestId: crid, status, dispatchPayload, body: display(dispatchPayload ?? shown), intents, ...(receipt ? { receipt } : {}), at });
+    if (a.kind === 'success' || a.kind === 'failed' || (a.kind === 'discarded' && markerPayload !== null)) {
+      const decided = a.kind === 'success' ? a.receipt.payload : markerPayload!;
+      // A validated decision is final for ITS payload; a surviving copy with another payload under the same id is a conflict.
+      if (livePayloads.some((p) => p !== decided)) { out.set(crid, op('conflict', null, single)); continue; }
+      out.set(crid, a.kind === 'success' ? op('confirmed', null, decided, a.receipt) : op(a.kind === 'failed' ? 'failed' : 'discarded', null, decided));
+      continue;
+    }
+    if (a.kind === 'discarded') { out.set(crid, op('discarded', null, single)); continue; } // a null-payload discard fences every payload
+    // No validated outcome (no marker, or a marker that proves nothing): the evidence is evaluated together.
+    const named = new Set(livePayloads);
+    if (markerPayload !== null) named.add(markerPayload);
+    if (named.size > 1) { out.set(crid, op('conflict', null, single)); continue; } // G7: never send either body
+    const only1 = named.size === 1 ? [...named][0] : null;
+    if (a.kind === 'none') { out.set(crid, op(live.length ? 'pending' : 'unresolved', blocked ? null : only1, only1)); continue; }
+    // An unverified marker: its single payload is recoverable when a live copy carries it, or when the marker itself is
+    // correctly bound (decisionAuthority gave its payload) and that payload names this request (G9: an incomplete
+    // marker never hides the live copy; an unbound marker's payload alone is never sent).
+    const trusted = only1 !== null && !blocked && (livePayloads.includes(only1) || (a.kind === 'unverified' && a.payload === only1 && isQueuedHabitLog(parseObject(only1)) && parseObject(only1)!.clientRequestId === crid));
+    out.set(crid, op('unresolved', trusted ? only1 : null, only1));
+  }
+  return out;
+}
+/** R17: THE recovery decision for an account (null = it could not be read: unresolved, never "nothing open"). */
+export async function readRecoveryDecision(owner: string): Promise<RecoveryOperation[] | null> {
+  try {
+    const q = inspectQuarantine(owner);
+    if (q.state !== 'ok') return null;
+    return [...(await tx('readonly', (st) => decideOperations(st, owner, q))).values()];
+  } catch {
+    return null;
+  }
+}
+/** R17: the most recent OPEN operation of the decision that matches a new activity (the shared match rule). */
+function openFor(ops: Iterable<RecoveryOperation>, next: RecoveryIntent): RecoveryOperation | undefined {
+  let best: RecoveryOperation | undefined;
+  for (const op of ops) if (isOpenRecovery(op) && matchesActivityIntent(op.intents, next) && (!best || op.at > best.at)) best = op;
+  return best;
+}
+
 type Decided = Extract<RequestState, { kind: 'success' | 'failed' | 'discarded' }>;
 const settledResult = (d: Decided): Extract<EnqueueResult, { status: 'settled' }> =>
   d.kind === 'success' ? { status: 'settled', decision: 'settled', outcome: 'success', receipt: d.receipt, serverOutcome: 'accepted' }
@@ -811,9 +933,15 @@ async function eligibilityGate(st: Stores, owner: string, crid: string, payload:
   const state = await requestState(st, owner, crid, payload, q);
   if (state.kind === 'success' || state.kind === 'failed' || state.kind === 'discarded') return { status: 'settled', state };
   if (state.kind === 'conflict') return { status: 'conflict' };
-  if (state.kind === 'unverified') return explicitRetry ? { status: 'eligible', copies: state.copies } : { status: 'unverified' };
   if (state.kind === 'paused' || (state.kind === 'live' && state.paused)) return { status: 'paused' };
-  return { status: 'eligible', copies: state.kind === 'live' ? state.copies : [] };
+  if (state.kind === 'absent') return { status: 'eligible', copies: [] }; // nothing names this id: a new operation
+  // R17 (39260 G7): a Retry or replay of an EXISTING id is bound to THE recovery decision, evaluated in this same
+  // claiming transaction -- only its one authoritative dispatch payload may be sent; conflicting or unprovable
+  // evidence stays unresolved (nothing written, every copy kept).
+  const decided = (await decideOperations(st, owner, q, crid)).get(crid);
+  if (!decided || decided.dispatchPayload !== payload) return state.kind === 'live' ? { status: 'paused' } : { status: 'unverified' };
+  if (state.kind === 'unverified') return explicitRetry && decided.status === 'unresolved' ? { status: 'eligible', copies: state.copies } : { status: 'unverified' };
+  return { status: 'eligible', copies: state.copies };
 }
 
 /**
@@ -836,7 +964,14 @@ class EnqueueRefusal extends Error { constructor(readonly result: EnqueueResult)
  * A commit that is confirmed by the reconciliation read is reported as 'stored' (without a claim), never as a
  * rejection; it then replays under the same request id.
  */
-export async function enqueueOwned(item: OwnedQueuedHabitLog, { claimFor, explicitRetry = false }: { claimFor?: string; explicitRetry?: boolean } = {}): Promise<EnqueueResult> {
+/**
+ * R17 (39260 G8) -- `newOperation`: the item is a NEW operation the user just initiated for this activity (not a
+ * Retry, not a deliberately separate activity). Inside the SAME read-write transaction that would store and claim
+ * it, THE recovery decision is evaluated; an open operation for the same activity refuses it ('recovery-required',
+ * nothing written). This does not depend on any page having finished loading its projection: a delayed, held or
+ * failed startup read cannot admit a fresh-id duplicate, and an unreadable store refuses (never "nothing open").
+ */
+export async function enqueueOwned(item: OwnedQueuedHabitLog, { claimFor, explicitRetry = false, newOperation }: { claimFor?: string; explicitRetry?: boolean; newOperation?: RecoveryIntent } = {}): Promise<EnqueueResult> {
   if (!item.ownerUserId || !item.clientRequestId) return { status: 'failed' };
   const owner = item.ownerUserId;
   const mine = canonicalPayload(item);
@@ -852,8 +987,15 @@ export async function enqueueOwned(item: OwnedQueuedHabitLog, { claimFor, explic
     if (q.state !== 'ok' || q.opaque) return { status: 'unavailable' };
     return await tx('readwrite', async (st) => {
       started = true;
+      if (newOperation) {
+        const open = openFor((await decideOperations(st, owner, q)).values(), newOperation);
+        if (open && open.clientRequestId !== item.clientRequestId) return { status: 'recovery-required', operation: open } as const; // nothing written
+      }
       const g = await eligibilityGate(st, owner, item.clientRequestId, mine, q, explicitRetry);
       if (g.status === 'settled') return settledResult(g.state); // nothing written
+      // R17: the user's explicit Retry of an EXISTING operation that may not be sent (conflicting, paused or unprovable
+      // evidence) leaves it unresolved -- never reported as "not stored", which would close an operation that may exist.
+      if (g.status !== 'eligible' && explicitRetry) return { status: 'unverified' } as const; // nothing written
       if (g.status !== 'eligible') return { status: g.status } as const; // nothing written
       let recordId: string;
       if (g.copies.length > 0) {
@@ -1087,33 +1229,25 @@ export async function readOperationState(owner: string, crid: string, payload: s
  *   unresolved  a marker that proves nothing, or conflicting evidence
  */
 export type StoredOperationStatus = 'pending' | 'unresolved' | 'confirmed' | 'failed' | 'discarded';
-export interface StoredOperation { clientRequestId: string; status: StoredOperationStatus; body: Record<string, unknown> | null; receipt?: AcceptedReceipt; at: number }
+/**
+ * R17: the UI projection of THE recovery decision (no separate interpretation): `conflict` is presented as
+ * unresolved with `retryable: false`; `body` is the operation's own intent (never a contradicting marker's body when
+ * a live copy exists); `intents` lists every activity the evidence names under the id.
+ */
+export interface StoredOperation { clientRequestId: string; status: StoredOperationStatus; body: Record<string, unknown> | null; receipt?: AcceptedReceipt; at: number; retryable: boolean; conflict: boolean; intents: RecoveryIntent[] }
+export const storedOperationOf = (op: RecoveryOperation): StoredOperation => ({
+  clientRequestId: op.clientRequestId,
+  status: op.status === 'conflict' ? 'unresolved' : op.status,
+  body: op.body,
+  ...(op.receipt ? { receipt: op.receipt } : {}),
+  at: op.at,
+  retryable: op.dispatchPayload !== null && (op.status === 'pending' || op.status === 'unresolved'),
+  conflict: op.status === 'conflict',
+  intents: op.intents,
+});
 export async function readActivityOperations(owner: string): Promise<StoredOperation[] | null> {
-  try {
-    const q = inspectQuarantine(owner);
-    if (q.state !== 'ok') return null;
-    return await tx('readonly', async (st) => {
-      const out = new Map<string, StoredOperation>();
-      const prefix = decisionKey(owner, '');
-      const parse = (p: unknown): Record<string, unknown> | null => { if (typeof p !== 'string') return null; try { const v = JSON.parse(p); return v && typeof v === 'object' && !Array.isArray(v) ? v : null; } catch { return null; } };
-      for (const d of (await asPromise(st.tombstones.getAll())) as Array<Partial<Decision>>) {
-        if (typeof d?.recordId !== 'string' || !d.recordId.startsWith(prefix)) continue;
-        const crid = d.recordId.slice(prefix.length);
-        const a = decisionAuthority(d, owner, crid);
-        const status: StoredOperationStatus = a.kind === 'success' ? 'confirmed' : a.kind === 'failed' ? 'failed' : a.kind === 'discarded' ? 'discarded' : 'unresolved';
-        out.set(crid, { clientRequestId: crid, status, body: parse(d.payload), ...(a.kind === 'success' ? { receipt: a.receipt } : {}), at: typeof d.at === 'number' ? d.at : 0 });
-      }
-      for (const r of await relevantRecords(st, owner)) {
-        const id = recordIdentity(owner, r);
-        if (!id.crid || out.has(id.crid)) continue;
-        const { tempId: _t, ownerUserId: _o, recordId: _r, queuedAt: _q, ...body } = (r.item ?? {}) as OwnedQueuedHabitLog & Record<string, unknown>;
-        out.set(id.crid, { clientRequestId: id.crid, status: id.kind === 'valid' ? 'pending' : 'unresolved', body: id.kind === 'valid' ? body : null, at: r.queuedAt ?? 0 });
-      }
-      return [...out.values()];
-    });
-  } catch {
-    return null;
-  }
+  const ops = await readRecoveryDecision(owner);
+  return ops === null ? null : ops.map(storedOperationOf);
 }
 
 export interface DiscardResult {

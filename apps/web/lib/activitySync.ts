@@ -26,9 +26,9 @@
  *   where available, an optimisation only: correctness comes from the claims).
  */
 import { AccountUnavailableError, captureAccountBinding, getTabId, getVerifiedAccount, isTransitionActive, isTransitionActiveNow, lockManager, reportUpgradeRequired, runActivityOperation, type AccountBinding, type AccountLease } from './accountSession';
-import type { OperationStatus } from './pendingReplayReconciliation';
+import type { OperationStatus, RecoveryIntent } from './pendingReplayReconciliation';
 import { decodeHabitLogList, decodeHabitLogResponse, HABIT_LOGS_PATH, type BoundServerRow, type DecodedHabitLogResponse } from './habitLogSyncPolicy';
-import { acceptedReceipt, canonicalPayload, claimForDispatch, enqueueOwned, readOperationState, readOwnedQueue, recordVerifiedReceipt, rejectedReceipt, releaseClaim, settleRecords, transmissionCheck, type ClaimToken, type EnqueueResult, type QueuedHabitLog } from './offlineHabitQueue';
+import { acceptedReceipt, canonicalPayload, claimForDispatch, enqueueOwned, readOperationState, readOwnedQueue, recordVerifiedReceipt, rejectedReceipt, releaseClaim, settleRecords, transmissionCheck, type ClaimToken, type EnqueueResult, type QueuedHabitLog, type RecoveryOperation } from './offlineHabitQueue';
 
 export type HabitLogPayload = Omit<QueuedHabitLog, 'tempId'>;
 
@@ -62,7 +62,12 @@ export type ActivityWriteResult =
   | { kind: 'already-recorded'; serverLog?: BoundServerRow }
 
   /** The server says this bundle is out of date; the entry is kept. */
-  | { kind: 'upgrade-required' };
+  | { kind: 'upgrade-required' }
+  /**
+   * R17 (39260 G8): a NEW operation was refused in the claiming transaction -- THE recovery decision holds an open
+   * operation for the same activity (`operation`). Nothing was stored or sent; the caller offers its recovery.
+   */
+  | { kind: 'recovery-required'; operation: RecoveryOperation };
 
 /**
  * R15 -- the ONE mapping from VALIDATED durable evidence to a submission outcome (decisionAuthority):
@@ -94,6 +99,7 @@ export function operationStatusOf(r: ActivityWriteResult): OperationStatus {
   switch (r.kind) {
     case 'confirmed': case 'already-recorded': return 'confirmed';
     case 'queued': case 'upgrade-required': return 'pending';
+    case 'recovery-required': return 'unresolved'; // R17: describes the OTHER (open) operation; this one was never created
     case 'account-changed': return r.keptForAccount ? 'pending' : 'unresolved';
     case 'outcome-unknown': return 'unresolved';
     case 'rejected': case 'storage-unavailable': return 'failed';
@@ -153,13 +159,18 @@ export const __decoder = { decode: decodeHabitLogResponse };
  * `explicitRetry`: the user's Retry of THIS operation (same id, same canonical body): it may send again past a marker
  * that proves nothing -- never past a valid decision.
  */
-export async function submitActivityLog(payload: HabitLogPayload, tempId: string, fetchImpl: typeof fetch = (i, n) => fetch(i, n), binding?: AccountBinding, { explicitRetry = false }: { explicitRetry?: boolean } = {}): Promise<ActivityWriteResult> {
+/**
+ * R17: `newOperation` -- the user's NEW operation for this activity (not a Retry, not a separate entry): refused in the
+ * claiming transaction while THE recovery decision holds an open operation for the same activity.
+ */
+export async function submitActivityLog(payload: HabitLogPayload, tempId: string, fetchImpl: typeof fetch = (i, n) => fetch(i, n), binding?: AccountBinding, { explicitRetry = false, newOperation }: { explicitRetry?: boolean; newOperation?: RecoveryIntent } = {}): Promise<ActivityWriteResult> {
   return runActivityOperation(async (lease) => {
     const tab = getTabId();
     // R9 -- THE transmission boundary: an activity is sent only after enqueueOwned stored it AND, in the same
     // transaction, established its eligibility (no decision, no quarantined copy, readable retired sources) and
     // claimed it. There is no direct-network fallback: if storage cannot be read, nothing is sent.
-    const stored = await enqueueOwned({ ...payload, tempId, ownerUserId: lease.account }, { claimFor: tab, explicitRetry });
+    const stored = await enqueueOwned({ ...payload, tempId, ownerUserId: lease.account }, { claimFor: tab, explicitRetry, newOperation });
+    if (stored.status === 'recovery-required') return { kind: 'recovery-required', operation: stored.operation }; // R17: nothing stored or sent
     if (stored.status === 'failed' || stored.status === 'unavailable') return { kind: 'storage-unavailable' }; // confirmed not queued
     if (stored.status === 'unknown') return { kind: 'outcome-unknown' }; // R13: possibly queued, never reported as not saved
     if (stored.status === 'unverified') return { kind: 'outcome-unknown', reason: 'unverified-marker' }; // R15: a marker that proves nothing

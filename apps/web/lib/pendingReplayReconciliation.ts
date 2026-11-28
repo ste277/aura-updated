@@ -78,7 +78,17 @@ export interface ActivityOperationView {
   at: number;
   /** The account the operation belongs to (the projection is account-scoped; R16 recovery never crosses accounts). */
   account?: string;
+  /**
+   * R17 (39260 G7): whether THE recovery decision (lib/offlineHabitQueue.ts decideOperations) established one
+   * authoritative dispatch payload for this request id. false = conflicting or incomplete evidence: the operation
+   * stays open and unresolved, and nothing may be sent under its id (no Retry is offered).
+   */
+  retryable?: boolean;
+  /** R17 (39260 G7/G9): every activity intent the durable evidence names under this request id (activity matching). */
+  intents?: RecoveryIntent[];
 }
+/** R17: one activity intent (title, and the catalog id when the card has one). */
+export interface RecoveryIntent { activityTitle: string; activityId?: string }
 export type ActivityOperations = Readonly<Record<string, ActivityOperationView>>;
 
 /** Unresolved copy, shared by every surface. */
@@ -127,23 +137,34 @@ export interface ActivityOperationRequest { retryOf?: string; onOperation?: (cli
  * ASK; it never resolves, releases, deduplicates or merges anything.
  */
 export class ActivityRecoveryRequiredError extends Error {
-  constructor(readonly clientRequestId: string, readonly activityTitle: string) {
+  /** R17: `retryable` -- THE recovery decision established one dispatch payload for that operation (else: no Retry). */
+  constructor(readonly clientRequestId: string, readonly activityTitle: string, readonly retryable = true) {
     super(UNVERIFIED_ACTIVITY_MESSAGE);
     this.name = 'ActivityRecoveryRequiredError';
   }
 }
 export const recoveryOperationOf = (err: unknown): string | undefined => (err instanceof Error && err.name === 'ActivityRecoveryRequiredError' ? (err as ActivityRecoveryRequiredError).clientRequestId : undefined);
+/** R17 (39260 G7): false when the withheld submission's open operation has conflicting evidence (never retried). */
+export const recoveryRetryableOf = (err: unknown): boolean => !(err instanceof Error && err.name === 'ActivityRecoveryRequiredError' && (err as ActivityRecoveryRequiredError).retryable === false);
+/**
+ * R17 (39260) -- THE activity-match rule of the shared recovery decision, used both by the in-memory projection
+ * (findRecoverableOperation) and inside the claiming IndexedDB transaction (offlineHabitQueue.ts enqueueOwned
+ * `newOperation`). It only decides when to ASK the user; it never resolves, releases, deduplicates or merges.
+ */
+export function matchesActivityIntent(intents: readonly RecoveryIntent[], next: RecoveryIntent): boolean {
+  const title = next.activityTitle.trim().toLowerCase();
+  return intents.some((i) => (next.activityId && i.activityId ? i.activityId === next.activityId : i.activityTitle.trim().toLowerCase() === title));
+}
+export const intentsOf = (op: ActivityOperationView): RecoveryIntent[] => (op.intents && op.intents.length ? op.intents : [{ activityTitle: op.activityTitle, activityId: op.activityId }]);
 export function findRecoverableOperation(
   operations: ActivityOperations | undefined,
   next: { activityTitle: string; activityId?: string }
 ): ActivityOperationView | undefined {
   if (!operations) return undefined;
-  const title = next.activityTitle.trim().toLowerCase();
   let best: ActivityOperationView | undefined;
   for (const op of Object.values(operations)) {
     if (!isOpen(op)) continue;
-    const same = next.activityId && op.activityId ? op.activityId === next.activityId : op.activityTitle.trim().toLowerCase() === title;
-    if (same && (!best || op.at > best.at)) best = op;
+    if (matchesActivityIntent(intentsOf(op), next) && (!best || op.at > best.at)) best = op;
   }
   return best;
 }

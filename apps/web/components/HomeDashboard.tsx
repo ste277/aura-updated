@@ -2404,7 +2404,7 @@ function GoodRightNowCard({
         <span role="status" style={{ marginTop: 'auto', paddingTop: 8, color: '#facc15', fontSize: 11, fontWeight: 850 }}>{UNVERIFIED_ACTIVITY_MESSAGE}</span>
         <div style={{ display: 'flex', gap: 5, marginTop: 6, width: '100%' }}>
           <button type="button" onClick={checkOperation} style={{ ...goodRightNowActionButtonStyle, flex: 1 }} aria-label={`Check again ${planTitle}`}>Check again</button>
-          {operationId && operation && <button type="button" onClick={retryOperation} style={{ ...goodRightNowActionButtonStyle, flex: 1 }} aria-label={`Retry ${planTitle}`}>Retry</button>}
+          {operationId && operation && operation.retryable !== false && <button type="button" onClick={retryOperation} style={{ ...goodRightNowActionButtonStyle, flex: 1 }} aria-label={`Retry ${planTitle}`}>Retry</button>}
         </div>
         {/* R16: a deliberately separate activity (identical intent allowed) -- never a silent replacement */}
         <button type="button" onClick={() => { setSeparate(true); setOperationId(null); setStatus('idle'); }} style={{ ...goodRightNowSecondaryLinkStyle, marginTop: 4 }} aria-label={`Log ${planTitle} as a separate activity`}>Log as a separate activity</button>

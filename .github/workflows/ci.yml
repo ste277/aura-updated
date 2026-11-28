@@ -1064,6 +1064,10 @@ jobs:
         env:
           TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
         run: npx ts-node --project tsconfig.jsdom-tests.json test/rel04R16OperationCorrection.test.ts
+      - name: Run REL-04 R17 recovery-decision test (39260 G7-G9 witnesses on e94a863 vs current; decision matrix; negative controls)
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/rel04R17RecoveryDecision.test.ts
       - name: Run REL-04 R3-head (b323d2a) reproduction test
         env:
           TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
@@ -1296,6 +1300,10 @@ jobs:
         env:
           REL04_SKIP_BUILD: '1'
         run: npx ts-node test/rel04R16HomeChromiumDb.test.ts
+      - name: Run REL-04 R17 recovery-decision closure test (production build, real Chromium, PostgreSQL; conflicting marker, held startup, incomplete marker)
+        env:
+          REL04_SKIP_BUILD: '1'
+        run: npx ts-node test/rel04R17RecoveryChromiumDb.test.ts
   web-build:
     name: Next.js production build
     runs-on: ubuntu-latest

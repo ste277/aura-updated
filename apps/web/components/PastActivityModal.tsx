@@ -3,7 +3,7 @@
 import React, { useMemo, useRef, useState } from 'react';
 import { colors, radius, spacing, typography } from './theme';
 import { ModalShell, useModalA11y, PrimaryButton, SecondaryButton, ActivityChip, FieldLabel, FieldHint, TextInput, TextAreaInput, SelectInput } from './ui';
-import { recoveryOperationOf, UNVERIFIED_ACTIVITY_MESSAGE, type ActivityLogResult, type ActivityOperationRequest, type CheckActivity } from '../lib/pendingReplayReconciliation';
+import { recoveryOperationOf, recoveryRetryableOf, UNVERIFIED_ACTIVITY_MESSAGE, type ActivityLogResult, type ActivityOperationRequest, type CheckActivity } from '../lib/pendingReplayReconciliation';
 
 interface PastActivityModalProps {
   isOpen?: boolean;
@@ -61,7 +61,7 @@ export function PastActivityModal({
   onSuccess,
 }: PastActivityModalProps) {
   // R15: the unresolved operation this form submitted (request id; null = blocked without a known id).
-  const [unresolvedOperation, setUnresolvedOperation] = useState<{ id: string | null } | null>(null);
+  const [unresolvedOperation, setUnresolvedOperation] = useState<{ id: string | null; retryable?: boolean } | null>(null);
   const [selectedChip, setSelectedChip] = useState<string>('');
   const [customTitle, setCustomTitle] = useState<string>('');
   const [notes, setNotes] = useState<string>('');
@@ -138,7 +138,7 @@ export function PastActivityModal({
         } catch (err) {
           // R16: the shared recovery contract withheld this submission (an earlier operation for this activity is still
           // open -- after a remount, navigation or restart too): show THAT operation's recovery, never a new id.
-          if (err instanceof Error && err.message === UNVERIFIED_ACTIVITY_MESSAGE) { setUnresolvedOperation({ id: recoveryOperationOf(err) ?? operationId }); return; }
+          if (err instanceof Error && err.message === UNVERIFIED_ACTIVITY_MESSAGE) { setUnresolvedOperation({ id: recoveryOperationOf(err) ?? operationId, retryable: recoveryRetryableOf(err) }); return; }
           throw err;
         }
         setUnresolvedOperation(null);
@@ -210,7 +210,7 @@ export function PastActivityModal({
                 Check again
               </button>
             )}
-            {unresolvedOperation.id && (
+            {unresolvedOperation.id && unresolvedOperation.retryable !== false && (
               <>
                 {' · '}
                 <button type="button" onClick={() => { void handleSubmit(undefined, { retryOf: unresolvedOperation.id! }); }} style={{ background: 'none', border: 'none', color: 'inherit', textDecoration: 'underline', cursor: 'pointer', padding: 0, fontSize: 13 }}>

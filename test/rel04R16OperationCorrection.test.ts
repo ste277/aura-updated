@@ -226,7 +226,7 @@ async function main() {
     const r = await s.sync.submitActivityLog({ ...body(id), logTimestamp: 'not-a-date' } as any, 'tmp', dev.fetch as any, undefined, { explicitRetry: true });
     Date.now = realNow;
     console.log('after-send', JSON.stringify({ r: r.kind, posts: posts(), copies: await copies(id), decisions: (await decisionsOf(id)).length }));
-    check(`G5 a body the route would refuse definitively is never re-dispatched after a possible earlier send (its stored copy is damaged -> paused: ${r.kind}); nothing is settled and the copy is kept`, r.kind === 'not-stored' && !(await decisionsOf(id)).some((d: any) => d.receipt) && (await copies(id)) === 1 && posts() - pBefore === 1);
+    check(`G5 a body the route would refuse definitively is never re-dispatched after a possible earlier send (its stored copy is damaged -> paused: ${r.kind}); nothing is settled and the copy is kept`, /* R17 (39261): an explicit Retry that may not be sent stays UNRESOLVED (outcome-unknown), never "not stored" */ r.kind === 'outcome-unknown' && !(await decisionsOf(id)).some((d: any) => d.receipt) && (await copies(id)) === 1 && posts() - pBefore === 1);
   }
 
   // ================================================================ negative controls for G4 / G5
@@ -282,6 +282,10 @@ async function main() {
   const pageQ = require('../apps/web/lib/offlineHabitQueue');
   const pageRecon = require('../apps/web/lib/pendingReplayReconciliation');
   const realFind = pageRecon.findRecoverableOperation;
+  // R17 (39261): the shared contract has a second, durable layer (the new-operation decision in the claiming
+  // transaction); the N11 negative control disables BOTH layers.
+  const pageSync = require('../apps/web/lib/activitySync');
+  const realSubmit = pageSync.submitActivityLog;
   const Page = require('../apps/web/app/page').default;
   const settle = async (k = 30) => { for (let i = 0; i < k; i++) await flush(); };
   const textOf = (_el: HTMLElement) => (document.body.textContent ?? '').replace(/\s+/g, ' ');
@@ -316,7 +320,7 @@ async function main() {
   }
   const ids = () => [...new Set(rows(A).map((l: any) => l.clientRequestId))];
   async function calendarRun(label: string, options: { negative?: boolean; restart?: boolean; separate?: boolean } = {}) {
-    if (options.negative) pageRecon.findRecoverableOperation = () => undefined;
+    if (options.negative) { pageRecon.findRecoverableOperation = () => undefined; pageSync.submitActivityLog = (p: any, t: any, f: any, b: any, o: any = {}) => { const { newOperation: _drop, ...rest } = o; return realSubmit(p, t, f, b, rest); }; }
     try {
       let P = await page();
       const opened = await P.openCalendarModal();
@@ -346,7 +350,7 @@ async function main() {
       const r = { opened, firstUnresolved, original: Boolean(original), noticeOnReturn, blocked, afterReentry, recovered, afterRecovery };
       console.log(`G6 ${label}`, JSON.stringify(r));
       return r;
-    } finally { pageRecon.findRecoverableOperation = realFind; ackHtml = 'off'; }
+    } finally { pageRecon.findRecoverableOperation = realFind; pageSync.submitActivityLog = realSubmit; ackHtml = 'off'; }
   }
   // Deterministic clock for the Calendar cases (the modal refuses FUTURE timestamps and the entry is "10:00 today"):
   // the page runs on a fixed afternoon of a fixed day; time still advances (claims, timers) from that instant.
@@ -380,7 +384,7 @@ async function main() {
     const P = await page({ keepStore: true });
     const banner = textOf(P.c);
     const handlerSrc = fs.readFileSync(path.join(WEB, 'app', 'page.tsx'), 'utf8');
-    const oneEntry = (handlerSrc.match(/findRecoverableOperation\(/g) ?? []).length === 1 && /throw new ActivityRecoveryRequiredError\(open\.clientRequestId, open\.activityTitle\)/.test(handlerSrc);
+    const oneEntry = (handlerSrc.match(/findRecoverableOperation\(/g) ?? []).length === 1 && /throw new ActivityRecoveryRequiredError\(open\.clientRequestId, open\.activityTitle(, open\.retryable !== false)?\)/.test(handlerSrc);
     const surfaces = ['HomeDashboard.tsx', 'Timeline.tsx', 'PastActivityModal.tsx'].every((f) => /recoveryOperationOf\(err\)/.test(fs.readFileSync(path.join(WEB, 'components', f), 'utf8')));
     const noLocalReconciliation = !/resolvePendingActivityStatus/.test(fs.readFileSync(path.join(WEB, 'components', 'HomeDashboard.tsx'), 'utf8') + fs.readFileSync(path.join(WEB, 'components', 'Timeline.tsx'), 'utf8') + fs.readFileSync(path.join(WEB, 'components', 'PastActivityModal.tsx'), 'utf8') + fs.readFileSync(path.join(WEB, 'components', 'CalendarViewSection.tsx'), 'utf8'));
     await P.h.unmount();

@@ -26,7 +26,7 @@ import type { DailyReflection } from '../lib/dailyReflection';
 import type { TomorrowPreview } from '../lib/tomorrowPreview';
 import { shouldRefreshMyDayForDateChange } from '../lib/myDayRefreshPolicy';
 import { readOfflineQueueView, toPendingLoggedEntry, mergeConfirmedLogEntries, selectQueueItemsToReconstruct } from '../lib/offlineHabitQueue';
-import { readActivityOperations, onOperationsChanged, type StoredOperation } from '../lib/offlineHabitQueue';
+import { readActivityOperations, onOperationsChanged, storedOperationOf, type StoredOperation } from '../lib/offlineHabitQueue';
 import { fetchVerifiedSession, subscribeAccount, getAccountEpoch, getVerifiedAccount, AccountUnavailableError, startForegroundReverification, captureAccountBinding } from '../lib/accountSession';
 import { installAccountBoundFetch } from '../lib/accountBoundFetch';
 import { readLegacySnapshot } from '../lib/offlineHabitQueue';
@@ -180,11 +180,35 @@ function DashboardPageInner() {
     operationsRef.current = next;
     setOperationsState(next);
   }, []);
+  // R17 (39260 G8) -- stale-read fencing. One logical clock orders projection READS (stamped when they start) and
+  // in-memory operation UPDATES: a read that started before a newer read was applied is discarded entirely, and a
+  // read never overwrites an operation this page updated after that read started. A read for another account than
+  // the current one is never applied.
+  const opsClockRef = useRef(0);
+  const opsAppliedReadRef = useRef(0);
+  const opsUpdatedAtRef = useRef<Record<string, number>>({});
+  const beginOperationsRead = useCallback(() => ++opsClockRef.current, []);
+  const readOperationsFenced = useCallback(async (owner: string) => {
+    const stamp = beginOperationsRead();
+    return { stamp, stored: await readActivityOperations(owner) };
+  }, [beginOperationsRead]);
   const putOperation = useCallback((op: OperationRecord) => {
+    opsUpdatedAtRef.current[op.clientRequestId] = ++opsClockRef.current;
     commitOperations({ ...operationsRef.current, [op.clientRequestId]: op });
   }, [commitOperations]);
+  const dropOperation = useCallback((clientRequestId: string) => {
+    opsUpdatedAtRef.current[clientRequestId] = ++opsClockRef.current;
+    const { [clientRequestId]: _gone, ...rest } = operationsRef.current;
+    commitOperations(rest);
+  }, [commitOperations]);
   /** Folds durable storage's view of the account's operations into the projection (storage is authoritative). */
-  const applyStoredOperations = useCallback((owner: string, stored: StoredOperation[] | null): ReadonlyMap<string, OperationRecord> => {
+  const applyStoredOperations = useCallback((owner: string, stored: StoredOperation[] | null, stamp?: number): ReadonlyMap<string, OperationRecord> => {
+    const current = () => new Map(Object.entries(operationsRef.current));
+    if (accountIdRef.current !== null && owner !== accountIdRef.current) return current(); // R17: another account's read
+    if (stamp !== undefined) {
+      if (stamp < opsAppliedReadRef.current) return current(); // R17: superseded by a newer applied read
+      opsAppliedReadRef.current = stamp;
+    }
     if (stored === null) {
       operationsUnreadableRef.current = true;
       setOperationsUnreadable(true);
@@ -195,7 +219,11 @@ function DashboardPageInner() {
     const next: Record<string, OperationRecord> = { ...operationsRef.current };
     for (const so of stored) {
       const prev = next[so.clientRequestId];
-      const body = (prev?.body ?? (so.body as HabitLogPayload | null)) ?? null;
+      // R17: this page updated the operation after the read started: the newer in-memory state stands.
+      if (stamp !== undefined && prev && (opsUpdatedAtRef.current[so.clientRequestId] ?? 0) > stamp) continue;
+      // R17 (39260 G7/G9): THE recovery decision supplies the operation's body (its own intent -- a live copy before a
+      // contradicting marker) and whether it may be retried; an in-memory body is kept only where storage names none.
+      const body = ((so.body as HabitLogPayload | null) ?? (so.conflict ? null : prev?.body)) ?? null;
       next[so.clientRequestId] = {
         clientRequestId: so.clientRequestId,
         account: owner,
@@ -209,6 +237,8 @@ function DashboardPageInner() {
         body,
         dispatched: prev?.dispatched ?? false,
         serverLog: so.receipt?.row ?? prev?.serverLog,
+        retryable: so.retryable,
+        intents: so.intents,
       };
     }
     commitOperations(next);
@@ -480,9 +510,9 @@ function DashboardPageInner() {
     const owner = accountIdRef.current;
     // R15: the operation projection is re-read with the queue view; the merge never releases an operation the
     // projection still holds open (a stale or empty list is not evidence).
-    void Promise.all([readOfflineQueueView(owner), owner ? readActivityOperations(owner) : Promise.resolve([] as StoredOperation[])]).then(([view, stored]) => {
+    void Promise.all([readOfflineQueueView(owner), owner ? readOperationsFenced(owner) : Promise.resolve({ stamp: undefined, stored: [] as StoredOperation[] })]).then(([view, read]) => {
       if (accountIdRef.current !== owner) return; // the account changed meanwhile: this page is being replaced
-      const ops = owner ? applyStoredOperations(owner, stored) : new Map<string, OperationRecord>();
+      const ops = owner ? applyStoredOperations(owner, read.stored, read.stamp) : new Map<string, OperationRecord>();
       // R5: an UNREADABLE queue is unknown, not empty -- keep every pending row (never treat them as gone).
       const queued = view ? view.items : null;
       setQueueUnavailable(queued === null);
@@ -494,7 +524,7 @@ function DashboardPageInner() {
         return mergeConfirmedLogEntries(confirmedEntries, prev, queuedClientRequestIds, ops);
       });
     });
-  }, [applyStoredOperations]);
+  }, [applyStoredOperations, readOperationsFenced]);
 
   // Parallelize Session & Initial Data Fetches
   const loadUserDataAndLogs = useCallback(async () => {
@@ -532,9 +562,9 @@ function DashboardPageInner() {
       setQueueUnavailable(queued === null);
       setPausedCount(view ? view.paused : 0);
       // R15: reattach the account's operations (ID-keyed projection) after refresh / remount / restart.
-      const storedOps = await readActivityOperations(check.user.id);
+      const storedOps = await readOperationsFenced(check.user.id);
       if (accountIdRef.current !== check.user.id) return;
-      applyStoredOperations(check.user.id, storedOps);
+      applyStoredOperations(check.user.id, storedOps.stored, storedOps.stamp);
       if (queued && queued.length > 0) {
         setLogEntries((prev) => {
           const reconstructed = selectQueueItemsToReconstruct(queued, prev).map(toPendingLoggedEntry);
@@ -574,7 +604,7 @@ function DashboardPageInner() {
       // answer above decided it); just leave the data empty.
       setPlannedActivities([]);
     }
-  }, [applyConfirmedLogs, applyStoredOperations]);
+  }, [applyConfirmedLogs, applyStoredOperations, readOperationsFenced]);
 
   useEffect(() => {
     loadUserDataAndLogs();
@@ -1522,7 +1552,9 @@ function DashboardPageInner() {
       if (operation?.retryOf) {
         // R15: Retry resumes the ORIGINAL operation. If its identity cannot be recovered safely, the action is
         // blocked -- a replacement id is never generated.
-        if (!retryOf || !retryOf.body || retryOf.account !== binding.account) throw new Error(UNVERIFIED_ACTIVITY_MESSAGE);
+        // R17 (39260 G7): only an operation for which THE recovery decision established one dispatch payload; the
+        // claiming transaction re-checks that exact payload (conflicting evidence is never sent).
+        if (!retryOf || !retryOf.body || retryOf.account !== binding.account || retryOf.retryable === false) throw new Error(UNVERIFIED_ACTIVITY_MESSAGE);
       } else if (operationsUnreadableRef.current) {
         // R15: this device's operations could not be read, so an earlier operation may still be unresolved: no
         // new operation until a read succeeds.
@@ -1533,7 +1565,7 @@ function DashboardPageInner() {
         // or explicitly logs a separate activity.
         const mine = Object.fromEntries(Object.entries(operationsRef.current).filter(([, op]) => op.account === binding.account));
         const open = findRecoverableOperation(mine, { activityTitle, activityId });
-        if (open) { operation?.onOperation?.(open.clientRequestId); throw new ActivityRecoveryRequiredError(open.clientRequestId, open.activityTitle); }
+        if (open) { operation?.onOperation?.(open.clientRequestId); throw new ActivityRecoveryRequiredError(open.clientRequestId, open.activityTitle, open.retryable !== false); }
       }
       const tempId = `temp-${Date.now()}`;
       let dispatchBody: HabitLogPayload;
@@ -1617,13 +1649,26 @@ function DashboardPageInner() {
       // failure queues the entry for THIS account only while it is current.
       let outcome: Awaited<ReturnType<typeof submitActivityLog>>;
       try {
-        outcome = await submitActivityLog(payload, tempId, undefined, binding, { explicitRetry: Boolean(retryOf) });
+        // R17 (39260 G8): a NEW operation (not a Retry, not a separate entry) carries its activity, so the claiming
+        // transaction evaluates THE recovery decision itself -- independent of this page's projection having loaded.
+        outcome = await submitActivityLog(payload, tempId, undefined, binding, retryOf ? { explicitRetry: true } : operation?.separate ? {} : { newOperation: { activityTitle, ...(activityId ? { activityId } : {}) } });
       } catch (err) {
         // runActivityOperation refused BEFORE anything was stored (no verified account / transition).
         if (!retryOf) setLogEntries((prev) => prev.filter((item) => item.id !== tempId));
         putOperation({ ...opBase, status: retryOf ? retryOf.status : 'failed', dispatched: retryOf?.dispatched ?? false });
         if (err instanceof AccountUnavailableError) throw err;
         throw new Error('Unable to log this activity.');
+      }
+      if (outcome.kind === 'recovery-required') {
+        // R17: nothing was stored or sent. The candidate operation is withdrawn and the durable open operation (from
+        // the same transaction's decision) is offered for recovery under ITS original id.
+        setLogEntries((prev) => prev.filter((item) => item.id !== tempId));
+        dropOperation(clientRequestId);
+        const open = storedOperationOf(outcome.operation);
+        applyStoredOperations(binding.account, [open], beginOperationsRead());
+        const shown = operationsRef.current[open.clientRequestId];
+        operation?.onOperation?.(open.clientRequestId);
+        throw new ActivityRecoveryRequiredError(open.clientRequestId, shown?.activityTitle ?? activityTitle, open.retryable);
       }
       const status: OperationStatus = operationStatusOf(outcome);
       const dispatched = (retryOf?.dispatched ?? false) || outcome.kind === 'queued' || (outcome.kind === 'outcome-unknown' && outcome.reason === 'unverified-response');
@@ -1682,7 +1727,7 @@ function DashboardPageInner() {
       // account-changed (not kept): the ORIGINAL account's operation.
       throw new AccountUnavailableError('stale');
     },
-    [activeType, loadMyDay, loadGuidance, loadUserDataAndLogs, putOperation]
+    [activeType, applyStoredOperations, beginOperationsRead, dropOperation, loadMyDay, loadGuidance, loadUserDataAndLogs, putOperation]
   );
 
   // R15 -- "Check again": re-establishes one operation's outcome from evidence (durable storage first, then the
@@ -1693,8 +1738,8 @@ function DashboardPageInner() {
       const binding = captureAccountBinding();
       const op = clientRequestId ? operationsRef.current[clientRequestId] : undefined;
       if (!op || !op.body) {
-        const stored = await readActivityOperations(binding.account);
-        applyStoredOperations(binding.account, stored);
+        const { stamp, stored } = await readOperationsFenced(binding.account);
+        applyStoredOperations(binding.account, stored, stamp);
         void loadUserDataAndLogs();
         const again = clientRequestId ? operationsRef.current[clientRequestId] : undefined;
         return again ? again.status : stored === null ? 'unresolved' : 'confirmed';
@@ -1713,7 +1758,7 @@ function DashboardPageInner() {
       }
       return status;
     },
-    [applyStoredOperations, loadMyDay, loadUserDataAndLogs, putOperation]
+    [applyStoredOperations, loadMyDay, loadUserDataAndLogs, putOperation, readOperationsFenced]
   );
 
   // AURA-ANDROID-REL-04 -- signed out only once the server has removed the
@@ -2041,8 +2086,13 @@ function DashboardPageInner() {
             {unresolvedOperations(operations).filter((op) => op.account === user.id).map((op) => (
               <li key={op.clientRequestId} data-operation-id={op.clientRequestId}>
                 {op.activityTitle}{' '}
-                <button type="button" onClick={() => { void handleCheckActivity(op.clientRequestId).catch(() => undefined); }} style={{ background: 'none', border: 'none', color: 'inherit', textDecoration: 'underline', cursor: 'pointer', padding: 0, fontSize: 13 }}>Check again</button>{' · '}
-                <button type="button" onClick={() => { void handleLogActivity(op.activityTitle, undefined, undefined, undefined, undefined, undefined, undefined, op.activityId, { retryOf: op.clientRequestId }).catch(() => undefined); }} style={{ background: 'none', border: 'none', color: 'inherit', textDecoration: 'underline', cursor: 'pointer', padding: 0, fontSize: 13 }}>Retry</button>
+                <button type="button" onClick={() => { void handleCheckActivity(op.clientRequestId).catch(() => undefined); }} style={{ background: 'none', border: 'none', color: 'inherit', textDecoration: 'underline', cursor: 'pointer', padding: 0, fontSize: 13 }}>Check again</button>
+                {/* R17 (39260 G7): Retry only where the recovery decision established one payload for this id. */}
+                {op.retryable === false ? (
+                  <span data-operation-conflict="true"> · This device holds conflicting copies of this entry, so Aura won&apos;t send it.</span>
+                ) : (
+                  <>{' · '}<button type="button" onClick={() => { void handleLogActivity(op.activityTitle, undefined, undefined, undefined, undefined, undefined, undefined, op.activityId, { retryOf: op.clientRequestId }).catch(() => undefined); }} style={{ background: 'none', border: 'none', color: 'inherit', textDecoration: 'underline', cursor: 'pointer', padding: 0, fontSize: 13 }}>Retry</button></>
+                )}
               </li>
             ))}
           </ul>
