@@ -1773,3 +1773,8 @@ jobs:
       # Move and Recomposition (person-before-plan lock order: no deadlock).
       - name: Run AURA-MP-3-R1 My People concurrency DB test
         run: npx ts-node --project tsconfig.jsdom-tests.json test/myPeopleMp3R1ConcurrencyDb.test.ts
+      # AURA-MP-3-R2 (62022) -- the same dismissal / deletion races with
+      # REPEATABLE READ as this process's connection default (session option,
+      # nothing global): the transactions must still run at READ COMMITTED.
+      - name: Run AURA-MP-3-R2 My People isolation DB test
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/myPeopleMp3R2IsolationDb.test.ts

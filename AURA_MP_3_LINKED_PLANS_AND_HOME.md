@@ -51,6 +51,12 @@ Independent verification 62019 found two races on 31b7daf; both reproduced here 
   - AuraMoment creation, a single statement that only takes a compatible `KEY SHARE` on the plan.
   - The person DELETE's `User` row update conflicts with no Move-side lock.
 
+## R2 — isolation guarantee (62022)
+
+62021 showed F1 relied on the default isolation level: under REPEATABLE READ a delete keeps its first snapshot and misses a dismissal that committed while it waited.
+- The dismissal, special-day DELETE and person DELETE now begin with `BEGIN ISOLATION LEVEL READ COMMITTED`. This is the same per-transaction mechanism `withRepeatableReadSnapshot` uses.
+- Nothing global or in Production changed, and the shared `beginTransaction` helper and the F2 lock order are unchanged.
+
 ## Tests
 
 | Test | Job | Checks | Covers |
@@ -58,6 +64,7 @@ Independent verification 62019 found two races on 31b7daf; both reproduced here 
 | `test/myPeopleMp3Ui.test.ts` | math-core | 19 | Home selection, dismissal keys, hand-offs, wording |
 | `test/myPeopleMp3PlanJsdom.test.ts` | math-core | 18 | The real Plan tab with the real timing engine, in both switch states |
 | `test/myPeopleMp3Db.test.ts` | Day Constructor DB | 33 | Real routes, Home card, People screen and database |
+| `test/myPeopleMp3R2IsolationDb.test.ts` | Day Constructor DB | 10 | REPEATABLE READ connection default: the isolation in effect inside each transaction, plus both orderings for dismissal vs day/person DELETE |
 | `test/myPeopleMp3R1ConcurrencyDb.test.ts` | Day Constructor DB | 25 | Forced interleavings in both orders, using real routes: dismissal vs day/person DELETE, and person DELETE vs Move, Home Move and Recomposition |
 
 All MP-1/MP-2, Find a Time, Move and Recomposition suites run unchanged.

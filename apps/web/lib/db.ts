@@ -463,6 +463,20 @@ export async function updateSavedPerson(ownerUserId: string, personId: string, i
   return result.rows[0];
 }
 
+/**
+ * AURA-MP-3-R2 (62022): the special-day dismissal and the special-day / person
+ * deletions depend on READ COMMITTED semantics. Each cleanup statement that runs
+ * after a row-lock wait must take a fresh snapshot so it sees a dismissal that
+ * committed while it waited. Under REPEATABLE READ the transaction keeps its
+ * first snapshot: the deletion leaves an orphan dismissal, and a dismissal that
+ * waited on a deleted day fails with a serialization error instead of 404. These
+ * three transactions therefore state their isolation level explicitly, with the
+ * same per-transaction `BEGIN ISOLATION LEVEL` mechanism
+ * withRepeatableReadSnapshot uses. They never inherit a session or database
+ * default (default_transaction_isolation). Nothing global changes.
+ */
+const BEGIN_READ_COMMITTED = 'BEGIN ISOLATION LEVEL READ COMMITTED';
+
 /** AURA-MP-1: deletion and every associated reference clean-up happen in
  * ONE transaction -- either all of it happens or none of it does.
  *   - the person row is locked first, scoped by owner (404 otherwise);
@@ -474,7 +488,7 @@ export async function updateSavedPerson(ownerUserId: string, personId: string, i
 export async function deleteSavedPerson(ownerUserId: string, personId: string): Promise<void> {
   const client = await pool.connect();
   try {
-    await client.query('BEGIN');
+    await client.query(BEGIN_READ_COMMITTED);
     const locked = await client.query(
       `SELECT id FROM "SavedPerson" WHERE id = $1 AND "ownerUserId" = $2 FOR UPDATE`,
       [personId, ownerUserId]
@@ -675,7 +689,7 @@ export async function dismissPersonOccasionForOwner<T>(
 ): Promise<PersonOccasionDismissOutcome<T>> {
   const client = await pool.connect();
   try {
-    await client.query('BEGIN');
+    await client.query(BEGIN_READ_COMMITTED);
     const found = await client.query(`SELECT * FROM "PersonOccasion" WHERE id = $1 AND "ownerUserId" = $2 FOR SHARE`, [occasionId, userId]);
     const occasion: PersonOccasion | undefined = found.rows[0];
     if (!occasion) {
@@ -780,7 +794,7 @@ export async function updatePersonOccasion(
 export async function deletePersonOccasion(ownerUserId: string, personId: string, occasionId: string): Promise<boolean> {
   const client = await pool.connect();
   try {
-    await client.query('BEGIN');
+    await client.query(BEGIN_READ_COMMITTED);
     const deleted = await client.query(
       `DELETE FROM "PersonOccasion" WHERE id = $1 AND "ownerUserId" = $2 AND "savedPersonId" = $3`,
       [occasionId, ownerUserId, personId]
