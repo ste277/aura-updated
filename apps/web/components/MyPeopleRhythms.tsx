@@ -65,7 +65,7 @@ export function KeepInTouchSection({ personId, personName }: { personId: string;
     setError('');
     setBusy(row.id);
     try {
-      if (what === 'REMOVE') await send('POST', `/api/goals/${row.goalId}/activities/${row.id}/dismiss`);
+      if (what === 'REMOVE') await send('POST', `/api/goals/${row.goalId}/activities/${row.id}/dismiss`, { savedPersonId: personId });
       // savedPersonId: the person this was done for -- if they were removed
       // meanwhile, the server refuses (409) instead of resuming a paused rhythm.
       else await send('PATCH', `/api/goals/${row.goalId}/activities/${row.id}/rhythm`, { paused: what === 'PAUSE', savedPersonId: personId });

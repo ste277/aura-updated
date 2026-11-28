@@ -3919,6 +3919,18 @@ export interface UpdateGoalActivityRhythmSettingsOptions {
   expectedSavedPersonId?: string;
 }
 
+/**
+ * AURA-MP-4-R1/R2 -- the ONE stale-person-association rule for every
+ * relationship rhythm mutation (edit, pause, resume: updateGoalActivityRhythmSettings;
+ * remove: dismissGoalActivity). `linkedBefore` is read before the row lock,
+ * `linkedNow` under it (READ COMMITTED). The mutation must not apply when the
+ * link vanished in between (a concurrent person DELETE paused and unlinked the
+ * rhythm, D7) or differs from the person the caller acted for.
+ */
+function personLinkChangedUnderLock(linkedBefore: string | null, linkedNow: string | null, options?: UpdateGoalActivityRhythmSettingsOptions): boolean {
+  return (linkedBefore !== null && linkedNow !== linkedBefore) || (options?.expectedSavedPersonId !== undefined && linkedNow !== options.expectedSavedPersonId);
+}
+
 export async function updateGoalActivityRhythmSettings(userId: string, goalId: string, goalActivityId: string, update: GoalActivityRhythmSettingsUpdate, options?: UpdateGoalActivityRhythmSettingsOptions): Promise<UpdateGoalActivityRhythmSettingsResult> {
   const client = await beginTransaction();
   try {
@@ -3944,9 +3956,7 @@ export async function updateGoalActivityRhythmSettings(userId: string, goalId: s
       return { status: 'NOT_FOUND' };
     }
     const row = current.rows[0];
-    const linkedBefore: string | null = linkBeforeLock.rows[0]?.savedPersonId ?? null;
-    const linkedNow: string | null = row.savedPersonId ?? null;
-    if ((linkedBefore !== null && linkedNow !== linkedBefore) || (options?.expectedSavedPersonId !== undefined && linkedNow !== options.expectedSavedPersonId)) {
+    if (personLinkChangedUnderLock(linkBeforeLock.rows[0]?.savedPersonId ?? null, row.savedPersonId ?? null, options)) {
       await client.query('ROLLBACK');
       return { status: 'PERSON_LINK_CHANGED' };
     }
@@ -3990,12 +4000,44 @@ export async function updateGoalActivityRhythmSettings(userId: string, goalId: s
  * status). Scoped by userId AND goalId AND id together, so a
  * goalActivityId belonging to a different Goal or a different user's Goal
  * never matches -- returns null rather than throwing. */
-export async function dismissGoalActivity(userId: string, goalId: string, goalActivityId: string): Promise<GoalActivity | null> {
-  const result = await pool.query(
-    `UPDATE "GoalActivity" SET status = 'DISMISSED' WHERE id = $1 AND "goalId" = $2 AND "userId" = $3 RETURNING *`,
-    [goalActivityId, goalId, userId]
-  );
-  return result.rows[0] ?? null;
+/** AURA-MP-4-R2 -- thrown by dismissGoalActivity (nothing written) when the
+ * rhythm's person link changed under it; the route answers 409. */
+export class PersonLinkChangedError extends Error {
+  constructor() {
+    super('PERSON_LINK_CHANGED');
+    this.name = 'PersonLinkChangedError';
+  }
+}
+
+export async function dismissGoalActivity(userId: string, goalId: string, goalActivityId: string, options?: UpdateGoalActivityRhythmSettingsOptions): Promise<GoalActivity | null> {
+  // AURA-MP-4-R2 -- the same stale-association protection as
+  // updateGoalActivityRhythmSettings (personLinkChangedUnderLock): link read
+  // before the row lock and under it, explicit READ COMMITTED, nothing
+  // written on a change. Only the rhythm row is locked (lock order kept).
+  const client = await beginTransaction();
+  try {
+    await client.query('SET TRANSACTION ISOLATION LEVEL READ COMMITTED');
+    const linkBeforeLock = await client.query(`SELECT "savedPersonId" FROM "GoalActivity" WHERE id = $1 AND "goalId" = $2 AND "userId" = $3`, [goalActivityId, goalId, userId]);
+    const locked = await client.query(`SELECT "savedPersonId" FROM "GoalActivity" WHERE id = $1 AND "goalId" = $2 AND "userId" = $3 FOR UPDATE`, [goalActivityId, goalId, userId]);
+    if (locked.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return null;
+    }
+    if (personLinkChangedUnderLock(linkBeforeLock.rows[0]?.savedPersonId ?? null, locked.rows[0].savedPersonId ?? null, options)) {
+      throw new PersonLinkChangedError(); // rolled back below
+    }
+    const result = await client.query(
+      `UPDATE "GoalActivity" SET status = 'DISMISSED' WHERE id = $1 AND "goalId" = $2 AND "userId" = $3 RETURNING *`,
+      [goalActivityId, goalId, userId]
+    );
+    await client.query('COMMIT');
+    return result.rows[0] ?? null;
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 /**

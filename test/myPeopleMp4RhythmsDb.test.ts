@@ -382,6 +382,49 @@ async function main() {
       const replannedRow = replanned.body?.id ? await plan(replanned.body.id) : null;
       check('A deliberate resume of the already-unlinked rhythm still works (no permanent ban): active again; planning allowed; the plan has no person (response = stored)', deliberate.status === 200 && after.rhythmPausedAt === null && after.savedPersonId === null && replanned.status === 200 && replannedRow?.savedPersonId === null && replanned.body?.savedPersonId === null, { deliberate: deliberate.status, replanned: replanned.status });
     }
+    // ================= R2: Remove (dismiss) against person DELETE =================
+    const removeAs = (rh: any, personId?: string) => () => call(dismissRoute.POST(req(token, personId ? { savedPersonId: personId } : undefined), { params: { goalId: rh.goalId, goalActivityId: rh.id } }));
+    const snapshot = async (id: string) => (await q(`SELECT to_jsonb(ga) AS j FROM "GoalActivity" ga WHERE id = $1`, [id])).rows[0].j;
+    {
+      // Remove first (its UPDATE paused, holding the rhythm row); the DELETE then waits on it.
+      const p = await mkPerson('Race remove A');
+      const rh = (await createRhythm(p, newGoalBody('A', `${tag} remove A`))()).body;
+      const r = await race({ kind: 'rhythm-update', id: rh.id, at: /UPDATE "GoalActivity" SET status/ }, removeAs(rh, p), deletePerson(p), /UPDATE "GoalActivity"/);
+      const row = await ga(rh.id);
+      check('R2 Remove first (from the person page), person DELETE second: both 200; the rhythm is removed (DISMISSED, kept as history) and still paused and unlinked by the deletion', r.paused && r.secondBlockedOn !== null && r.first.status === 200 && r.second.status === 200 && row.status === 'DISMISSED' && row.savedPersonId === null && row.rhythmPausedAt !== null, { r: { first: r.first.status, second: r.second.status, blocked: r.secondBlockedOn }, row: { status: row.status, link: row.savedPersonId } });
+    }
+    {
+      // Person DELETE first; a Remove sent from the person page waits, then must not change the preserved rhythm.
+      const p = await mkPerson('Race remove B');
+      const rh = (await createRhythm(p, newGoalBody('B', `${tag} remove B`))()).body;
+      const r = await race({ kind: 'person-delete', id: p, at: /DELETE FROM "SavedPerson"/ }, deletePerson(p), removeAs(rh, p), /"GoalActivity"/);
+      const row = await ga(rh.id);
+      check('R2 person DELETE first, Remove second: the Remove waits on the rhythm row, then 409 PERSON_LINK_CHANGED; the rhythm stays SUGGESTED, PAUSED and unlinked', r.paused && r.secondBlockedOn !== null && r.first.status === 200 && r.second.status === 409 && r.second.body?.code === 'PERSON_LINK_CHANGED' && row.status !== 'DISMISSED' && row.savedPersonId === null && row.rhythmPausedAt !== null, { r: { first: r.first.status, second: r.second.status, body: r.second.body }, status: row.status });
+    }
+    {
+      // Stale person page: the deletion already committed; the page's Remove carries the person.
+      const p = await mkPerson('Stale remove');
+      const rh = (await createRhythm(p, newGoalBody('S', `${tag} stale remove`))()).body;
+      await deletePerson(p)();
+      const before = await snapshot(rh.id);
+      const stale = await removeAs(rh, p)();
+      const unchanged = JSON.stringify(before) === JSON.stringify(await snapshot(rh.id));
+      check('R2 stale person page Remove after deletion: 409 PERSON_LINK_CHANGED and the preserved rhythm is byte-for-byte unchanged (paused, unlinked, not removed)', stale.status === 409 && stale.body?.code === 'PERSON_LINK_CHANGED' && unchanged && before.status !== 'DISMISSED' && before.savedPersonId === null && before.rhythmPausedAt !== null, { stale: stale.status, unchanged });
+      const resumed = await settings(rh.goalId, rh.id, { paused: false })();
+      const replanned = await planFor(rh.id, 'Plan after stale remove and resume')();
+      check('R2 a later deliberate Resume from Goals restores planning (plan 200, unlinked, response = stored)', resumed.status === 200 && replanned.status === 200 && replanned.body?.savedPersonId === null && (await plan(replanned.body.id))?.savedPersonId === null, { resumed: resumed.status, replanned: replanned.status });
+    }
+    {
+      // Legitimate Remove still works: from a live person page, and from Goals (no body).
+      const p = await mkPerson('Legit remove');
+      const fromPage = (await createRhythm(p, newGoalBody('L', `${tag} legit page`))()).body;
+      const fromGoals = (await createRhythm(p, newGoalBody('L', `${tag} legit goals`))()).body;
+      const a = await removeAs(fromPage, p)();
+      const b = await removeAs(fromGoals)();
+      check('R2 legitimate Remove: from the person page (matching person) and from Goals (no body) both 200 -> DISMISSED, links kept', a.status === 200 && b.status === 200 && (await ga(fromPage.id)).status === 'DISMISSED' && (await ga(fromGoals.id)).status === 'DISMISSED' && (await ga(fromPage.id)).savedPersonId === p, { a: a.status, b: b.status });
+      const wrong = await removeAs((await createRhythm(p, newGoalBody('L', `${tag} legit wrong`))()).body, ravi)();
+      check('R2 a Remove naming a different person than the rhythm\'s is refused (409)', wrong.status === 409);
+    }
     {
       // Unrelated rhythms and other accounts are unaffected.
       const legacyGoal = (await call(goalsRoute.POST(req(token, { title: `${tag} legacy R1` })))).body;
@@ -390,6 +433,8 @@ async function main() {
       const pz = await settings(legacyId, legacy.id, { paused: true })();
       const rz = await settings(legacyId, legacy.id, { paused: false })();
       check('An unrelated rhythm (no person) pauses and resumes exactly as before', pz.status === 200 && rz.status === 200 && (await ga(legacy.id)).rhythmPausedAt === null);
+      const dz = await call(dismissRoute.POST(req(token), { params: { goalId: legacyId, goalActivityId: legacy.id } }));
+      check('An unrelated rhythm (no person) is removed exactly as before', dz.status === 200 && (await ga(legacy.id)).status === 'DISMISSED');
       const op = await mkPerson('Other R1', otherToken);
       const orh = (await call(rhythmsRoute.POST(req(otherToken, newGoalBody('Other', 'Call Other R1')), { params: { personId: op } }))).body;
       const mine = await mkPerson('Mine R1');

@@ -40,9 +40,16 @@ MP-4 implements design §6.2, D7 and D8/R1 of `AURA_MP_01_PRODUCT_AND_ARCHITECTU
 - **F2:** Plan and Plan My Day success responses return the committed `savedPersonId`, because `carryGoalActivityPersonToPlan` now returns the updated row.
 - **Unchanged:** migration 0058, the lock order, weekly acceptance and Move.
 
+## R2 — stale Remove (62031)
+- **Remove gets the same protection.** `dismissGoalActivity` uses the shared `personLinkChangedUnderLock` rule from R1: link read before the lock and under it, explicit READ COMMITTED, only the rhythm row locked.
+  - My People sends `savedPersonId` with every Edit, Pause, Resume and Remove.
+  - A stale Remove after a person deletion returns **409 `PERSON_LINK_CHANGED`** and changes nothing.
+- **Goals is unchanged:** Remove from Goals sends no body and still works, as does a deliberate Resume.
+- **Other paths checked:** creating a rhythm locks the person first, and planning re-checks the pause. Edit, Pause, Resume and Remove are every relationship-rhythm mutation and all share the rule.
+
 ## Tests
 | Test | Job | Checks |
 |---|---|---|
 | `test/myPeopleMp4Rules.test.ts` | math-core | 10 |
-| `test/myPeopleMp4RhythmsDb.test.ts` | Day Constructor DB | 42: migration, ownership (API and FK), lifecycle, carry and Move, deletion, both orderings of person DELETE vs creation, planning, resume and edit (final state paused, planning refused), atomicity, isolation, switch |
+| `test/myPeopleMp4RhythmsDb.test.ts` | Day Constructor DB | 49: migration, ownership (API and FK), lifecycle, carry and Move, deletion, both orderings of person DELETE vs creation, planning, resume, edit and remove (final state paused, planning refused), atomicity, isolation, switch |
 | `test/myPeopleMp4UiDb.test.ts` | Day Constructor DB | 13: the real person screen, explicit create and attach, pause, resume, edit and remove, switch off |
