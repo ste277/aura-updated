@@ -32,6 +32,7 @@ const CASES: Array<{ control: string; suite: string; jsdom?: boolean; expect: Re
   { control: 'd6-synthetic-provenance', suite: 'test/palmD6I1Reading.test.ts', expect: [/^A1\./], why: 'a confirmed-scanner reading mislabelled as synthetic' },
   { control: 'd6r1-retain-landmarks', suite: 'test/palmD6I1R1RetentionJsdom.test.ts', jsdom: true, expect: [/^M5\./], why: 'R1 F1: the tracing panel keeps the 21 landmarks after confirmation' },
   { control: 'd6r1-textual-only-scan', suite: 'test/palmG5I1PrivacyGate.test.ts', expect: [/^B2c\. negative: F2 bypass/], why: 'R1 F2: the B2b scan reverted to the textual pattern that missed side-effect imports' },
+  { control: 'd6r2-no-decoded-strings', suite: 'test/palmG5I1PrivacyGate.test.ts', expect: [/^B2c\. negative: R2: the 50372 escaped-quote fixture/, /^B2c\. negative: R2: a \\u escape spelling/], why: 'R2 F2: decoded string-literal values no longer scanned (the 50372 bypass returns)' },
   { control: 'dr1-timeout-removed', suite: 'test/palm04I5CameraAdapter.test.ts', expect: [/^K2\./], why: 'DR-1 start-up timer never armed' },
   { control: 'dr1-timeout-unguarded', suite: 'test/palm04I5CameraAdapter.test.ts', expect: [/^K5\./], why: 'a stale start-up timer may stop a newer session' },
 ];

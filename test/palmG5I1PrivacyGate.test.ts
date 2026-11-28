@@ -109,16 +109,35 @@ type Src = { rel: string; text: string };
 // which is what the approved G6 assertion exception and its negatives rely on), now including side-effect imports.
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const tsScanner = require('typescript');
-function moduleSpecifiers(text: string): string[] {
+// AURA-PALM-D6-I1-R2 (50372 F2): import text held in a STATIC string must count whatever its spelling. The
+// TypeScript parser decodes every string literal ('...' and "...", escaped quotes, \x / \u / \u{...} escapes, line
+// continuations) and every static template literal (no substitutions); each decoded value that mentions import,
+// export or require is scanned with the same syntax-aware scanner. Bounded to static syntax and static text: template
+// literals with substitutions, concatenation and computed strings are not evaluated (no JavaScript evaluator).
+const scriptKind = (rel: string) => (/\.tsx$/.test(rel) ? tsScanner.ScriptKind.TSX : /\.ts$/.test(rel) ? tsScanner.ScriptKind.TS : /\.jsx$/.test(rel) ? tsScanner.ScriptKind.JSX : tsScanner.ScriptKind.JS);
+function decodedStringSpecifiers(rel: string, text: string): string[] {
+  const out: string[] = [];
+  const sf = tsScanner.createSourceFile(rel || 'x.ts', text, tsScanner.ScriptTarget.Latest, false, scriptKind(rel || 'x.ts'));
+  const visit = (n: any) => {
+    if ((tsScanner.isStringLiteral(n) || tsScanner.isNoSubstitutionTemplateLiteral(n)) && /\b(import|export|require)\b/.test(n.text)) {
+      for (const f of tsScanner.preProcessFile(n.text, true, true).importedFiles) out.push(f.fileName);
+    }
+    tsScanner.forEachChild(n, visit);
+  };
+  visit(sf);
+  return out;
+}
+function moduleSpecifiers(text: string, rel = ''): string[] {
   const syntax: string[] = tsScanner.preProcessFile(text, true, true).importedFiles.map((f: { fileName: string }) => f.fileName);
   const textual = [...strip(text).matchAll(/(?:\bfrom\s+|\bimport\s*\(\s*|\brequire\s*\(\s*|\bimport\s+)['"]([^'"]+)['"]/g)].map((m) => m[1]);
-  return [...new Set([...syntax, ...textual])];
+  const decoded = decodedStringSpecifiers(rel, text);
+  return [...new Set([...syntax, ...textual, ...decoded])];
 }
 /** B2 with the E1-R3 exception: files outside palm-scan that reference lib/palm-analysis (static, dynamic or require). */
 const LIB_ROOT = 'apps/web/lib/palm-analysis/';
 /** Every import / dynamic import / require specifier in `text` that resolves (relatively) into lib/palm-analysis or names it. */
 function libRefs(rel: string, text: string): string[] {
-  const specs = moduleSpecifiers(text);
+  const specs = moduleSpecifiers(text, rel);
   return specs.filter((sp) => /lib\/palm-analysis\//.test(sp) || (sp.startsWith('.') && `${path.posix.normalize(path.posix.join(path.posix.dirname(rel), sp))}/`.startsWith(LIB_ROOT)));
 }
 function b2Violations(files: Src[]): string[] {
@@ -149,7 +168,7 @@ function importersClosure(files: Src[], target: string): string[] {
     return base;
   };
   const deps = new Map<string, string[]>();
-  for (const f of files) deps.set(f.rel, moduleSpecifiers(f.text).map((sp) => resolve(f.rel, sp)).filter((x): x is string => !!x));
+  for (const f of files) deps.set(f.rel, moduleSpecifiers(f.text, f.rel).map((sp) => resolve(f.rel, sp)).filter((x): x is string => !!x));
   const reached = new Set<string>([target]);
   let grew = true;
   while (grew) { grew = false; for (const [k, ds] of deps) if (!reached.has(k) && ds.some((d) => reached.has(d))) { reached.add(k); grew = true; } }
@@ -186,7 +205,7 @@ check('B2b. the E1 reading interface stays synthetic-only and development-only (
 check('B2b-d6. (D6-I1) the confirmed-scanner entry requires its own { confirmedScanner: true } declaration AND the development gate, and its output is marked non-synthetic', /const opts = requireConfirmedScannerOptions\(options, \['confirmedScanner', 'mode'\]\); \/\/ 1\. before any work\n\s+if \(!confirmedScannerGateOpen\(\)\) throw new E1ErrorClass\('development-only'/.test(read(E1_READING)) && /return process\.env\.NODE_ENV === 'development' && process\.env\.NEXT_PUBLIC_AURA_PALM_IMAGE_INPUT === 'g5-i1-dev';/.test(read(E1_READING)) && /return readingFor\(input, opts\.mode, false\);/.test(read(E1_READING)) && /if \(snap\.confirmedScanner !== true\) refuse\('confirmedScanner must be exactly true'\);/.test(e1Src('identity.mjs')));
 // B2c -- negative regressions: unauthorised imports still fail B2 / B2b
 const readingText = read(E1_READING);
-const neg: Array<[string, Src[], 'b2' | 'closure' | 'app']> = [
+const neg: Array<[string, Src[], 'b2' | 'closure' | 'app' | 'clean']> = [
   ['another package imports lib/palm-analysis', [{ rel: 'packages/other/x.ts', text: "import { measureHand } from '../../apps/web/lib/palm-analysis/measurements';" }], 'b2'],
   ['an app module dynamically imports lib/palm-analysis', [{ rel: 'apps/web/lib/other.ts', text: "const m = await import('./palm-analysis/features');" }], 'b2'],
   ['a module requires lib/palm-analysis', [{ rel: 'apps/web/app/x.ts', text: "const f = require('../lib/palm-analysis/quality');" }], 'b2'],
@@ -218,10 +237,30 @@ const neg: Array<[string, Src[], 'b2' | 'closure' | 'app']> = [
   ['a named re-export of E1', [{ rel: 'apps/web/lib/rex2.ts', text: "export { generateConfirmedScannerReading as g } from '../../../packages/palm-reading-engine/e1/src/reading';" }], 'closure'],
   ['a multi-line import of E1', [{ rel: 'apps/web/lib/ml.ts', text: "import {\n  generateConfirmedScannerReading,\n} from\n  '../../../packages/palm-reading-engine/e1/src/reading';" }], 'closure'],
   ['a side-effect import of lib/palm-analysis outside palm-scan (B2)', [{ rel: 'apps/web/lib/side2.ts', text: "import './palm-analysis/features';" }], 'b2'],
+  // D6-I1-R2 (50372 F2): statically represented import text, in any spelling, is an import reference
+  ["R2: the 50372 escaped-quote fixture (double-quoted string, escaped double quotes)", [{ rel: G6_GUARD_TEST, text: `${read(G6_GUARD_TEST)}\n` + "const reviewImportFixture = \"import \\\"../../e1/src/reading.ts\\\";\";" }], 'closure'],
+  ["R2: single-quoted string with escaped single quotes", [{ rel: G6_GUARD_TEST, text: `${read(G6_GUARD_TEST)}\n` + "const f = 'import \\'../../e1/src/reading.ts\\';';" }], 'closure'],
+  ["R2: a static template literal", [{ rel: G6_GUARD_TEST, text: `${read(G6_GUARD_TEST)}\n` + "const f = `import '../../e1/src/reading.ts';`;" }], 'closure'],
+  ["R2: a \\u escape spelling \"import\"", [{ rel: G6_GUARD_TEST, text: `${read(G6_GUARD_TEST)}\n` + "const f = \"\\u0069mport '../../e1/src/reading.ts';\";" }], 'closure'],
+  ["R2: a \\u{...} code-point escape", [{ rel: G6_GUARD_TEST, text: `${read(G6_GUARD_TEST)}\n` + "const f = \"\\u{69}mport '../../e1/src/reading.ts';\";" }], 'closure'],
+  ["R2: \\x escapes in the module path", [{ rel: G6_GUARD_TEST, text: `${read(G6_GUARD_TEST)}\n` + "const f = \"import '..\\x2f..\\x2fe1\\x2fsrc\\x2freading.ts';\";" }], 'closure'],
+  ["R2: require text in a string", [{ rel: G6_GUARD_TEST, text: `${read(G6_GUARD_TEST)}\n` + "const f = \"require('../../e1/src/reading.ts')\";" }], 'closure'],
+  ["R2: dynamic-import text in a template literal", [{ rel: G6_GUARD_TEST, text: `${read(G6_GUARD_TEST)}\n` + "const f = `import('../../e1/src/reading')`;" }], 'closure'],
+  ["R2: re-export text in a string", [{ rel: G6_GUARD_TEST, text: `${read(G6_GUARD_TEST)}\n` + "const f = 'export * from \"../../e1/src/reading\";';" }], 'closure'],
+  ["R2: the approved assertion re-spelled with \\u0027 quotes (decodes to the approved line, but is not the exact approved text)", [{ rel: G6_GUARD_TEST, text: `${read(G6_GUARD_TEST)}\n` + "const x = { line: \"import { generateConfirmedScannerReading } from \\u0027../../../../packages/palm-reading-engine/e1/src/reading\\u0027;\", };" }], 'closure'],
+  ['R2: escaped import text in an app module', [{ rel: 'apps/web/lib/esc.ts', text: "export const t = \"import \\\"../../../packages/palm-reading-engine/e1/src/reading\\\";\";" }], 'closure'],
+  ["R2 positive: unrelated prose strings that merely mention import, export or reading", [{ rel: G6_GUARD_TEST, text: `${read(G6_GUARD_TEST)}\n` + "const a = 'Import the photo from the camera, then export the reading.'; const b = \"reading.ts\"; const c = `require nothing`;" }], 'clean'],
+  ["R2 positive: import text for an unrelated module", [{ rel: G6_GUARD_TEST, text: `${read(G6_GUARD_TEST)}\n` + "const a = \"import '../../e1/src/sha256.mjs';\"; const b = `import x from './other';`;" }], 'clean'],
+  ["R2 positive: a template literal with a substitution is not statically decoded (bounded scope)", [{ rel: G6_GUARD_TEST, text: `${read(G6_GUARD_TEST)}\n` + "const m = 'reading'; const t = `import '../../e1/src/${m}.ts';`;" }], 'clean'],
 ];
-const neg2 = neg as Array<[string, Src[], 'b2' | 'closure' | 'app']>;
+const neg2 = neg;
 for (const [name, files, kind] of neg2) {
   const all = [...realSources.filter((f) => !files.some((g) => g.rel === f.rel)), ...files];
+  if (kind === 'clean') { // a POSITIVE control: must NOT be flagged
+    const flagged = reachersExceptApp([...all, ...testSources]).filter((f) => !E1_READING_CONSUMERS.includes(f));
+    check(`B2c. positive: ${name} -> accepted`, flagged.length === 0);
+    continue;
+  }
   const failed = kind === 'b2' ? b2Violations(all).length > 0 : kind === 'app' ? appImportViolations(all).length > 0 : reachersExceptApp([...all, ...testSources]).filter((f) => !E1_READING_CONSUMERS.includes(f)).length > 0;
   check(`B2c. negative: ${name} -> fails`, failed);
 }
