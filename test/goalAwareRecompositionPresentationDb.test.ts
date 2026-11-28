@@ -21,11 +21,12 @@ import {
   loadGoalContextsForPlanIds,
   type PlannedActivity,
 } from '../apps/web/lib/db';
-import { createSessionToken } from '../apps/web/lib/auth';
+
 import { createRealRecompositionDeps, handleRemainingDayRecompositionRequest, type RecompositionBoundaryDeps } from '../apps/web/lib/remainingDayRecompositionServer';
 import type { RecompositionDeps } from '../apps/web/lib/remainingDayRecomposition';
 import { POST as recomposeRoute } from '../apps/web/app/api/day/recompose/route';
 import type { TimingCandidate, TimingCandidateLabel } from '../packages/recommendation/src/timingSearch';
+import { createTestSessionToken, TEST_SESSION_COOKIE } from './authSessionTestSupport';
 
 let allPassed = true;
 function check(label: string, condition: boolean) {
@@ -72,7 +73,7 @@ function mockConstructorDeps(plans: PlannedActivity[], table: Table): Recomposit
 async function main() {
   const user = await upsertUserByEmail({ email: 'test-goal-aware-recomposition@example.com', cityName: 'Chennai', latitude: 13.0827, longitude: 80.2707, timezone: TZ });
   const other = await upsertUserByEmail({ email: 'test-goal-aware-recomposition-other@example.com', cityName: 'Chennai', latitude: 13.0827, longitude: 80.2707, timezone: TZ });
-  const tok = createSessionToken(user.id, user.email);
+  const tok = await createTestSessionToken(user.id, user.email);
 
   const goalIds: string[] = [];
   const cleanup = async () => {
@@ -123,7 +124,7 @@ async function main() {
     // ============================================================
     // 21/22. Goal-linked MOVE exposes goal id/title; non-Goal MOVE stays Goal-free -- via the REAL route.
     // ============================================================
-    const fakeReq: any = { cookies: { get: (n: string) => (n === 'as_session' ? { value: tok } : undefined) }, json: async () => { throw new Error('body must never be read'); }, headers: new Headers() };
+    const fakeReq: any = { cookies: { get: (n: string) => (n === TEST_SESSION_COOKIE ? { value: tok } : undefined) }, json: async () => { throw new Error('body must never be read'); }, headers: new Headers() };
     // The real route wires createRealRecompositionDeps; substitute the mock deps by monkey-patching is not
     // possible for a route import, so call handleRemainingDayRecompositionRequest directly with the SAME
     // loadGoalContexts the real route uses (loadGoalContextsForPlanIds), proving the real production wiring

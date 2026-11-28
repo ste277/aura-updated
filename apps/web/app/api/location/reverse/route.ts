@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSessionFromRequest } from '../../../../lib/session';
+import { getSessionFromRequest, SESSION_UNAVAILABLE, sessionUnavailableResponse } from '../../../../lib/session';
 import { reverseGeocode, isGeocodingConfigured } from '../../../../lib/geocoding';
 import { isRateLimited } from '../../../../lib/inMemoryRateLimit';
 import { MIN_VALID_LATITUDE, MAX_VALID_LATITUDE, MIN_VALID_LONGITUDE, MAX_VALID_LONGITUDE } from '../../../../lib/cities';
@@ -45,7 +45,8 @@ async function readBoundedBody(req: NextRequest): Promise<string | null> {
 }
 
 export async function POST(req: NextRequest) {
-  const session = getSessionFromRequest(req);
+  const session = await getSessionFromRequest(req);
+  if (session === SESSION_UNAVAILABLE) return sessionUnavailableResponse();
   if (!session) {
     return json({ error: 'Not authenticated.' }, 401);
   }

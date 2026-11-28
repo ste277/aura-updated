@@ -14,7 +14,7 @@
  *   3. switch ON again: every My People field and special day is unchanged.
  */
 import { Pool } from 'pg';
-import { createSessionToken } from '../apps/web/lib/auth';
+
 import { getSavedPersonForOwner, getUserById, updateBirthProfile, upsertUserByEmail, deleteSavedPerson } from '../apps/web/lib/db';
 import { GET as listPeople, POST as createPerson } from '../apps/web/app/api/people/route';
 import { GET as getPerson, PATCH as patchPerson, DELETE as deletePerson } from '../apps/web/app/api/people/[personId]/route';
@@ -31,6 +31,7 @@ import { orchestrateAskAura, AskAuraOrchestratorDeps } from '../apps/web/lib/ask
 import { parseAskAuraRequest } from '../packages/recommendation/src/askAuraIntent';
 import { DailyAssistantContext } from '../packages/recommendation/src/dailyAssistant';
 import { getDatePartsInTimezone, addDaysToDateStr } from '../apps/web/lib/timezone';
+import { createTestSessionToken, TEST_SESSION_COOKIE } from './authSessionTestSupport';
 
 let allPassed = true;
 function check(label: string, condition: boolean, detail?: unknown) {
@@ -41,7 +42,7 @@ function check(label: string, condition: boolean, detail?: unknown) {
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const sql = async (text: string, params: unknown[] = []) => (await pool.query(text, params)).rows;
 const fakeReq = (token: string, body?: unknown, url = 'http://localhost/api/people'): any => ({
-  cookies: { get: (n: string) => (n === 'as_session' ? { value: token } : undefined) },
+  cookies: { get: (n: string) => (n === TEST_SESSION_COOKIE ? { value: token } : undefined) },
   json: async () => body,
   headers: new Headers(),
   nextUrl: new URL(url),
@@ -64,7 +65,7 @@ async function main() {
   const tag = `mp1rb-${Date.now()}`;
   const owner = await upsertUserByEmail({ email: `owner-${tag}@mp1.aura.local`, cityName: 'Chennai', latitude: 13.0827, longitude: 80.2707, timezone: TZ });
   await updateBirthProfile(owner.id, { birthDate: '1990-01-15', birthTime: '07:30', birthCityName: 'Chennai', birthLatitude: 13.0827, birthLongitude: 80.2707, birthTimezone: TZ });
-  const token = createSessionToken(owner.id, owner.email);
+  const token = await createTestSessionToken(owner.id, owner.email);
   const today = getDatePartsInTimezone(TZ, new Date()).dateStr;
   const range = { start: addDaysToDateStr(today, 3), end: addDaysToDateStr(today, 9) };
 

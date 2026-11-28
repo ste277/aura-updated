@@ -4,9 +4,10 @@
  * (the C1 mapper bug must not repeat for MOVED). Requires DATABASE_URL.
  */
 import { upsertUserByEmail, updateBirthProfile, createPlannedActivity, beginTransaction, logPlannedActivity, skipPlannedActivity, cancelPlannedActivity } from '../apps/web/lib/db';
-import { createSessionToken } from '../apps/web/lib/auth';
+
 import { POST as moveRoute } from '../apps/web/app/api/plans/[planId]/move/route';
 import { mapPlanRow, isActionableUpcomingPlan } from '../apps/web/lib/planFormatting';
+import { createTestSessionToken, TEST_SESSION_COOKIE } from './authSessionTestSupport';
 
 let allPassed = true;
 function check(label: string, condition: boolean) {
@@ -16,7 +17,7 @@ function check(label: string, condition: boolean) {
 const TZ = 'Asia/Kolkata';
 const MIN = 60000; const HOUR = 3600000; const DAY = 86400000;
 const minute = (ms: number) => Math.floor(ms / MIN) * MIN;
-const req = (tok: string | null, body: unknown): any => ({ cookies: { get: (n: string) => (tok && n === 'as_session' ? { value: tok } : undefined) }, json: async () => { if (body === '__malformed__') throw new SyntaxError('bad json'); return body; }, headers: new Headers() });
+const req = (tok: string | null, body: unknown): any => ({ cookies: { get: (n: string) => (tok && n === TEST_SESSION_COOKIE ? { value: tok } : undefined) }, json: async () => { if (body === '__malformed__') throw new SyntaxError('bad json'); return body; }, headers: new Headers() });
 async function sql(t: string, p: unknown[] = []): Promise<any[]> {
   const c = await beginTransaction();
   try { const r = await c.query(t, p); await c.query('COMMIT'); return r.rows; } catch (e) { await c.query('ROLLBACK').catch(() => {}); throw e; } finally { c.release(); }
@@ -26,7 +27,7 @@ async function main() {
   const U = await upsertUserByEmail({ email: 'test-move-api-a@example.com', cityName: 'Chennai', latitude: 13.0827, longitude: 80.2707, timezone: TZ });
   const V = await upsertUserByEmail({ email: 'test-move-api-b@example.com', cityName: 'Chennai', latitude: 13.0827, longitude: 80.2707, timezone: TZ });
   for (const u of [U, V]) await updateBirthProfile(u.id, { birthDate: '1990-06-15', birthTime: '08:30', birthCityName: 'Chennai', birthLatitude: 13.0827, birthLongitude: 80.2707, birthTimezone: TZ });
-  const tok = createSessionToken(U.id, U.email); const tokV = createSessionToken(V.id, V.email);
+  const tok = await createTestSessionToken(U.id, U.email); const tokV = await createTestSessionToken(V.id, V.email);
   let n = 0;
   const mk = async (title: string, startMs?: number) => { const s = startMs ?? minute(Date.now()) + 10 * DAY + n++ * 3 * HOUR; return createPlannedActivity({ userId: U.id, title: `${title} ${Date.now()}-${n}`, plannedStartAt: new Date(s), plannedEndAt: new Date(s + HOUR), durationMinutes: 60, windowType: 'NEUTRAL' }); };
   const dest = () => new Date(minute(Date.now()) + 50 * DAY + n++ * 3 * HOUR);

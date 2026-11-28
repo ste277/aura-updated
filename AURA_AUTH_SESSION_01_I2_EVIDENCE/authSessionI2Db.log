@@ -1,0 +1,78 @@
+OK   S1 verify-code issues a session: 200 and a v2 cookie
+OK   S2 cookie: HttpOnly, SameSite=Lax, Path=/, no Domain (dev: as_sid, not Secure)
+OK   S3 Max-Age derives from the DB expiry (30 days, minus seconds)
+OK   S4 legacy as_session is cleared at sign-in (Max-Age=0)
+OK   S5 exactly one AuthSession row, keyed by sha256(sid) (raw sid not stored)
+OK   S6 fixed 30-day expiry: expiresAt - createdAt = 720 h exactly (DB-set)
+OK   S7 the token exp is the row expiresAt
+OK   S8 the code was consumed in the same transaction
+OK   S9 a consumed code is rejected (401, no cookie, no new row)
+OK   S10 concurrent sign-ins with one code: exactly one 200 and one session row (others 401/429)
+OK   E3-1 /api/auth/session returns the signed-in user (joined lookup)
+OK   E3-2 /api/auth/session never sets the session cookie (B4)
+OK   E3-3 no cookie -> { user: null }
+OK   E1-1 an authenticated route serves the session user
+OK   E1-2 account isolation: B never sees A's data
+OK   E1-3 no cookie -> 401
+OK   T rejects a flipped signature: { user: null } and 401
+OK   T rejects a token signed with another secret: { user: null } and 401
+OK   T rejects a v1 token signed with the CURRENT secret, in the v2 cookie: { user: null } and 401
+OK   T rejects A's sid with B's uid (validly signed): row/user binding: { user: null } and 401
+OK   T rejects a validly signed token with no row: { user: null } and 401
+OK   T rejects a validly signed token whose exp differs from its row: { user: null } and 401
+OK   T rejects garbage: { user: null } and 401
+OK   T rejects an oversized value: { user: null } and 401
+OK   T-v1 a legacy as_session cookie (current secret) is not authentication, and it is cleared (N6)
+OK   T-v1b a legacy as_session cookie gives 401 on an E1 route
+OK   T-v1c a v2 cookie under the wrong (secure) name is ignored outside production
+OK   X0 a second session for A works
+OK   X1 expired by the DATABASE clock (token exp still in the future) -> null / 401
+OK   X2 other sessions of the same user are unaffected
+OK   L1 logout: 200 only after the row is durably revoked (revokedAt set, reason logout)
+OK   L2 logout clears as_sid and legacy as_session (Max-Age=0, Path=/)
+OK   L3 B1: every request after the revocation commit is 401 (20 concurrent replays)
+OK   L4 replayed cookie on /api/auth/session -> { user: null } (N3)
+OK   L5 logout is idempotent: a replayed logout is 200
+OK   L6 logout with no / garbage cookie is 200 (nothing to revoke) and clears cookies
+OK   L7 other sessions survive one session's logout
+OK   L8 N5: signing in again after logout gives a new working session; the old stays rejected
+OK   B3-1 an operation holding FOR SHARE completes; the concurrent logout waits for it, then commits
+OK   B3-2 after the revocation committed, the share-locked operation is refused and never runs
+OK   E4-1 sessionUserFromCookie: live session -> user id
+OK   E4-2 sessionUserFromCookie: revoked session -> null
+OK   E4-3 sessionUserFromCookie: legacy as_session only -> null
+OK   F1 DB unreachable: /api/auth/session -> 503 with Retry-After, no Set-Cookie
+OK   F2 DB unreachable: E1 route -> 503 (not 401)
+OK   F3 D8: DB unreachable -> logout 503, the cookie is KEPT (no Set-Cookie), message "Couldn't sign out. Try again."
+OK   F4 sign-in with the session DB unreachable -> 503, no cookie, code NOT consumed
+OK   F5 no cookie is still 401 without touching the database (no false 503)
+OK   F6 a malformed cookie is 401 without touching the database
+OK   F7 E4 helper throws (fail closed) when the DB is unreachable
+OK   F8 a hung database (blackholed lookup) -> 503 within the 2 s lookup deadline
+OK   F9 recovers on the next request without a restart
+OK   F10 D8: an uncertain first revoke is retried once within the deadline -> 200 and the row is revoked
+OK   G1 ambiguous sign-in COMMIT (committed, reply lost) -> 503 and NO cookie; the orphan row is unusable
+OK   G2 sign-in COMMIT never reached the server -> 503, no cookie, no row, code NOT consumed (retry works)
+OK   G3 the same code then signs in normally
+OK   P1 production: __Host-as_sid, Secure, HttpOnly, SameSite=Lax, Path=/, no Domain
+OK   P2 production: sign-in also clears as_sid and as_session
+OK   P3 production reads ONLY __Host-as_sid (the unprefixed name is ignored)
+OK   P4 the test pool seam refuses in production
+OK   C1 the daily cron runs the bounded cleanup (old expired + old revoked rows deleted)
+OK   C2 cleanup never deletes a live session
+OK   C3 the cron route (and its cleanup) stays secret-gated: 404 without the secret
+OK   R1 no aura-session backend is left active or idle-in-transaction
+
+64 passed, 0 failed
+oidc-provider WARNING: Unsupported runtime. Use Node.js v22.x LTS, or a later LTS release.
+[auth] verify-code: no active code { emailRef: '4cc555d1770d76c2' }
+[auth] verify-code: attempt cap reached { emailRef: 'bc70e6e291a35501' }
+[auth] verify-code: code already consumed { emailRef: 'bc70e6e291a35501' }
+[auth] verify-code: code already consumed { emailRef: 'bc70e6e291a35501' }
+[auth] verify-code: code already consumed { emailRef: 'bc70e6e291a35501' }
+[auth] verify-code: code already consumed { emailRef: 'bc70e6e291a35501' }
+[auth] verify-code: session not established { emailRef: 'bc70e6e291a35501' }
+[auth-session] checked-out client error (Error)
+[auth] verify-code: session not established { emailRef: 'bc70e6e291a35501' }
+[auth-session] checked-out client error (Error)
+[auth] verify-code: session not established { emailRef: 'bc70e6e291a35501' }

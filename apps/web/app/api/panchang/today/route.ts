@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSessionFromRequest } from '../../../../lib/session';
+import { SESSION_UNAVAILABLE, sessionUnavailableResponse, getSessionWithUserFromRequest } from '../../../../lib/session';
 import { getUserById } from '../../../../lib/db';
 import { getPanchangForDate } from '../../../../../../packages/panchang/src/panchangDay';
 import { getDatePartsInTimezone } from '../../../../../../packages/panchang/src/localDate';
@@ -23,10 +23,11 @@ import { solarErrorResponse } from '../../../../lib/solarErrorResponse';
  * this URL, since that's the contract this route has always had.
  */
 export async function GET(req: NextRequest) {
-  const session = getSessionFromRequest(req);
+  const session = await getSessionWithUserFromRequest(req);
+  if (session === SESSION_UNAVAILABLE) return sessionUnavailableResponse();
   if (!session) return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 });
 
-  const user = await getUserById(session.userId);
+  const user = session.user;
   if (!user) return NextResponse.json({ error: 'User not found.' }, { status: 404 });
 
   const now = new Date();

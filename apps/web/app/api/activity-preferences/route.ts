@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSessionFromRequest } from '../../../lib/session';
+import { getSessionFromRequest, SESSION_UNAVAILABLE, sessionUnavailableResponse } from '../../../lib/session';
 import { listUserActivityPreferences } from '../../../lib/activityPreferences';
 
 /**
@@ -12,7 +12,8 @@ import { listUserActivityPreferences } from '../../../lib/activityPreferences';
  * contract stays deliberately minimal).
  */
 export async function GET(req: NextRequest) {
-  const session = getSessionFromRequest(req);
+  const session = await getSessionFromRequest(req);
+  if (session === SESSION_UNAVAILABLE) return sessionUnavailableResponse();
   if (!session) return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 });
 
   const preferences = await listUserActivityPreferences(session.userId);

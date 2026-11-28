@@ -18,7 +18,7 @@ import { createPostgresRateLimiter } from '../../../packages/mcp-tools/src/secur
 import { createBucketHasher, deriveBucketKey, type BucketHasher } from '../../../packages/mcp-tools/src/security/preAuthRules';
 import { createFixedWindowRateLimiter, type McpRateLimiter } from '../../../packages/mcp-tools/src/security/rateLimit';
 import type { RemoteMcpConfig } from '../../../packages/mcp-tools/src/http/remoteMcpHandler';
-import { SESSION_COOKIE_NAME, verifySessionToken } from './auth';
+import { getSessionFromCookieHeader, readSessionCookieFromHeader, withSessionShareLock } from './session';
 import { resolveRuntimeMcpAuthMode } from './mcpAuthGate';
 
 /**
@@ -29,8 +29,10 @@ import { resolveRuntimeMcpAuthMode } from './mcpAuthGate';
  * apps/web/pages/api/oauth/[...oidc].ts and the I2b connection routes), and
  * it re-checks the gate itself before constructing anything.
  *
- * Login reuses Aura's existing session cookie (`as_session`, verified by the
- * unchanged lib/auth.ts verifier). Nothing here changes Aura's authentication.
+ * Login reuses Aura's session (AURA-AUTH-SESSION-01-I2, D6): the v2 session
+ * cookie, verified against the database by lib/session.ts -- the same central
+ * validation as every route. Consent approval re-checks the session FOR SHARE
+ * while the grant is issued (B3). Nothing else in MCP OAuth changes.
  *
  * Storage (I2b):
  *   - default: in memory (lost on restart);
@@ -110,19 +112,29 @@ function boundedPool(connectionString: string, role: 'store' | 'limiter'): Pool 
 const globalRef = globalThis as typeof globalThis & { __auraMcpLocalOAuth?: LocalState };
 
 export function readSessionCookieValue(cookieHeader: string | null | undefined): string | null {
-  if (!cookieHeader) return null;
-  for (const part of cookieHeader.split(';')) {
-    const i = part.indexOf('=');
-    if (i > 0 && part.slice(0, i).trim() === SESSION_COOKIE_NAME) return decodeURIComponent(part.slice(i + 1).trim());
-  }
-  return null;
+  return readSessionCookieFromHeader(cookieHeader);
 }
 
-/** Aura user id from a Cookie header, or null. */
-export function sessionUserFromCookie(cookieHeader: string | null | undefined): string | null {
-  const token = readSessionCookieValue(cookieHeader);
-  const session = token ? verifySessionToken(token) : null;
+/**
+ * Aura user id from a Cookie header (database-backed, lib/session.ts), or
+ * null when not authenticated. Throws SessionVerificationUnavailableError
+ * when the session cannot be verified (callers answer 503 / fail closed).
+ */
+export async function sessionUserFromCookie(cookieHeader: string | null | undefined): Promise<string | null> {
+  const session = await getSessionFromCookieHeader(cookieHeader);
   return session?.userId ?? null;
+}
+
+/**
+ * B3 (design §3) for consent approval: the grant is issued only while the
+ * approving user's session row is held FOR SHARE after a live re-check, so a
+ * concurrent logout is strictly ordered before (no grant: null) or after it.
+ */
+async function guardConsentGrant(req: IncomingMessage, userId: string, issue: () => Promise<string>): Promise<string | null> {
+  const session = await getSessionFromCookieHeader(req.headers.cookie);
+  if (!session || session.userId !== userId) return null;
+  const locked = await withSessionShareLock(session, issue);
+  return locked.ok ? locked.value : null;
 }
 
 /** Only an explicit loopback database may hold local OAuth state. */
@@ -179,10 +191,11 @@ export function getLocalMcpAuth(config: RemoteMcpConfig): LocalState {
     issuer: config.authorizationServer,
     resourceUrl: config.resourceUrl,
     clients: LOCAL_CLIENTS,
-    resolveSessionUser: (req: IncomingMessage) => {
-      const userId = sessionUserFromCookie(req.headers.cookie);
+    resolveSessionUser: async (req: IncomingMessage) => {
+      const userId = await sessionUserFromCookie(req.headers.cookie);
       return userId ? { userId } : null;
     },
+    guardConsentGrant,
     signInUrl: (returnTo) => `/connect/sign-in?returnTo=${encodeURIComponent(returnTo)}`,
     connectionsUrl: '/connect/apps',
     audit,

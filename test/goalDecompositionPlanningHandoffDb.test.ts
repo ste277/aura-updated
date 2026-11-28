@@ -45,7 +45,7 @@ import {
   loadGoalActivityRhythmFacts,
 } from '../apps/web/lib/db';
 import { computeGoalActivityRhythmEligibility } from '../apps/web/lib/goalActivityRhythm';
-import { createSessionToken } from '../apps/web/lib/auth';
+
 import { matchGoalTemplateCategory, resolveGoalTemplateActivities } from '../apps/web/lib/goals';
 import {
   createInitialProposalState,
@@ -69,6 +69,7 @@ import { parsePreviewResponseBody } from '../apps/web/lib/dayConstructorPreviewC
 import type { ConstructDayPreview } from '../apps/web/lib/dayConstructorOrchestrator';
 import { buildAcceptRequestBody } from '../apps/web/lib/acceptConstructedDay';
 import { POST as acceptRoute } from '../apps/web/app/api/day-constructor/accept/route';
+import { createTestSessionToken, TEST_SESSION_COOKIE } from './authSessionTestSupport';
 
 let allPassed = true;
 function check(label: string, condition: boolean) {
@@ -100,7 +101,7 @@ async function sql(text: string, params: unknown[] = []): Promise<any[]> {
 }
 
 function fakeRequest(cookie: string | undefined, jsonBody: unknown): any {
-  return { cookies: { get: (name: string) => (cookie !== undefined && name === 'as_session' ? { value: cookie } : undefined) }, json: async () => jsonBody };
+  return { cookies: { get: (name: string) => (cookie !== undefined && name === TEST_SESSION_COOKIE ? { value: cookie } : undefined) }, json: async () => jsonBody };
 }
 async function callCreateGoal(token: string | undefined, body: unknown): Promise<{ status: number; body: any }> {
   const res: any = await createGoal(fakeRequest(token, body));
@@ -114,7 +115,7 @@ function iso(s: string): Date {
 async function main() {
   const user = await upsertUserByEmail({ email: 'test-b5-composed-lifecycle@example.com', cityName: 'Chennai', latitude: 13.0827, longitude: 80.2707, timezone: TZ });
   await updateBirthProfile(user.id, { birthDate: '1990-06-15', birthTime: '08:30', birthCityName: 'Chennai', birthLatitude: 13.0827, birthLongitude: 80.2707, birthTimezone: TZ });
-  const token = createSessionToken(user.id, user.email);
+  const token = await createTestSessionToken(user.id, user.email);
 
   const cleanup = async () => {
     await sql(`UPDATE "GoalActivityOccurrence" SET "plannedActivityId" = NULL WHERE "userId" = $1`, [user.id]);

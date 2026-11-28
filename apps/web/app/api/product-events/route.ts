@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSessionFromRequest } from '../../../lib/session';
+import { getSessionFromRequest, SESSION_UNAVAILABLE, sessionUnavailableResponse } from '../../../lib/session';
 import { getAuraMomentByToken } from '../../../lib/db';
 import { parseJsonObject } from '../../../lib/request';
 import { recordProductEvent } from '../../../lib/productEvents';
@@ -31,7 +31,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'A valid JSON body with an eventName is required.' }, { status: 400 });
   }
 
-  const session = getSessionFromRequest(req);
+  const session = await getSessionFromRequest(req);
+  if (session === SESSION_UNAVAILABLE) return sessionUnavailableResponse();
 
   let auraMomentId: string | null = null;
   if (typeof body.momentToken === 'string' && body.momentToken.length > 0) {

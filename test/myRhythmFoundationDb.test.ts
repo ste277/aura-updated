@@ -23,10 +23,11 @@ import { POST as plansRoute } from '../apps/web/app/api/plans/route';
 import { PATCH as rhythmRoute } from '../apps/web/app/api/goals/[goalId]/activities/[goalActivityId]/rhythm/route';
 import { GET as goalDetailRoute } from '../apps/web/app/api/goals/[goalId]/route';
 import { upsertUserByEmail, createGoalWithActivities, beginTransaction } from '../apps/web/lib/db';
-import { createSessionToken } from '../apps/web/lib/auth';
+
 import { loadEligibleGoalDemand, createRealGoalDemandCandidatesDeps } from '../apps/web/lib/goalDemandCandidates';
 import { getDatePartsInTimezone, addDaysToDateStr } from '../apps/web/lib/timezone';
 import { localCalendarWeekStart } from '../apps/web/lib/goalActivityRhythm';
+import { createTestSessionToken, TEST_SESSION_COOKIE } from './authSessionTestSupport';
 
 let allPassed = true;
 function check(label: string, condition: boolean) {
@@ -39,7 +40,7 @@ const TZ = 'Asia/Kolkata';
 
 function fakeRequest(token: string | undefined, body: unknown): any {
   return {
-    cookies: { get: (n: string) => (token !== undefined && n === 'as_session' ? { value: token } : undefined) },
+    cookies: { get: (n: string) => (token !== undefined && n === TEST_SESSION_COOKIE ? { value: token } : undefined) },
     headers: new Headers(),
     nextUrl: new URL('http://localhost/api/test'),
     json: async () => body,
@@ -99,8 +100,8 @@ async function main() {
 
   const userA = await upsertUserByEmail({ email: emailA, cityName: 'Chennai', latitude: 13.0827, longitude: 80.2707, timezone: TZ });
   const userB = await upsertUserByEmail({ email: emailB, cityName: 'Chennai', latitude: 13.0827, longitude: 80.2707, timezone: TZ });
-  const tokA = createSessionToken(userA.id, userA.email);
-  const tokB = createSessionToken(userB.id, userB.email);
+  const tokA = await createTestSessionToken(userA.id, userA.email);
+  const tokB = await createTestSessionToken(userB.id, userB.email);
 
   // A full future local week (Monday..Sunday), at least 7 days out, so every
   // session below falls in ONE week regardless of today's weekday or time.

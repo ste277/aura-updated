@@ -41,7 +41,7 @@ import {
 } from '../apps/web/lib/db';
 import { getUserById } from '../apps/web/lib/db';
 import { computeGoalActivityRhythmEligibility } from '../apps/web/lib/goalActivityRhythm';
-import { createSessionToken } from '../apps/web/lib/auth';
+
 import { handleDayConstructorPreviewRequest } from '../apps/web/lib/dayConstructorPreviewRequest';
 import { createRealDayConstructorOrchestratorDeps } from '../apps/web/lib/dayConstructorOrchestrator';
 import { parsePreviewResponseBody } from '../apps/web/lib/dayConstructorPreviewClient';
@@ -53,6 +53,7 @@ import { resolveAutomaticGoalDemand, resolveGoalActivityHandoff } from '../apps/
 import { deriveAvailableAutoGoalSuggestions, createIntentRowFromAutoGoalSuggestion, createIntentRowFromGoalActivity, type PlanDayIntentRow } from '../apps/web/lib/planDayEntry';
 import { encodeGoalDemandIntentId } from '../apps/web/lib/goalDemandIntentId';
 import { movePlannedActivity } from '../apps/web/lib/planMove';
+import { createTestSessionToken } from './authSessionTestSupport';
 
 let allPassed = true;
 function check(label: string, condition: boolean) {
@@ -124,13 +125,12 @@ async function main() {
     const parsed = parsePreviewResponseBody(JSON.parse(JSON.stringify(result.body)), result.httpStatus);
     return parsed.status === 'READY' ? parsed.preview : null;
   };
-  const fakeReq = (userId: string, body: unknown): any => ({
-    cookies: { get: () => ({ value: createSessionToken(userId, 'ignored@example.com') }) },
-    json: async () => body,
-    headers: new Headers(),
-  });
+  const fakeReq = async (userId: string, body: unknown): Promise<any> => {
+    const token = await createTestSessionToken(userId);
+    return { cookies: { get: () => ({ value: token }) }, json: async () => body, headers: new Headers() };
+  };
   const accept = async (body: unknown) => {
-    const res = await acceptRoute(fakeReq(user.id, body));
+    const res = await acceptRoute(await fakeReq(user.id, body));
     return res.json();
   };
   const eligibility = async (planningLocalDate: string) => loadEligibleGoalDemand(createRealGoalDemandCandidatesDeps(), user.id, planningLocalDate, TZ);

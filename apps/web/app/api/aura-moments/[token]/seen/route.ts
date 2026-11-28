@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSessionFromRequest } from '../../../../../lib/session';
+import { getSessionFromRequest, SESSION_UNAVAILABLE, sessionUnavailableResponse } from '../../../../../lib/session';
 import { markAuraMomentResponseSeen } from '../../../../../lib/db';
 
 /**
@@ -10,7 +10,8 @@ import { markAuraMomentResponseSeen } from '../../../../../lib/db';
  * revealing whether it exists for someone else.
  */
 export async function POST(req: NextRequest, { params }: { params: { token: string } }) {
-  const session = getSessionFromRequest(req);
+  const session = await getSessionFromRequest(req);
+  if (session === SESSION_UNAVAILABLE) return sessionUnavailableResponse();
   if (!session) return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 });
 
   const moment = await markAuraMomentResponseSeen(session.userId, params.token);

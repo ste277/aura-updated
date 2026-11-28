@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSessionFromRequest } from '../../../../../../../lib/session';
+import { getSessionFromRequest, SESSION_UNAVAILABLE, sessionUnavailableResponse } from '../../../../../../../lib/session';
 import { dismissGoalActivity } from '../../../../../../../lib/db';
 
 export async function POST(req: NextRequest, { params }: { params: { goalId: string; goalActivityId: string } }) {
-  const session = getSessionFromRequest(req);
+  const session = await getSessionFromRequest(req);
+  if (session === SESSION_UNAVAILABLE) return sessionUnavailableResponse();
   if (!session) return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 });
 
   const activity = await dismissGoalActivity(session.userId, params.goalId, params.goalActivityId);

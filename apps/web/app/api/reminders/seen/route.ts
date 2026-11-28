@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSessionFromRequest } from '../../../../lib/session';
+import { getSessionFromRequest, SESSION_UNAVAILABLE, sessionUnavailableResponse } from '../../../../lib/session';
 import { getAuraMomentByIdForOwner, getPlannedActivityForOwner, getUserById, markReminderSeen, ReminderScheduledItemType } from '../../../../lib/db';
 import { parseJsonObject } from '../../../../lib/request';
 
@@ -21,7 +21,8 @@ import { parseJsonObject } from '../../../../lib/request';
 const VALID_SCHEDULED_ITEM_TYPES = new Set<ReminderScheduledItemType>(['PLANNED_ACTIVITY', 'AURA_MOMENT']);
 
 export async function POST(req: NextRequest) {
-  const session = getSessionFromRequest(req);
+  const session = await getSessionFromRequest(req);
+  if (session === SESSION_UNAVAILABLE) return sessionUnavailableResponse();
   if (!session) return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 });
 
   const body = await parseJsonObject(req);

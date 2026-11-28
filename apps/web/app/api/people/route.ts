@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSessionFromRequest } from '../../../lib/session';
+import { getSessionFromRequest, SESSION_UNAVAILABLE, sessionUnavailableResponse } from '../../../lib/session';
 import { createSavedPersonWithinLimit, listSavedPeople, SavedPersonLimitError } from '../../../lib/db';
 import { parseJsonObject } from '../../../lib/request';
 import { buildSavedPersonCreateInput } from '../../../lib/savedPersonRequest';
@@ -32,7 +32,8 @@ const withCapability = (res: NextResponse, enabled: boolean) => {
 };
 
 export async function GET(req: NextRequest) {
-  const session = getSessionFromRequest(req);
+  const session = await getSessionFromRequest(req);
+  if (session === SESSION_UNAVAILABLE) return sessionUnavailableResponse();
   if (!session) return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 });
 
   const enabled = isMyPeopleServerEnabled();
@@ -55,7 +56,8 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const session = getSessionFromRequest(req);
+  const session = await getSessionFromRequest(req);
+  if (session === SESSION_UNAVAILABLE) return sessionUnavailableResponse();
   if (!session) return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 });
 
   const body = await parseJsonObject(req);

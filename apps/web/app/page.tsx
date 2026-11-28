@@ -59,6 +59,7 @@ import { resolveTzOffsetMinutes, getDatePartsInTimezone } from '../lib/timezone'
 import { formatDisplayName } from '../lib/displayName';
 import { trackEvent } from '../lib/trackEvent';
 import { generateClientRequestId } from '../lib/clientId';
+import { fetchSessionBootstrap, signOutDurably, SIGN_OUT_FAILED_MESSAGE } from '../lib/sessionClient';
 import { useAndroidBackButton } from '../lib/useAndroidBackButton';
 import {
   loadNotificationPrefs,
@@ -126,6 +127,13 @@ function isFrictionWindow(windowName: string): boolean {
 
 export default function DashboardPage() {
   const [user, setUser] = useState<SessionUser | null | undefined>(undefined);
+  // AURA-AUTH-SESSION-01-I2 -- the session check could not be completed (503 /
+  // offline). Never read as signed out; the last known state is kept.
+  const [sessionUnavailable, setSessionUnavailable] = useState(false);
+  const [sessionRetryTick, setSessionRetryTick] = useState(0);
+  // D8 / B6 -- sign-out in progress, and the message shown when it could not be confirmed.
+  const [signingOut, setSigningOut] = useState(false);
+  const [signOutError, setSignOutError] = useState<string | null>(null);
   // Onboarding V1 PR 1 -- Location Trust Foundation: lets the global
   // disclosure banner's action land directly on the already-expanded
   // Location & Time panel, instead of a collapsed You tab the user then
@@ -397,14 +405,19 @@ export default function DashboardPage() {
   // Parallelize Session & Initial Data Fetches
   const loadUserDataAndLogs = useCallback(async () => {
     try {
-      const sessionRes = await fetch('/api/auth/session');
-      const sessionData = await sessionRes.json();
-
-      if (!sessionData?.user) {
+      // AURA-AUTH-SESSION-01-I2: 503 / offline = unknown, never signed out (N7).
+      const boot = await fetchSessionBootstrap<{ user?: SessionUser; onboardingResolved?: boolean }>((input, init) => fetch(input, init));
+      if (boot.kind === 'unknown') {
+        setSessionUnavailable(true);
+        return;
+      }
+      setSessionUnavailable(false);
+      if (boot.kind === 'signed_out') {
         setUser(null);
         setPlannedActivities([]);
         return;
       }
+      const sessionData = boot.data;
 
       setUser(sessionData.user);
 
@@ -436,8 +449,8 @@ export default function DashboardPage() {
         setPlannedActivities(await plansRes.json());
       }
     } catch {
-      setUser(null);
-      setPlannedActivities([]);
+      // AURA-AUTH-SESSION-01-I2 (N7): a failed refresh after the session check
+      // keeps the last known state; only a definitive { user: null } signs out.
     }
   }, [applyConfirmedLogs]);
 
@@ -1579,10 +1592,33 @@ export default function DashboardPage() {
     [activeType, loadMyDay, loadGuidance]
   );
 
+  // AURA-AUTH-SESSION-01-I2 (D8): signed out ONLY after the server confirmed
+  // the revocation (200). Otherwise one automatic retry, then
+  // "Couldn't sign out. Try again." and the user stays signed in.
   const handleLogout = useCallback(async () => {
-    await fetch('/api/auth/logout', { method: 'POST' });
-    setUser(null);
+    setSignOutError(null);
+    setSigningOut(true);
+    const outcome = await signOutDurably((input, init) => fetch(input, init));
+    setSigningOut(false);
+    if (outcome === 'signed_out') {
+      setUser(null);
+      setPlannedActivities([]);
+    } else {
+      setSignOutError(SIGN_OUT_FAILED_MESSAGE);
+    }
   }, []);
+
+  // AURA-AUTH-SESSION-01-I2 (N7): while the first session check is unknown,
+  // retry a bounded number of times (every 3 s, at most 10) without ever
+  // showing the sign-in screen.
+  useEffect(() => {
+    if (!sessionUnavailable || user !== undefined || sessionRetryTick >= 10) return;
+    const t = setTimeout(() => {
+      setSessionRetryTick((n) => n + 1);
+      loadUserDataAndLogs();
+    }, 3000);
+    return () => clearTimeout(t);
+  }, [sessionUnavailable, user, sessionRetryTick, loadUserDataAndLogs]);
 
   // My Day Timing Location Change Refresh V1 -- LocationPicker only ever
   // calls onChanged (routed here) after PATCH /api/users/location has
@@ -1805,8 +1841,17 @@ export default function DashboardPage() {
 
   if (user === undefined) {
     return (
-      <main style={{ minHeight: '100vh', background: 'var(--as-bg, #020617)', color: 'var(--as-text-muted)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        Loading...
+      <main style={{ minHeight: '100vh', background: 'var(--as-bg, #020617)', color: 'var(--as-text-muted)', display: 'flex', flexDirection: 'column', gap: 12, alignItems: 'center', justifyContent: 'center', padding: 16, textAlign: 'center' }}>
+        {sessionUnavailable ? (
+          <>
+            <span>Aura can&apos;t confirm your sign-in right now. Retrying…</span>
+            <button type="button" onClick={() => { setSessionRetryTick(0); loadUserDataAndLogs(); }} style={{ background: 'transparent', color: 'inherit', border: '1px solid currentColor', borderRadius: 8, padding: '6px 14px' }}>
+              Try again
+            </button>
+          </>
+        ) : (
+          'Loading...'
+        )}
       </main>
     );
   }
@@ -2078,6 +2123,8 @@ export default function DashboardPage() {
             onOpenPeople={() => { setPeopleReturnTo('you'); setActiveTab('people'); }}
             onOpenSharedMoments={handleOpenMomentsFromYou}
             onSignOut={handleLogout}
+            signingOut={signingOut}
+            signOutError={signOutError}
             // Deliberately the MOMENT-only unread count, not the combined
             // Bell badge total (auraUpdates.unreadCount now also folds in
             // active reminders, brief section 18) -- this row is

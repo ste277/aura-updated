@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSessionFromRequest } from '../../../../lib/session';
+import { getSessionFromRequest, SESSION_UNAVAILABLE, sessionUnavailableResponse, getSessionWithUserFromRequest } from '../../../../lib/session';
 import { parseJsonObject } from '../../../../lib/request';
-import { getUserById, getUserAvailabilityConfiguration, replaceUserAvailabilityConfiguration, resetUserAvailabilityConfiguration } from '../../../../lib/db';
+import { getUserAvailabilityConfiguration, replaceUserAvailabilityConfiguration, resetUserAvailabilityConfiguration } from '../../../../lib/db';
 import { validateAvailabilityPeriodInput, type AvailabilityPeriodInput, type Weekday } from '../../../../lib/availabilityContext';
 import { periodsOverlap } from '../../../../lib/availabilitySettings';
 
@@ -34,10 +34,11 @@ import { periodsOverlap } from '../../../../lib/availabilitySettings';
 const MAX_PERIODS_PER_REQUEST = 100; // 7 weekdays worth of periods, generously bounded -- transport/input protection only, not a scheduling policy (mirrors dayConstructorPreviewRequest.ts's own MAX_INTENTS_PER_REQUEST convention).
 
 export async function GET(req: NextRequest) {
-  const session = getSessionFromRequest(req);
+  const session = await getSessionWithUserFromRequest(req);
+  if (session === SESSION_UNAVAILABLE) return sessionUnavailableResponse();
   if (!session) return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 });
 
-  const user = await getUserById(session.userId);
+  const user = session.user;
   if (!user) return NextResponse.json({ error: 'User not found.' }, { status: 404 });
 
   const configuration = await getUserAvailabilityConfiguration(session.userId);
@@ -86,7 +87,8 @@ function validateSubmittedPeriods(raw: unknown): { ok: true; periods: Availabili
 }
 
 export async function PUT(req: NextRequest) {
-  const session = getSessionFromRequest(req);
+  const session = await getSessionFromRequest(req);
+  if (session === SESSION_UNAVAILABLE) return sessionUnavailableResponse();
   if (!session) return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 });
 
   const body = await parseJsonObject(req);
@@ -100,7 +102,8 @@ export async function PUT(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
-  const session = getSessionFromRequest(req);
+  const session = await getSessionFromRequest(req);
+  if (session === SESSION_UNAVAILABLE) return sessionUnavailableResponse();
   if (!session) return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 });
 
   await resetUserAvailabilityConfiguration(session.userId);

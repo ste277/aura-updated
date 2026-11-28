@@ -24,8 +24,9 @@ import {
   upsertUserByEmail, updateBirthProfile, createPlannedActivity, beginTransaction,
   createGoalWithActivities, addGoalActivity, deleteGoal, listGoalActivitiesWithLinkedPlanStatus,
 } from '../apps/web/lib/db';
-import { createSessionToken } from '../apps/web/lib/auth';
+
 import { POST as moveRoute } from '../apps/web/app/api/plans/[planId]/move/route';
+import { createTestSessionToken, TEST_SESSION_COOKIE } from './authSessionTestSupport';
 
 let allPassed = true;
 function check(label: string, condition: boolean) {
@@ -129,7 +130,7 @@ check('the CHECK block now renders its own "Rescheduling this plan" banner when 
 // (recommendation-based Move is still unaffected).
 // ============================================================
 
-const req = (tok: string | null, body: unknown): any => ({ cookies: { get: (n: string) => (tok && n === 'as_session' ? { value: tok } : undefined) }, json: async () => body, headers: new Headers() });
+const req = (tok: string | null, body: unknown): any => ({ cookies: { get: (n: string) => (tok && n === TEST_SESSION_COOKIE ? { value: tok } : undefined) }, json: async () => body, headers: new Headers() });
 async function sql(t: string, p: unknown[] = []): Promise<any[]> {
   const c = await beginTransaction();
   try { const r = await c.query(t, p); await c.query('COMMIT'); return r.rows; } catch (e) { await c.query('ROLLBACK').catch(() => {}); throw e; } finally { c.release(); }
@@ -139,7 +140,7 @@ async function main() {
   const U = await upsertUserByEmail({ email: 'test-dr4f2b-choose-own-time@example.com', cityName: 'Chennai', latitude: 13.0827, longitude: 80.2707, timezone: TZ });
   const V = await upsertUserByEmail({ email: 'test-dr4f2b-choose-own-time-b@example.com', cityName: 'Chennai', latitude: 13.0827, longitude: 80.2707, timezone: TZ });
   for (const u of [U, V]) await updateBirthProfile(u.id, { birthDate: '1990-06-15', birthTime: '08:30', birthCityName: 'Chennai', birthLatitude: 13.0827, birthLongitude: 80.2707, birthTimezone: TZ });
-  const tok = createSessionToken(U.id, U.email);
+  const tok = await createTestSessionToken(U.id, U.email);
   const goalIds: string[] = [];
   let n = 0;
   const src = () => minute(Date.now()) + 15 * DAY + n++ * 3 * HOUR;
@@ -208,7 +209,7 @@ async function main() {
     const mineZoned = getDatePartsInTimezone(TZ, mineDest);
     const mineMinuteOfDay = getMinuteOfDayInTimezone(TZ, mineDest);
     const mineTimeStr = `${String(Math.floor(mineMinuteOfDay / 60)).padStart(2, '0')}:${String(mineMinuteOfDay % 60).padStart(2, '0')}`;
-    const rCross = await manualTimeMoveViaRoute(mine.id, mineZoned.dateStr, mineTimeStr, createSessionToken(V.id, V.email));
+    const rCross = await manualTimeMoveViaRoute(mine.id, mineZoned.dateStr, mineTimeStr, await createTestSessionToken(V.id, V.email));
     check('a cross-user manual-time reschedule attempt -> 404, nothing changes', rCross.status === 404 && (await sql(`SELECT status FROM "PlannedActivity" WHERE id = $1`, [mine.id]))[0].status === 'UPCOMING');
   } finally {
     await sql(`UPDATE "GoalActivity" SET "plannedActivityId" = NULL WHERE "userId" = $1`, [U.id]).catch(() => {});

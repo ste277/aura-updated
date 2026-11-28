@@ -23,7 +23,7 @@
  */
 import { randomUUID } from 'crypto';
 import { upsertUserByEmail, updateBirthProfile, createGoalWithActivities, addGoalActivity, beginTransaction, cancelPlannedActivity } from '../apps/web/lib/db';
-import { createSessionToken } from '../apps/web/lib/auth';
+
 import { getDatePartsInTimezone } from '../apps/web/lib/timezone';
 import { localCalendarWeekBounds } from '../apps/web/lib/goalActivityRhythm';
 import { addCivilDays, civilWeekday, fixtureAnchorMonday, realClockReferenceForFixture } from './lifecycleFixtureCalendar';
@@ -38,6 +38,7 @@ import {
   parseWeeklyAcceptanceResponseBody,
   isSessionLocked,
 } from '../apps/web/lib/weeklyPlanReviewClient';
+import { createTestSessionToken, TEST_SESSION_COOKIE } from './authSessionTestSupport';
 
 let allPassed = true;
 function check(label: string, condition: boolean) {
@@ -65,7 +66,7 @@ let frozenNowIso = '';
 
 // `nowIso` (optional) overrides the frozen "now" for ONE request -- used only by section 8's own fixed clock (AURA-CI-10).
 const fakeReq = (cookie: string | undefined, body: unknown, nowIso: string = frozenNowIso): any => ({
-  cookies: { get: (n: string) => (cookie !== undefined && n === 'as_session' ? { value: cookie } : undefined) },
+  cookies: { get: (n: string) => (cookie !== undefined && n === TEST_SESSION_COOKIE ? { value: cookie } : undefined) },
   json: async () => body,
   headers: new Headers(nowIso ? { 'x-e2e-now': nowIso } : {}),
 });
@@ -107,7 +108,7 @@ async function main() {
 
   const user = await upsertUserByEmail({ email: `hgr3c2-weekly-review-client-${Date.now()}@example.com`, cityName: 'Chennai', latitude: 13.0827, longitude: 80.2707, timezone: TZ });
   await updateBirthProfile(user.id, { birthDate: '1990-06-15', birthTime: '08:30', birthCityName: 'Chennai', birthLatitude: 13.0827, birthLongitude: 80.2707, birthTimezone: TZ });
-  const tok = createSessionToken(user.id, user.email);
+  const tok = await createTestSessionToken(user.id, user.email);
 
   const { goal } = await createGoalWithActivities({ userId: user.id, title: 'Get fit (HGR3-C2 fixture)', targetDate: null, activities: [] });
   const activity = await addGoalActivity(user.id, goal.id, { title: 'Run', activityId: 'workout', rhythm: { kind: 'N_PER_WEEK', targetPerWeek: 1 } });
@@ -233,7 +234,7 @@ async function main() {
       civilWeekday(SAME_DATE_DAY) === 3 && getDatePartsInTimezone(TZ, new Date(SAME_DATE_NOW_ISO)).dateStr === SAME_DATE_DAY && Date.parse(SAME_DATE_NOW_ISO) > Date.now() + 27 * 24 * 3600000);
     const user2 = await upsertUserByEmail({ email: `hgr3c2-weekly-review-client-samedate-${Date.now()}@example.com`, cityName: 'Chennai', latitude: 13.0827, longitude: 80.2707, timezone: TZ });
     await updateBirthProfile(user2.id, { birthDate: '1990-06-15', birthTime: '08:30', birthCityName: 'Chennai', birthLatitude: 13.0827, birthLongitude: 80.2707, birthTimezone: TZ });
-    const tok2 = createSessionToken(user2.id, user2.email);
+    const tok2 = await createTestSessionToken(user2.id, user2.email);
     const { goal: goal2 } = await createGoalWithActivities({ userId: user2.id, title: 'Mindfulness (HGR3-C2 same-date fixture)', targetDate: null, activities: [] });
     const activity2 = await addGoalActivity(user2.id, goal2.id, { title: 'Meditate', activityId: 'meditation', rhythm: { kind: 'N_PER_WEEK', targetPerWeek: 2 } });
     if (!activity2) throw new Error('fixture setup failed: second addGoalActivity returned null');

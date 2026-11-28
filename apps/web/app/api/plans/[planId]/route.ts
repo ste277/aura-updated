@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSessionFromRequest } from '../../../../lib/session';
+import { getSessionFromRequest, SESSION_UNAVAILABLE, sessionUnavailableResponse } from '../../../../lib/session';
 import { cancelPlannedActivity, deletePlannedActivity } from '../../../../lib/db';
 
 /**
@@ -12,7 +12,8 @@ import { cancelPlannedActivity, deletePlannedActivity } from '../../../../lib/db
  * twice.
  */
 export async function DELETE(req: NextRequest, { params }: { params: { planId: string } }) {
-  const session = getSessionFromRequest(req);
+  const session = await getSessionFromRequest(req);
+  if (session === SESSION_UNAVAILABLE) return sessionUnavailableResponse();
   if (!session) return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 });
 
   try {

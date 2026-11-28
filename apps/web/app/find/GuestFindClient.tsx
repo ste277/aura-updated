@@ -162,6 +162,10 @@ export function GuestFindClient({ initialSource, initialRestoreToken }: { initia
     (async () => {
       try {
         const res = await fetch('/api/auth/session');
+        // AURA-AUTH-SESSION-01-I2: 503 = the session could not be verified --
+        // unknown, not signed out. Same path as a failed check below: the
+        // picker is shown and nothing is restored, cleared or decided.
+        if (!res.ok) throw new Error('session check unavailable');
         const data = await res.json().catch(() => ({ user: null }));
         if (cancelled) return;
         const authed = Boolean(data?.user);

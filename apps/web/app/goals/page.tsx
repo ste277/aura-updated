@@ -1,7 +1,6 @@
 import type { Metadata } from 'next';
 import { cookies } from 'next/headers';
-import { verifySessionToken, SESSION_COOKIE_NAME } from '../../lib/auth';
-import { getUserById } from '../../lib/db';
+import { getSessionWithUserFromCookieStore } from '../../lib/session';
 import { GoalsListClient } from './GoalsListClient';
 
 /**
@@ -12,7 +11,7 @@ import { GoalsListClient } from './GoalsListClient';
  *
  * Same session-verification pattern as app/plan-day/page.tsx: a real
  * async Server Component reading the SAME session cookie every route
- * handler already uses (`verifySessionToken`/`SESSION_COOKIE_NAME`), never
+ * handler already uses (lib/session.ts), never
  * a second authentication model. Only an `authenticated` boolean is
  * forwarded -- the actual Goal list is fetched client-side from the
  * existing GET /api/goals (this ticket's own section 40: reuse the
@@ -24,13 +23,12 @@ export const metadata: Metadata = {
   description: 'What are you working toward? Create a goal and Aura can help turn it into actions you can plan.',
 };
 
+// AURA-AUTH-SESSION-01-I2 (E2): database-backed verification through
+// lib/session.ts (the joined session + user lookup). An outage throws
+// SessionVerificationUnavailableError, so the page fails instead of
+// rendering as signed out.
 async function resolveAuthenticated(): Promise<boolean> {
-  const token = cookies().get(SESSION_COOKIE_NAME)?.value;
-  if (!token) return false;
-  const session = verifySessionToken(token);
-  if (!session) return false;
-  const user = await getUserById(session.userId);
-  return user !== null;
+  return (await getSessionWithUserFromCookieStore(cookies())) !== null;
 }
 
 export default async function GoalsPage() {

@@ -24,9 +24,10 @@ import {
   upsertUserByEmail, updateBirthProfile, createPlannedActivity, beginTransaction,
   createGoalWithActivities, addGoalActivity, deleteGoal, listGoalActivitiesWithLinkedPlanStatus,
 } from '../apps/web/lib/db';
-import { createSessionToken } from '../apps/web/lib/auth';
+
 import { POST as moveRoute } from '../apps/web/app/api/plans/[planId]/move/route';
 import { mapPlanRow, isActionableUpcomingPlan } from '../apps/web/lib/planFormatting';
+import { createTestSessionToken, TEST_SESSION_COOKIE } from './authSessionTestSupport';
 
 let allPassed = true;
 function check(label: string, condition: boolean) {
@@ -135,7 +136,7 @@ check('SegmentedControl\'s new `disabled` prop is optional and backward compatib
 // that selecting any recommendation is equally safe.
 // ============================================================
 
-const req = (tok: string | null, body: unknown): any => ({ cookies: { get: (n: string) => (tok && n === 'as_session' ? { value: tok } : undefined) }, json: async () => body, headers: new Headers() });
+const req = (tok: string | null, body: unknown): any => ({ cookies: { get: (n: string) => (tok && n === TEST_SESSION_COOKIE ? { value: tok } : undefined) }, json: async () => body, headers: new Headers() });
 async function sql(t: string, p: unknown[] = []): Promise<any[]> {
   const c = await beginTransaction();
   try { const r = await c.query(t, p); await c.query('COMMIT'); return r.rows; } catch (e) { await c.query('ROLLBACK').catch(() => {}); throw e; } finally { c.release(); }
@@ -144,7 +145,7 @@ async function sql(t: string, p: unknown[] = []): Promise<any[]> {
 async function main() {
   const U = await upsertUserByEmail({ email: 'test-dr4f2a-choice@example.com', cityName: 'Chennai', latitude: 13.0827, longitude: 80.2707, timezone: TZ });
   await updateBirthProfile(U.id, { birthDate: '1990-06-15', birthTime: '08:30', birthCityName: 'Chennai', birthLatitude: 13.0827, birthLongitude: 80.2707, birthTimezone: TZ });
-  const tok = createSessionToken(U.id, U.email);
+  const tok = await createTestSessionToken(U.id, U.email);
   const goalIds: string[] = [];
   let n = 0;
   const src = () => minute(Date.now()) + 15 * DAY + n++ * 3 * HOUR;

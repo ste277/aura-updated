@@ -19,6 +19,7 @@
  */
 import fs from 'fs';
 import path from 'path';
+import { TEST_SESSION_COOKIE } from './authSessionTestSupport';
 
 let allPassed = true;
 function check(label: string, condition: boolean) {
@@ -102,8 +103,8 @@ function main() {
     // invariant it proves -- widened to "getUserById appears as one of
     // the named imports from lib/db", still real substring matching,
     // never weakened to "imports something from lib/db".
-    '21. page.tsx (the Server Component route shell) reuses the existing canonical session verification (verifySessionToken/SESSION_COOKIE_NAME/getUserById) -- no second auth model',
-    planDayPageSource.includes("verifySessionToken, SESSION_COOKIE_NAME } from '../../lib/auth'") && /import \{[^}]*\bgetUserById\b[^}]*\} from '\.\.\/\.\.\/lib\/db'/.test(planDayPageSource)
+    '21. page.tsx (the Server Component route shell) reuses the canonical, database-backed session verification (AURA-AUTH-SESSION-01-I2: lib/session.ts getSessionFromCookieStore/activeSessionCookieName, plus getUserById) -- no second auth model',
+    planDayPageSource.includes("import { activeSessionCookieName, getSessionFromCookieStore } from '../../lib/session'") && /import \{[^}]*\bgetUserById\b[^}]*\} from '\.\.\/\.\.\/lib\/db'/.test(planDayPageSource) && !planDayPageSource.includes('verifySessionToken')
   );
 
   // ============================================================

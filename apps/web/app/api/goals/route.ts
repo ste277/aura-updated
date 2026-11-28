@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSessionFromRequest } from '../../../lib/session';
+import { getSessionFromRequest, SESSION_UNAVAILABLE, sessionUnavailableResponse } from '../../../lib/session';
 import { listGoalsForUser, createGoalWithActivities, getGoalForUser, listGoalActivitiesWithLinkedPlanStatus } from '../../../lib/db';
 import { parseJsonObject } from '../../../lib/request';
 import { isGoalTemplateCategory, isValidCivilDateString, resolveGoalTemplateActivities, classifyGoalCreateRequestMode } from '../../../lib/goals';
@@ -26,7 +26,8 @@ const MAX_CLIENT_REQUEST_ID_LENGTH = 200;
 const MAX_REVIEWED_ACTIVITIES = 20;
 
 export async function GET(req: NextRequest) {
-  const session = getSessionFromRequest(req);
+  const session = await getSessionFromRequest(req);
+  if (session === SESSION_UNAVAILABLE) return sessionUnavailableResponse();
   if (!session) return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 });
 
   const statusParam = req.nextUrl.searchParams.get('status');
@@ -37,7 +38,8 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const session = getSessionFromRequest(req);
+  const session = await getSessionFromRequest(req);
+  if (session === SESSION_UNAVAILABLE) return sessionUnavailableResponse();
   if (!session) return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 });
 
   const body = await parseJsonObject(req);

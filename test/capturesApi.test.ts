@@ -5,10 +5,11 @@
  *   DATABASE_URL="postgresql://..." npx ts-node test/capturesApi.test.ts
  */
 import { upsertUserByEmail, beginTransaction } from '../apps/web/lib/db';
-import { createSessionToken } from '../apps/web/lib/auth';
+
 import { GET as listCaptures, POST as postCapture } from '../apps/web/app/api/captures/route';
 import { DELETE as deleteCapture } from '../apps/web/app/api/captures/[captureId]/route';
 import { POST as completeCaptureRoute } from '../apps/web/app/api/captures/[captureId]/complete/route';
+import { createTestSessionToken, TEST_SESSION_COOKIE } from './authSessionTestSupport';
 
 let allPassed = true;
 function check(label: string, condition: boolean) {
@@ -18,7 +19,7 @@ function check(label: string, condition: boolean) {
 
 function fakeRequest(opts: { cookie?: string; jsonBody?: unknown; malformed?: boolean } = {}): any {
   return {
-    cookies: { get: (name: string) => (opts.cookie !== undefined && name === 'as_session' ? { value: opts.cookie } : undefined) },
+    cookies: { get: (name: string) => (opts.cookie !== undefined && name === TEST_SESSION_COOKIE ? { value: opts.cookie } : undefined) },
     json: async () => {
       if (opts.malformed) throw new SyntaxError('bad json');
       return opts.jsonBody;
@@ -41,8 +42,8 @@ async function main() {
   const TZ = 'Asia/Kolkata';
   const userA = await upsertUserByEmail({ email: 'test-capture-api-a@example.com', cityName: 'Chennai', latitude: 13.0827, longitude: 80.2707, timezone: TZ });
   const userB = await upsertUserByEmail({ email: 'test-capture-api-b@example.com', cityName: 'Chennai', latitude: 13.0827, longitude: 80.2707, timezone: TZ });
-  const tokenA = createSessionToken(userA.id, userA.email);
-  const tokenB = createSessionToken(userB.id, userB.email);
+  const tokenA = await createTestSessionToken(userA.id, userA.email);
+  const tokenB = await createTestSessionToken(userB.id, userB.email);
   const post = (cookie: string | undefined, jsonBody: unknown, malformed = false) => postCapture(fakeRequest({ cookie, jsonBody, malformed }));
 
   try {

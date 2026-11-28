@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSessionFromRequest } from '../../../../lib/session';
+import { getSessionFromRequest, SESSION_UNAVAILABLE, sessionUnavailableResponse, getSessionWithUserFromRequest } from '../../../../lib/session';
 import { parseJsonObject } from '../../../../lib/request';
-import { getUserById, getDailyWorkPreferences, setDailyWorkPreferences, clearDailyWorkPreferences } from '../../../../lib/db';
+import { getDailyWorkPreferences, setDailyWorkPreferences, clearDailyWorkPreferences } from '../../../../lib/db';
 import { validateDailyRhythmPreferencesInput } from '../../../../lib/dailyRhythmPreferences';
 
 /**
@@ -28,10 +28,11 @@ import { validateDailyRhythmPreferencesInput } from '../../../../lib/dailyRhythm
  */
 
 export async function GET(req: NextRequest) {
-  const session = getSessionFromRequest(req);
+  const session = await getSessionWithUserFromRequest(req);
+  if (session === SESSION_UNAVAILABLE) return sessionUnavailableResponse();
   if (!session) return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 });
 
-  const user = await getUserById(session.userId);
+  const user = session.user;
   if (!user) return NextResponse.json({ error: 'User not found.' }, { status: 404 });
 
   const prefs = await getDailyWorkPreferences(session.userId);
@@ -47,7 +48,8 @@ export async function GET(req: NextRequest) {
 }
 
 export async function PUT(req: NextRequest) {
-  const session = getSessionFromRequest(req);
+  const session = await getSessionFromRequest(req);
+  if (session === SESSION_UNAVAILABLE) return sessionUnavailableResponse();
   if (!session) return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 });
 
   const body = await parseJsonObject(req);
@@ -69,7 +71,8 @@ export async function PUT(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
-  const session = getSessionFromRequest(req);
+  const session = await getSessionFromRequest(req);
+  if (session === SESSION_UNAVAILABLE) return sessionUnavailableResponse();
   if (!session) return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 });
 
   await clearDailyWorkPreferences(session.userId);

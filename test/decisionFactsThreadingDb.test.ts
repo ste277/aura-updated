@@ -18,7 +18,7 @@
  */
 import { fixtureAnchorMonday, addCivilDays, realClockReferenceForFixture } from './lifecycleFixtureCalendar';
 import { upsertUserByEmail, updateBirthProfile, createGoalWithActivities, addGoalActivity, beginTransaction, logPlannedActivity, getUserById } from '../apps/web/lib/db';
-import { createSessionToken } from '../apps/web/lib/auth';
+
 import { encodeGoalDemandIntentId } from '../apps/web/lib/goalDemandIntentId';
 import { loadEligibleGoalDemand, createRealGoalDemandCandidatesDeps } from '../apps/web/lib/goalDemandCandidates';
 import { createRealDayConstructorOrchestratorDeps } from '../apps/web/lib/dayConstructorOrchestrator';
@@ -27,6 +27,7 @@ import { loadGoalDecisionFacts } from '../apps/web/lib/goalDecisionFactsProvider
 import { parsePreviewResponseBody } from '../apps/web/lib/dayConstructorPreviewClient';
 import { buildAcceptRequestBody } from '../apps/web/lib/acceptConstructedDay';
 import { POST as acceptRoute } from '../apps/web/app/api/day-constructor/accept/route';
+import { createTestSessionToken } from './authSessionTestSupport';
 
 let allPassed = true;
 function check(label: string, condition: boolean) {
@@ -74,7 +75,7 @@ async function main() {
   for (const u of [user, other]) {
     await updateBirthProfile(u.id, { birthDate: '1990-06-15', birthTime: '08:30', birthCityName: 'Chennai', birthLatitude: 13.0827, birthLongitude: 80.2707, birthTimezone: TZ });
   }
-  const token = createSessionToken(user.id, user.email);
+  const token = await createTestSessionToken(user.id, user.email);
   const ids = [user.id, other.id];
 
   const cleanup = async () => {

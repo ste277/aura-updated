@@ -10,7 +10,7 @@
 // Run with: npx ts-node test/planGoalActivityArchivedLifecycleDb.test.ts
 import { POST as plansRoute } from '../apps/web/app/api/plans/route';
 import { upsertUserByEmail, createGoalWithActivities, archiveGoal, beginTransaction, lockGoalParentLifecycleForPlanning } from '../apps/web/lib/db';
-import { createSessionToken } from '../apps/web/lib/auth';
+import { createTestSessionToken, TEST_SESSION_COOKIE } from './authSessionTestSupport';
 
 let allPassed = true;
 function check(label: string, condition: boolean) {
@@ -20,7 +20,7 @@ function check(label: string, condition: boolean) {
 
 function req(tok: string, body: Record<string, unknown>): any {
   return {
-    cookies: { get: (n: string) => (n === 'as_session' ? { value: tok } : undefined) },
+    cookies: { get: (n: string) => (n === TEST_SESSION_COOKIE ? { value: tok } : undefined) },
     headers: new Headers(),
     nextUrl: new URL('http://localhost/api/plans'),
     json: async () => body,
@@ -52,7 +52,7 @@ async function main() {
     const email = 'hpg2-fix-active@example.com';
     await wipe(email);
     const user = await upsertUserByEmail({ email, cityName: 'Chennai', latitude: 13.0827, longitude: 80.2707, timezone: 'Asia/Kolkata' });
-    const tok = createSessionToken(user.id, user.email);
+    const tok = await createTestSessionToken(user.id, user.email);
     const { activities } = await createGoalWithActivities({ userId: user.id, title: 'Fitness', targetDate: null, activities: [{ title: 'Strength training', activityId: null }] });
     const ga = activities[0];
 
@@ -69,7 +69,7 @@ async function main() {
     const email = 'hpg2-fix-archived@example.com';
     await wipe(email);
     const user = await upsertUserByEmail({ email, cityName: 'Chennai', latitude: 13.0827, longitude: 80.2707, timezone: 'Asia/Kolkata' });
-    const tok = createSessionToken(user.id, user.email);
+    const tok = await createTestSessionToken(user.id, user.email);
     const { goal, activities } = await createGoalWithActivities({ userId: user.id, title: 'Reading', targetDate: null, activities: [{ title: 'Read 20 pages', activityId: null }] });
     const ga = activities[0];
     await archiveGoal(user.id, goal.id);
@@ -91,7 +91,7 @@ async function main() {
     const email = 'hpg2-fix-race-simple@example.com';
     await wipe(email);
     const user = await upsertUserByEmail({ email, cityName: 'Chennai', latitude: 13.0827, longitude: 80.2707, timezone: 'Asia/Kolkata' });
-    const tok = createSessionToken(user.id, user.email);
+    const tok = await createTestSessionToken(user.id, user.email);
     const { goal, activities } = await createGoalWithActivities({ userId: user.id, title: 'Writing', targetDate: null, activities: [{ title: 'Journal', activityId: null }] });
     const ga = activities[0];
     // "Selection" happens while the Goal is still ACTIVE (the picker only
@@ -110,7 +110,7 @@ async function main() {
     const email = 'hpg2-fix-race-concurrent@example.com';
     await wipe(email);
     const user = await upsertUserByEmail({ email, cityName: 'Chennai', latitude: 13.0827, longitude: 80.2707, timezone: 'Asia/Kolkata' });
-    const tok = createSessionToken(user.id, user.email);
+    const tok = await createTestSessionToken(user.id, user.email);
     const { goal, activities } = await createGoalWithActivities({ userId: user.id, title: 'Meditation', targetDate: null, activities: [{ title: 'Sit quietly', activityId: null }] });
     const ga = activities[0];
 
@@ -148,7 +148,7 @@ async function main() {
     const email = 'hpg2-fix-race-plan-wins@example.com';
     await wipe(email);
     const user = await upsertUserByEmail({ email, cityName: 'Chennai', latitude: 13.0827, longitude: 80.2707, timezone: 'Asia/Kolkata' });
-    const tok = createSessionToken(user.id, user.email);
+    const tok = await createTestSessionToken(user.id, user.email);
     const { goal, activities } = await createGoalWithActivities({ userId: user.id, title: 'Focus', targetDate: null, activities: [{ title: 'Deep work block', activityId: null }] });
     const ga = activities[0];
 
@@ -171,7 +171,7 @@ async function main() {
     await wipe(emailB);
     const userA = await upsertUserByEmail({ email: emailA, cityName: 'Chennai', latitude: 13.0827, longitude: 80.2707, timezone: 'Asia/Kolkata' });
     const userB = await upsertUserByEmail({ email: emailB, cityName: 'Chennai', latitude: 13.0827, longitude: 80.2707, timezone: 'Asia/Kolkata' });
-    const tokB = createSessionToken(userB.id, userB.email);
+    const tokB = await createTestSessionToken(userB.id, userB.email);
     const { activities } = await createGoalWithActivities({ userId: userA.id, title: 'Fitness', targetDate: null, activities: [{ title: 'Strength training', activityId: null }] });
     const gaOwnedByA = activities[0];
 
@@ -188,7 +188,7 @@ async function main() {
     const email = 'hpg2-fix-invalid-id@example.com';
     await wipe(email);
     const user = await upsertUserByEmail({ email, cityName: 'Chennai', latitude: 13.0827, longitude: 80.2707, timezone: 'Asia/Kolkata' });
-    const tok = createSessionToken(user.id, user.email);
+    const tok = await createTestSessionToken(user.id, user.email);
     const res = await plansRoute(req(tok, { ...futurePlan('Whatever'), goalActivityId: 'not-a-real-id' }));
     check('6. invalid GoalActivity id: rejected with 400', res.status === 400);
     await wipe(email);
@@ -199,7 +199,7 @@ async function main() {
     const email = 'hpg2-fix-rollback-isolation@example.com';
     await wipe(email);
     const user = await upsertUserByEmail({ email, cityName: 'Chennai', latitude: 13.0827, longitude: 80.2707, timezone: 'Asia/Kolkata' });
-    const tok = createSessionToken(user.id, user.email);
+    const tok = await createTestSessionToken(user.id, user.email);
     const { activities: fitnessActivities } = await createGoalWithActivities({ userId: user.id, title: 'Fitness', targetDate: null, activities: [{ title: 'Go for a run', activityId: null }] });
     const liveGa = fitnessActivities[0];
     const liveRes = await plansRoute(req(tok, { ...futurePlan('Go for a run'), goalActivityId: liveGa.id }));
@@ -225,7 +225,7 @@ async function main() {
     const email = 'hpg2-fix-ordinary-plan@example.com';
     await wipe(email);
     const user = await upsertUserByEmail({ email, cityName: 'Chennai', latitude: 13.0827, longitude: 80.2707, timezone: 'Asia/Kolkata' });
-    const tok = createSessionToken(user.id, user.email);
+    const tok = await createTestSessionToken(user.id, user.email);
     const res = await plansRoute(req(tok, futurePlan('Deep work')));
     const body = await res.json();
     check('9. an ordinary plan (no goalActivityId at all) is created normally', res.status === 200 && !!body.id);

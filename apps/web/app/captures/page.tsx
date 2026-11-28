@@ -1,7 +1,6 @@
 import type { Metadata } from 'next';
 import { cookies } from 'next/headers';
-import { verifySessionToken, SESSION_COOKIE_NAME } from '../../lib/auth';
-import { getUserById } from '../../lib/db';
+import { getSessionWithUserFromCookieStore } from '../../lib/session';
 import { CapturesClient } from './CapturesClient';
 
 /**
@@ -16,13 +15,12 @@ export const metadata: Metadata = {
   description: 'Capture something you want to do. Aura will help find the time.',
 };
 
+// AURA-AUTH-SESSION-01-I2 (E2): database-backed verification through
+// lib/session.ts (the joined session + user lookup). An outage throws
+// SessionVerificationUnavailableError, so the page fails instead of
+// rendering as signed out.
 async function resolveAuthenticated(): Promise<boolean> {
-  const token = cookies().get(SESSION_COOKIE_NAME)?.value;
-  if (!token) return false;
-  const session = verifySessionToken(token);
-  if (!session) return false;
-  const user = await getUserById(session.userId);
-  return user !== null;
+  return (await getSessionWithUserFromCookieStore(cookies())) !== null;
 }
 
 export default async function CapturesPage() {

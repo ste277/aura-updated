@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSessionFromRequest } from '../../../lib/session';
+import { SESSION_UNAVAILABLE, sessionUnavailableResponse, getSessionWithUserFromRequest } from '../../../lib/session';
 import { getUserById } from '../../../lib/db';
 import { buildMyDay } from '../../../lib/myDayOrchestrator';
 import { resolveRequestNow } from '../../../lib/testTimeOverride';
@@ -15,10 +15,11 @@ import { resolveRequestNow } from '../../../lib/testTimeOverride';
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 export async function GET(req: NextRequest) {
-  const session = getSessionFromRequest(req);
+  const session = await getSessionWithUserFromRequest(req);
+  if (session === SESSION_UNAVAILABLE) return sessionUnavailableResponse();
   if (!session) return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 });
 
-  const user = await getUserById(session.userId);
+  const user = session.user;
   if (!user) return NextResponse.json({ error: 'User not found.' }, { status: 404 });
 
   const rawDate = req.nextUrl.searchParams.get('date');

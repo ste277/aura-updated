@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSessionFromRequest } from '../../../../lib/session';
+import { SESSION_UNAVAILABLE, sessionUnavailableResponse, getSessionWithUserFromRequest } from '../../../../lib/session';
 import { getUserById } from '../../../../lib/db';
 import { resolveTzOffsetMinutes } from '../../../../lib/timezone';
 import { buildPersonalMuhurtaContextForUser } from '../../../../lib/natalContext';
@@ -23,12 +23,13 @@ const NO_STORE_HEADERS = { 'Cache-Control': 'private, no-store, max-age=0' } as 
  */
 export async function GET(req: NextRequest) {
   try {
-    const session = getSessionFromRequest(req);
+    const session = await getSessionWithUserFromRequest(req);
+    if (session === SESSION_UNAVAILABLE) return sessionUnavailableResponse();
     if (!session) {
       return NextResponse.json({ status: 'AUTH_REQUIRED', error: 'Not authenticated.' }, { status: 401, headers: NO_STORE_HEADERS });
     }
 
-    const user = await getUserById(session.userId);
+    const user = session.user;
     if (!user) {
       return NextResponse.json({ status: 'AUTH_REQUIRED', error: 'User not found.' }, { status: 404, headers: NO_STORE_HEADERS });
     }

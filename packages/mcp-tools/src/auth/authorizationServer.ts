@@ -186,6 +186,12 @@ export interface AuraOAuthServerOptions {
   /** Resolves the signed-in Aura user from the request, or null. */
   resolveSessionUser: (req: IncomingMessage) => Promise<{ userId: string } | null> | { userId: string } | null;
   /**
+   * AURA-AUTH-SESSION-01-I2 (B3): optional guard around issuing a consented
+   * grant. Aura runs `issue` while the approving session is held FOR SHARE
+   * after a live re-check; null = the session is no longer live (no grant).
+   */
+  guardConsentGrant?: (req: IncomingMessage, userId: string, issue: () => Promise<string>) => Promise<string | null>;
+  /**
    * Where an unauthenticated user is sent to sign in. A function receives
    * the interaction path to return to (always an /oauth/interaction/ path).
    */
@@ -805,7 +811,10 @@ ${duration}${manage}
       audit({ event: 'oauth.grant', outcome: 'denied', clientId: client.client_id, userId: user.userId });
       return finish(req, res, { error: 'access_denied', error_description: 'The user denied access.' });
     }
-    const grantId = await grantFor(details, user.userId);
+    const grantId = options.guardConsentGrant
+      ? await options.guardConsentGrant(req, user.userId, () => grantFor(details, user.userId))
+      : await grantFor(details, user.userId);
+    if (grantId === null) return sendPage(res, 401, 'Sign in required', '<h1>Sign in required</h1>');
     audit({ event: 'oauth.grant', outcome: 'ok', clientId: client.client_id, userId: user.userId });
     return finish(req, res, { consent: { grantId } });
   }

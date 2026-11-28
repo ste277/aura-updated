@@ -6,7 +6,7 @@
 import fs from 'fs';
 import path from 'path';
 import { canonicalPreviewItemFields, signPreviewItem, verifyPreviewItem, signPreviewResultBody, verifyAcceptanceItems, PREVIEW_TOKEN_VERSION, type PreviewItemFacts } from '../apps/web/lib/dayConstructorPreviewIntegrity';
-import { sign, createSessionToken, verifySessionToken } from '../apps/web/lib/auth';
+import { sign, verify } from '../apps/web/lib/auth';
 
 let allPassed = true;
 function check(label: string, condition: boolean) {
@@ -63,9 +63,9 @@ check('36. a mutated body (validly-shaped base64url, original signature) is reje
 check('37. missing / empty / non-string tokens are rejected (PREVIEW_TOKEN_MISSING) -- no fallback to trusting the payload', [undefined, null, '', 0, {}, ['x']].every((v) => { const r = verifyPreviewItem(facts(), v); return !r.ok && r.code === 'PREVIEW_TOKEN_MISSING'; }));
 check('36. garbage strings are rejected (PREVIEW_TOKEN_INVALID)', ['x', 'a.b', '...', 'not a token'].every((v) => { const r = verifyPreviewItem(facts(), v); return !r.ok && r.code === 'PREVIEW_TOKEN_INVALID'; }));
 check('38/21. an unknown version fails closed even when correctly signed (v:2, and a missing v)', [{ k: 'dc-preview-item', v: 2, f: canonicalPreviewItemFields(facts()) }, { k: 'dc-preview-item', f: canonicalPreviewItemFields(facts()) }].every((p) => { const r = verifyPreviewItem(facts(), sign(p)); return !r.ok && r.code === 'PREVIEW_TOKEN_INVALID'; }) && PREVIEW_TOKEN_VERSION === 1);
-check('21/4. the wrong purpose is rejected: a correctly signed session token can never be presented as a preview token', (() => { const r = verifyPreviewItem(facts(), createSessionToken('user-a', 'a@example.com')); return !r.ok && r.code === 'PREVIEW_TOKEN_INVALID'; })() && !verifyPreviewItem(facts(), sign({ k: 'something-else', v: 1, f: canonicalPreviewItemFields(facts()) })).ok);
+check('21/4. the wrong purpose is rejected: a correctly signed session token can never be presented as a preview token', (() => { const r = verifyPreviewItem(facts(), sign({ userId: 'user-a', email: 'a@example.com', exp: Date.now() + 60_000 })); return !r.ok && r.code === 'PREVIEW_TOKEN_INVALID'; })() && !verifyPreviewItem(facts(), sign({ k: 'something-else', v: 1, f: canonicalPreviewItemFields(facts()) })).ok);
 check('4. a malformed signed body (field array missing / wrong length) fails closed', [{ k: 'dc-preview-item', v: 1 }, { k: 'dc-preview-item', v: 1, f: 'nope' }, { k: 'dc-preview-item', v: 1, f: canonicalPreviewItemFields(facts()).slice(1) }, { k: 'dc-preview-item', v: 1, f: [...canonicalPreviewItemFields(facts()), 'extra'] }].every((p) => !verifyPreviewItem(facts(), sign(p)).ok));
-check('4. the token carries no userId/email keys, so it is not a session lookalike (its user is only a bound fact)', (() => { const payload = JSON.parse(Buffer.from(token.split('.')[0], 'base64url').toString('utf8')); return !('userId' in payload) && !('email' in payload) && Object.keys(payload).sort().join() === 'f,k,v' && (verifySessionToken(token) as any)?.userId === undefined; })());
+check('4. the token carries no userId/email keys, so it is not a session lookalike (its user is only a bound fact)', (() => { const payload = JSON.parse(Buffer.from(token.split('.')[0], 'base64url').toString('utf8')); return !('userId' in payload) && !('email' in payload) && Object.keys(payload).sort().join() === 'f,k,v' && (verify<any>(token) as any)?.userId === undefined; })());
 
 // ---------- 18/19/39/40. acceptance gate across several items ----------
 {

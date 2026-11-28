@@ -20,9 +20,10 @@
  */
 import { upsertUserByEmail, beginTransaction, listGoalActivitiesWithLinkedPlanStatus, addGoalActivity } from '../apps/web/lib/db';
 import { deriveIdempotentGoalId } from '../apps/web/lib/goalCreateIdempotency';
-import { createSessionToken } from '../apps/web/lib/auth';
+
 import { POST as createGoal } from '../apps/web/app/api/goals/route';
 import { randomUUID } from 'crypto';
+import { createTestSessionToken, TEST_SESSION_COOKIE } from './authSessionTestSupport';
 
 let allPassed = true;
 function check(label: string, condition: boolean) {
@@ -33,7 +34,7 @@ async function sql(text: string, params: unknown[] = []): Promise<any[]> {
   const c = await beginTransaction();
   try { const r = await c.query(text, params); await c.query('COMMIT'); return r.rows; } catch (e) { await c.query('ROLLBACK').catch(() => {}); throw e; } finally { c.release(); }
 }
-const fakeRequest = (cookie: string | undefined, jsonBody: unknown): any => ({ cookies: { get: (name: string) => (cookie !== undefined && name === 'as_session' ? { value: cookie } : undefined) }, json: async () => jsonBody });
+const fakeRequest = (cookie: string | undefined, jsonBody: unknown): any => ({ cookies: { get: (name: string) => (cookie !== undefined && name === TEST_SESSION_COOKIE ? { value: cookie } : undefined) }, json: async () => jsonBody });
 async function post(token: string, body: unknown): Promise<{ status: number; body: any }> {
   const res: any = await createGoal(fakeRequest(token, body));
   return { status: res.status, body: await res.json() };
@@ -48,8 +49,8 @@ async function main() {
   const U = await mkUser('a');
   const V = await mkUser('b');
   const ids = [U.id, V.id];
-  const tokenU = createSessionToken(U.id, U.email);
-  const tokenV = createSessionToken(V.id, V.email);
+  const tokenU = await createTestSessionToken(U.id, U.email);
+  const tokenV = await createTestSessionToken(V.id, V.email);
   const cleanup = async () => {
     await sql(`DELETE FROM "Goal" WHERE "userId" = ANY($1::text[])`, [ids]);
     await sql(`DELETE FROM "User" WHERE id = 'gcro-ballast-user'`).catch(() => {});

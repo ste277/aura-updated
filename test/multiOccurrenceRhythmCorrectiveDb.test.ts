@@ -31,7 +31,7 @@
  *   DATABASE_URL="postgresql://..." npx ts-node test/multiOccurrenceRhythmCorrectiveDb.test.ts
  */
 import { upsertUserByEmail, updateBirthProfile, createGoalWithActivities, addGoalActivity, deleteGoal, deletePlannedActivity, loadGoalContextsForPlanIds, listGoalActivitiesWithLinkedPlanStatus, beginTransaction } from '../apps/web/lib/db';
-import { createSessionToken } from '../apps/web/lib/auth';
+
 import { movePlannedActivity, MovePlanError } from '../apps/web/lib/planMove';
 import { persistAcceptedConstructedDay } from '../apps/web/lib/dayConstructorAcceptancePersistence';
 import { loadEligibleGoalDemand, createRealGoalDemandCandidatesDeps } from '../apps/web/lib/goalDemandCandidates';
@@ -39,6 +39,7 @@ import { resolveGoalActivityHandoff } from '../apps/web/lib/planDayBootstrap';
 import { loadGoalActivityRhythmFacts } from '../apps/web/lib/db';
 import { GET as getGoalDetail } from '../apps/web/app/api/goals/[goalId]/route';
 import type { AcceptConstructedDayRequest } from '../apps/web/lib/dayConstructorAcceptance';
+import { createTestSessionToken, TEST_SESSION_COOKIE } from './authSessionTestSupport';
 
 let allPassed = true;
 function check(label: string, condition: boolean) {
@@ -57,7 +58,7 @@ function iso(s: string): Date { return new Date(s); }
 function window(date: string, start: string, end: string) { return { date, start: iso(start), end: iso(end), timezone: TZ, source: 'EXPLICIT_RANGE' as const }; }
 function item(intentId: string, start: string, end: string) { return { intentId, title: 'Strength training', placementSource: 'SELECTED_CANDIDATE' as const, start: iso(start), end: iso(end) }; }
 function fakeRequest(cookie?: string): any {
-  return { cookies: { get: (name: string) => (cookie !== undefined && name === 'as_session' ? { value: cookie } : undefined) } };
+  return { cookies: { get: (name: string) => (cookie !== undefined && name === TEST_SESSION_COOKIE ? { value: cookie } : undefined) } };
 }
 async function getGoalDetailBody(token: string, goalId: string): Promise<any> {
   const res: any = await getGoalDetail(fakeRequest(token), { params: { goalId } });
@@ -69,7 +70,7 @@ const planStatus = async (planId: string): Promise<string> => (await sql(`SELECT
 async function main() {
   const user = await upsertUserByEmail({ email: 'test-pr2-corrective@example.com', cityName: 'Chennai', latitude: 13.0827, longitude: 80.2707, timezone: TZ });
   await updateBirthProfile(user.id, { birthDate: '1990-06-15', birthTime: '08:30', birthCityName: 'Chennai', birthLatitude: 13.0827, birthLongitude: 80.2707, birthTimezone: TZ });
-  const token = createSessionToken(user.id, 'test-pr2-corrective@example.com');
+  const token = await createTestSessionToken(user.id, 'test-pr2-corrective@example.com');
 
   const createdGoalIds: string[] = [];
   const cleanup = async () => {

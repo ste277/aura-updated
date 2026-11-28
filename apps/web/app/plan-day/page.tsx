@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import { cookies } from 'next/headers';
-import { verifySessionToken, SESSION_COOKIE_NAME } from '../../lib/auth';
+import { activeSessionCookieName, getSessionFromCookieStore } from '../../lib/session';
 import { getUserById, listGoalActivitiesWithLinkedPlanStatus, listCapturesWithLinkedPlanStatus, loadGoalActivityRhythmFacts } from '../../lib/db';
 import { resolvePlanDayServerProps, resolveGoalActivityHandoff, resolveCaptureHandoff, resolveAutomaticGoalDemand, markCanonicalGoalDemandHandoff } from '../../lib/planDayBootstrap';
 import { createRealGoalDemandCandidatesDeps } from '../../lib/goalDemandCandidates';
@@ -21,8 +21,8 @@ import { PlanDayClient } from './PlanDayClient';
  * (`resolvePlanDayServerProps`, planDayBootstrap.ts) from a real server
  * clock read and the authenticated user's own timezone -- passed down as
  * plain props, never recomputed from the browser's clock. This reuses the
- * EXACT SAME canonical session verification (`verifySessionToken`,
- * `SESSION_COOKIE_NAME`) and user lookup (`getUserById`) every route
+ * EXACT SAME canonical session verification (lib/session.ts,
+ * database-backed) and user lookup (`getUserById`) every route
  * handler in this app already uses -- `next/headers`'s `cookies()` is the
  * standard, first-party Next.js primitive for reading that SAME cookie
  * from within a Server Component (where a `NextRequest` isn't available),
@@ -49,9 +49,13 @@ export default async function PlanDayPage({
   searchParams: { horizon?: string | string[]; fromGoal?: string | string[]; activities?: string | string[]; captures?: string | string[] };
 }) {
   const horizon = parseHorizonSearchParam(searchParams.horizon);
+  // AURA-AUTH-SESSION-01-I2 (E2): one database-backed session verification per
+  // render, shared by every resolver below (the cookie cannot change mid-render).
+  let verified: ReturnType<typeof getSessionFromCookieStore> | null = null;
+  const verifySession = () => (verified ??= getSessionFromCookieStore(cookies()));
   const bootstrap = await resolvePlanDayServerProps({
-    getSessionToken: () => cookies().get(SESSION_COOKIE_NAME)?.value,
-    verifySession: (token) => verifySessionToken(token),
+    getSessionToken: () => cookies().get(activeSessionCookieName())?.value,
+    verifySession,
     getUser: (userId) => getUserById(userId),
     now: () => new Date(),
   }, horizon);
@@ -65,8 +69,8 @@ export default async function PlanDayPage({
   const activitiesParam = typeof searchParams.activities === 'string' ? searchParams.activities : null;
   const goalActivities = await resolveGoalActivityHandoff(
     {
-      getSessionToken: () => cookies().get(SESSION_COOKIE_NAME)?.value,
-      verifySession: (token) => verifySessionToken(token),
+      getSessionToken: () => cookies().get(activeSessionCookieName())?.value,
+      verifySession,
       listGoalActivities: (userId, goalId) => listGoalActivitiesWithLinkedPlanStatus(userId, goalId),
       loadGoalActivityRhythmFacts: (userId, goalActivityId, timezone) => loadGoalActivityRhythmFacts(userId, goalActivityId, timezone),
     },
@@ -83,8 +87,8 @@ export default async function PlanDayPage({
   const capturesParam = typeof searchParams.captures === 'string' ? searchParams.captures : null;
   const captures = await resolveCaptureHandoff(
     {
-      getSessionToken: () => cookies().get(SESSION_COOKIE_NAME)?.value,
-      verifySession: (token) => verifySessionToken(token),
+      getSessionToken: () => cookies().get(activeSessionCookieName())?.value,
+      verifySession,
       listCaptures: (userId) => listCapturesWithLinkedPlanStatus(userId),
     },
     capturesParam
@@ -104,8 +108,8 @@ export default async function PlanDayPage({
   // inside the resolver itself.
   const automaticGoalDemand = await resolveAutomaticGoalDemand(
     {
-      getSessionToken: () => cookies().get(SESSION_COOKIE_NAME)?.value,
-      verifySession: (token) => verifySessionToken(token),
+      getSessionToken: () => cookies().get(activeSessionCookieName())?.value,
+      verifySession,
       ...createRealGoalDemandCandidatesDeps(),
     },
     bootstrap?.planningDate ?? null,

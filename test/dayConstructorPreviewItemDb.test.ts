@@ -6,7 +6,7 @@
  * DATABASE_URL.
  */
 import { upsertUserByEmail, updateUserLocation, updateBirthProfile, getUserById, beginTransaction, createPlannedActivity } from '../apps/web/lib/db';
-import { createSessionToken, sign } from '../apps/web/lib/auth';
+import { sign } from '../apps/web/lib/auth';
 import { handleDayConstructorPreviewRequest } from '../apps/web/lib/dayConstructorPreviewRequest';
 import { createRealDayConstructorOrchestratorDeps } from '../apps/web/lib/dayConstructorOrchestrator';
 import { parsePreviewResponseBody } from '../apps/web/lib/dayConstructorPreviewClient';
@@ -18,6 +18,7 @@ import { POST as acceptRoute } from '../apps/web/app/api/day-constructor/accept/
 import { resolveTzOffsetMinutes } from '../apps/web/lib/timezone';
 import { computeAssistantWindows } from '../packages/recommendation/src/dailyAssistant';
 import { addCivilDays, fixtureAnchorMonday, realClockReferenceForFixture } from './lifecycleFixtureCalendar';
+import { createTestSessionToken, TEST_SESSION_COOKIE } from './authSessionTestSupport';
 
 /*
  * AURA-CI-08 -- deterministic fixture.
@@ -68,7 +69,7 @@ function check(label: string, condition: boolean) {
   if (!condition) allPassed = false;
 }
 const HOUR = 3600000; const MIN = 60000;
-const fakeReq = (cookie: string | undefined, body: unknown): any => ({ cookies: { get: (n: string) => (cookie !== undefined && n === 'as_session' ? { value: cookie } : undefined) }, json: async () => body, headers: new Headers() });
+const fakeReq = (cookie: string | undefined, body: unknown): any => ({ cookies: { get: (n: string) => (cookie !== undefined && n === TEST_SESSION_COOKIE ? { value: cookie } : undefined) }, json: async () => body, headers: new Headers() });
 async function sql(t: string, p: unknown[] = []): Promise<any[]> {
   const c = await beginTransaction();
   try { const r = await c.query(t, p); await c.query('COMMIT'); return r.rows; } catch (e) { await c.query('ROLLBACK').catch(() => {}); throw e; } finally { c.release(); }
@@ -79,7 +80,7 @@ async function main() {
     // upsertUserByEmail returns an EXISTING row unchanged, so on a reused database the stored location could be another run's; pin it explicitly.
     const U = await updateUserLocation(existing.id, { cityName: PLACE.cityName, latitude: PLACE.latitude, longitude: PLACE.longitude, timezone: TZ });
     await updateBirthProfile(U.id, { birthDate: '1990-06-15', birthTime: '08:30', birthCityName: PLACE.cityName, birthLatitude: PLACE.latitude, birthLongitude: PLACE.longitude, birthTimezone: TZ });
-    return { U, tok: createSessionToken(U.id, U.email) };
+    return { U, tok: await createTestSessionToken(U.id, U.email) };
   };
   const A = await mkUser('a');
   const B = await mkUser('b');

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSessionFromRequest } from '../../../../lib/session';
-import { getUserById, listPlannedActivities } from '../../../../lib/db';
+import { SESSION_UNAVAILABLE, sessionUnavailableResponse, getSessionWithUserFromRequest } from '../../../../lib/session';
+import { listPlannedActivities } from '../../../../lib/db';
 import { getDatePartsInTimezone } from '../../../../lib/timezone';
 import { computeUserLocalNoon, formatLocalICSDate } from '../../../../lib/calendarFeedIcs';
 import { getDailySolarWindows } from '../../../../../../packages/astronomy/src/solarWindows';
@@ -20,12 +20,13 @@ function escapeICSText(value: string): string {
 }
 
 export async function GET(req: NextRequest) {
-  const session = getSessionFromRequest(req);
+  const session = await getSessionWithUserFromRequest(req);
+  if (session === SESSION_UNAVAILABLE) return sessionUnavailableResponse();
   if (!session?.userId) {
     return new NextResponse('Unauthorized', { status: 401 });
   }
 
-  const user = await getUserById(session.userId);
+  const user = session.user;
   if (!user) {
     return new NextResponse('User not found', { status: 404 });
   }

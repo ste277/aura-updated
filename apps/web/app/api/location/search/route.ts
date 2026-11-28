@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSessionFromRequest } from '../../../../lib/session';
+import { getSessionFromRequest, SESSION_UNAVAILABLE, sessionUnavailableResponse } from '../../../../lib/session';
 import { searchPlaces, isGeocodingConfigured } from '../../../../lib/geocoding';
 import { isRateLimited } from '../../../../lib/inMemoryRateLimit';
 
@@ -16,7 +16,8 @@ const RATE_LIMIT_MAX_REQUESTS = 20;
 const RATE_LIMIT_WINDOW_MS = 60_000;
 
 export async function GET(req: NextRequest) {
-  const session = getSessionFromRequest(req);
+  const session = await getSessionFromRequest(req);
+  if (session === SESSION_UNAVAILABLE) return sessionUnavailableResponse();
   if (!session) {
     return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 });
   }

@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSessionFromRequest } from '../../../../lib/session';
+import { getSessionFromRequest, SESSION_UNAVAILABLE, sessionUnavailableResponse } from '../../../../lib/session';
 import { updateUserLocation, saveCustomCityForUser } from '../../../../lib/db';
 import { findCity, isValidCustomLocation } from '../../../../lib/cities';
 import { parseJsonObject } from '../../../../lib/request';
 
 export async function PATCH(req: NextRequest) {
-  const session = getSessionFromRequest(req);
+  const session = await getSessionFromRequest(req);
+  if (session === SESSION_UNAVAILABLE) return sessionUnavailableResponse();
   if (!session) {
     return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 });
   }

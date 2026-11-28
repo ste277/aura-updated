@@ -1,0 +1,26 @@
+OK   C1-C9, C11: no session-coverage violation in production code -- 0 violation(s)
+OK   C5: database-backed session calls in routes were found (99)
+OK   C7: API routes were scanned (92)
+OK   C7: every PUBLIC route still exists (the list is not stale)
+OK   C10: lib/session.ts does no work at import (no pool, key or env access at load)
+OK   C10b: lib/session.ts reads only the active cookie name (no legacy read, no fallback)
+OK   C10c: no authentication mode switch / enforcement flag in lib/session.ts
+OK   N1 (C1) a v1 verifier call is reported
+OK   N2 (C2) reading as_session is reported
+OK   N3 (C3) a hard-coded v2 cookie name is reported
+OK   N4 (C4) a direct cookie read is reported
+OK   N5 (C4) a raw Cookie header read is reported
+OK   N6 (C5) an un-awaited session call is reported
+OK   N7 (C5) a missing 503 check is reported (outage would read as 401)
+OK   N8 (C5) the correct pattern is NOT reported
+OK   N9 (C6) an un-awaited page helper is reported
+OK   N10 (C7) an unclassified, unauthenticated route is reported
+OK   N11 (C8) issuing a session outside sign-in is reported
+OK   N12 (C8) clearing v2 cookies outside logout is reported
+OK   N13 (C9) a re-verifying seam is reported
+OK   N14 (C11) an I1 module reading process.env is reported
+OK   N15 (C1) a v1 reference inside packages/ is reported
+OK   N16 comments are ignored (a commented-out violation is not reported)
+OK   N17 (C10) import-time pool creation and env access are reported (and function bodies are not)
+
+24 passed, 0 failed

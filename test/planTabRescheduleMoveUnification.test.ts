@@ -27,10 +27,11 @@ import {
   createGoalWithActivities, addGoalActivity, deleteGoal, listGoalActivitiesWithLinkedPlanStatus,
   logPlannedActivity,
 } from '../apps/web/lib/db';
-import { createSessionToken } from '../apps/web/lib/auth';
+
 import { POST as moveRoute } from '../apps/web/app/api/plans/[planId]/move/route';
 import { mapPlanRow, isActionableUpcomingPlan } from '../apps/web/lib/planFormatting';
 import { deriveGoalActivityState } from '../apps/web/lib/goals';
+import { createTestSessionToken, TEST_SESSION_COOKIE } from './authSessionTestSupport';
 
 let allPassed = true;
 function check(label: string, condition: boolean) {
@@ -77,7 +78,7 @@ check('the "How long?" selector is disabled in all three composer modes while a 
 // client now sends against the real, unmodified Move route.
 // ============================================================
 
-const req = (tok: string | null, body: unknown): any => ({ cookies: { get: (n: string) => (tok && n === 'as_session' ? { value: tok } : undefined) }, json: async () => body, headers: new Headers() });
+const req = (tok: string | null, body: unknown): any => ({ cookies: { get: (n: string) => (tok && n === TEST_SESSION_COOKIE ? { value: tok } : undefined) }, json: async () => body, headers: new Headers() });
 async function sql(t: string, p: unknown[] = []): Promise<any[]> {
   const c = await beginTransaction();
   try { const r = await c.query(t, p); await c.query('COMMIT'); return r.rows; } catch (e) { await c.query('ROLLBACK').catch(() => {}); throw e; } finally { c.release(); }
@@ -87,7 +88,7 @@ async function main() {
   const U = await upsertUserByEmail({ email: 'test-planview-reschedule-a@example.com', cityName: 'Chennai', latitude: 13.0827, longitude: 80.2707, timezone: TZ });
   const V = await upsertUserByEmail({ email: 'test-planview-reschedule-b@example.com', cityName: 'Chennai', latitude: 13.0827, longitude: 80.2707, timezone: TZ });
   for (const u of [U, V]) await updateBirthProfile(u.id, { birthDate: '1990-06-15', birthTime: '08:30', birthCityName: 'Chennai', birthLatitude: 13.0827, birthLongitude: 80.2707, birthTimezone: TZ });
-  const tok = createSessionToken(U.id, U.email); const tokV = createSessionToken(V.id, V.email);
+  const tok = await createTestSessionToken(U.id, U.email); const tokV = await createTestSessionToken(V.id, V.email);
   const goalIds: string[] = [];
   let n = 0;
   const mk = async (title: string, startMs: number, durMin = 60, extra: Partial<Record<string, unknown>> = {}) =>

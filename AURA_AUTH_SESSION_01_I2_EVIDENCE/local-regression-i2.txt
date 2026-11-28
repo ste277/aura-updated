@@ -1,0 +1,79 @@
+PASS exit=0  12.3s activityPreferencesApi.test.ts :: ALL EXPLICIT DURATION PREFERENCES API CHECKS PASSED
+PASS exit=0   1.2s authSessionToken.test.ts :: 68 passed, 0 failed
+PASS exit=0  14.7s automaticGoalLifecycleClosureDb.test.ts :: ALL AUTOMATIC GOAL LIFECYCLE CLOSURE CHECKS PASSED
+PASS exit=0  12.5s availabilityPreferencesApi.test.ts :: ALL AVAILABILITY PREFERENCES API CHECKS PASSED
+PASS exit=0   2.4s capturesApi.test.ts :: ALL CAPTURE API CHECKS PASSED
+PASS exit=0   2.7s dailyBriefingApi.test.ts :: ALL DB2 DAILY BRIEFING API CHECKS PASSED
+PASS exit=0   2.8s dailyBriefingHistoricalApi.test.ts :: ALL DB3 HISTORICAL API CHECKS PASSED
+PASS exit=0  12.6s dailyRhythmPreferencesApiDb.test.ts :: ALL DAILY RHYTHM PREFERENCES API CHECKS PASSED
+PASS exit=0   1.9s dayConstructorPreviewIntegrity.test.ts :: ALL PREVIEW INTEGRITY CHECKS PASSED
+PASS exit=0   4.4s dayConstructorPreviewIntegrityDb.test.ts :: ALL PREVIEW INTEGRITY DB CHECKS PASSED
+PASS exit=0   4.4s dayConstructorPreviewItemDb.test.ts :: ALL DAY CONSTRUCTOR PREVIEW ITEM CHECKS PASSED
+PASS exit=0  14.5s decisionFactsThreadingDb.test.ts :: ALL DECISION FACTS THREADING CHECKS PASSED
+PASS exit=0   3.7s findATimeConstraintsDb.test.ts :: ALL CHECKS PASSED
+PASS exit=0   3.3s goalActivityDailyOccurrenceEligibilityDb.test.ts :: ALL HPG3-A2 DAILY OCCURRENCE ELIGIBILITY CHECKS PASSED
+PASS exit=0  12.1s goalActivityRhythmGoalDetailDb.test.ts :: ALL GOAL ACTIVITY RHYTHM GOAL DETAIL DB CHECKS PASSED
+PASS exit=0  13.0s goalActivityRhythmMaterializationDb.test.ts :: ALL GOAL ACTIVITY RHYTHM MATERIALIZATION DB CHECKS PASSED
+PASS exit=0  13.5s goalActivityRhythmSetupDb.test.ts :: ALL GOAL ACTIVITY RHYTHM SETUP DB CHECKS PASSED
+PASS exit=0  13.3s goalAwareRecompositionPresentationDb.test.ts :: ALL GOAL-AWARE RECOMPOSITION PRESENTATION DB CHECKS PASSED
+PASS exit=0   4.2s goalCreateReplayOrderingDb.test.ts :: ALL GOAL CREATE REPLAY ORDERING DB CHECKS PASSED
+FAIL exit=1   2.1s goalDecompositionPlanningHandoffDb.test.ts :: }
+PASS exit=0  15.8s goalLifecycleArchivedAcceptanceDb.test.ts :: ALL GOAL LIFECYCLE ARCHIVED ACCEPTANCE DB CHECKS PASSED
+PASS exit=0  13.9s goalRhythmWeeklyAcceptanceDb.test.ts :: ALL GOAL RHYTHM WEEKLY ACCEPTANCE DB CHECKS PASSED
+PASS exit=0  14.0s goalsCreateIdempotencyDb.test.ts :: ALL GOALS CREATE IDEMPOTENCY CHECKS PASSED
+PASS exit=0  14.0s goalsReviewedCreateDb.test.ts :: ALL GOALS REVIEWED CREATE CHECKS PASSED
+PASS exit=0   5.2s homeCompletionDb.test.ts :: ALL HOME COMPLETION DB CHECKS PASSED
+PASS exit=0   5.7s homeMoveDb.test.ts :: ALL HOME MOVE DB CHECKS PASSED
+PASS exit=0   5.2s homeSkipDb.test.ts :: ALL HOME SKIP DB CHECKS PASSED
+FAIL exit=1   5.2s hpg5I2MyDaySaveDb.test.ts :: }
+FAIL exit=1   5.0s hpg5I3HomeSaveDb.test.ts :: }
+PASS exit=0   3.6s locationExplicitConfirmationApiDb.test.ts :: ALL LOCATION PR8 API SCENARIOS PASSED
+PASS exit=0  14.9s manualGoalProvenanceParityDb.test.ts :: ALL MANUAL GOAL PROVENANCE PARITY DB CHECKS PASSED
+PASS exit=0   5.5s missedRecoveryDb.test.ts :: ALL MISSED RECOVERY DB CHECKS PASSED
+PASS exit=0   5.5s movePlanApiDb.test.ts :: ALL MOVE API CHECKS PASSED
+PASS exit=0   5.7s movePlannedActivityDb.test.ts :: ALL MOVE DB CHECKS PASSED
+FAIL exit=1   5.6s multiOccurrenceRhythmCorrectiveDb.test.ts :: SOME PR2 CORRECTIVE DB CHECKS FAILED
+PASS exit=0   5.0s myPeopleDb.test.ts :: [people] delete failed { personId: '11b1800f-3f70-4756-a2f3-709a08af5240' }
+PASS exit=0   4.9s myPeopleR1Db.test.ts :: ALL MY PEOPLE R1 DB CHECKS PASSED
+PASS exit=0  14.0s myPeopleR2Db.test.ts :: ALL MY PEOPLE R2 DB CHECKS PASSED
+PASS exit=0  24.8s myPeopleR3Db.test.ts :: ALL MY PEOPLE R3 DB CHECKS PASSED
+PASS exit=0  58.1s myPeopleR4Db.test.ts :: ALL MY PEOPLE R4 DB CHECKS PASSED
+PASS exit=0   6.6s myPeopleSwitchRollbackDb.test.ts :: ALL MY PEOPLE SWITCH ROLLBACK CHECKS PASSED
+PASS exit=0   4.0s myRhythmFoundationDb.test.ts :: All checks passed.
+PASS exit=0   6.2s myRhythmPreferencesUiDb.test.ts :: ALL MR3 UI DB CHECKS PASSED
+PASS exit=0   7.3s myRhythmSchedulingDb.test.ts :: All checks passed.
+PASS exit=0   9.1s peopleViewLegacyEditorDb.test.ts :: ALL LEGACY EDITOR DB CHECKS PASSED
+FAIL exit=1   2.3s planDayWiring.test.ts :: Some Plan Day Wiring checks FAILED.
+PASS exit=0   3.9s planGoalActivityArchivedLifecycleDb.test.ts :: ALL HPG2 ARCHIVED-GOAL LIFECYCLE FIX CHECKS PASSED
+PASS exit=0   2.7s planGoalActivityCompletionIntegrityDb.test.ts :: ALL HPG2 COMPLETION/PROGRESS INTEGRITY CHECKS PASSED
+PASS exit=0   2.7s planGoalActivityLinkDb.test.ts :: ALL HPG2 GOAL-ACTIVITY LINK CHECKS PASSED
+PASS exit=0   3.6s planStatusPreservationDb.test.ts :: ALL STATUS PRESERVATION CHECKS PASSED
+FAIL exit=1   2.3s planTabChooseMyOwnTime.test.ts :: }
+FAIL exit=1   2.3s planTabRecommendationChoiceRescheduleContext.test.ts :: }
+PASS exit=0   3.9s planTabRescheduleMoveUnification.test.ts :: ALL PLAN TAB RESCHEDULE-VIA-MOVE CHECKS PASSED
+PASS exit=0   4.6s plannedActivitySchedulingModeDb.test.ts :: ALL SCHEDULING MODE DB CHECKS PASSED
+PASS exit=0  17.1s remainingDayRecompositionAcceptanceDb.test.ts :: day/recompose/accept: unexpected failure duplicate key value violates unique constraint "PlannedActi
+FAIL exit=1   8.3s remainingDayRecompositionDb.test.ts :: SOME RECOMPOSITION DB CHECKS FAILED
+PASS exit=0   5.4s remainingDayRecompositionIntegrity.test.ts :: ALL RECOMPOSITION INTEGRITY CHECKS PASSED
+PASS exit=0  19.4s scheduleWriteManualSerializationDb.test.ts :: ALL MANUAL WRITER SERIALIZATION DB CHECKS PASSED
+PASS exit=0   5.8s schedulingEligibilityErrorContractDb.test.ts :: ALL SCHEDULING ELIGIBILITY ERROR CONTRACT CHECKS PASSED
+PASS exit=0  16.1s schedulingEligibilityUiPresentationDb.test.ts :: ALL SCHEDULING ELIGIBILITY UI PRESENTATION DB CHECKS PASSED
+PASS exit=0   6.8s skipPlannedActivityDb.test.ts :: ALL SKIP DB CHECKS PASSED
+PASS exit=0  16.6s weeklyPlanReviewClientDb.test.ts :: ALL WEEKLY PLAN REVIEW CLIENT DB CHECKS PASSED
+PASS exit=0   2.5s authSessionClient.test.ts :: 12 passed, 0 failed
+PASS exit=0   2.6s authSessionCoverage.test.ts :: 24 passed, 0 failed
+PASS exit=0   9.7s authSessionI2Db.test.ts :: [auth] verify-code: session not established { emailRef: 'bc70e6e291a35501' }
+PASS exit=0   2.3s authSessionDeadline.test.ts :: 27 passed, 0 failed
+PASS exit=0   2.5s authSessionContract.test.ts :: 21 passed, 0 failed
+PASS exit=0   6.4s authSessionStoreDb.test.ts :: [auth-session] pool client error (error)
+PASS exit=0  13.8s authSessionR1Db.test.ts :: 42 passed, 0 failed
+PASS exit=0  11.9s authSessionR3Db.test.ts :: (Use `node --trace-deprecation ...` to show where the warning was created)
+TOTAL 70 run, 62 passed, 8 failed
+  FAILED goalDecompositionPlanningHandoffDb.test.ts []
+  FAILED hpg5I2MyDaySaveDb.test.ts []
+  FAILED hpg5I3HomeSaveDb.test.ts []
+  FAILED multiOccurrenceRhythmCorrectiveDb.test.ts ["FAIL A. once no retained linkage remains anywhere (every occurrence's plan hard-deleted), legitimate deletion succeeds", "FAIL C. 1 of 5 committed: derivedState is PLANNED, and the canonical rhythm.eligibleForAnotherOccurrence (feeding GoalDetailClient's isSelectable) is TRUE -- selectable", 'FAIL C. 5 of 5 committed: rhythm.eligibleForAnotherOccurrence is FALSE -- not selectable']
+  FAILED planDayWiring.test.ts ['FAIL 87c. no modal/drawer/new route is introduced for the Add-another affordance']
+  FAILED planTabChooseMyOwnTime.test.ts []
+  FAILED planTabRecommendationChoiceRescheduleContext.test.ts []
+  FAILED remainingDayRecompositionDb.test.ts ["FAIL 61. today only: every decided slot is within the user's local today; the proposal names the local target date"]

@@ -80,7 +80,9 @@ check('round trip: verifies and returns exactly the claims', !!verified && verif
 check('round trip: the token does not contain the raw secret', !token.includes(LEGACY_SECRET));
 
 // --- Rejection: other token types signed with the same base secret -------------
-const legacySession = authLib.createSessionToken(uid, 'person@example.test');
+// I2: the v1 issuer is removed; this is byte-for-byte what it produced (sign() over
+// {userId, email, exp} with the CURRENT AUTH_SECRET) -- design §4.3 roll-forward test.
+const legacySession = authLib.sign({ userId: uid, email: 'person@example.test', exp: now + SESSION_TTL_MS });
 const magicLink = authLib.createMagicLinkToken('person@example.test');
 const guestState = authLib.sign({ activityId: 'x', horizon: 'TODAY', timePreference: 'ANY', durationMinutes: 30, cityName: 'Chennai', candidateStart: 'a', candidateEnd: 'b', exp: now + 60000 });
 const previewTok = authLib.sign({ k: 'dc-preview-item', v: 1, f: [uid, 'x'] });
@@ -97,7 +99,7 @@ for (const [name, t] of [
   check(`rejects a ${name} signed with the same AUTH_SECRET`, verifySessionTokenV2(key, t, now + 1000) === null);
 }
 check('the legacy verify() rejects a v2 token', authLib.verify(token) === null);
-check('the legacy verifySessionToken() rejects a v2 token', authLib.verifySessionToken(token) === null);
+check('I2: the v1 session API is removed from lib/auth.ts (createSessionToken / verifySessionToken / SESSION_COOKIE_NAME)', !('createSessionToken' in authLib) && !('verifySessionToken' in authLib) && !('SESSION_COOKIE_NAME' in authLib));
 check('rejects a token signed with a key from a different secret', verifySessionTokenV2(otherKey, token, now + 1000) === null);
 
 // --- Rejection: malformed and tampered -------------------------------------------
@@ -166,7 +168,7 @@ const clearSecure = sessionCookieClearList(true);
 check('clear (secure): __Host-as_sid, as_sid and legacy as_session, all Secure, Path=/, Max-Age=0', clearSecure.map((c) => c.name).join(',') === [SECURE_SESSION_COOKIE_NAME, INSECURE_SESSION_COOKIE_NAME, LEGACY_SESSION_COOKIE_NAME].join(',') && clearSecure.every((c) => c.options.secure && c.options.path === '/' && c.options.maxAge === 0 && !('domain' in c.options)));
 const clearInsecure = sessionCookieClearList(false);
 check('clear (insecure): as_sid and as_session only (a __Host- cookie cannot exist there)', clearInsecure.map((c) => c.name).join(',') === [INSECURE_SESSION_COOKIE_NAME, LEGACY_SESSION_COOKIE_NAME].join(','));
-check('legacy cookie name matches lib/auth.ts', LEGACY_SESSION_COOKIE_NAME === authLib.SESSION_COOKIE_NAME);
+check('legacy cookie name is the v1 name, as_session (cleared only, never read)', LEGACY_SESSION_COOKIE_NAME === 'as_session');
 
 // --- SQL literal guards ------------------------------------------------------------
 check('sqlLiteral: accepts a valid idHash / userId / reason', sqlLiteral(h, 'idHash') === `'${h}'` && sqlLiteral(uid, 'userId') === `'${uid}'` && sqlLiteral('logout', 'reason') === `'logout'`);

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSessionFromRequest } from '../../../../../lib/session';
+import { getSessionFromRequest, SESSION_UNAVAILABLE, sessionUnavailableResponse } from '../../../../../lib/session';
 import { addGoalActivity } from '../../../../../lib/db';
 import { parseJsonObject } from '../../../../../lib/request';
 import { getActivityProfileById } from '../../../../../../../packages/recommendation/src/personalizedTasks';
@@ -8,7 +8,8 @@ import { validateGoalActivityRhythm, NONE_GOAL_ACTIVITY_RHYTHM, type GoalActivit
 const MAX_TITLE_LENGTH = 200;
 
 export async function POST(req: NextRequest, { params }: { params: { goalId: string } }) {
-  const session = getSessionFromRequest(req);
+  const session = await getSessionFromRequest(req);
+  if (session === SESSION_UNAVAILABLE) return sessionUnavailableResponse();
   if (!session) return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 });
 
   const body = await parseJsonObject(req);

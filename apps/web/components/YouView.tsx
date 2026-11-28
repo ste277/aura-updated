@@ -64,6 +64,10 @@ interface YouViewProps {
    * Your Moments section, a redirect rather than a dead end. */
   onOpenSharedMoments: () => void;
   onSignOut: () => void;
+  /** AURA-AUTH-SESSION-01-I2 (D8): a sign-out request is in flight. */
+  signingOut?: boolean;
+  /** AURA-AUTH-SESSION-01-I2 (D8): shown when the server could not confirm the sign-out. */
+  signOutError?: string | null;
   /** Aura Updates V1 -- unread moment-response count (brief section 9: "a
    * subtle unread indicator... a small dot" on the existing Shared Moments
    * entry, NOT a new nav item). Omitted or 0 renders no badge at all. */
@@ -95,6 +99,8 @@ export function YouView({
   onOpenPeople,
   onOpenSharedMoments,
   onSignOut,
+  signingOut = false,
+  signOutError = null,
   sharedMomentsUnreadCount,
 }: YouViewProps) {
   // AURA-PREF-01: `/?tab=you&section=availability|work-hours` (from Find a
@@ -316,8 +322,13 @@ export function YouView({
         </div>
       </div>
 
-      <DestructiveButton onClick={onSignOut} style={{ width: '100%' }}>
-        Sign out
+      {signOutError && (
+        <div role="alert" style={{ color: colors.textPrimary, fontSize: 13, marginBottom: spacing.sm, textAlign: 'center' }}>
+          {signOutError}
+        </div>
+      )}
+      <DestructiveButton onClick={signingOut ? undefined : onSignOut} disabled={signingOut} style={{ width: '100%' }}>
+        {signingOut ? 'Signing out…' : 'Sign out'}
       </DestructiveButton>
     </div>
   );

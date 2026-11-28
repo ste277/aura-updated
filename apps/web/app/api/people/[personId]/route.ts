@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSessionFromRequest } from '../../../../lib/session';
+import { getSessionFromRequest, SESSION_UNAVAILABLE, sessionUnavailableResponse } from '../../../../lib/session';
 import { deleteSavedPerson, getSavedPersonForOwner, listPersonOccasions, updateSavedPerson } from '../../../../lib/db';
 import { natalContextForSavedPerson } from '../../../../lib/savedPersonNatalContext';
 import { parseJsonObject } from '../../../../lib/request';
@@ -31,7 +31,8 @@ const withCapability = (res: NextResponse, enabled: boolean) => {
 };
 
 export async function GET(req: NextRequest, { params }: { params: { personId: string } }) {
-  const session = getSessionFromRequest(req);
+  const session = await getSessionFromRequest(req);
+  if (session === SESSION_UNAVAILABLE) return sessionUnavailableResponse();
   if (!session) return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 });
 
   const person = await getSavedPersonForOwner(session.userId, params.personId);
@@ -51,7 +52,8 @@ export async function GET(req: NextRequest, { params }: { params: { personId: st
 }
 
 export async function PATCH(req: NextRequest, { params }: { params: { personId: string } }) {
-  const session = getSessionFromRequest(req);
+  const session = await getSessionFromRequest(req);
+  if (session === SESSION_UNAVAILABLE) return sessionUnavailableResponse();
   if (!session) return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 });
 
   const body = await parseJsonObject(req);
@@ -77,7 +79,8 @@ export async function PATCH(req: NextRequest, { params }: { params: { personId: 
 }
 
 export async function DELETE(req: NextRequest, { params }: { params: { personId: string } }) {
-  const session = getSessionFromRequest(req);
+  const session = await getSessionFromRequest(req);
+  if (session === SESSION_UNAVAILABLE) return sessionUnavailableResponse();
   if (!session) return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 });
 
   try {

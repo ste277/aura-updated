@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSessionFromRequest } from '../../../../../../lib/session';
+import { getSessionFromRequest, SESSION_UNAVAILABLE, sessionUnavailableResponse } from '../../../../../../lib/session';
 import { deletePersonOccasion, PersonOccasionConflictError, PersonOccasionInvalidError, updatePersonOccasion } from '../../../../../../lib/db';
 import { parseJsonObject } from '../../../../../../lib/request';
 import { parsePersonOccasionFields, validatePersonOccasion } from '../../../../../../lib/savedPersonRequest';
@@ -22,7 +22,8 @@ const notFound = () => NextResponse.json({ error: 'Not found.' }, { status: 404 
 
 export async function PATCH(req: NextRequest, { params }: { params: { personId: string; occasionId: string } }) {
   if (!isMyPeopleServerEnabled()) return notFound();
-  const session = getSessionFromRequest(req);
+  const session = await getSessionFromRequest(req);
+  if (session === SESSION_UNAVAILABLE) return sessionUnavailableResponse();
   if (!session) return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 });
 
   const body = await parseJsonObject(req);
@@ -47,7 +48,8 @@ export async function PATCH(req: NextRequest, { params }: { params: { personId: 
 
 export async function DELETE(req: NextRequest, { params }: { params: { personId: string; occasionId: string } }) {
   if (!isMyPeopleServerEnabled()) return notFound();
-  const session = getSessionFromRequest(req);
+  const session = await getSessionFromRequest(req);
+  if (session === SESSION_UNAVAILABLE) return sessionUnavailableResponse();
   if (!session) return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 });
 
   const deleted = await deletePersonOccasion(session.userId, params.personId, params.occasionId);

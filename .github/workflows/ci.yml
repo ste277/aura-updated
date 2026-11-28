@@ -935,13 +935,19 @@ jobs:
         run: npx ts-node --project tsconfig.jsdom-tests.json test/ios02LocationErrorsAndPrivacy.test.ts
       # AURA-AUTH-SESSION-01-I1 -- dormant session store foundation (no auth
       # behaviour change): v2 token, HKDF key, cookie helpers and SQL literal
-      # guards; plus the static guard that nothing in the app imports the I1
-      # modules yet, that they read no env and do no work at import, and that
-      # migration 0055 is additive only. No database.
+      # guards. No database.
       - name: Run session token primitives test (AUTH-SESSION-01-I1)
         run: npx ts-node test/authSessionToken.test.ts
-      - name: Run session store dormancy guard (AUTH-SESSION-01-I1)
-        run: npx ts-node test/authSessionDormancy.test.ts
+      # AURA-AUTH-SESSION-01-I2 -- the I1 dormancy guard is replaced (by design) by
+      # the static session-coverage scanner: no v1 session API, every route /
+      # page / seam / MCP consent path authenticates through lib/session.ts with
+      # the 503 outcome handled, only sign-in issues, PUBLIC routes classified,
+      # no import-time work; with negative fixtures. Plus the client outcome
+      # logic (503 = unknown, sign-out only on 200). No database.
+      - name: Run session coverage guard (AUTH-SESSION-01-I2)
+        run: npx ts-node test/authSessionCoverage.test.ts
+      - name: Run session client outcome test (AUTH-SESSION-01-I2)
+        run: npx ts-node test/authSessionClient.test.ts
       # AURA-AUTH-SESSION-01-I1 R1 (39233) -- controlled-clock tests of the single
       # absolute caller deadline / outcome classification / revoke retry, and the
       # compile-time provisional-vs-committed result contract. No database.
@@ -1303,6 +1309,14 @@ jobs:
       # raw-id release counts, deterministic barriers and the loopback fault proxy.
       - name: Run session R3 transaction binding and single-use release DB test (AUTH-SESSION-01-I1 R3)
         run: npx ts-node test/authSessionR3Db.test.ts
+      # AURA-AUTH-SESSION-01-I2 -- end-to-end session integration on the same
+      # disposable database: real routes and NextRequest/NextResponse; sign-in
+      # issuance (transactional code + session, single use, concurrency, COMMIT
+      # faults), E1/E3/E4, isolation, tampering, v1 tokens incl. the CURRENT
+      # secret, DB-clock expiry, D8 logout, B1, B3 ordering, DB failure and
+      # timeout (503), the production __Host- cookie contract and the cron cleanup.
+      - name: Run session I2 integration DB test (AUTH-SESSION-01-I2)
+        run: npx ts-node test/authSessionI2Db.test.ts
       - name: Verify every repository migration was recorded as applied
         run: |
           set -euo pipefail

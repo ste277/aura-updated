@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSessionFromRequest } from '../../../lib/session';
+import { getSessionFromRequest, SESSION_UNAVAILABLE, sessionUnavailableResponse } from '../../../lib/session';
 import { DIRECT_PLAN_SCHEDULING_MODE } from '../../../lib/plannedActivitySchedulingMode';
 import { beginTransaction, createPlannedActivity, listPlannedActivities, getPlannedActivityForOwner, getGuestConversionRedemption, claimGuestConversionToken, fillGuestConversionRedemption, getPlanCreationClaim, claimPlanCreation, fillPlanCreationClaim, linkGoalActivityToPlannedActivity, lockGoalParentLifecycleForPlanning, materializeGoalActivityRhythmOccurrence, getUserById, getSavedPersonForOwner } from '../../../lib/db';
 import { isMyPeopleServerEnabled } from '../../../lib/myPeopleGate';
@@ -109,7 +109,8 @@ function parseCalendarUrl(value: unknown): string | null {
 // server/DB, same reasoning as muhurthamSearchRequest.ts's own extraction.
 
 export async function GET(req: NextRequest) {
-  const session = getSessionFromRequest(req);
+  const session = await getSessionFromRequest(req);
+  if (session === SESSION_UNAVAILABLE) return sessionUnavailableResponse();
   if (!session) return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 });
 
   const plans = await listPlannedActivities(session.userId);
@@ -126,7 +127,8 @@ class PlanOverlapRejection extends Error {
 }
 
 export async function POST(req: NextRequest) {
-  const session = getSessionFromRequest(req);
+  const session = await getSessionFromRequest(req);
+  if (session === SESSION_UNAVAILABLE) return sessionUnavailableResponse();
   if (!session) return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 });
 
   const body = await parseJsonObject(req);

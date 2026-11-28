@@ -13,7 +13,7 @@
  *   DATABASE_URL="postgresql://..." npx ts-node test/goalActivityRhythmSetupDb.test.ts
  */
 import { upsertUserByEmail, updateBirthProfile, beginTransaction, listGoalActivitiesWithLinkedPlanStatus } from '../apps/web/lib/db';
-import { createSessionToken } from '../apps/web/lib/auth';
+
 import { persistAcceptedConstructedDay } from '../apps/web/lib/dayConstructorAcceptancePersistence';
 import type { AcceptConstructedDayRequest, AcceptedProposedItem } from '../apps/web/lib/dayConstructorAcceptance';
 import { deriveGoalActivityState } from '../apps/web/lib/goals';
@@ -23,6 +23,7 @@ import { POST as createGoal } from '../apps/web/app/api/goals/route';
 import { POST as addActivity } from '../apps/web/app/api/goals/[goalId]/activities/route';
 import { PATCH as setRhythmRoute } from '../apps/web/app/api/goals/[goalId]/activities/[goalActivityId]/rhythm/route';
 import { GET as getGoalDetail } from '../apps/web/app/api/goals/[goalId]/route';
+import { createTestSessionToken, TEST_SESSION_COOKIE } from './authSessionTestSupport';
 
 let allPassed = true;
 function check(label: string, condition: boolean) {
@@ -60,7 +61,7 @@ function item(overrides: Partial<AcceptedProposedItem> & { intentId: string; sta
  * own header comment for why a real NextRequest is never imported here. */
 function fakeRequest(cookie: string | undefined, jsonBody: unknown): any {
   return {
-    cookies: { get: (name: string) => (cookie !== undefined && name === 'as_session' ? { value: cookie } : undefined) },
+    cookies: { get: (name: string) => (cookie !== undefined && name === TEST_SESSION_COOKIE ? { value: cookie } : undefined) },
     json: async () => jsonBody,
   };
 }
@@ -87,8 +88,8 @@ async function main() {
   const userB = await upsertUserByEmail({ email: 'test-rhythm-setup-b@example.com', cityName: 'Chennai', latitude: 13.0827, longitude: 80.2707, timezone: TZ });
   await updateBirthProfile(userA.id, { birthDate: '1990-06-15', birthTime: '08:30', birthCityName: 'Chennai', birthLatitude: 13.0827, birthLongitude: 80.2707, birthTimezone: TZ });
   await updateBirthProfile(userB.id, { birthDate: '1990-06-15', birthTime: '08:30', birthCityName: 'Chennai', birthLatitude: 13.0827, birthLongitude: 80.2707, birthTimezone: TZ });
-  const tokenA = createSessionToken(userA.id, userA.email);
-  const tokenB = createSessionToken(userB.id, userB.email);
+  const tokenA = await createTestSessionToken(userA.id, userA.email);
+  const tokenB = await createTestSessionToken(userB.id, userB.email);
 
   const createdPlanIds: string[] = [];
   const createdGoalIds: string[] = [];

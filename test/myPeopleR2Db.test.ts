@@ -20,8 +20,8 @@
  */
 import { React, mount, click, typeInto, act } from './jsdomReactHarness';
 import { Pool } from 'pg';
+import { createTestSessionToken, TEST_SESSION_COOKIE } from './authSessionTestSupport';
 
-const { createSessionToken } = require('../apps/web/lib/auth');
 const db = require('../apps/web/lib/db');
 const peopleRoute = require('../apps/web/app/api/people/route');
 const personRoute = require('../apps/web/app/api/people/[personId]/route');
@@ -37,7 +37,7 @@ const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 let token = '';
 const sent: Array<{ method: string; url: string; body: any; status: number }> = [];
 const routeReq = (body: unknown, url: string): any => ({
-  cookies: { get: (n: string) => (n === 'as_session' ? { value: token } : undefined) },
+  cookies: { get: (n: string) => (n === TEST_SESSION_COOKIE ? { value: token } : undefined) },
   json: async () => body,
   headers: new Headers(),
   nextUrl: new URL(`http://localhost${url}`),
@@ -115,7 +115,7 @@ async function op(label: string, id: string, cardName: string, edit: (root: HTML
 async function main() {
   const tag = `mp1r2-${Date.now()}`;
   const user = await db.upsertUserByEmail({ email: `${tag}@mp1.aura.local`, cityName: 'Chennai', latitude: 13.0827, longitude: 80.2707, timezone: 'Asia/Kolkata' });
-  token = createSessionToken(user.id, user.email);
+  token = await createTestSessionToken(user.id, user.email);
   process.env.NEXT_PUBLIC_AURA_MY_PEOPLE = '0';
 
   // Seed (enabled, so My People types and fields can exist).

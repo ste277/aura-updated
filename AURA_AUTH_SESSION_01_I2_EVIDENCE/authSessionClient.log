@@ -1,0 +1,14 @@
+OK   B1 200 with a user -> signed_in
+OK   B2 200 { user: null } -> signed_out (the only signed-out outcome)
+OK   B3 503 -> unknown (never signed out)
+OK   B4 500 -> unknown
+OK   B5 offline -> unknown (N7)
+OK   B6 unparseable 200 -> unknown
+OK   O1 logout 200 -> signed_out after one request
+OK   O2 503 then 200 -> signed_out (one automatic retry)
+OK   O3 503 twice -> failed after exactly one retry (user stays signed in)
+OK   O4 offline -> failed, never a local-only sign-out
+OK   O5 a non-200 (e.g. 401) is not treated as a confirmed sign-out
+OK   O6 the failure message is the approved D8 text
+
+12 passed, 0 failed

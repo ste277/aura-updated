@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSessionFromRequest } from '../../../../../lib/session';
+import { getSessionFromRequest, SESSION_UNAVAILABLE, sessionUnavailableResponse } from '../../../../../lib/session';
 import { parseJsonObject } from '../../../../../lib/request';
 import { acceptRemainingDayRecomposition } from '../../../../../lib/remainingDayRecompositionAcceptance';
 import { SCHEDULING_ELIGIBILITY_STATUS_BY_CODE } from '../../../../../lib/schedulingEligibilityError';
@@ -16,7 +16,8 @@ import { SCHEDULING_ELIGIBILITY_STATUS_BY_CODE } from '../../../../../lib/schedu
  *   401 unauthenticated, 500 SAVE_FAILED (no `code`; rolled back; no internals leaked)
  */
 export async function POST(req: NextRequest) {
-  const session = getSessionFromRequest(req);
+  const session = await getSessionFromRequest(req);
+  if (session === SESSION_UNAVAILABLE) return sessionUnavailableResponse();
   if (!session) return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 });
   const body = await parseJsonObject(req);
   const result = await acceptRemainingDayRecomposition(session.userId, body?.proposalToken);

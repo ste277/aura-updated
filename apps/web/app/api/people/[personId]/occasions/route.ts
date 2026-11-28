@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSessionFromRequest } from '../../../../../lib/session';
+import { getSessionFromRequest, SESSION_UNAVAILABLE, sessionUnavailableResponse } from '../../../../../lib/session';
 import {
   createPersonOccasion,
   getSavedPersonForOwner,
@@ -28,7 +28,8 @@ const notFound = () => NextResponse.json({ error: 'Not found.' }, { status: 404 
 
 export async function GET(req: NextRequest, { params }: { params: { personId: string } }) {
   if (!isMyPeopleServerEnabled()) return notFound();
-  const session = getSessionFromRequest(req);
+  const session = await getSessionFromRequest(req);
+  if (session === SESSION_UNAVAILABLE) return sessionUnavailableResponse();
   if (!session) return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 });
 
   const person = await getSavedPersonForOwner(session.userId, params.personId);
@@ -42,7 +43,8 @@ export async function GET(req: NextRequest, { params }: { params: { personId: st
 
 export async function POST(req: NextRequest, { params }: { params: { personId: string } }) {
   if (!isMyPeopleServerEnabled()) return notFound();
-  const session = getSessionFromRequest(req);
+  const session = await getSessionFromRequest(req);
+  if (session === SESSION_UNAVAILABLE) return sessionUnavailableResponse();
   if (!session) return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 });
 
   const body = await parseJsonObject(req);

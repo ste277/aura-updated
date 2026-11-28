@@ -13,10 +13,11 @@
  * apart from the date (the My Day FIND body itself is pinned by the jsdom suite).
  */
 import { upsertUserByEmail, beginTransaction } from '../apps/web/lib/db';
-import { createSessionToken } from '../apps/web/lib/auth';
+
 import { localDateTimeToUTC, getDatePartsInTimezone, addDaysToDateStr } from '../apps/web/lib/timezone';
 import { POST as plansRoute } from '../apps/web/app/api/plans/route';
 import { POST as timingSearchRoute } from '../apps/web/app/api/timing-search/route';
+import { createTestSessionToken, TEST_SESSION_COOKIE } from './authSessionTestSupport';
 
 const { saveUpcomingPlanFromCandidate, PlanOverlapSaveError } = require('../apps/web/components/PlanWithAuraView');
 
@@ -51,7 +52,7 @@ const routes: Record<string, (req: any) => Promise<Response>> = { '/api/plans': 
   if (!route || (opts?.method ?? 'GET').toUpperCase() !== 'POST') throw new Error(`unrouted ${url}`);
   const body = JSON.parse(opts.body);
   const token = currentToken;
-  return route({ cookies: { get: (n: string) => (token !== undefined && n === 'as_session' ? { value: token } : undefined) }, json: async () => body, headers: new Headers() });
+  return route({ cookies: { get: (n: string) => (token !== undefined && n === TEST_SESSION_COOKIE ? { value: token } : undefined) }, json: async () => body, headers: new Headers() });
 };
 
 const today = getDatePartsInTimezone(TZ, new Date()).dateStr;
@@ -64,7 +65,7 @@ async function main() {
   const mk = async (k: string) => {
     const u = await upsertUserByEmail({ email: `hpg5i2-${k}-${tag}@e2e.aura.local`, cityName: 'Chennai', latitude: 13.0827, longitude: 80.2707, timezone: TZ });
     await sql(`UPDATE "User" SET timezone = $1 WHERE id = $2`, [TZ, u.id]);
-    return { ...u, token: createSessionToken(u.id, u.email) };
+    return { ...u, token: await createTestSessionToken(u.id, u.email) };
   };
   const A = await mk('a');
   const B = await mk('b');

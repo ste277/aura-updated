@@ -14,8 +14,9 @@
  *   DATABASE_URL="postgresql://..." npx ts-node test/locationExplicitConfirmationApiDb.test.ts
  */
 import { upsertUserByEmail, beginTransaction, getUserById } from '../apps/web/lib/db';
-import { createSessionToken, SESSION_COOKIE_NAME } from '../apps/web/lib/auth';
+
 import { PATCH as locationRoute } from '../apps/web/app/api/users/location/route';
+import { createTestSessionToken, TEST_SESSION_COOKIE } from './authSessionTestSupport';
 
 let allPassed = true;
 function check(label: string, condition: boolean) {
@@ -40,7 +41,7 @@ async function sql(text: string, params: unknown[] = []): Promise<any[]> {
  * async json() body reader. '__malformed__' simulates a body that throws
  * on .json(), the same sentinel the existing move-API test suite uses. */
 const req = (tok: string | null, body: unknown): any => ({
-  cookies: { get: (n: string) => (tok && n === SESSION_COOKIE_NAME ? { value: tok } : undefined) },
+  cookies: { get: (n: string) => (tok && n === TEST_SESSION_COOKIE ? { value: tok } : undefined) },
   json: async () => {
     if (body === '__malformed__') throw new SyntaxError('bad json');
     return body;
@@ -65,8 +66,8 @@ async function callPatch(token: string | null, body: unknown) {
 async function main() {
   const userA = await upsertUserByEmail({ email: 'test-pr8-location-a@example.com', ...CHENNAI });
   const userB = await upsertUserByEmail({ email: 'test-pr8-location-b@example.com', ...CHENNAI });
-  const tokenA = createSessionToken(userA.id, userA.email);
-  const tokenB = createSessionToken(userB.id, userB.email);
+  const tokenA = await createTestSessionToken(userA.id, userA.email);
+  const tokenB = await createTestSessionToken(userB.id, userB.email);
 
   const resetUser = async (userId: string) =>
     sql(`UPDATE "User" SET "cityName" = $2, latitude = $3, longitude = $4, timezone = $5, "locationConfirmedAt" = NULL WHERE id = $1`,
@@ -131,7 +132,7 @@ async function main() {
     // user (simulating a fresh sign-in) reads the identical persisted
     // state; confirmation is a plain DB column, never session-scoped.
     // ============================================================
-    const freshSignInToken = createSessionToken(userA.id, userA.email);
+    const freshSignInToken = await createTestSessionToken(userA.id, userA.email);
     const viaNewSession = await callPatch(freshSignInToken, confirmCurrentPayload(CHENNAI));
     check('8. a brand-new session token for the same user can read/re-confirm the identical persisted location', viaNewSession.status === 200 && viaNewSession.body.cityName === 'Chennai');
 

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSessionFromRequest } from '../../../../../lib/session';
+import { getSessionFromRequest, SESSION_UNAVAILABLE, sessionUnavailableResponse } from '../../../../../lib/session';
 import { parseJsonObject } from '../../../../../lib/request';
 import { movePlannedActivity, MovePlanError, type MovePlanErrorCode } from '../../../../../lib/planMove';
 
@@ -23,7 +23,8 @@ const STATUS_BY_CODE: Record<MovePlanErrorCode, number> = {
  * successor; a retry of an already-successful Move returns the same pair.
  */
 export async function POST(req: NextRequest, { params }: { params: { planId: string } }) {
-  const session = getSessionFromRequest(req);
+  const session = await getSessionFromRequest(req);
+  if (session === SESSION_UNAVAILABLE) return sessionUnavailableResponse();
   if (!session) return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 });
 
   const body = await parseJsonObject(req);

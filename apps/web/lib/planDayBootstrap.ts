@@ -71,13 +71,14 @@ export function resolvePlanDayBootstrap(userTimezone: string, now: Date, horizon
 }
 
 export interface PlanDayBootstrapDeps {
-  /** `() => cookies().get(SESSION_COOKIE_NAME)?.value` in production. */
+  /** `() => cookies().get(activeSessionCookieName())?.value` in production. */
   getSessionToken: () => string | undefined;
-  /** `verifySessionToken` (auth.ts), passed by reference -- the SAME
-   * canonical verification every route in this app already uses (this
+  /** AURA-AUTH-SESSION-01-I2: the database-backed verification of
+   * lib/session.ts (async; throws on an outage, so the page fails instead of
+   * rendering signed out) -- the SAME canonical verification every route uses (this
    * ticket's own section 15: reuse the existing mechanism, never a
    * second auth model). */
-  verifySession: (token: string) => { userId: string } | null;
+  verifySession: (token: string) => { userId: string } | null | Promise<{ userId: string } | null>;
   /** `getUserById` (db.ts), passed by reference. `availabilityConfigured`
    * is optional here (this ticket's own section 8) -- the real `User` row
    * always carries it, but a test fixture supplying only `{ timezone }`
@@ -118,7 +119,7 @@ export async function resolvePlanDayServerProps(deps: PlanDayBootstrapDeps, hori
   const token = deps.getSessionToken();
   if (!token) return null;
 
-  const session = deps.verifySession(token);
+  const session = await deps.verifySession(token);
   if (!session) return null;
 
   const user = await deps.getUser(session.userId);
@@ -172,7 +173,7 @@ export interface GoalActivityHandoffDeps {
    * its own too). A cookie read + HMAC verify is cheap; this is not a
    * meaningful duplication cost. */
   getSessionToken: () => string | undefined;
-  verifySession: (token: string) => { userId: string } | null;
+  verifySession: (token: string) => { userId: string } | null | Promise<{ userId: string } | null>;
   /** `listGoalActivitiesWithLinkedPlanStatus` (db.ts), passed by
    * reference -- the SAME already-merged PR A read this ticket's own
    * section 40's "reuse the already-merged PR A APIs" instruction asks
@@ -224,7 +225,7 @@ export async function resolveGoalActivityHandoff(deps: GoalActivityHandoffDeps, 
 
   const token = deps.getSessionToken();
   if (!token) return [];
-  const session = deps.verifySession(token);
+  const session = await deps.verifySession(token);
   if (!session) return [];
 
   const requestedIdSet = new Set(requestedIds);
@@ -313,7 +314,7 @@ export interface CaptureHandoffItem {
 
 export interface CaptureHandoffDeps {
   getSessionToken: () => string | undefined;
-  verifySession: (token: string) => { userId: string } | null;
+  verifySession: (token: string) => { userId: string } | null | Promise<{ userId: string } | null>;
   /** `listCapturesWithLinkedPlanStatus` (db.ts), passed by reference. */
   listCaptures: (
     userId: string
@@ -334,7 +335,7 @@ export async function resolveCaptureHandoff(deps: CaptureHandoffDeps, capturesPa
 
   const token = deps.getSessionToken();
   if (!token) return [];
-  const session = deps.verifySession(token);
+  const session = await deps.verifySession(token);
   if (!session) return [];
 
   const requested = new Set(requestedIds);
@@ -390,7 +391,7 @@ export type AutomaticGoalDemandBootstrapResult =
 
 export interface AutomaticGoalDemandBootstrapDeps extends GoalDemandCandidatesDeps {
   getSessionToken: () => string | undefined;
-  verifySession: (token: string) => { userId: string } | null;
+  verifySession: (token: string) => { userId: string } | null | Promise<{ userId: string } | null>;
 }
 
 /**
@@ -422,7 +423,7 @@ export async function resolveAutomaticGoalDemand(
 
   const token = deps.getSessionToken();
   if (!token) return { status: 'OK', suggestions: [], manualCanonicalGoalActivityIds: [] };
-  const session = deps.verifySession(token);
+  const session = await deps.verifySession(token);
   if (!session) return { status: 'OK', suggestions: [], manualCanonicalGoalActivityIds: [] };
 
   const result = await loadEligibleGoalDemand(deps, session.userId, planningLocalDate, timezone);

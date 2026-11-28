@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getUserById, listDailyReflections, listHabitLogsForInsights, INSIGHTS_HISTORY_DAYS } from '../../../../lib/db';
-import { getSessionFromRequest } from '../../../../lib/session';
+import { listDailyReflections, listHabitLogsForInsights, INSIGHTS_HISTORY_DAYS } from '../../../../lib/db';
+import { SESSION_UNAVAILABLE, sessionUnavailableResponse, getSessionWithUserFromRequest } from '../../../../lib/session';
 import { getDatePartsInTimezone } from '../../../../lib/timezone';
 import { classifyInsightsWindow } from '../../../../lib/insightsWindowAlignment';
 import { toInsightsObservation, isInCalendarMonth } from '../../../../lib/insightsTimezone';
@@ -10,10 +10,11 @@ import { computeAlignmentComparison } from '../../../../lib/insightsAlignment';
 const REFLECTION_HISTORY_DAYS = 60;
 
 export async function GET(req: NextRequest) {
-  const session = getSessionFromRequest(req);
+  const session = await getSessionWithUserFromRequest(req);
+  if (session === SESSION_UNAVAILABLE) return sessionUnavailableResponse();
   if (!session) return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 });
 
-  const user = await getUserById(session.userId);
+  const user = session.user;
   if (!user) return NextResponse.json({ error: 'User not found.' }, { status: 404 });
 
   // Insights Correctness + Historical Integrity V1 -- switched from the

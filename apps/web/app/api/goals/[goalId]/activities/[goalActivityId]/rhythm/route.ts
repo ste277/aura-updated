@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSessionFromRequest } from '../../../../../../../lib/session';
+import { getSessionFromRequest, SESSION_UNAVAILABLE, sessionUnavailableResponse } from '../../../../../../../lib/session';
 import { updateGoalActivityRhythmSettings } from '../../../../../../../lib/db';
 import { parseJsonObject } from '../../../../../../../lib/request';
 import { validateGoalActivityRhythm } from '../../../../../../../lib/goalActivityRhythm';
@@ -33,7 +33,8 @@ import {
  * otherwise 404 (another user's rhythm can never be read or modified).
  */
 export async function PATCH(req: NextRequest, { params }: { params: { goalId: string; goalActivityId: string } }) {
-  const session = getSessionFromRequest(req);
+  const session = await getSessionFromRequest(req);
+  if (session === SESSION_UNAVAILABLE) return sessionUnavailableResponse();
   if (!session) return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 });
 
   const body = await parseJsonObject(req);

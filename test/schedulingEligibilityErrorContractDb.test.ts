@@ -22,7 +22,7 @@ import {
   logPlannedActivity,
   deletePlannedActivity,
 } from '../apps/web/lib/db';
-import { createSessionToken } from '../apps/web/lib/auth';
+
 import { movePlannedActivity, MovePlanError } from '../apps/web/lib/planMove';
 import { persistAcceptedConstructedDay } from '../apps/web/lib/dayConstructorAcceptancePersistence';
 import type { AcceptConstructedDayRequest } from '../apps/web/lib/dayConstructorAcceptance';
@@ -30,6 +30,7 @@ import { signPreviewItem } from '../apps/web/lib/dayConstructorPreviewIntegrity'
 import { parseAcceptResponseBody } from '../apps/web/lib/acceptConstructedDay';
 import { classifyAcceptanceUiState } from '../apps/web/lib/dayPlanAcceptancePresentation';
 import { fixtureAnchorMonday, addCivilDays, realClockReferenceForFixture } from './lifecycleFixtureCalendar';
+import { createTestSessionToken, TEST_SESSION_COOKIE } from './authSessionTestSupport';
 
 let allPassed = true;
 function check(label: string, condition: boolean) {
@@ -41,7 +42,7 @@ const TZ = 'Asia/Kolkata';
 
 function req(tok: string | null, body: Record<string, unknown>): any {
   return {
-    cookies: { get: (n: string) => (tok && n === 'as_session' ? { value: tok } : undefined) },
+    cookies: { get: (n: string) => (tok && n === TEST_SESSION_COOKIE ? { value: tok } : undefined) },
     headers: new Headers(),
     nextUrl: new URL('http://localhost/api/plans'),
     json: async () => body,
@@ -82,7 +83,7 @@ async function freshUserAndGoal(emailTag: string, activityTitle: string, rhythm?
   await sql(`DELETE FROM "Goal" WHERE "userId" IN (SELECT id FROM "User" WHERE email = $1)`, [email]).catch(() => {});
   await sql(`DELETE FROM "User" WHERE email = $1`, [email]).catch(() => {});
   const user = await upsertUserByEmail({ email, cityName: 'Chennai', latitude: 13.0827, longitude: 80.2707, timezone: TZ });
-  const tok = createSessionToken(user.id, user.email);
+  const tok = await createTestSessionToken(user.id, user.email);
   const { goal, activities } = await createGoalWithActivities({ userId: user.id, title: `Goal ${emailTag}`, targetDate: null, activities: [{ title: activityTitle, activityId: null, rhythm }] });
   const ga = activities[0];
   return { email, user, tok, goal, ga };
@@ -267,11 +268,11 @@ async function main() {
         goalActivityLinks: [{ intentId, goalActivityId: ga.id }],
       };
     };
-    const fakeReq = (body: unknown): any => ({ cookies: { get: () => ({ value: createSessionToken(user.id, user.email) }) }, json: async () => body, headers: new Headers() });
-    const res1 = await acceptRoute(fakeReq(mkBody(0, 'i1')));
+    const fakeReq = async (body: unknown): Promise<any> => { const token = await createTestSessionToken(user.id); return { cookies: { get: () => ({ value: token }) }, json: async () => body, headers: new Headers() }; };
+    const res1 = await acceptRoute(await fakeReq(mkBody(0, 'i1')));
     const body1 = await res1.json();
     check('3a. route success unchanged: 200, SAVED, no code field', res1.status === 200 && body1.status === 'SAVED' && body1.code === undefined);
-    const res2 = await acceptRoute(fakeReq(mkBody(2 * HOUR, 'i2')));
+    const res2 = await acceptRoute(await fakeReq(mkBody(2 * HOUR, 'i2')));
     const body2 = await res2.json();
     check('3a. route daily capacity exceeded -> HTTP 409, status SAVE_FAILED, code DAILY_CAPACITY_EXCEEDED', res2.status === 409 && body2.status === 'SAVE_FAILED' && body2.code === 'DAILY_CAPACITY_EXCEEDED');
     await wipe(email, user.id);

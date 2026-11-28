@@ -4,8 +4,9 @@
 // a disposable local Postgres with migrations applied).
 import { GET as route } from '../apps/web/app/api/daily-briefing/today/route';
 import { upsertUserByEmail, updateBirthProfile, beginTransaction } from '../apps/web/lib/db';
-import { createSessionToken } from '../apps/web/lib/auth';
+
 import { getDatePartsInTimezone, addDaysToDateStr } from '../apps/web/lib/timezone';
+import { createTestSessionToken, TEST_SESSION_COOKIE } from './authSessionTestSupport';
 
 let allPassed = true;
 function check(label: string, condition: boolean) {
@@ -15,7 +16,7 @@ function check(label: string, condition: boolean) {
 
 function req(tok: string | null, url: string): any {
   return {
-    cookies: { get: (n: string) => (tok && n === 'as_session' ? { value: tok } : undefined) },
+    cookies: { get: (n: string) => (tok && n === TEST_SESSION_COOKIE ? { value: tok } : undefined) },
     headers: new Headers(),
     nextUrl: new URL(url),
   };
@@ -32,15 +33,15 @@ async function main() {
 
   const ist = await upsertUserByEmail({ email: 'test-db3-ist@example.com', cityName: 'Chennai', latitude: 13.0827, longitude: 80.2707, timezone: TZ_IST });
   await updateBirthProfile(ist.id, { birthDate: '1990-06-15', birthTime: '08:30', birthCityName: 'Chennai', birthLatitude: 13.0827, birthLongitude: 80.2707, birthTimezone: TZ_IST });
-  const istTok = createSessionToken(ist.id, ist.email);
+  const istTok = await createTestSessionToken(ist.id, ist.email);
 
   const neg = await upsertUserByEmail({ email: 'test-db3-neg@example.com', cityName: 'New York', latitude: 40.7128, longitude: -74.006, timezone: TZ_NEG });
   await updateBirthProfile(neg.id, { birthDate: '1985-12-01', birthTime: '14:45', birthCityName: 'New York', birthLatitude: 40.7128, birthLongitude: -74.006, birthTimezone: TZ_NEG });
-  const negTok = createSessionToken(neg.id, neg.email);
+  const negTok = await createTestSessionToken(neg.id, neg.email);
 
   const other = await upsertUserByEmail({ email: 'test-db3-other@example.com', cityName: 'Chennai', latitude: 13.0827, longitude: 80.2707, timezone: TZ_IST });
   await updateBirthProfile(other.id, { birthDate: '1975-03-02', birthTime: '04:10', birthCityName: 'Chennai', birthLatitude: 13.0827, birthLongitude: 80.2707, birthTimezone: TZ_IST });
-  const otherTok = createSessionToken(other.id, other.email);
+  const otherTok = await createTestSessionToken(other.id, other.email);
 
   const istToday = getDatePartsInTimezone(TZ_IST, new Date()).dateStr;
   const istYesterday = addDaysToDateStr(istToday, -1);
@@ -112,7 +113,7 @@ async function main() {
 
     // ---- 11. Typed unavailable response (incomplete profile) still works with ?date= ----
     const incomplete = await upsertUserByEmail({ email: 'test-db3-incomplete@example.com', cityName: 'Chennai', latitude: 13.0827, longitude: 80.2707, timezone: TZ_IST });
-    const incompleteTok = createSessionToken(incomplete.id, incomplete.email);
+    const incompleteTok = await createTestSessionToken(incomplete.id, incomplete.email);
     const r11 = await route(req(incompleteTok, `${BASE}?date=${istYesterday}`));
     const b11 = await r11.json();
     check('11. incomplete birth profile + historical date -> still 200 UNAVAILABLE/INCOMPLETE_BIRTH_PROFILE (not an error, not fabricated)', r11.status === 200 && b11.status === 'UNAVAILABLE' && b11.reason === 'INCOMPLETE_BIRTH_PROFILE');

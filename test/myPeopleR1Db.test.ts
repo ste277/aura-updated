@@ -17,7 +17,7 @@
  *       export carries no ownerUserId.
  */
 import { Pool } from 'pg';
-import { createSessionToken } from '../apps/web/lib/auth';
+
 import { createSavedPerson, getSavedPersonForOwner, upsertUserByEmail } from '../apps/web/lib/db';
 import { GET as listPeople, POST as createPerson } from '../apps/web/app/api/people/route';
 import { GET as getPerson, PATCH as patchPerson } from '../apps/web/app/api/people/[personId]/route';
@@ -25,6 +25,7 @@ import { POST as createOccasion } from '../apps/web/app/api/people/[personId]/oc
 import { PATCH as patchOccasion } from '../apps/web/app/api/people/[personId]/occasions/[occasionId]/route';
 import { GET as upcoming } from '../apps/web/app/api/people/occasions/upcoming/route';
 import { GET as exportData } from '../apps/web/app/api/users/export/route';
+import { createTestSessionToken, TEST_SESSION_COOKIE } from './authSessionTestSupport';
 
 let allPassed = true;
 function check(label: string, condition: boolean, detail?: unknown) {
@@ -35,7 +36,7 @@ function check(label: string, condition: boolean, detail?: unknown) {
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const sql = async (t: string, p: unknown[] = []) => (await pool.query(t, p)).rows;
 const fakeReq = (token: string, body?: unknown, url = 'http://localhost/api/people'): any => ({
-  cookies: { get: (n: string) => (n === 'as_session' ? { value: token } : undefined) },
+  cookies: { get: (n: string) => (n === TEST_SESSION_COOKIE ? { value: token } : undefined) },
   json: async () => body,
   headers: new Headers(),
   nextUrl: new URL(url),
@@ -66,7 +67,7 @@ async function main() {
   const tag = `mp1r1-${Date.now()}`;
   const mk = async (k: string) => {
     const u = await upsertUserByEmail({ email: `${k}-${tag}@mp1.aura.local`, cityName: 'Chennai', latitude: 13.0827, longitude: 80.2707, timezone: 'Asia/Kolkata' });
-    return { ...u, token: createSessionToken(u.id, u.email) };
+    return { ...u, token: await createTestSessionToken(u.id, u.email) };
   };
   const A = await mk('a');
   const L = await mk('limits');
