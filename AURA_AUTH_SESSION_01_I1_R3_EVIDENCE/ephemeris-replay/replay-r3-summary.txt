@@ -1,0 +1,249 @@
+SKIP 0 Install root deps (replaced by local root npm ci from the lockfile)
+PASS 1 2s Run ephemeris test
+PASS 2 11s Run PA-3B solar windows timezone fix test
+PASS 3 1s Run PA-3C-C1A typed solar errors test
+PASS 4 1s Run PA-3C-C1B-01 solar unavailable classification test
+PASS 5 2s Run PA-3C-C1B-02 Muhurtham eligibility test
+PASS 6 2s Run PA-3C-C1B-03 Daily Assistant availability test
+PASS 7 2s Run PA-3C-C1C-01 Timing Search solar unavailable containment test
+PASS 8 1s Run integration test
+PASS 9 1s Run timezone test
+PASS 10 2s Run window notifications test
+PASS 11 2s Run activity ontology test
+PASS 12 3s Run muhurta reasons test
+PASS 13 5s Run muhurta test
+PASS 14 3s Run PA-2C Tithi/Karana aberration fix test
+PASS 15 5s Run timing search test
+PASS 16 2s Run timing search API validation test
+PASS 17 11s Run remote MCP transport test
+PASS 18 7s Run local OAuth -> MCP test
+PASS 19 5s Run OAuth security regression test
+PASS 20 13s Run I2b OAuth production-readiness test
+PASS 21 6s Run I2b-S2 staging-blocker offline test
+PASS 22 4s Run I2b-S8 offline security test
+PASS 23 15s Run I2b-S10 offline activation-readiness test
+PASS 24 5s Run I2b-S11 offline remediation test
+PASS 25 5s Run I2b-S12 offline residual test
+PASS 26 1s Run panchang day service test
+PASS 27 3s Run panchang month service test
+PASS 28 1s Run window overlap test
+PASS 29 1s Run day activity suggestions test
+PASS 30 2s Run everyday activity catalog test
+PASS 31 16s Run Muhurtham Finder test
+PASS 32 3s Run Panchang reference-instant regression test
+PASS 33 4s Run Muhurtham search API validation test
+PASS 34 3s Run Muhurta rule packs test
+PASS 35 6s Run Muhurta traditional coverage test (PCE-2A)
+PASS 36 1s Run Lahiri ayanamsa epoch-fix regression test (PCE-4A)
+PASS 37 1s Run PCE-3B independent reference validation (strict checks fail CI; observational findings are report-only, printed to this step's own log, and never fail it -- see the test file's own doc comment)
+PASS 38 2s Run Marriage Muhurtham foundation test
+PASS 39 6s Run Marriage required eligibility test
+PASS 40 2s Run Griha Pravesh required eligibility test (PCE-3E)
+PASS 41 10s Run ceremonial Muhurtham eligibility test
+PASS 42 3s Run inauspicious period precedence test
+PASS 43 4s Run Marriage candidate discovery hardening test
+PASS 44 24s Run Ask Aura Marriage routing test
+PASS 45 6s Run Personal Muhurtham test
+PASS 46 2s Run SavedPerson request validation test
+PASS 47 1s Run SavedPerson natal context test
+PASS 48 11s Run Shared Muhurtham test
+PASS 49 3s Run everyday shared timing fit test
+PASS 50 1s Run score engine test
+PASS 51 10s Run Aura Moment alternatives (rescheduling) test
+PASS 52 2s Run Aura Moment request validation test
+PASS 53 2s Run Aura Updates test
+PASS 54 1s Run product metrics test
+PASS 55 1s Run Home dashboard time-left formatting test
+PASS 56 1s Run Intentional Day Builder domain test
+PASS 57 1s Run Goal Activity Rhythm structural guards test
+PASS 58 1s Run Automatic Goal suggestion inclusion test
+PASS 59 1s Run Goal demand intent id test
+PASS 60 1s Run Goal demand provenance authorization test
+PASS 61 1s Run Goal demand provenance authorization structural guards test
+PASS 62 1s Run Goal template category matching test
+PASS 63 2s Run Daily Guidance Daily Rhythm alignment test
+SKIP 64 Install web deps (restored npm ci install)
+PASS 65 2s Run Aura Moment test
+PASS 66 1s Run product events validation test
+PASS 67 28s Run palm reading engine and adapter tests (synthetic, fast)
+PASS 68 4s Run Palmistry content, privacy and isolation test
+PASS 69 6s Run Palmistry Explore + guide component test
+PASS 70 7s Run Palmistry Vercel build guard test
+PASS 71 7s Run personalised interpretation release-guard test (PALM-03-E1)
+PASS 72 4s Run database identity guard test
+PASS 73 3s Run Goal demand candidates test
+PASS 74 3s Run Home Goal Rhythm suggestions test
+PASS 75 3s Run Home Goal Rhythm prioritization and overflow test
+PASS 76 1s Run Home Ask Aura handoff test
+PASS 77 7s Run Home Ask Aura handoff component lifecycle test
+PASS 78 3s Run Goal Rhythm weekly proposal test
+PASS 79 23s Run PREF-01 availability preferences test
+PASS 80 2s Run Daily Rhythm scheduling test
+PASS 81 2s Run Daily Rhythm Find a Time test
+PASS 82 4s Run Daily Rhythm candidate coverage test
+PASS 83 4s Run HPG-FIX-01 activity title persistence test
+PASS 84 4s Run HPG-FIX-01 already-scheduled recommendation test
+PASS 85 4s Run HPG-FIX-01 weekly proposal validity test
+PASS 86 4s Run HPG-FIX-01 Home rhythm refresh (jsdom) test
+PASS 87 3s Run MR3 My Rhythm preferences editor (jsdom) test
+PASS 88 4s Run REM-01 notification settings (jsdom) test
+PASS 89 3s Run Aura Reminders eligibility test
+PASS 90 3s Run reminder push payload test
+PASS 91 2s Run reminder attention test
+PASS 92 2s Run reminder consistency test
+PASS 93 1s Run Web Push client capability test
+PASS 94 2s Run HPG-FIX-01 Goal -> Plan -> Tomorrow (V1-02) test
+PASS 95 3s Run Goal Rhythm weekly acceptance test
+PASS 96 2s Run Weekly plan review client test
+PASS 97 3s Run Goal planning-source adapter test
+PASS 98 3s Run Automatic Goal demand bootstrap test
+PASS 99 7s Run Plan-with-Aura view logic test
+PASS 100 3s Run Panchang calendar logic test
+PASS 101 6s Run Muhurtham Finder view logic test
+PASS 102 2s Run Home dashboard logic test
+PASS 103 3s Run Home recomposition test
+PASS 104 5s Run onboarding recommendation test
+PASS 105 2s Run Goal activity proposal test
+PASS 106 1s Run Goal create idempotency test
+PASS 107 2s Run Goals domain test
+PASS 108 2s Run Goals wiring test
+PASS 109 2s Run Goals presentation test
+PASS 110 2s Run Goal planning handoff test
+PASS 111 1s Run Goal planning handoff UI test
+PASS 112 2s Run Goal planning handoff wiring test
+PASS 113 1s Run Goal completion test
+PASS 114 2s Run Goal completion structural guards test
+PASS 115 1s Run Goal activity execution test
+PASS 116 1s Run Goal activity execution structural guards test
+PASS 117 2s Run Goal activity occurrence structural guards test
+PASS 118 2s Run Goal activity rhythm test
+PASS 119 1s Run Goal activity rhythm materialization structural guards test
+PASS 120 1s Run Goal activity rhythm Goal Detail structural guards test
+PASS 121 2s Run Goal activity rhythm Goal Detail UI test
+PASS 122 2s Run Goal activity rhythm setup structural guards test
+PASS 123 1s Run My Rhythm preferences test
+PASS 124 3s Run My Rhythm scheduling preferences test
+PASS 125 2s Run MR3 My Rhythm preferences UI test
+PASS 126 1s Run INS-01 alignment insight safeguards test
+PASS 127 2s Run Daily agenda Goal context test
+PASS 128 1s Run Goal context structural guards test
+PASS 129 1s Run Goal Detail completion structural guards test
+PASS 130 1s Run Right Now Goal context test
+PASS 131 1s Run Goal template completion test
+PASS 132 4s Run Goal-aware Recomposition presentation test
+PASS 133 2s Run Day Plan acceptance presentation test
+PASS 134 1s Run Scheduling eligibility presentation test
+PASS 135 7s Run Home Move test
+PASS 136 2s Run Home Skip test
+PASS 137 2s Run Missed activity presentation test
+PASS 138 2s Run Missed recovery test
+PASS 139 4s Run Skip planned activity test
+PASS 140 2s Run Full-day timeline navigation test
+PASS 141 2s Run Goal decomposition observability test
+PASS 142 2s Run Goals UI wiring test
+PASS 143 4s Run Decision Facts V1 architecture test
+PASS 144 2s Run opportunity projection test
+PASS 145 2s Run opportunity projection architecture test
+PASS 146 2s Run opportunity range adapter test
+PASS 147 1s Run opportunity range adapter architecture test
+PASS 148 3s Run recurrence period bounds test
+PASS 149 4s Run opportunity decision facts test
+PASS 150 2s Run opportunity decision facts architecture test
+PASS 151 4s Run manual Goal provenance parity test
+PASS 152 2s Run manual Goal provenance parity architecture test
+PASS 153 3s Run opportunity fact quality test
+PASS 154 4s Run opportunity fact quality architecture test
+PASS 155 3s Run Goal lifecycle authorization architecture test
+PASS 156 2s Run Constructor overload decision architecture test
+PASS 157 2s Run decision fact preparation architecture test
+PASS 158 4s Run decision fact preparation behavior test
+PASS 159 4s Run decision evidence test
+PASS 160 1s Run decision evidence architecture test
+PASS 161 2s Run decision pressure test
+PASS 162 2s Run decision pressure architecture test
+PASS 163 4s Run decision pressure authority test
+PASS 164 4s Run decision pressure catalog reachability test
+PASS 165 3s Run contention trace test
+PASS 166 3s Run contention trace architecture test
+PASS 167 3s Run contention observer isolation test
+PASS 168 3s Run shadow pressure evaluation test
+PASS 169 3s Run shadow pressure architecture test
+PASS 170 4s Run decision scheduling context test
+PASS 171 2s Run decision scheduling context architecture test
+PASS 172 8s Run promotion input test
+PASS 173 4s Run promotion input architecture test
+PASS 174 3s Run precedence anomaly real-pipeline test
+PASS 175 7s Run scheduling Date mutator architecture test
+PASS 176 3s Run construction basis test
+PASS 177 3s Run construction basis architecture test
+PASS 178 3s Run baseline placements test
+PASS 179 2s Run baseline placements architecture test
+PASS 180 15s Run promotion contention authority test
+PASS 181 2s Run promotion contention authority architecture test
+PASS 182 15s Run scheduling attempt authority test
+PASS 183 3s Run scheduling attempt authority architecture test
+PASS 184 8s Run local counterfactual test
+PASS 185 1s Run local counterfactual gate parity test
+PASS 186 3s Run local counterfactual architecture test
+PASS 187 6s Run counterfactual acceptance test
+PASS 188 2s Run counterfactual acceptance architecture test
+PASS 189 11s Run shadow policy observation test
+PASS 190 3s Run shadow policy observation architecture test
+PASS 191 41s Run active result materializer test
+PASS 192 6s Run active result materializer architecture test
+PASS 193 5s Run shadow policy execution test
+PASS 194 4s Run shadow policy execution architecture test
+PASS 195 4s Run shadow evidence test
+PASS 196 2s Run shadow evidence architecture test
+PASS 197 1s Run shadow review delta test
+PASS 198 1s Run shadow review delta architecture test
+PASS 199 5s Run shadow rollout R3 preview review test
+PASS 200 1s Run shadow rollout R3 architecture test
+PASS 201 1s Run seeded fixture reproducibility test
+PASS 202 2s Run Constructor blocker overlap architecture test
+PASS 203 10s Run lifecycle fixture calendar test
+PASS 204 2s Run birth date canonicalization test
+PASS 205 4s Run Constructor blocker overlap behavior test
+PASS 206 1s Run acceptance fresh-overlap architecture test
+PASS 207 2s Run day constructor preview integrity test
+PASS 208 1s Run day constructor preview item client test
+PASS 209 1s Run day plan preview item editing test
+PASS 210 1s Run day plan preview item editing wiring test
+PASS 211 2s Run day plan preview item lifecycle race condition test
+PASS 212 1s Run manual writer serialization architecture test
+PASS 213 1s Run Recomposition proposal overlap architecture test
+PASS 214 2s Run Forward Planner overlap blocker architecture test
+PASS 215 4s Run Find a Time constraints test (HPG5-V2-I1)
+PASS 216 4s Run Find a Time conflict component test (HPG5-V2-I1)
+PASS 217 6s Run sign-in resend / change-email component test (AURA-READY-03-F2)
+PASS 218 2s Run landing guest-entry component test (AURA-READY-02-F3)
+PASS 219 5s Run guest activity discovery tests (AURA-DISC-01)
+PASS 220 3s Run Find a Time error-state component test (AURA-READY-02-F4)
+PASS 221 1s Run conflict presentation test (HPG5-V2-I2)
+PASS 222 5s Run conflict panel and My Day save component test (HPG5-V2-I2)
+PASS 223 5s Run Home save conflict component test (HPG5-V2-I3)
+PASS 224 11s Run COMPAT-05 timezone shortOffset fallback test
+PASS 225 0s Run Android minimum-support static test
+PASS 226 0s Check JDK for COMPAT-03 Java logic tests
+PASS 227 1s Run COMPAT-03 geolocation patch script test
+PASS 228 1s Run COMPAT-03 geolocation Java logic test
+PASS 229 0s Run COMPAT-03 geolocation Java logic harness test
+PASS 230 1s Run M2 client request id test
+PASS 231 1s Run M2 Android back navigation test
+PASS 232 1s Run onboarding Goal step wiring test
+PASS 233 1s Run pending activity visual consistency test
+PASS 234 1s Run pending activity reload visibility test
+PASS 235 1s Run location search API test
+PASS 236 0s Run LocationPicker smart selection test
+PASS 237 0s Run LocationPicker native geolocation test
+PASS 238 1s Run IOS-02 reverse-geocode POST route test
+PASS 239 2s Run LocationPicker M2-D reliability test
+PASS 240 3s Run LocationPicker native timeout diagnostics test
+PASS 241 2s Run LocationPicker StrictMode lifecycle test
+PASS 242 3s Run LocationPicker REL-03 supersede test
+PASS 243 2s Run IOS-02 location errors and privacy test
+PASS 244 1s Run session token primitives test (AUTH-SESSION-01-I1)
+PASS 245 3s Run session store dormancy guard (AUTH-SESSION-01-I1)
+PASS 246 1s Run session deadline and retry controlled-clock test (AUTH-SESSION-01-I1 R1)
+PASS 247 2s Run session provisional/committed contract test (AUTH-SESSION-01-I1 R1)
+DONE pass=246 fail=0

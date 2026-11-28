@@ -1,0 +1,69 @@
+PASS  generateSessionId: 43 base64url characters
+PASS  generateSessionId: 1 000 ids are unique
+PASS  hashSessionId: 43 base64url characters, deterministic, differs from the id
+PASS  hashSessionId: rejects a malformed id
+PASS  deriveSessionKey: rejects a missing or short secret
+PASS  deriveSessionKey: key bytes are not enumerable (never serialized or logged)
+PASS  createSessionTokenV2: refuses a forged key object
+PASS  verifySessionTokenV2: refuses a forged key object
+PASS  round trip: verifies and returns exactly the claims
+PASS  round trip: the token does not contain the raw secret
+PASS  rejects a v1 session token signed with the same AUTH_SECRET
+PASS  rejects a magic-link token signed with the same AUTH_SECRET
+PASS  rejects a guest-state token signed with the same AUTH_SECRET
+PASS  rejects a Day Constructor preview token signed with the same AUTH_SECRET
+PASS  rejects a recomposition token signed with the same AUTH_SECRET
+PASS  rejects a a v2-shaped payload signed with the legacy key signed with the same AUTH_SECRET
+PASS  the legacy verify() rejects a v2 token
+PASS  the legacy verifySessionToken() rejects a v2 token
+PASS  rejects a token signed with a key from a different secret
+PASS  rejects a tampered signature
+PASS  rejects a tampered body (original signature, different uid)
+PASS  rejects an empty string
+PASS  rejects a non-string
+PASS  rejects three segments
+PASS  rejects one segment
+PASS  rejects non-base64url characters
+PASS  rejects an overlong token
+PASS  rejects an expired token (now == exp)
+PASS  rejects an expired token (now > exp)
+PASS  rejects iat more than 60 s in the future
+PASS  accepts iat within the 60 s skew
+PASS  create: refuses a malformed sid
+PASS  create: refuses a non-UUID uid
+PASS  create: refuses exp <= iat
+PASS  create: refuses a lifetime beyond 30 days
+PASS  create: refuses non-integer times
+PASS  HKDF parameters match the design (re-derived token verifies)
+PASS  rejects a correctly signed token with wrong typ
+PASS  rejects a correctly signed token with wrong version (1)
+PASS  rejects a correctly signed token with wrong version (string "2")
+PASS  rejects a correctly signed token with missing sid
+PASS  rejects a correctly signed token with malformed sid
+PASS  rejects a correctly signed token with malformed uid
+PASS  rejects a correctly signed token with an extra field
+PASS  rejects a correctly signed token with an array payload
+PASS  rejects a correctly signed token with string times
+PASS  rejects a correctly signed token with exp before iat
+PASS  rejects a correctly signed non-JSON body
+PASS  cookie name: __Host- prefix only when Secure
+PASS  cookie options: HttpOnly, Secure, SameSite=Lax, Path=/, no Domain
+PASS  cookie options: Max-Age derived from expiresAt
+PASS  cookie options: Max-Age never exceeds 30 days
+PASS  cookie options: refuses an expired or invalid expiresAt
+PASS  clear (secure): __Host-as_sid, as_sid and legacy as_session, all Secure, Path=/, Max-Age=0
+PASS  clear (insecure): as_sid and as_session only (a __Host- cookie cannot exist there)
+PASS  legacy cookie name matches lib/auth.ts
+PASS  sqlLiteral: accepts a valid idHash / userId / reason
+PASS  sqlLiteral: rejects a quote
+PASS  sqlLiteral: rejects a backslash
+PASS  sqlLiteral: rejects a NUL
+PASS  sqlLiteral: rejects an overlong value
+PASS  sqlLiteral: rejects an injection attempt
+PASS  sqlLiteral: rejects a non-UUID
+PASS  sqlLiteral: rejects an unknown reason
+PASS  sqlLiteral: rejects a non-string
+PASS  sqlInteger: bounds and integers only
+PASS  error: fixed message, name and reason; nothing else
+
+67 passed, 0 failed

@@ -1,0 +1,63 @@
+MP-1 revision: 7b8d0fd5a0cb33302297fe752f5005d27aaad16d
+I1 R3 revision: f8c75230c654bd9cff2e2b31200640e63fb3075b
+Combined tree: I1 R3 + MP-1 merged locally (never committed or pushed); 3 guard conflicts resolved by union
+
+== Order A: I1 (0055) applied first, then MP-1 (0056)
+  step 1 deploy I1-only tree:
+    Applying migration `0054_reminder_dispatch_heartbeat`
+    Applying migration `0055_auth_session`
+    All migrations have been successfully applied.
+  step 2 deploy combined tree:
+    Applying migration `0056_my_people_foundation`
+    All migrations have been successfully applied.
+  status (combined tree):
+    56 migrations found in prisma/migrations
+    Database schema is up to date!
+  ledger (last three applied, then distinct count): 0054_reminder_dispatch_heartbeat,0055_auth_session,0056_my_people_foundation 56 
+  tests (combined tree):
+  authSessionStoreDb: exit=0 :: 50 passed, 0 failed
+  authSessionR1Db: exit=0 :: 42 passed, 0 failed
+  authSessionR3Db: exit=0 :: 24 passed, 0 failed
+  birthDateWritersDb: exit=0 :: ALL BIRTH DATE WRITERS DB CHECKS PASSED
+  myPeopleDb: exit=0 :: ALL MY PEOPLE DB CHECKS PASSED
+  myPeopleSwitchRollbackDb: exit=0 :: ALL MY PEOPLE SWITCH ROLLBACK CHECKS PASSED
+  myPeopleR1Db: exit=0 :: ALL MY PEOPLE R1 DB CHECKS PASSED
+  peopleViewLegacyEditorDb: exit=0 :: ALL LEGACY EDITOR DB CHECKS PASSED
+  myPeopleR2Db: exit=0 :: ALL MY PEOPLE R2 DB CHECKS PASSED
+  myPeopleR3Db: exit=0 :: ALL MY PEOPLE R3 DB CHECKS PASSED
+  myPeopleR4Db: exit=0 :: ALL MY PEOPLE R4 DB CHECKS PASSED
+
+== Order B: MP-1 (0056) applied first, then I1 (0055)
+  step 1 deploy MP-1-only tree:
+    Applying migration `0054_reminder_dispatch_heartbeat`
+    Applying migration `0056_my_people_foundation`
+    All migrations have been successfully applied.
+  step 2 deploy combined tree:
+    Applying migration `0055_auth_session`
+    All migrations have been successfully applied.
+  status (combined tree):
+    56 migrations found in prisma/migrations
+    Database schema is up to date!
+  ledger (last three applied, then distinct count): 0054_reminder_dispatch_heartbeat,0056_my_people_foundation,0055_auth_session 56 
+  tests (combined tree):
+  authSessionStoreDb: exit=0 :: 50 passed, 0 failed
+  authSessionR1Db: exit=0 :: 42 passed, 0 failed
+  authSessionR3Db: exit=0 :: 24 passed, 0 failed
+  birthDateWritersDb: exit=0 :: ALL BIRTH DATE WRITERS DB CHECKS PASSED
+  myPeopleDb: exit=0 :: ALL MY PEOPLE DB CHECKS PASSED
+  myPeopleSwitchRollbackDb: exit=0 :: ALL MY PEOPLE SWITCH ROLLBACK CHECKS PASSED
+  myPeopleR1Db: exit=0 :: ALL MY PEOPLE R1 DB CHECKS PASSED
+  peopleViewLegacyEditorDb: exit=0 :: ALL LEGACY EDITOR DB CHECKS PASSED
+  myPeopleR2Db: exit=0 :: ALL MY PEOPLE R2 DB CHECKS PASSED
+  myPeopleR3Db: exit=0 :: ALL MY PEOPLE R3 DB CHECKS PASSED
+  myPeopleR4Db: exit=0 :: ALL MY PEOPLE R4 DB CHECKS PASSED
+
+== Guards and dormancy in the combined tree (no database)
+  availabilityPreferencesPref01: exit=0 :: ALL PREF-01 AVAILABILITY PREFERENCE CHECKS PASSED
+  myRhythmPreferencesUi: exit=0 :: ALL MR3 UI CHECKS PASSED
+  insightsAlignmentSafeguards: exit=0 :: ALL INS-01 ALIGNMENT SAFEGUARD CHECKS PASSED
+  authSessionDormancy: exit=0 :: 33 passed, 0 failed
+  authSessionToken: exit=0 :: 68 passed, 0 failed
+  authSessionDeadline: exit=0 :: 27 passed, 0 failed
+  authSessionContract: exit=0 :: 21 passed, 0 failed
+  myPeopleRequest: exit=0 :: ALL MY PEOPLE REQUEST CHECKS PASSED

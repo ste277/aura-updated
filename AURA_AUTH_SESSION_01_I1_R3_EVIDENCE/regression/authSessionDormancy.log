@@ -1,0 +1,35 @@
+PASS  D1 / D1b / D2 / D3: no runtime reference, reachability, env read or import-time work (421 files, 110 entry points, 499 reachable)
+PASS  entry points discovered (app/, pages/, configs)
+PASS  I1 module present: lib/authSessionToken.ts
+PASS  I1 module present: lib/authSessionDb.ts
+PASS  I1 module present: lib/authSessionStore.ts
+PASS  I1 module present: lib/sessionErrors.ts
+PASS  D4: migration 0055 is additive only (CREATE TABLE / CREATE INDEX for AuthSession)
+PASS  D4: migration 0055 creates exactly one table and two indexes
+PASS  P import probe: all four I1 modules load with an empty application environment
+PASS  P import probe: importing them triggers no pool/client, connection, timer, env read, key derivation, randomness or file write
+PASS  fixture baseline: copies of the real I1 modules + a plain route are clean
+PASS  fixture rejects: middleware.ts named import (D1)
+PASS  fixture rejects: src/middleware.ts via @/ alias (D1)
+PASS  fixture rejects: instrumentation.ts dynamic import (D1)
+PASS  fixture rejects: existing route + aliased import (D1)
+PASS  fixture rejects: namespace import (D1)
+PASS  fixture rejects: default import (D1)
+PASS  fixture rejects: side-effect import (D1)
+PASS  fixture rejects: export * re-export (D1)
+PASS  fixture rejects: named re-export (D1)
+PASS  fixture rejects: dynamic import, template literal (D1)
+PASS  fixture rejects: require, template literal (D1)
+PASS  fixture rejects: import = require (D1)
+PASS  fixture rejects: computed dynamic import (D1)
+PASS  fixture rejects: I1: pool inside a top-level if block (D3)
+PASS  fixture rejects: I1: key derived in an IIFE (D3)
+PASS  fixture rejects: I1: class static block (D3)
+PASS  fixture rejects: I1: conditional new Pool (D3)
+PASS  fixture rejects: I1: env read inside a function (D2)
+PASS  fixture rejects: indirect runtime import through a barrel (D1 on the barrel, D1b chain from the route)
+PASS  fixture allows: type-only imports / exports, and calls inside function bodies of I1 modules
+PASS  fixture allows: test/ files are not production (not scanned)
+PASS  probe control: an import-time timer and env read are recorded
+
+33 passed, 0 failed

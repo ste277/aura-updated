@@ -1,0 +1,20 @@
+PASS  compile-time contract type-checked (no sid on provisional / decision / label; no forged session or authorization; only a narrowed committed decision authorizes)
+PASS  run: acknowledged COMMIT -> committed + authorization (no sid on either)
+PASS  run: COMMIT answered ROLLBACK -> rolled_back, no authorization
+PASS  run: COMMIT rejected (40001) -> rolled_back (rejected_at_commit), no authorization
+PASS  run: socket error, no SQLSTATE -> ambiguous, no authorization
+PASS  run: socket error, no SQLSTATE -> the provisional can never be committed again
+PASS  run: connection exception 08006 -> ambiguous, no authorization
+PASS  run: connection exception 08006 -> the provisional can never be committed again
+PASS  run: admin shutdown 57P01 -> ambiguous, no authorization
+PASS  run: admin shutdown 57P01 -> the provisional can never be committed again
+PASS  run: unexpected reply -> ambiguous, no authorization
+PASS  run: unexpected reply -> the provisional can never be committed again
+PASS  run: no open transaction holding the row -> rolled_back (session_not_in_transaction); COMMIT never sent
+PASS  run: connection lost before COMMIT was sent -> rolled_back (commit_not_sent), never authorized
+PASS  run: aborted transaction (25P02 on the check) -> COMMIT sent, answers ROLLBACK -> rolled_back
+PASS  run: a forged authorization is refused
+PASS  run: a hand-made provisional object cannot be committed / authorized
+PASS  run: classification is refused unless the commit was ambiguous
+
+18 passed, 0 failed

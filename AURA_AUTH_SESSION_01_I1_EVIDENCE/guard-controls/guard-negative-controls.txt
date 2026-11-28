@@ -1,0 +1,29 @@
+== baseline (0055_auth_session present, nothing else)
+availabilityPreferencesPref01: PASS
+myRhythmPreferencesUi: PASS
+insightsAlignmentSafeguards: PASS
+dayConstructorAcceptanceFreshOverlapArchitecture: PASS
+scheduleWriteManualSerializationArchitecture: PASS
+== probe: unrelated migration 0057_unrelated_guard_probe (expect FAIL)
+availabilityPreferencesPref01: FAIL
+myRhythmPreferencesUi: FAIL
+insightsAlignmentSafeguards: FAIL
+== probe: misnamed 0055 migration 0055_other_feature (expect FAIL)
+availabilityPreferencesPref01: FAIL
+myRhythmPreferencesUi: FAIL
+insightsAlignmentSafeguards: FAIL
+== probe: another production file sets lock_timeout/statement_timeout (expect FAIL)
+dayConstructorAcceptanceFreshOverlapArchitecture: FAIL
+scheduleWriteManualSerializationArchitecture: FAIL
+== probe: authSessionDb.ts touches the schedule-write lock (temporary mutation, expect FAIL)
+dayConstructorAcceptanceFreshOverlapArchitecture: FAIL
+scheduleWriteManualSerializationArchitecture: FAIL
+== probe: NOWAIT inside authSessionDb.ts (temporary mutation, expect FAIL for 212)
+scheduleWriteManualSerializationArchitecture: FAIL
+== restored authSessionDb.ts sha256 matches: yes
+== baseline again
+availabilityPreferencesPref01: PASS
+myRhythmPreferencesUi: PASS
+insightsAlignmentSafeguards: PASS
+dayConstructorAcceptanceFreshOverlapArchitecture: PASS
+scheduleWriteManualSerializationArchitecture: PASS

@@ -1,0 +1,106 @@
+{
+  "implementation": "R2+",
+  "A1_substituted_transaction_after_caller_commit": {
+    "decision": {
+      "outcome": "committed",
+      "authorization": {
+        "kind": "commit_authorization",
+        "idHash": "<synthetic-redacted>",
+        "userId": "<synthetic-redacted>"
+      }
+    },
+    "outcome": "committed",
+    "releases": 1,
+    "results": [
+      "RAW SID RELEASED"
+    ]
+  },
+  "A2_release_after_ambiguous_T1_commit_via_substitute": {
+    "t1Commit": "ambiguous",
+    "rowCommittedByT1": true,
+    "decision": {
+      "outcome": "committed",
+      "authorization": {
+        "kind": "commit_authorization",
+        "idHash": "<synthetic-redacted>",
+        "userId": "<synthetic-redacted>"
+      }
+    },
+    "outcome": "committed",
+    "releases": 1,
+    "results": [
+      "RAW SID RELEASED"
+    ]
+  },
+  "A3_rollback_then_mismatched_reinsert": {
+    "decision": {
+      "outcome": "committed",
+      "authorization": {
+        "kind": "commit_authorization",
+        "idHash": "<synthetic-redacted>",
+        "userId": "<synthetic-redacted>"
+      }
+    },
+    "outcome": "committed",
+    "releases": 1,
+    "results": [
+      "RAW SID RELEASED"
+    ]
+  },
+  "A4_caller_commit_and_begin_queued_behind_helper": {
+    "decision": {
+      "outcome": "committed",
+      "authorization": {
+        "kind": "commit_authorization",
+        "idHash": "<synthetic-redacted>",
+        "userId": "<synthetic-redacted>"
+      }
+    },
+    "callerCommitGotNoTransactionNotice": false,
+    "authorizationCameFromTheOriginatingTransaction": false,
+    "outcome": "committed",
+    "releases": 1,
+    "results": [
+      "RAW SID RELEASED"
+    ]
+  },
+  "A4b_transaction_replaced_before_helper": {
+    "decision": {
+      "outcome": "committed",
+      "authorization": {
+        "kind": "commit_authorization",
+        "idHash": "<synthetic-redacted>",
+        "userId": "<synthetic-redacted>"
+      }
+    },
+    "outcome": "committed",
+    "releases": 1,
+    "results": [
+      "RAW SID RELEASED"
+    ]
+  },
+  "B_overlapping_release_x2": {
+    "outcome": "committed",
+    "releases": 2,
+    "results": [
+      "RAW SID RELEASED",
+      "RAW SID RELEASED"
+    ]
+  },
+  "B_overlapping_release_x10": {
+    "outcome": "committed",
+    "releases": 10,
+    "results": [
+      "RAW SID RELEASED",
+      "RAW SID RELEASED",
+      "RAW SID RELEASED",
+      "RAW SID RELEASED",
+      "RAW SID RELEASED",
+      "RAW SID RELEASED",
+      "RAW SID RELEASED",
+      "RAW SID RELEASED",
+      "RAW SID RELEASED",
+      "RAW SID RELEASED"
+    ]
+  }
+}

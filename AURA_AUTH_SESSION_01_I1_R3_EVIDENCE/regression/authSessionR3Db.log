@@ -1,0 +1,28 @@
+PASS  1 originating transaction + acknowledged COMMIT -> committed; exactly 1 release; sid hashes to the row -- {"outcome":"committed","releases":1}
+PASS  2 transaction replaced before COMMIT -> rolled_back (transaction_mismatch); 0 releases; permanently dead -- {"outcome":"rolled_back","reason":"transaction_mismatch"}
+PASS  3 rollback then another transaction -> transaction_mismatch; 0 releases -- {"outcome":"rolled_back","reason":"transaction_mismatch"}
+PASS  3 rollback then another transaction that re-inserts the same idHash (mismatched operation) -> transaction_mismatch; 0 releases -- {"outcome":"rolled_back","reason":"transaction_mismatch"}
+(node:32450) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+PASS  4a caller COMMIT/BEGIN queued behind the helper -> the helper's one message committed T1 itself (the caller's COMMIT saw no transaction); exactly 1 release -- {"outcome":"committed","t1ByHelper":true,"releases":1}
+PASS  4b caller COMMIT/BEGIN/write queued before the helper -> transaction_mismatch; 0 releases -- {"outcome":"rolled_back","reason":"transaction_mismatch"}
+PASS  5 provisional P2 presented with another transaction -> transaction_mismatch (that transaction left aborted for its caller); 0 releases; P2 permanently dead -- {"wrong":{"outcome":"rolled_back","reason":"transaction_mismatch"},"aborted":"25P02"}
+PASS  5 a provisional with its OWN transaction still commits (exactly 1 release)
+PASS  6 connection reuse (same backend pid, later transaction) -> transaction_mismatch; 0 releases -- {"samePid":true,"d":{"outcome":"rolled_back","reason":"transaction_mismatch"}}
+PASS  7 forged / copied / transferred authorizations (spread, prototype, JSON, structuredClone, re-pointed) -> all refused; the genuine one still releases exactly once -- {"refused":5,"genuine":1}
+PASS  8 sequential reuse -> exactly 1 release; the second call is refused
+PASS  9 2 overlapping release calls -> exactly 1 release, 1 refused -- {"releases":1}
+PASS  10 25 overlapping release calls -> exactly 1 release, 24 refused -- {"releases":1}
+PASS  11 read-back held at a barrier: 5 overlapping calls are refused BEFORE it completes; only the reserving call releases (exactly 1) -- {"refused":5,"lookupsStarted":1}
+PASS  12a read-back fails (confirmed, ended pool) -> unavailable; the retry with a healthy pool is refused; 0 releases -- {"failed":"SessionVerificationUnavailableError"}
+PASS  12b read-back uncertain (black-holed answer, deadline) -> unavailable/uncertain; NOT restored; 0 releases
+PASS  13 confirmed commit but revoked row -> 0 releases (null once, then refused) -- {"releases":0}
+PASS  13 confirmed commit but expired row -> 0 releases (null once, then refused) -- {"releases":0}
+PASS  13 confirmed commit but missing row -> 0 releases (null once, then refused) -- {"releases":0}
+PASS  14 ambiguous COMMIT that persisted the row -> ambiguous, no authorization; 0 releases
+PASS  14 a later substitute transaction cannot commit / authorize it (refused); 0 releases
+PASS  15 repeated classification -> committed_undisclosed x3, never session material -- ["committed_undisclosed","committed_undisclosed","committed_undisclosed"]
+PASS  control: standalone createAuthSession unchanged (committed, hashed id)
+PASS  no uncaught exceptions or unhandled rejections -- 0
+
+24 passed, 0 failed

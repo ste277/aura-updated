@@ -1,0 +1,247 @@
+246
+{"i":0,"name":"Install root deps","run":"npm install","env":null,"wd":null}
+{"i":1,"name":"Run ephemeris test","run":"npx ts-node test/ephemeris.test.ts","env":null,"wd":null}
+{"i":2,"name":"Run PA-3B solar windows timezone fix test","run":"npx ts-node test/pa3bSolarWindowsTimezoneFix.test.ts","env":null,"wd":null}
+{"i":3,"name":"Run PA-3C-C1A typed solar errors test","run":"npx ts-node test/pa3cC1ASolarErrorHandling.test.ts","env":null,"wd":null}
+{"i":4,"name":"Run PA-3C-C1B-01 solar unavailable classification test","run":"npx ts-node test/pa3cC1B01SolarUnavailable.test.ts","env":null,"wd":null}
+{"i":5,"name":"Run PA-3C-C1B-02 Muhurtham eligibility test","run":"npx ts-node test/pa3cC1B02MuhurthamEligibility.test.ts","env":null,"wd":null}
+{"i":6,"name":"Run PA-3C-C1B-03 Daily Assistant availability test","run":"npx ts-node test/pa3cC1B03DailyAssistantAvailability.test.ts","env":null,"wd":null}
+{"i":7,"name":"Run PA-3C-C1C-01 Timing Search solar unavailable containment test","run":"npx ts-node test/pa3cC1C01TimingSearchSolarUnavailable.test.ts","env":null,"wd":null}
+{"i":8,"name":"Run integration test","run":"npx ts-node test/integration.test.ts","env":null,"wd":null}
+{"i":9,"name":"Run timezone test","run":"npx ts-node test/timezone.test.ts","env":null,"wd":null}
+{"i":10,"name":"Run window notifications test","run":"npx ts-node test/windowNotifications.test.ts","env":null,"wd":null}
+{"i":11,"name":"Run activity ontology test","run":"npx ts-node test/activityOntology.test.ts","env":null,"wd":null}
+{"i":12,"name":"Run muhurta reasons test","run":"npx ts-node test/muhurtaReasons.test.ts","env":null,"wd":null}
+{"i":13,"name":"Run muhurta test","run":"npx ts-node test/muhurta.test.ts","env":null,"wd":null}
+{"i":14,"name":"Run PA-2C Tithi/Karana aberration fix test","run":"npx ts-node test/pa2cTithiKaranaAberrationFix.test.ts","env":null,"wd":null}
+{"i":15,"name":"Run timing search test","run":"npx ts-node test/timingSearch.test.ts","env":null,"wd":null}
+{"i":16,"name":"Run timing search API validation test","run":"npx ts-node test/timingSearchApi.test.ts","env":null,"wd":null}
+{"i":17,"name":"Run remote MCP transport test","run":"npx ts-node test/mcpRemoteTransport.test.ts","env":null,"wd":null}
+{"i":18,"name":"Run local OAuth -> MCP test","run":"npx ts-node test/mcpOAuthLocal.test.ts","env":null,"wd":null}
+{"i":19,"name":"Run OAuth security regression test","run":"npx ts-node test/mcpOAuthSecurityRegression.test.ts","env":null,"wd":null}
+{"i":20,"name":"Run I2b OAuth production-readiness test","run":"npx ts-node test/mcpOAuthI2b.test.ts","env":null,"wd":null}
+{"i":21,"name":"Run I2b-S2 staging-blocker offline test","run":"npx ts-node test/mcpOAuthStagingBlockers.test.ts","env":null,"wd":null}
+{"i":22,"name":"Run I2b-S8 offline security test","run":"npx ts-node test/mcpOAuthS8.test.ts","env":null,"wd":null}
+{"i":23,"name":"Run I2b-S10 offline activation-readiness test","run":"npx ts-node test/mcpOAuthS10.test.ts","env":null,"wd":null}
+{"i":24,"name":"Run I2b-S11 offline remediation test","run":"npx ts-node test/mcpOAuthS11.test.ts","env":null,"wd":null}
+{"i":25,"name":"Run I2b-S12 offline residual test","run":"npx ts-node test/mcpOAuthS12.test.ts","env":null,"wd":null}
+{"i":26,"name":"Run panchang day service test","run":"npx ts-node test/panchangDay.test.ts","env":null,"wd":null}
+{"i":27,"name":"Run panchang month service test","run":"npx ts-node test/panchangMonth.test.ts","env":null,"wd":null}
+{"i":28,"name":"Run window overlap test","run":"npx ts-node test/windowOverlap.test.ts","env":null,"wd":null}
+{"i":29,"name":"Run day activity suggestions test","run":"npx ts-node test/dayActivitySuggestions.test.ts","env":null,"wd":null}
+{"i":30,"name":"Run everyday activity catalog test","run":"npx ts-node test/activityCatalogEveryday.test.ts","env":null,"wd":null}
+{"i":31,"name":"Run Muhurtham Finder test","run":"npx ts-node test/muhurthamFinder.test.ts","env":null,"wd":null}
+{"i":32,"name":"Run Panchang reference-instant regression test","run":"npx ts-node test/panchangReferenceInstantRegression.test.ts","env":null,"wd":null}
+{"i":33,"name":"Run Muhurtham search API validation test","run":"npx ts-node test/muhurthamSearchApi.test.ts","env":null,"wd":null}
+{"i":34,"name":"Run Muhurta rule packs test","run":"npx ts-node test/muhurtaRulePacks.test.ts","env":null,"wd":null}
+{"i":35,"name":"Run Muhurta traditional coverage test (PCE-2A)","run":"npx ts-node test/muhurtaTraditionalCoverage.test.ts","env":null,"wd":null}
+{"i":36,"name":"Run Lahiri ayanamsa epoch-fix regression test (PCE-4A)","run":"npx ts-node test/pce4aLahiriAyanamsaEpochFix.test.ts","env":null,"wd":null}
+{"i":37,"name":"Run PCE-3B independent reference validation (strict checks fail CI; observational findings are report-only, printed to this step's own log, and never fail it -- see the test file's own doc comment)","run":"npx ts-node test/pce3bIndependentReferenceValidation.test.ts","env":null,"wd":null}
+{"i":38,"name":"Run Marriage Muhurtham foundation test","run":"npx ts-node test/marriageMuhurthamFoundation.test.ts","env":null,"wd":null}
+{"i":39,"name":"Run Marriage required eligibility test","run":"npx ts-node test/marriageRequiredEligibility.test.ts","env":null,"wd":null}
+{"i":40,"name":"Run Griha Pravesh required eligibility test (PCE-3E)","run":"npx ts-node test/grihaPraveshRequiredEligibility.test.ts","env":null,"wd":null}
+{"i":41,"name":"Run ceremonial Muhurtham eligibility test","run":"npx ts-node test/ceremonialMuhurthamEligibility.test.ts","env":null,"wd":null}
+{"i":42,"name":"Run inauspicious period precedence test","run":"npx ts-node test/inauspiciousPeriodPrecedence.test.ts","env":null,"wd":null}
+{"i":43,"name":"Run Marriage candidate discovery hardening test","run":"npx ts-node test/marriageCandidateDiscoveryHardening.test.ts","env":null,"wd":null}
+{"i":44,"name":"Run Ask Aura Marriage routing test","run":"npx ts-node test/askAuraMarriageRouting.test.ts","env":null,"wd":null}
+{"i":45,"name":"Run Personal Muhurtham test","run":"npx ts-node test/personalMuhurtham.test.ts","env":null,"wd":null}
+{"i":46,"name":"Run SavedPerson request validation test","run":"npx ts-node test/savedPersonRequest.test.ts","env":null,"wd":null}
+{"i":47,"name":"Run SavedPerson natal context test","run":"npx ts-node test/savedPersonNatalContext.test.ts","env":null,"wd":null}
+{"i":48,"name":"Run Shared Muhurtham test","run":"npx ts-node test/sharedMuhurtham.test.ts","env":null,"wd":null}
+{"i":49,"name":"Run everyday shared timing fit test","run":"npx ts-node test/everydayTimingFit.test.ts","env":null,"wd":null}
+{"i":50,"name":"Run score engine test","run":"npx ts-node test/scoreEngine.test.ts","env":null,"wd":null}
+{"i":51,"name":"Run Aura Moment alternatives (rescheduling) test","run":"npx ts-node test/auraMomentAlternatives.test.ts","env":null,"wd":null}
+{"i":52,"name":"Run Aura Moment request validation test","run":"npx ts-node test/auraMomentRequest.test.ts","env":null,"wd":null}
+{"i":53,"name":"Run Aura Updates test","run":"npx ts-node test/auraUpdates.test.ts","env":null,"wd":null}
+{"i":54,"name":"Run product metrics test","run":"npx ts-node test/productMetrics.test.ts","env":null,"wd":null}
+{"i":55,"name":"Run Home dashboard time-left formatting test","run":"npx ts-node test/formatTimeLeft.test.ts","env":null,"wd":null}
+{"i":56,"name":"Run Intentional Day Builder domain test","run":"npx ts-node test/dayBuilder.test.ts","env":null,"wd":null}
+{"i":57,"name":"Run Goal Activity Rhythm structural guards test","run":"npx ts-node test/goalActivityRhythmStructuralGuards.test.ts","env":null,"wd":null}
+{"i":58,"name":"Run Automatic Goal suggestion inclusion test","run":"npx ts-node test/autoGoalSuggestionInclusion.test.ts","env":null,"wd":null}
+{"i":59,"name":"Run Goal demand intent id test","run":"npx ts-node test/goalDemandIntentId.test.ts","env":null,"wd":null}
+{"i":60,"name":"Run Goal demand provenance authorization test","run":"npx ts-node test/goalDemandProvenanceAuthorization.test.ts","env":null,"wd":null}
+{"i":61,"name":"Run Goal demand provenance authorization structural guards test","run":"npx ts-node test/goalDemandProvenanceAuthorizationStructuralGuards.test.ts","env":null,"wd":null}
+{"i":62,"name":"Run Goal template category matching test","run":"npx ts-node test/goalTemplateCategoryMatching.test.ts","env":null,"wd":null}
+{"i":63,"name":"Run Daily Guidance Daily Rhythm alignment test","run":"npx ts-node test/dailyGuidanceDailyRhythmAlignment.test.ts","env":null,"wd":null}
+{"i":64,"name":"Install web deps","run":"npm install","env":null,"wd":"apps/web"}
+{"i":65,"name":"Run Aura Moment test","run":"npx ts-node test/auraMoments.test.ts","env":null,"wd":null}
+{"i":66,"name":"Run product events validation test","run":"npx ts-node test/productEvents.test.ts","env":null,"wd":null}
+{"i":67,"name":"Run palm reading engine and adapter tests (synthetic, fast)","run":"node --test test/*.test.mjs","env":null,"wd":"packages/palm-reading-engine/prototype"}
+{"i":68,"name":"Run Palmistry content, privacy and isolation test","run":"npx ts-node test/palm01I1Content.test.ts","env":null,"wd":null}
+{"i":69,"name":"Run Palmistry Explore + guide component test","run":"npx ts-node --project tsconfig.jsdom-tests.json test/palm01I1ExploreJsdom.test.ts","env":null,"wd":null}
+{"i":70,"name":"Run Palmistry Vercel build guard test","run":"npx ts-node test/palm01P4VercelGuard.test.ts","env":null,"wd":null}
+{"i":71,"name":"Run personalised interpretation release-guard test (PALM-03-E1)","run":"npx ts-node test/palm03E1ReleaseGuards.test.ts","env":null,"wd":null}
+{"i":72,"name":"Run database identity guard test","run":"npx ts-node test/dbIdentityGuard.test.ts","env":null,"wd":null}
+{"i":73,"name":"Run Goal demand candidates test","run":"npx ts-node test/goalDemandCandidates.test.ts","env":null,"wd":null}
+{"i":74,"name":"Run Home Goal Rhythm suggestions test","run":"npx ts-node test/homeGoalRhythmSuggestions.test.ts","env":null,"wd":null}
+{"i":75,"name":"Run Home Goal Rhythm prioritization and overflow test","run":"npx ts-node test/homeGoalRhythmSuggestionsPrioritization.test.ts","env":null,"wd":null}
+{"i":76,"name":"Run Home Ask Aura handoff test","run":"npx ts-node test/homeIntent1AskAuraHandoff.test.ts","env":null,"wd":null}
+{"i":77,"name":"Run Home Ask Aura handoff component lifecycle test","run":"npx ts-node --project tsconfig.jsdom-tests.json test/homeIntent1AskAuraHandoffComponent.test.ts","env":null,"wd":null}
+{"i":78,"name":"Run Goal Rhythm weekly proposal test","run":"npx ts-node test/goalRhythmWeeklyProposal.test.ts","env":null,"wd":null}
+{"i":79,"name":"Run PREF-01 availability preferences test","run":"npx ts-node test/availabilityPreferencesPref01.test.ts","env":null,"wd":null}
+{"i":80,"name":"Run Daily Rhythm scheduling test","run":"npx ts-node test/dailyRhythmScheduling.test.ts","env":null,"wd":null}
+{"i":81,"name":"Run Daily Rhythm Find a Time test","run":"npx ts-node test/timingSearchDailyRhythm.test.ts","env":null,"wd":null}
+{"i":82,"name":"Run Daily Rhythm candidate coverage test","run":"npx ts-node test/dailyRhythmCandidateCoverageIntegration.test.ts","env":null,"wd":null}
+{"i":83,"name":"Run HPG-FIX-01 activity title persistence test","run":"npx ts-node test/hpgFix01TitlePersistence.test.ts","env":null,"wd":null}
+{"i":84,"name":"Run HPG-FIX-01 already-scheduled recommendation test","run":"npx ts-node test/hpgFix01AlreadyScheduled.test.ts","env":null,"wd":null}
+{"i":85,"name":"Run HPG-FIX-01 weekly proposal validity test","run":"npx ts-node test/hpgFix01WeeklyProposal.test.ts","env":null,"wd":null}
+{"i":86,"name":"Run HPG-FIX-01 Home rhythm refresh (jsdom) test","run":"npx ts-node --project tsconfig.jsdom-tests.json test/hpgFix01HomeRefreshJsdom.test.ts","env":null,"wd":null}
+{"i":87,"name":"Run MR3 My Rhythm preferences editor (jsdom) test","run":"npx ts-node --project tsconfig.jsdom-tests.json test/myRhythmPreferencesEditorJsdom.test.ts","env":null,"wd":null}
+{"i":88,"name":"Run REM-01 notification settings (jsdom) test","run":"npx ts-node --project tsconfig.jsdom-tests.json test/reminderNotificationSettingsJsdom.test.ts","env":null,"wd":null}
+{"i":89,"name":"Run Aura Reminders eligibility test","run":"npx ts-node test/auraReminders.test.ts","env":null,"wd":null}
+{"i":90,"name":"Run reminder push payload test","run":"npx ts-node test/pushPayload.test.ts","env":null,"wd":null}
+{"i":91,"name":"Run reminder attention test","run":"npx ts-node test/reminderAttention.test.ts","env":null,"wd":null}
+{"i":92,"name":"Run reminder consistency test","run":"npx ts-node test/reminderConsistency.test.ts","env":null,"wd":null}
+{"i":93,"name":"Run Web Push client capability test","run":"npx ts-node test/webPushClientCapability.test.ts","env":null,"wd":null}
+{"i":94,"name":"Run HPG-FIX-01 Goal -> Plan -> Tomorrow (V1-02) test","run":"npx ts-node test/hpgFix01GoalPlanTomorrow.test.ts","env":null,"wd":null}
+{"i":95,"name":"Run Goal Rhythm weekly acceptance test","run":"npx ts-node test/goalRhythmWeeklyAcceptance.test.ts","env":null,"wd":null}
+{"i":96,"name":"Run Weekly plan review client test","run":"npx ts-node test/weeklyPlanReviewClient.test.ts","env":null,"wd":null}
+{"i":97,"name":"Run Goal planning-source adapter test","run":"npx ts-node test/goalPlanningSourceAdapter.test.ts","env":null,"wd":null}
+{"i":98,"name":"Run Automatic Goal demand bootstrap test","run":"npx ts-node test/automaticGoalDemandBootstrap.test.ts","env":null,"wd":null}
+{"i":99,"name":"Run Plan-with-Aura view logic test","run":"npx ts-node test/planWithAuraViewLogic.test.ts","env":{"TS_NODE_COMPILER_OPTIONS":"{\"jsx\":\"react\"}"},"wd":null}
+{"i":100,"name":"Run Panchang calendar logic test","run":"npx ts-node test/panchangCalendarLogic.test.ts","env":{"TS_NODE_COMPILER_OPTIONS":"{\"jsx\":\"react\"}"},"wd":null}
+{"i":101,"name":"Run Muhurtham Finder view logic test","run":"npx ts-node test/muhurthamFinderViewLogic.test.ts","env":{"TS_NODE_COMPILER_OPTIONS":"{\"jsx\":\"react\"}"},"wd":null}
+{"i":102,"name":"Run Home dashboard logic test","run":"npx ts-node test/homeDashboardLogic.test.ts","env":{"TS_NODE_COMPILER_OPTIONS":"{\"jsx\":\"react\"}"},"wd":null}
+{"i":103,"name":"Run Home recomposition test","run":"npx ts-node test/homeRecomposition.test.ts","env":{"TS_NODE_COMPILER_OPTIONS":"{\"jsx\":\"react\"}"},"wd":null}
+{"i":104,"name":"Run onboarding recommendation test","run":"npx ts-node test/onboardingRecommendation.test.ts","env":{"TS_NODE_COMPILER_OPTIONS":"{\"jsx\":\"react-jsx\"}"},"wd":null}
+{"i":105,"name":"Run Goal activity proposal test","run":"npx ts-node test/goalActivityProposal.test.ts","env":{"TS_NODE_COMPILER_OPTIONS":"{\"jsx\":\"react\"}"},"wd":null}
+{"i":106,"name":"Run Goal create idempotency test","run":"npx ts-node test/goalCreateIdempotency.test.ts","env":null,"wd":null}
+{"i":107,"name":"Run Goals domain test","run":"npx ts-node test/goals.test.ts","env":null,"wd":null}
+{"i":108,"name":"Run Goals wiring test","run":"npx ts-node test/goalsWiring.test.ts","env":null,"wd":null}
+{"i":109,"name":"Run Goals presentation test","run":"npx ts-node test/goalsPresentation.test.ts","env":null,"wd":null}
+{"i":110,"name":"Run Goal planning handoff test","run":"npx ts-node test/goalPlanningHandoff.test.ts","env":null,"wd":null}
+{"i":111,"name":"Run Goal planning handoff UI test","run":"npx ts-node test/goalPlanningHandoffUi.test.ts","env":null,"wd":null}
+{"i":112,"name":"Run Goal planning handoff wiring test","run":"npx ts-node test/goalPlanningHandoffWiring.test.ts","env":null,"wd":null}
+{"i":113,"name":"Run Goal completion test","run":"npx ts-node test/goalCompletion.test.ts","env":null,"wd":null}
+{"i":114,"name":"Run Goal completion structural guards test","run":"npx ts-node test/goalCompletionStructuralGuards.test.ts","env":null,"wd":null}
+{"i":115,"name":"Run Goal activity execution test","run":"npx ts-node test/goalActivityExecution.test.ts","env":null,"wd":null}
+{"i":116,"name":"Run Goal activity execution structural guards test","run":"npx ts-node test/goalActivityExecutionStructuralGuards.test.ts","env":null,"wd":null}
+{"i":117,"name":"Run Goal activity occurrence structural guards test","run":"npx ts-node test/goalActivityOccurrenceStructuralGuards.test.ts","env":null,"wd":null}
+{"i":118,"name":"Run Goal activity rhythm test","run":"npx ts-node test/goalActivityRhythm.test.ts","env":null,"wd":null}
+{"i":119,"name":"Run Goal activity rhythm materialization structural guards test","run":"npx ts-node test/goalActivityRhythmMaterializationStructuralGuards.test.ts","env":null,"wd":null}
+{"i":120,"name":"Run Goal activity rhythm Goal Detail structural guards test","run":"npx ts-node test/goalActivityRhythmGoalDetailStructuralGuards.test.ts","env":null,"wd":null}
+{"i":121,"name":"Run Goal activity rhythm Goal Detail UI test","run":"npx ts-node test/goalActivityRhythmGoalDetailUi.test.ts","env":null,"wd":null}
+{"i":122,"name":"Run Goal activity rhythm setup structural guards test","run":"npx ts-node test/goalActivityRhythmSetupStructuralGuards.test.ts","env":null,"wd":null}
+{"i":123,"name":"Run My Rhythm preferences test","run":"npx ts-node test/goalActivityRhythmPreferences.test.ts","env":null,"wd":null}
+{"i":124,"name":"Run My Rhythm scheduling preferences test","run":"npx ts-node test/myRhythmSchedulingPreferences.test.ts","env":null,"wd":null}
+{"i":125,"name":"Run MR3 My Rhythm preferences UI test","run":"npx ts-node test/myRhythmPreferencesUi.test.ts","env":null,"wd":null}
+{"i":126,"name":"Run INS-01 alignment insight safeguards test","run":"npx ts-node test/insightsAlignmentSafeguards.test.ts","env":null,"wd":null}
+{"i":127,"name":"Run Daily agenda Goal context test","run":"npx ts-node test/dailyAgendaGoalContext.test.ts","env":null,"wd":null}
+{"i":128,"name":"Run Goal context structural guards test","run":"npx ts-node test/goalContextStructuralGuards.test.ts","env":null,"wd":null}
+{"i":129,"name":"Run Goal Detail completion structural guards test","run":"npx ts-node test/goalDetailCompletionStructuralGuards.test.ts","env":null,"wd":null}
+{"i":130,"name":"Run Right Now Goal context test","run":"npx ts-node test/rightNowGoalContext.test.ts","env":null,"wd":null}
+{"i":131,"name":"Run Goal template completion test","run":"npx ts-node test/goalTemplateCompletion.test.ts","env":null,"wd":null}
+{"i":132,"name":"Run Goal-aware Recomposition presentation test","run":"npx ts-node test/goalAwareRecompositionPresentation.test.ts","env":{"TS_NODE_COMPILER_OPTIONS":"{\"jsx\":\"react\"}"},"wd":null}
+{"i":133,"name":"Run Day Plan acceptance presentation test","run":"npx ts-node test/dayPlanAcceptancePresentation.test.ts","env":null,"wd":null}
+{"i":134,"name":"Run Scheduling eligibility presentation test","run":"npx ts-node test/schedulingEligibilityPresentation.test.ts","env":null,"wd":null}
+{"i":135,"name":"Run Home Move test","run":"npx ts-node test/homeMove.test.ts","env":null,"wd":null}
+{"i":136,"name":"Run Home Skip test","run":"npx ts-node test/homeSkip.test.ts","env":null,"wd":null}
+{"i":137,"name":"Run Missed activity presentation test","run":"npx ts-node test/missedActivityPresentation.test.ts","env":null,"wd":null}
+{"i":138,"name":"Run Missed recovery test","run":"npx ts-node test/missedRecovery.test.ts","env":null,"wd":null}
+{"i":139,"name":"Run Skip planned activity test","run":"npx ts-node test/skipPlannedActivity.test.ts","env":null,"wd":null}
+{"i":140,"name":"Run Full-day timeline navigation test","run":"npx ts-node test/fullDayTimelineNavigation.test.ts","env":null,"wd":null}
+{"i":141,"name":"Run Goal decomposition observability test","run":"npx ts-node test/goalDecompositionObservability.test.ts","env":{"TS_NODE_COMPILER_OPTIONS":"{\"jsx\":\"react\"}"},"wd":null}
+{"i":142,"name":"Run Goals UI wiring test","run":"npx ts-node test/goalsUiWiring.test.ts","env":{"TS_NODE_COMPILER_OPTIONS":"{\"jsx\":\"react\"}"},"wd":null}
+{"i":143,"name":"Run Decision Facts V1 architecture test","run":"npx ts-node test/decisionFactsArchitecture.test.ts","env":null,"wd":null}
+{"i":144,"name":"Run opportunity projection test","run":"npx ts-node test/opportunityProjection.test.ts","env":null,"wd":null}
+{"i":145,"name":"Run opportunity projection architecture test","run":"npx ts-node test/opportunityProjectionArchitecture.test.ts","env":null,"wd":null}
+{"i":146,"name":"Run opportunity range adapter test","run":"npx ts-node test/opportunityRangeAdapter.test.ts","env":null,"wd":null}
+{"i":147,"name":"Run opportunity range adapter architecture test","run":"npx ts-node test/opportunityRangeAdapterArchitecture.test.ts","env":null,"wd":null}
+{"i":148,"name":"Run recurrence period bounds test","run":"npx ts-node test/recurrencePeriodBounds.test.ts","env":null,"wd":null}
+{"i":149,"name":"Run opportunity decision facts test","run":"npx ts-node test/opportunityDecisionFacts.test.ts","env":null,"wd":null}
+{"i":150,"name":"Run opportunity decision facts architecture test","run":"npx ts-node test/opportunityDecisionFactsArchitecture.test.ts","env":null,"wd":null}
+{"i":151,"name":"Run manual Goal provenance parity test","run":"npx ts-node test/manualGoalProvenanceParity.test.ts","env":null,"wd":null}
+{"i":152,"name":"Run manual Goal provenance parity architecture test","run":"npx ts-node test/manualGoalProvenanceParityArchitecture.test.ts","env":null,"wd":null}
+{"i":153,"name":"Run opportunity fact quality test","run":"npx ts-node test/opportunityFactQuality.test.ts","env":null,"wd":null}
+{"i":154,"name":"Run opportunity fact quality architecture test","run":"npx ts-node test/opportunityFactQualityArchitecture.test.ts","env":null,"wd":null}
+{"i":155,"name":"Run Goal lifecycle authorization architecture test","run":"npx ts-node test/goalLifecycleAuthorizationArchitecture.test.ts","env":null,"wd":null}
+{"i":156,"name":"Run Constructor overload decision architecture test","run":"npx ts-node test/dayConstructorOverloadDecisionArchitecture.test.ts","env":null,"wd":null}
+{"i":157,"name":"Run decision fact preparation architecture test","run":"npx ts-node test/decisionFactPreparationArchitecture.test.ts","env":null,"wd":null}
+{"i":158,"name":"Run decision fact preparation behavior test","run":"npx ts-node test/decisionFactPreparation.test.ts","env":null,"wd":null}
+{"i":159,"name":"Run decision evidence test","run":"npx ts-node test/decisionEvidence.test.ts","env":null,"wd":null}
+{"i":160,"name":"Run decision evidence architecture test","run":"npx ts-node test/decisionEvidenceArchitecture.test.ts","env":null,"wd":null}
+{"i":161,"name":"Run decision pressure test","run":"npx ts-node test/decisionPressure.test.ts","env":null,"wd":null}
+{"i":162,"name":"Run decision pressure architecture test","run":"npx ts-node test/decisionPressureArchitecture.test.ts","env":null,"wd":null}
+{"i":163,"name":"Run decision pressure authority test","run":"npx ts-node test/decisionPressureAuthority.test.ts","env":null,"wd":null}
+{"i":164,"name":"Run decision pressure catalog reachability test","run":"npx ts-node test/decisionPressureCatalogReachability.test.ts","env":null,"wd":null}
+{"i":165,"name":"Run contention trace test","run":"npx ts-node test/contentionTrace.test.ts","env":null,"wd":null}
+{"i":166,"name":"Run contention trace architecture test","run":"npx ts-node test/contentionTraceArchitecture.test.ts","env":null,"wd":null}
+{"i":167,"name":"Run contention observer isolation test","run":"npx ts-node test/contentionObserverIsolation.test.ts","env":null,"wd":null}
+{"i":168,"name":"Run shadow pressure evaluation test","run":"npx ts-node test/shadowPressureEvaluation.test.ts","env":null,"wd":null}
+{"i":169,"name":"Run shadow pressure architecture test","run":"npx ts-node test/shadowPressureArchitecture.test.ts","env":null,"wd":null}
+{"i":170,"name":"Run decision scheduling context test","run":"npx ts-node test/decisionSchedulingContext.test.ts","env":null,"wd":null}
+{"i":171,"name":"Run decision scheduling context architecture test","run":"npx ts-node test/decisionSchedulingContextArchitecture.test.ts","env":null,"wd":null}
+{"i":172,"name":"Run promotion input test","run":"npx ts-node test/promotionInput.test.ts","env":null,"wd":null}
+{"i":173,"name":"Run promotion input architecture test","run":"npx ts-node test/promotionInputArchitecture.test.ts","env":null,"wd":null}
+{"i":174,"name":"Run precedence anomaly real-pipeline test","run":"npx ts-node test/precedenceAnomalyRealPipeline.test.ts","env":null,"wd":null}
+{"i":175,"name":"Run scheduling Date mutator architecture test","run":"npx ts-node test/schedulingDateMutatorArchitecture.test.ts","env":null,"wd":null}
+{"i":176,"name":"Run construction basis test","run":"npx ts-node test/constructionBasis.test.ts","env":null,"wd":null}
+{"i":177,"name":"Run construction basis architecture test","run":"npx ts-node test/constructionBasisArchitecture.test.ts","env":null,"wd":null}
+{"i":178,"name":"Run baseline placements test","run":"npx ts-node test/baselinePlacements.test.ts","env":null,"wd":null}
+{"i":179,"name":"Run baseline placements architecture test","run":"npx ts-node test/baselinePlacementsArchitecture.test.ts","env":null,"wd":null}
+{"i":180,"name":"Run promotion contention authority test","run":"npx ts-node test/promotionContentionAuthority.test.ts","env":null,"wd":null}
+{"i":181,"name":"Run promotion contention authority architecture test","run":"npx ts-node test/promotionContentionAuthorityArchitecture.test.ts","env":null,"wd":null}
+{"i":182,"name":"Run scheduling attempt authority test","run":"npx ts-node test/schedulingAttemptAuthority.test.ts","env":null,"wd":null}
+{"i":183,"name":"Run scheduling attempt authority architecture test","run":"npx ts-node test/schedulingAttemptAuthorityArchitecture.test.ts","env":null,"wd":null}
+{"i":184,"name":"Run local counterfactual test","run":"npx ts-node test/localCounterfactual.test.ts","env":null,"wd":null}
+{"i":185,"name":"Run local counterfactual gate parity test","run":"npx ts-node test/localCounterfactualGateParity.test.ts","env":null,"wd":null}
+{"i":186,"name":"Run local counterfactual architecture test","run":"npx ts-node test/localCounterfactualArchitecture.test.ts","env":null,"wd":null}
+{"i":187,"name":"Run counterfactual acceptance test","run":"npx ts-node test/counterfactualAcceptance.test.ts","env":null,"wd":null}
+{"i":188,"name":"Run counterfactual acceptance architecture test","run":"npx ts-node test/counterfactualAcceptanceArchitecture.test.ts","env":null,"wd":null}
+{"i":189,"name":"Run shadow policy observation test","run":"npx ts-node test/shadowPolicyObservation.test.ts","env":null,"wd":null}
+{"i":190,"name":"Run shadow policy observation architecture test","run":"npx ts-node test/shadowPolicyObservationArchitecture.test.ts","env":null,"wd":null}
+{"i":191,"name":"Run active result materializer test","run":"npx ts-node test/activeResultMaterializer.test.ts","env":null,"wd":null}
+{"i":192,"name":"Run active result materializer architecture test","run":"npx ts-node test/activeResultMaterializerArchitecture.test.ts","env":null,"wd":null}
+{"i":193,"name":"Run shadow policy execution test","run":"npx ts-node test/shadowPolicyExecution.test.ts","env":null,"wd":null}
+{"i":194,"name":"Run shadow policy execution architecture test","run":"npx ts-node test/shadowPolicyExecutionArchitecture.test.ts","env":null,"wd":null}
+{"i":195,"name":"Run shadow evidence test","run":"npx ts-node test/shadowEvidence.test.ts","env":null,"wd":null}
+{"i":196,"name":"Run shadow evidence architecture test","run":"npx ts-node test/shadowEvidenceArchitecture.test.ts","env":null,"wd":null}
+{"i":197,"name":"Run shadow review delta test","run":"npx ts-node test/shadowReviewDelta.test.ts","env":null,"wd":null}
+{"i":198,"name":"Run shadow review delta architecture test","run":"npx ts-node test/shadowReviewDeltaArchitecture.test.ts","env":null,"wd":null}
+{"i":199,"name":"Run shadow rollout R3 preview review test","run":"npx ts-node test/shadowRolloutR3PreviewReview.test.ts","env":null,"wd":null}
+{"i":200,"name":"Run shadow rollout R3 architecture test","run":"npx ts-node test/shadowRolloutR3Architecture.test.ts","env":null,"wd":null}
+{"i":201,"name":"Run seeded fixture reproducibility test","run":"npx ts-node test/seededFixtureReproducibility.test.ts","env":null,"wd":null}
+{"i":202,"name":"Run Constructor blocker overlap architecture test","run":"npx ts-node test/dayConstructorBlockerOverlapArchitecture.test.ts","env":null,"wd":null}
+{"i":203,"name":"Run lifecycle fixture calendar test","run":"npx ts-node test/lifecycleFixtureCalendar.test.ts","env":null,"wd":null}
+{"i":204,"name":"Run birth date canonicalization test","run":"npx ts-node test/birthDateCanonicalization.test.ts","env":null,"wd":null}
+{"i":205,"name":"Run Constructor blocker overlap behavior test","run":"npx ts-node test/dayConstructorBlockerOverlap.test.ts","env":null,"wd":null}
+{"i":206,"name":"Run acceptance fresh-overlap architecture test","run":"npx ts-node test/dayConstructorAcceptanceFreshOverlapArchitecture.test.ts","env":null,"wd":null}
+{"i":207,"name":"Run day constructor preview integrity test","run":"npx ts-node test/dayConstructorPreviewIntegrity.test.ts","env":null,"wd":null}
+{"i":208,"name":"Run day constructor preview item client test","run":"npx ts-node test/dayConstructorPreviewItemClient.test.ts","env":null,"wd":null}
+{"i":209,"name":"Run day plan preview item editing test","run":"npx ts-node test/dayPlanPreviewItemEditing.test.ts","env":null,"wd":null}
+{"i":210,"name":"Run day plan preview item editing wiring test","run":"npx ts-node test/dayPlanPreviewItemEditingWiring.test.ts","env":null,"wd":null}
+{"i":211,"name":"Run day plan preview item lifecycle race condition test","run":"npx ts-node test/dayPlanPreviewItemLifecycleRaceConditions.test.ts","env":null,"wd":null}
+{"i":212,"name":"Run manual writer serialization architecture test","run":"npx ts-node test/scheduleWriteManualSerializationArchitecture.test.ts","env":null,"wd":null}
+{"i":213,"name":"Run Recomposition proposal overlap architecture test","run":"npx ts-node test/remainingDayRecompositionProposalOverlapArchitecture.test.ts","env":null,"wd":null}
+{"i":214,"name":"Run Forward Planner overlap blocker architecture test","run":"npx ts-node test/forwardPlannerOverlapBlockerArchitecture.test.ts","env":null,"wd":null}
+{"i":215,"name":"Run Find a Time constraints test (HPG5-V2-I1)","run":"npx ts-node test/findATimeConstraints.test.ts","env":{"TS_NODE_COMPILER_OPTIONS":"{\"jsx\":\"react\"}"},"wd":null}
+{"i":216,"name":"Run Find a Time conflict component test (HPG5-V2-I1)","run":"npx ts-node --project tsconfig.jsdom-tests.json test/findATimeConflictJsdom.test.ts","env":null,"wd":null}
+{"i":217,"name":"Run sign-in resend / change-email component test (AURA-READY-03-F2)","run":"npx ts-node --project tsconfig.jsdom-tests.json test/signInResendChangeEmailJsdom.test.ts","env":null,"wd":null}
+{"i":218,"name":"Run landing guest-entry component test (AURA-READY-02-F3)","run":"npx ts-node --project tsconfig.jsdom-tests.json test/landingGuestEntryJsdom.test.ts","env":null,"wd":null}
+{"i":219,"name":"Run guest activity discovery tests (AURA-DISC-01)","run":"npx ts-node test/disc01GuestActivityDiscovery.test.ts\nnpx ts-node --project tsconfig.jsdom-tests.json test/disc01GuestActivityDiscoveryJsdom.test.ts\n","env":null,"wd":null}
+{"i":220,"name":"Run Find a Time error-state component test (AURA-READY-02-F4)","run":"npx ts-node --project tsconfig.jsdom-tests.json test/findATimeErrorStatesJsdom.test.ts","env":null,"wd":null}
+{"i":221,"name":"Run conflict presentation test (HPG5-V2-I2)","run":"npx ts-node test/hpg5I2ConflictPresentation.test.ts","env":{"TS_NODE_COMPILER_OPTIONS":"{\"jsx\":\"react\"}"},"wd":null}
+{"i":222,"name":"Run conflict panel and My Day save component test (HPG5-V2-I2)","run":"npx ts-node --project tsconfig.jsdom-tests.json test/hpg5I2ConflictPanelJsdom.test.ts","env":null,"wd":null}
+{"i":223,"name":"Run Home save conflict component test (HPG5-V2-I3)","run":"npx ts-node --project tsconfig.jsdom-tests.json test/hpg5I3HomeSaveJsdom.test.ts","env":null,"wd":null}
+{"i":224,"name":"Run COMPAT-05 timezone shortOffset fallback test","run":"npx ts-node test/timezoneShortOffsetFallback.test.ts","env":null,"wd":null}
+{"i":225,"name":"Run Android minimum-support static test","run":"node test/androidMinimumSupportConfig.test.mjs","env":null,"wd":null}
+{"i":226,"name":"Check JDK for COMPAT-03 Java logic tests","run":"javac -version && java -version","env":null,"wd":null}
+{"i":227,"name":"Run COMPAT-03 geolocation patch script test","run":"node test/geolocationCompatPatchScript.test.mjs","env":null,"wd":null}
+{"i":228,"name":"Run COMPAT-03 geolocation Java logic test","run":"node test/geolocationCompatJavaLogic.test.mjs","env":null,"wd":null}
+{"i":229,"name":"Run COMPAT-03 geolocation Java logic harness test","run":"node test/geolocationCompatJavaLogicHarness.test.mjs","env":null,"wd":null}
+{"i":230,"name":"Run M2 client request id test","run":"npx ts-node test/clientId.test.ts","env":null,"wd":null}
+{"i":231,"name":"Run M2 Android back navigation test","run":"npx ts-node test/androidBackNavigation.test.ts","env":null,"wd":null}
+{"i":232,"name":"Run onboarding Goal step wiring test","run":"npx ts-node test/onboardingGoalStepWiring.test.ts","env":null,"wd":null}
+{"i":233,"name":"Run pending activity visual consistency test","run":"npx ts-node test/pendingActivityVisualConsistency.test.ts","env":null,"wd":null}
+{"i":234,"name":"Run pending activity reload visibility test","run":"npx ts-node --project tsconfig.jsdom-tests.json test/pendingActivityReloadVisibility.test.ts","env":null,"wd":null}
+{"i":235,"name":"Run location search API test","run":"npx ts-node test/locationSearchApi.test.ts","env":null,"wd":null}
+{"i":236,"name":"Run LocationPicker smart selection test","run":"npx ts-node test/locationPickerSmartSelection.test.ts","env":null,"wd":null}
+{"i":237,"name":"Run LocationPicker native geolocation test","run":"npx ts-node test/locationPickerNativeGeolocation.test.ts","env":null,"wd":null}
+{"i":238,"name":"Run IOS-02 reverse-geocode POST route test","run":"npx ts-node test/ios02ReverseRoutePost.test.ts","env":null,"wd":null}
+{"i":239,"name":"Run LocationPicker M2-D reliability test","run":"npx ts-node --project tsconfig.jsdom-tests.json test/locationPickerM2dReliability.test.ts","env":{"TS_NODE_COMPILER_OPTIONS":"{\"jsx\":\"react-jsx\"}"},"wd":null}
+{"i":240,"name":"Run LocationPicker native timeout diagnostics test","run":"npx ts-node --project tsconfig.jsdom-tests.json test/locationPickerNativeTimeoutDiagnostics.test.ts","env":{"TS_NODE_COMPILER_OPTIONS":"{\"jsx\":\"react-jsx\"}"},"wd":null}
+{"i":241,"name":"Run LocationPicker StrictMode lifecycle test","run":"npx ts-node --project tsconfig.jsdom-tests.json test/locationPickerStrictModeLifecycle.test.ts","env":{"TS_NODE_COMPILER_OPTIONS":"{\"jsx\":\"react-jsx\"}"},"wd":null}
+{"i":242,"name":"Run LocationPicker REL-03 supersede test","run":"npx ts-node --project tsconfig.jsdom-tests.json test/locationPickerRel03Supersede.test.ts","env":{"TS_NODE_COMPILER_OPTIONS":"{\"jsx\":\"react-jsx\"}"},"wd":null}
+{"i":243,"name":"Run IOS-02 location errors and privacy test","run":"npx ts-node --project tsconfig.jsdom-tests.json test/ios02LocationErrorsAndPrivacy.test.ts","env":{"TS_NODE_COMPILER_OPTIONS":"{\"jsx\":\"react-jsx\"}"},"wd":null}
+{"i":244,"name":"Run session token primitives test (AUTH-SESSION-01-I1)","run":"npx ts-node test/authSessionToken.test.ts","env":null,"wd":null}
+{"i":245,"name":"Run session store dormancy guard (AUTH-SESSION-01-I1)","run":"npx ts-node test/authSessionDormancy.test.ts","env":null,"wd":null}

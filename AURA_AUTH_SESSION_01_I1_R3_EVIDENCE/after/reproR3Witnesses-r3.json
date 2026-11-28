@@ -1,0 +1,82 @@
+{
+  "implementation": "R2+",
+  "A1_substituted_transaction_after_caller_commit": {
+    "decision": {
+      "outcome": "rolled_back",
+      "reason": "transaction_mismatch"
+    },
+    "outcome": "rolled_back",
+    "releases": 0,
+    "results": []
+  },
+  "A2_release_after_ambiguous_T1_commit_via_substitute": {
+    "t1Commit": "ambiguous",
+    "rowCommittedByT1": true,
+    "decision": {
+      "outcome": "rolled_back",
+      "reason": "transaction_mismatch"
+    },
+    "outcome": "rolled_back",
+    "releases": 0,
+    "results": []
+  },
+  "A3_rollback_then_mismatched_reinsert": {
+    "decision": {
+      "outcome": "rolled_back",
+      "reason": "transaction_mismatch"
+    },
+    "outcome": "rolled_back",
+    "releases": 0,
+    "results": []
+  },
+  "A4_caller_commit_and_begin_queued_behind_helper": {
+    "decision": {
+      "outcome": "committed",
+      "authorization": {
+        "kind": "commit_authorization",
+        "idHash": "<synthetic-redacted>",
+        "userId": "<synthetic-redacted>"
+      }
+    },
+    "callerCommitGotNoTransactionNotice": true,
+    "authorizationCameFromTheOriginatingTransaction": true,
+    "outcome": "committed",
+    "releases": 1,
+    "results": [
+      "RAW SID RELEASED"
+    ]
+  },
+  "A4b_transaction_replaced_before_helper": {
+    "decision": {
+      "outcome": "rolled_back",
+      "reason": "transaction_mismatch"
+    },
+    "outcome": "rolled_back",
+    "releases": 0,
+    "results": []
+  },
+  "B_overlapping_release_x2": {
+    "outcome": "committed",
+    "releases": 1,
+    "results": [
+      "RAW SID RELEASED",
+      "throws TypeError"
+    ]
+  },
+  "B_overlapping_release_x10": {
+    "outcome": "committed",
+    "releases": 1,
+    "results": [
+      "RAW SID RELEASED",
+      "throws TypeError",
+      "throws TypeError",
+      "throws TypeError",
+      "throws TypeError",
+      "throws TypeError",
+      "throws TypeError",
+      "throws TypeError",
+      "throws TypeError",
+      "throws TypeError"
+    ]
+  }
+}

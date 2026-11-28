@@ -1,0 +1,1196 @@
+﻿2026-11-27T12:22:08.5740618Z Current runner version: '2.338.2'
+2026-11-27T12:22:08.5762716Z ##[group]Runner Image Provisioner
+2026-11-27T12:22:08.5763438Z Hosted Compute Agent
+2026-11-27T12:22:08.5764041Z Version: 20261111.635
+2026-11-27T12:22:08.5764574Z Commit: b8a594ea514ff44cadb5342986c68b1eac6e22ed
+2026-11-27T12:22:08.5765253Z Build Date: 2026-11-11T01:49:01Z
+2026-11-27T12:22:08.5765875Z Worker ID: {cb7231c7-84a5-4ca3-8418-3767319cdef5}
+2026-11-27T12:22:08.5766470Z Region: westus2
+2026-11-27T12:22:08.5766935Z Cloud: Azure
+2026-11-27T12:22:08.5767509Z ##[endgroup]
+2026-11-27T12:22:08.5768626Z ##[group]Operating System
+2026-11-27T12:22:08.5769461Z Ubuntu
+2026-11-27T12:22:08.5769927Z 26.04.1
+2026-11-27T12:22:08.5770426Z LTS
+2026-11-27T12:22:08.5770918Z ##[endgroup]
+2026-11-27T12:22:08.5771387Z ##[group]Runner Image
+2026-11-27T12:22:08.5771917Z Image: ubuntu-26.04
+2026-11-27T12:22:08.5772399Z Version: 20261116.202.1
+2026-11-27T12:22:08.5773532Z Included Software: https://github.com/actions/runner-images/blob/ubuntu26/20261116.202/images/ubuntu/Ubuntu2604-Readme.md
+2026-11-27T12:22:08.5774761Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu26%2F20261116.202
+2026-11-27T12:22:08.5775583Z ##[endgroup]
+2026-11-27T12:22:08.5776624Z ##[group]GITHUB_TOKEN Permissions
+2026-11-27T12:22:08.5778246Z Contents: read
+2026-11-27T12:22:08.5778753Z Metadata: read
+2026-11-27T12:22:08.5779484Z Packages: read
+2026-11-27T12:22:08.5779984Z ##[endgroup]
+2026-11-27T12:22:08.5781790Z Secret source: Actions
+2026-11-27T12:22:08.5782630Z Cache mode: write
+2026-11-27T12:22:08.5783194Z Prepare workflow directory
+2026-11-27T12:22:08.6134025Z Prepare all required actions
+2026-11-27T12:22:08.6173319Z Getting action download info
+2026-11-27T12:22:08.9425167Z Download action repository 'actions/checkout@v5' (SHA:fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09)
+2026-11-27T12:22:09.3269911Z Download action repository 'actions/setup-node@v5' (SHA:a0853c24544627f65ddf259abe73b1d18a591444)
+2026-11-27T12:22:09.5391636Z Complete job name: Database migration validation
+2026-11-27T12:22:09.5980428Z ##[group]Checking docker version
+2026-11-27T12:22:09.5991173Z ##[command]/usr/bin/docker version --format '{{.Server.APIVersion}}'
+2026-11-27T12:22:09.7535684Z '1.54'
+2026-11-27T12:22:09.7551494Z Docker daemon API version: '1.54'
+2026-11-27T12:22:09.7552117Z ##[command]/usr/bin/docker version --format '{{.Client.APIVersion}}'
+2026-11-27T12:22:09.7718095Z '1.54'
+2026-11-27T12:22:09.7732318Z Docker client API version: '1.54'
+2026-11-27T12:22:09.7737455Z ##[endgroup]
+2026-11-27T12:22:09.7739647Z ##[group]Clean up resources from previous jobs
+2026-11-27T12:22:09.7744658Z ##[command]/usr/bin/docker ps --all --quiet --no-trunc --filter "label=e67059"
+2026-11-27T12:22:09.7962343Z ##[command]/usr/bin/docker network prune --force --filter "label=e67059"
+2026-11-27T12:22:09.8173891Z ##[endgroup]
+2026-11-27T12:22:09.8174322Z ##[group]Create local container network
+2026-11-27T12:22:09.8184070Z ##[command]/usr/bin/docker network create --label e67059 github_network_f821774b4c864b9e841471ea45a0a3ac
+2026-11-27T12:22:09.8727239Z 9c95f41052c3cd31be6c100b6375946aac03b088da542bc1bdd6699756f9a272
+2026-11-27T12:22:09.8745416Z ##[endgroup]
+2026-11-27T12:22:09.8766891Z ##[group]Starting postgres service container
+2026-11-27T12:22:09.8784467Z ##[command]/usr/bin/docker pull postgres:16
+2026-11-27T12:22:10.7872076Z 16: Pulling from library/postgres
+2026-11-27T12:22:11.0714295Z e91b6b814ba6: Pulling fs layer
+2026-11-27T12:22:11.0716878Z 72bd85048465: Pulling fs layer
+2026-11-27T12:22:11.0717287Z 34ff39ac908b: Pulling fs layer
+2026-11-27T12:22:11.0717602Z 40748add9f4f: Pulling fs layer
+2026-11-27T12:22:11.0717931Z 91d82016f303: Pulling fs layer
+2026-11-27T12:22:11.0718230Z c362828e9ca3: Pulling fs layer
+2026-11-27T12:22:11.0718528Z 3b9319a24e33: Pulling fs layer
+2026-11-27T12:22:11.0718830Z 46e4f78fd254: Pulling fs layer
+2026-11-27T12:22:11.0719439Z 1be8baae3c53: Pulling fs layer
+2026-11-27T12:22:11.0719933Z cfa3776983f1: Pulling fs layer
+2026-11-27T12:22:11.0720367Z 9be9d0609035: Pulling fs layer
+2026-11-27T12:22:11.0720955Z cc2ed79b34db: Pulling fs layer
+2026-11-27T12:22:11.0721395Z 111f378001d9: Pulling fs layer
+2026-11-27T12:22:11.1967688Z 34ff39ac908b: Download complete
+2026-11-27T12:22:11.2980290Z 72bd85048465: Download complete
+2026-11-27T12:22:11.3972673Z 91d82016f303: Download complete
+2026-11-27T12:22:11.3976211Z 1be8baae3c53: Download complete
+2026-11-27T12:22:11.4003478Z cfa3776983f1: Download complete
+2026-11-27T12:22:11.4021095Z c362828e9ca3: Download complete
+2026-11-27T12:22:11.4021733Z 9be9d0609035: Download complete
+2026-11-27T12:22:11.4023313Z cc2ed79b34db: Download complete
+2026-11-27T12:22:11.4023981Z e91b6b814ba6: Download complete
+2026-11-27T12:22:11.4052673Z 46e4f78fd254: Download complete
+2026-11-27T12:22:11.4968238Z 111f378001d9: Download complete
+2026-11-27T12:22:11.6961949Z 40748add9f4f: Download complete
+2026-11-27T12:22:11.6963363Z 636bc81cf18f: Download complete
+2026-11-27T12:22:11.7969684Z 7aa47411d7c7: Download complete
+2026-11-27T12:22:12.3962198Z 3b9319a24e33: Download complete
+2026-11-27T12:22:12.4008358Z 1be8baae3c53: Pull complete
+2026-11-27T12:22:12.4104616Z 40748add9f4f: Pull complete
+2026-11-27T12:22:12.5025051Z e91b6b814ba6: Pull complete
+2026-11-27T12:22:12.6026580Z 46e4f78fd254: Pull complete
+2026-11-27T12:22:12.6987132Z 72bd85048465: Pull complete
+2026-11-27T12:22:12.7010430Z c362828e9ca3: Pull complete
+2026-11-27T12:22:12.7028868Z 9be9d0609035: Pull complete
+2026-11-27T12:22:12.7047177Z 111f378001d9: Pull complete
+2026-11-27T12:22:14.2961555Z 34ff39ac908b: Pull complete
+2026-11-27T12:22:14.3000944Z cc2ed79b34db: Pull complete
+2026-11-27T12:22:14.3008178Z 3b9319a24e33: Pull complete
+2026-11-27T12:22:14.3340711Z 91d82016f303: Pull complete
+2026-11-27T12:22:14.3355224Z cfa3776983f1: Pull complete
+2026-11-27T12:22:14.3363322Z Digest: sha256:ce81150802644ddfac1db4da9e63be6f2a3818aa6ee98a7a28838aeea65dc37a
+2026-11-27T12:22:14.3363899Z Status: Downloaded newer image for postgres:16
+2026-11-27T12:22:14.3364299Z docker.io/library/postgres:16
+2026-11-27T12:22:14.3440058Z ##[command]/usr/bin/docker create --name e1e103e95d77460cbc774b01a8584ac6_postgres16_693998 --label e67059 --network github_network_f821774b4c864b9e841471ea45a0a3ac --network-alias postgres -p 5432:5432 --health-cmd "pg_isready -U aura_ci -d aura_ci" --health-interval 5s --health-timeout 5s --health-retries 10 -e "POSTGRES_USER=aura_ci" -e "POSTGRES_PASSWORD=aura_ci" -e "POSTGRES_DB=aura_ci" -e GITHUB_ACTIONS=true -e CI=true postgres:16
+2026-11-27T12:22:17.6916327Z 04ce49897e41c2c217d00133d850517845eb2ec6da7af7909a34d4806bc6d9db
+2026-11-27T12:22:17.6949918Z ##[command]/usr/bin/docker start 04ce49897e41c2c217d00133d850517845eb2ec6da7af7909a34d4806bc6d9db
+2026-11-27T12:22:18.0729156Z 04ce49897e41c2c217d00133d850517845eb2ec6da7af7909a34d4806bc6d9db
+2026-11-27T12:22:18.0768556Z ##[command]/usr/bin/docker ps --all --filter id=04ce49897e41c2c217d00133d850517845eb2ec6da7af7909a34d4806bc6d9db --filter status=running --no-trunc --format "{{.ID}} {{.Status}}"
+2026-11-27T12:22:18.1021269Z 04ce49897e41c2c217d00133d850517845eb2ec6da7af7909a34d4806bc6d9db Up Less than a second (health: starting)
+2026-11-27T12:22:18.1070322Z ##[command]/usr/bin/docker port 04ce49897e41c2c217d00133d850517845eb2ec6da7af7909a34d4806bc6d9db
+2026-11-27T12:22:18.1206598Z 5432/tcp -> 0.0.0.0:5432
+2026-11-27T12:22:18.1207501Z 5432/tcp -> [::]:5432
+2026-11-27T12:22:18.1250656Z ##[endgroup]
+2026-11-27T12:22:18.1257629Z ##[group]Waiting for all services to be ready
+2026-11-27T12:22:18.1269976Z ##[command]/usr/bin/docker inspect --format="{{if .Config.Healthcheck}}{{print .State.Health.Status}}{{end}}" 04ce49897e41c2c217d00133d850517845eb2ec6da7af7909a34d4806bc6d9db
+2026-11-27T12:22:18.1469753Z starting
+2026-11-27T12:22:18.1502573Z postgres service is starting, waiting 2 seconds before checking again.
+2026-11-27T12:22:20.1506530Z ##[command]/usr/bin/docker inspect --format="{{if .Config.Healthcheck}}{{print .State.Health.Status}}{{end}}" 04ce49897e41c2c217d00133d850517845eb2ec6da7af7909a34d4806bc6d9db
+2026-11-27T12:22:20.1633413Z starting
+2026-11-27T12:22:20.1650367Z postgres service is starting, waiting 3 seconds before checking again.
+2026-11-27T12:22:23.9560079Z ##[command]/usr/bin/docker inspect --format="{{if .Config.Healthcheck}}{{print .State.Health.Status}}{{end}}" 04ce49897e41c2c217d00133d850517845eb2ec6da7af7909a34d4806bc6d9db
+2026-11-27T12:22:23.9685829Z healthy
+2026-11-27T12:22:23.9702430Z postgres service is healthy.
+2026-11-27T12:22:23.9703079Z ##[endgroup]
+2026-11-27T12:22:23.9926732Z ##[group]Run actions/checkout@v5
+2026-11-27T12:22:23.9927157Z with:
+2026-11-27T12:22:23.9927348Z   repository: ste277/aura-updated
+2026-11-27T12:22:23.9929455Z   token: ***
+2026-11-27T12:22:23.9929635Z   ssh-strict: true
+2026-11-27T12:22:23.9929811Z   ssh-user: git
+2026-11-27T12:22:23.9930004Z   persist-credentials: true
+2026-11-27T12:22:23.9930202Z   clean: true
+2026-11-27T12:22:23.9930383Z   sparse-checkout-cone-mode: true
+2026-11-27T12:22:23.9930592Z   fetch-depth: 1
+2026-11-27T12:22:23.9930759Z   fetch-tags: false
+2026-11-27T12:22:23.9930933Z   show-progress: true
+2026-11-27T12:22:23.9931124Z   lfs: false
+2026-11-27T12:22:23.9931283Z   submodules: false
+2026-11-27T12:22:23.9931459Z   set-safe-directory: true
+2026-11-27T12:22:23.9931668Z   allow-unsafe-pr-checkout: false
+2026-11-27T12:22:23.9932012Z env:
+2026-11-27T12:22:23.9932324Z   DATABASE_URL: ***localhost:5432/aura_ci
+2026-11-27T12:22:23.9932546Z ##[endgroup]
+2026-11-27T12:22:24.2634089Z Syncing repository: ste277/aura-updated
+2026-11-27T12:22:24.2635247Z ##[group]Getting Git version info
+2026-11-27T12:22:24.2635575Z Working directory is '/home/runner/work/aura-updated/aura-updated'
+2026-11-27T12:22:24.2636046Z [command]/usr/bin/git version
+2026-11-27T12:22:24.2645193Z git version 2.56.1
+2026-11-27T12:22:24.2663948Z ##[endgroup]
+2026-11-27T12:22:24.2676579Z Temporarily overriding HOME='/home/runner/work/_temp/db1fc036-8d3a-4d21-97bd-59a17cc97a4d' before making global git config changes
+2026-11-27T12:22:24.2677483Z Adding repository directory to the temporary git global config as a safe directory
+2026-11-27T12:22:24.2681606Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/aura-updated/aura-updated
+2026-11-27T12:22:24.2756112Z Deleting the contents of '/home/runner/work/aura-updated/aura-updated'
+2026-11-27T12:22:24.2759424Z ##[group]Initializing the repository
+2026-11-27T12:22:24.2764104Z [command]/usr/bin/git init /home/runner/work/aura-updated/aura-updated
+2026-11-27T12:22:24.2874057Z hint: Using 'master' as the name for the initial branch. This default branch name
+2026-11-27T12:22:24.2875013Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+2026-11-27T12:22:24.2875723Z hint: to use in all of your new repositories, which will suppress this warning,
+2026-11-27T12:22:24.2876277Z hint: call:
+2026-11-27T12:22:24.2876568Z hint:
+2026-11-27T12:22:24.2877018Z hint: 	git config --global init.defaultBranch <name>
+2026-11-27T12:22:24.2877471Z hint:
+2026-11-27T12:22:24.2877855Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+2026-11-27T12:22:24.2878477Z hint: 'development'. The just-created branch can be renamed via this command:
+2026-11-27T12:22:24.2879154Z hint:
+2026-11-27T12:22:24.2879418Z hint: 	git branch -m <name>
+2026-11-27T12:22:24.2880027Z hint:
+2026-11-27T12:22:24.2880587Z hint: Disable this message with "git config set advice.defaultBranchName false"
+2026-11-27T12:22:24.2884404Z Initialized empty Git repository in /home/runner/work/aura-updated/aura-updated/.git/
+2026-11-27T12:22:24.2895947Z [command]/usr/bin/git remote add origin https://github.com/ste277/aura-updated
+2026-11-27T12:22:24.2946273Z ##[endgroup]
+2026-11-27T12:22:24.2949309Z ##[group]Disabling automatic garbage collection
+2026-11-27T12:22:24.2949795Z [command]/usr/bin/git config --local gc.auto 0
+2026-11-27T12:22:24.2980743Z ##[endgroup]
+2026-11-27T12:22:24.2981296Z ##[group]Setting up auth
+2026-11-27T12:22:24.2991187Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-11-27T12:22:24.3025767Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-11-27T12:22:24.3527586Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-11-27T12:22:24.3557234Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-11-27T12:22:24.3790518Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-11-27T12:22:24.3820260Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-11-27T12:22:24.4056383Z [command]/usr/bin/git config --local http.https://github.com/.extraheader AUTHORIZATION: basic ***
+2026-11-27T12:22:24.4091804Z ##[endgroup]
+2026-11-27T12:22:24.4092359Z ##[group]Fetching the repository
+2026-11-27T12:22:24.4099467Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +40f6cbaa7701bb225f0ceed05613146efe87e72d:refs/remotes/pull/401/merge
+2026-11-27T12:22:25.6622291Z From https://github.com/ste277/aura-updated
+2026-11-27T12:22:25.6622947Z  * [new ref]         40f6cbaa7701bb225f0ceed05613146efe87e72d -> pull/401/merge
+2026-11-27T12:22:25.6627022Z ##[endgroup]
+2026-11-27T12:22:25.6629817Z ##[group]Determining the checkout info
+2026-11-27T12:22:25.6630395Z ##[endgroup]
+2026-11-27T12:22:25.6643028Z [command]/usr/bin/git sparse-checkout disable
+2026-11-27T12:22:25.6691613Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+2026-11-27T12:22:25.6717804Z ##[group]Checking out the ref
+2026-11-27T12:22:25.6721408Z [command]/usr/bin/git checkout --progress --force refs/remotes/pull/401/merge
+2026-11-27T12:22:25.8111848Z Note: switching to 'refs/remotes/pull/401/merge'.
+2026-11-27T12:22:25.8112102Z 
+2026-11-27T12:22:25.8112268Z You are in 'detached HEAD' state. You can look around, make experimental
+2026-11-27T12:22:25.8112681Z changes and commit them, and you can discard any commits you make in this
+2026-11-27T12:22:25.8113044Z state without impacting any branches by switching back to a branch.
+2026-11-27T12:22:25.8113249Z 
+2026-11-27T12:22:25.8113479Z If you want to create a new branch to retain commits you create, you may
+2026-11-27T12:22:25.8113848Z do so (now or later) by using -c with the switch command. Example:
+2026-11-27T12:22:25.8114056Z 
+2026-11-27T12:22:25.8114147Z   git switch -c <new-branch-name>
+2026-11-27T12:22:25.8114293Z 
+2026-11-27T12:22:25.8114375Z Or undo this operation with:
+2026-11-27T12:22:25.8114507Z 
+2026-11-27T12:22:25.8114577Z   git switch -
+2026-11-27T12:22:25.8114694Z 
+2026-11-27T12:22:25.8114879Z Turn off this advice by setting config variable advice.detachedHead to false
+2026-11-27T12:22:25.8115112Z 
+2026-11-27T12:22:25.8115387Z HEAD is now at 40f6cba Merge 84196311f41a53be3f4ef5ada4680aacf65a6131 into 38b7fa6f587fd7c1eac0687eb153ac11514ede1f
+2026-11-27T12:22:25.8126202Z ##[endgroup]
+2026-11-27T12:22:25.8170586Z [command]/usr/bin/git log -1 --format=%H
+2026-11-27T12:22:25.8193481Z 40f6cbaa7701bb225f0ceed05613146efe87e72d
+2026-11-27T12:22:25.8420952Z ##[group]Run actions/setup-node@v5
+2026-11-27T12:22:25.8421179Z with:
+2026-11-27T12:22:25.8421341Z   node-version: 24
+2026-11-27T12:22:25.8421516Z   always-auth: false
+2026-11-27T12:22:25.8421701Z   check-latest: false
+2026-11-27T12:22:25.8423619Z   token: ***
+2026-11-27T12:22:25.8423815Z   package-manager-cache: true
+2026-11-27T12:22:25.8424020Z env:
+2026-11-27T12:22:25.8424338Z   DATABASE_URL: ***localhost:5432/aura_ci
+2026-11-27T12:22:25.8424554Z ##[endgroup]
+2026-11-27T12:22:25.9633124Z Found in cache @ /opt/hostedtoolcache/node/24.22.3/x64
+2026-11-27T12:22:25.9636635Z (node:2584) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+2026-11-27T12:22:25.9637506Z (Use `node --trace-deprecation ...` to show where the warning was created)
+2026-11-27T12:22:25.9639516Z ##[group]Environment details
+2026-11-27T12:22:26.6967259Z node: v24.22.3
+2026-11-27T12:22:26.6967511Z npm: 11.19.1
+2026-11-27T12:22:26.6967689Z yarn: 1.22.22
+2026-11-27T12:22:26.6968767Z ##[endgroup]
+2026-11-27T12:22:26.7097400Z ##[group]Run npm install
+2026-11-27T12:22:26.7097669Z [36;1mnpm install[0m
+2026-11-27T12:22:26.7138546Z shell: /usr/bin/bash -e {0}
+2026-11-27T12:22:26.7138777Z env:
+2026-11-27T12:22:26.7139900Z   DATABASE_URL: ***localhost:5432/aura_ci
+2026-11-27T12:22:26.7140152Z ##[endgroup]
+2026-11-27T12:22:28.6775184Z npm warn deprecated tar@6.2.1: Old versions of tar are not supported, and contain widely publicized security vulnerabilities, which have been fixed in the current version. Please update. Support for old versions may be purchased (at exorbitant rates) by contacting i@izs.me
+2026-11-27T12:22:28.9582495Z npm warn deprecated glob@9.3.5: Old versions of glob are not supported, and contain widely publicized security vulnerabilities, which have been fixed in the current version. Please update. Support for old versions may be purchased (at exorbitant rates) by contacting i@izs.me
+2026-11-27T12:22:37.5905195Z 
+2026-11-27T12:22:37.5905894Z > auraschedule-web@0.0.1 postinstall
+2026-11-27T12:22:37.5908446Z > node scripts/apply-geolocation-compat-patch.mjs
+2026-11-27T12:22:37.5908967Z 
+2026-11-27T12:22:37.6309441Z [geolocation-compat-patch] applied coarse-location compatibility patch to @capacitor/geolocation 6.1.1 (GeolocationPlugin.java, Geolocation.java).
+2026-11-27T12:22:37.6448032Z 
+2026-11-27T12:22:37.6448739Z added 167 packages, and audited 168 packages in 11s
+2026-11-27T12:22:37.6451646Z 
+2026-11-27T12:22:37.6451973Z 16 packages are looking for funding
+2026-11-27T12:22:37.7650900Z   run `npm fund` for details
+2026-11-27T12:22:37.7651190Z 
+2026-11-27T12:22:37.7651480Z 13 vulnerabilities (3 moderate, 6 high, 4 critical)
+2026-11-27T12:22:37.7651786Z 
+2026-11-27T12:22:37.7652054Z To address issues that do not require attention, run:
+2026-11-27T12:22:37.7652515Z   npm audit fix
+2026-11-27T12:22:37.7652666Z 
+2026-11-27T12:22:37.7652934Z To address all issues (including breaking changes), run:
+2026-11-27T12:22:37.7653294Z   npm audit fix --force
+2026-11-27T12:22:37.7653418Z 
+2026-11-27T12:22:37.7653530Z Run `npm audit` for details.
+2026-11-27T12:22:37.7660621Z npm warn install-scripts 3 packages have install scripts not yet covered by allowScripts:
+2026-11-27T12:22:37.7661552Z npm warn install-scripts   @prisma/client@5.22.0 (postinstall: node scripts/postinstall.js)
+2026-11-27T12:22:37.7662453Z npm warn install-scripts   @prisma/engines@5.22.0 (postinstall: node scripts/postinstall.js)
+2026-11-27T12:22:37.7663329Z npm warn install-scripts   prisma@5.22.0 (preinstall: node scripts/preinstall-entry.js)
+2026-11-27T12:22:37.7663826Z npm warn install-scripts
+2026-11-27T12:22:37.7664294Z npm warn install-scripts Run `npm install-scripts ls` to review, or `npm install-scripts approve <pkg>` to allow.
+2026-11-27T12:22:37.8350745Z ##[group]Run npx prisma migrate deploy
+2026-11-27T12:22:37.8351060Z [36;1mnpx prisma migrate deploy[0m
+2026-11-27T12:22:37.8387778Z shell: /usr/bin/bash -e {0}
+2026-11-27T12:22:37.8387986Z env:
+2026-11-27T12:22:37.8388378Z   DATABASE_URL: ***localhost:5432/aura_ci
+2026-11-27T12:22:37.8388613Z ##[endgroup]
+2026-11-27T12:22:38.3791764Z Prisma schema loaded from prisma/schema.prisma
+2026-11-27T12:22:38.3850040Z Datasource "db": PostgreSQL database "aura_ci", schema "public" at "localhost:5432"
+2026-11-27T12:22:38.4405388Z 
+2026-11-27T12:22:38.4406233Z 55 migrations found in prisma/migrations
+2026-11-27T12:22:38.4406577Z 
+2026-11-27T12:22:38.5868273Z Applying migration `0001_init`
+2026-11-27T12:22:38.6570322Z Applying migration `0002_visit_log`
+2026-11-27T12:22:38.7655995Z Applying migration `0003_timezone_column`
+2026-11-27T12:22:38.8678925Z Applying migration `0004_habits`
+2026-11-27T12:22:38.9060797Z Applying migration `0005_birth_profile`
+2026-11-27T12:22:38.9243676Z Applying migration `0006_timestamptz_fix`
+2026-11-27T12:22:39.9780644Z Applying migration `0007_custom_cities`
+2026-11-27T12:22:40.0095685Z Applying migration `0008_daily_reflections`
+2026-11-27T12:22:40.0489844Z Applying migration `0009_habit_log_duration`
+2026-11-27T12:22:40.0591862Z Applying migration `0010_habit_log_notes`
+2026-11-27T12:22:40.1674943Z Applying migration `0011_auth_codes`
+2026-11-27T12:22:40.2079149Z Applying migration `0012_user_email_case_insensitive`
+2026-11-27T12:22:40.2176167Z Applying migration `0013_planned_activities`
+2026-11-27T12:22:40.3160547Z Applying migration `0014_habit_log_context`
+2026-11-27T12:22:40.3464078Z Applying migration `0015_saved_person`
+2026-11-27T12:22:40.3762444Z Applying migration `0016_aura_moments`
+2026-11-27T12:22:40.5254508Z Applying migration `0017_aura_moment_reschedule`
+2026-11-27T12:22:40.5457293Z Applying migration `0018_aura_updates`
+2026-11-27T12:22:40.5646203Z Applying migration `0019_product_events`
+2026-11-27T12:22:40.6974778Z Applying migration `0020_aura_moment_source`
+2026-11-27T12:22:40.7050279Z Applying migration `0021_aura_reminders`
+2026-11-27T12:22:40.7153165Z Applying migration `0022_reminder_attention_delivery`
+2026-11-27T12:22:40.7240826Z Applying migration `0023_web_push`
+2026-11-27T12:22:40.7286330Z Applying migration `0024_guest_conversion_idempotency`
+2026-11-27T12:22:40.7326025Z Applying migration `0025_day_builder`
+2026-11-27T12:22:40.7363368Z Applying migration `0026_day_builder_dismissal`
+2026-11-27T12:22:40.7401304Z Applying migration `0027_day_builder_priorities`
+2026-11-27T12:22:40.7423198Z Applying migration `0028_event_location_plan_persistence`
+2026-11-27T12:22:40.7440260Z Applying migration `0029_aura_moment_location_name`
+2026-11-27T12:22:40.7456684Z Applying migration `0030_habit_log_activity_id`
+2026-11-27T12:22:40.7473649Z Applying migration `0031_planned_activity_activity_id`
+2026-11-27T12:22:40.7490848Z Applying migration `0032_habit_log_client_request_id`
+2026-11-27T12:22:40.7515020Z Applying migration `0033_user_activity_preference`
+2026-11-27T12:22:40.7558511Z Applying migration `0034_user_availability`
+2026-11-27T12:22:40.7596537Z Applying migration `0035_goals`
+2026-11-27T12:22:40.7665820Z Applying migration `0036_captures`
+2026-11-27T12:22:40.7713251Z Applying migration `0037_planned_activity_skipped_at`
+2026-11-27T12:22:40.7731833Z Applying migration `0038_planned_activity_move_lineage`
+2026-11-27T12:22:40.7758551Z Applying migration `0039_planned_activity_scheduling_mode`
+2026-11-27T12:22:40.7777789Z Applying migration `0040_goal_activity_completion_requirement`
+2026-11-27T12:22:40.7794946Z Applying migration `0041_goal_activity_execution`
+2026-11-27T12:22:40.7969529Z Applying migration `0042_goal_activity_occurrence`
+2026-11-27T12:22:40.8058935Z Applying migration `0043_goal_activity_rhythm`
+2026-11-27T12:22:40.8076522Z Applying migration `0044_user_location_confirmed_at`
+2026-11-27T12:22:40.8093540Z Applying migration `0045_user_onboarding_resolved_at`
+2026-11-27T12:22:40.8112102Z Applying migration `0046_planned_activity_moved_at`
+2026-11-27T12:22:40.8129797Z Applying migration `0047_goal_activity_occurrence_scheduled_week`
+2026-11-27T12:22:40.8147730Z Applying migration `0048_goal_activity_execution_occurrence_link`
+2026-11-27T12:22:40.8176023Z Applying migration `0049_habit_log_completion_attribution`
+2026-11-27T12:22:40.8211423Z Applying migration `0050_user_daily_rhythm_preferences`
+2026-11-27T12:22:40.8231560Z Applying migration `0051_goal_activity_daily_frequency_foundation`
+2026-11-27T12:22:40.8248064Z Applying migration `0052_mcp_oauth_state`
+2026-11-27T12:22:40.8343803Z Applying migration `0053_goal_activity_rhythm_preferences`
+2026-11-27T12:22:40.8362288Z Applying migration `0054_reminder_dispatch_heartbeat`
+2026-11-27T12:22:40.8394904Z Applying migration `0055_auth_session`
+2026-11-27T12:22:40.8440879Z 
+2026-11-27T12:22:40.8446283Z The following migration(s) have been applied:
+2026-11-27T12:22:40.8446493Z 
+2026-11-27T12:22:40.8446581Z migrations/
+2026-11-27T12:22:40.8446990Z   └─ 0001_init/
+2026-11-27T12:22:40.8447231Z     └─ migration.sql
+2026-11-27T12:22:40.8447817Z   └─ 0002_visit_log/
+2026-11-27T12:22:40.8448016Z     └─ migration.sql
+2026-11-27T12:22:40.8448220Z   └─ 0003_timezone_column/
+2026-11-27T12:22:40.8448432Z     └─ migration.sql
+2026-11-27T12:22:40.8448632Z   └─ 0004_habits/
+2026-11-27T12:22:40.8448815Z     └─ migration.sql
+2026-11-27T12:22:40.8449271Z   └─ 0005_birth_profile/
+2026-11-27T12:22:40.8449559Z     └─ migration.sql
+2026-11-27T12:22:40.8449761Z   └─ 0006_timestamptz_fix/
+2026-11-27T12:22:40.8449969Z     └─ migration.sql
+2026-11-27T12:22:40.8450386Z   └─ 0007_custom_cities/
+2026-11-27T12:22:40.8450800Z     └─ migration.sql
+2026-11-27T12:22:40.8451193Z   └─ 0008_daily_reflections/
+2026-11-27T12:22:40.8451587Z     └─ migration.sql
+2026-11-27T12:22:40.8451898Z   └─ 0009_habit_log_duration/
+2026-11-27T12:22:40.8452239Z     └─ migration.sql
+2026-11-27T12:22:40.8464929Z   └─ 0010_habit_log_notes/
+2026-11-27T12:22:40.8465454Z     └─ migration.sql
+2026-11-27T12:22:40.8465885Z   └─ 0011_auth_codes/
+2026-11-27T12:22:40.8466316Z     └─ migration.sql
+2026-11-27T12:22:40.8466803Z   └─ 0012_user_email_case_insensitive/
+2026-11-27T12:22:40.8467328Z     └─ migration.sql
+2026-11-27T12:22:40.8467791Z   └─ 0013_planned_activities/
+2026-11-27T12:22:40.8468237Z     └─ migration.sql
+2026-11-27T12:22:40.8468659Z   └─ 0014_habit_log_context/
+2026-11-27T12:22:40.8469630Z     └─ migration.sql
+2026-11-27T12:22:40.8470086Z   └─ 0015_saved_person/
+2026-11-27T12:22:40.8470562Z     └─ migration.sql
+2026-11-27T12:22:40.8470982Z   └─ 0016_aura_moments/
+2026-11-27T12:22:40.8471446Z     └─ migration.sql
+2026-11-27T12:22:40.8471929Z   └─ 0017_aura_moment_reschedule/
+2026-11-27T12:22:40.8472396Z     └─ migration.sql
+2026-11-27T12:22:40.8472829Z   └─ 0018_aura_updates/
+2026-11-27T12:22:40.8473300Z     └─ migration.sql
+2026-11-27T12:22:40.8473727Z   └─ 0019_product_events/
+2026-11-27T12:22:40.8474200Z     └─ migration.sql
+2026-11-27T12:22:40.8474624Z   └─ 0020_aura_moment_source/
+2026-11-27T12:22:40.8475063Z     └─ migration.sql
+2026-11-27T12:22:40.8475472Z   └─ 0021_aura_reminders/
+2026-11-27T12:22:40.8475910Z     └─ migration.sql
+2026-11-27T12:22:40.8476334Z   └─ 0022_reminder_attention_delivery/
+2026-11-27T12:22:40.8476773Z     └─ migration.sql
+2026-11-27T12:22:40.8477224Z   └─ 0023_web_push/
+2026-11-27T12:22:40.8477611Z     └─ migration.sql
+2026-11-27T12:22:40.8478044Z   └─ 0024_guest_conversion_idempotency/
+2026-11-27T12:22:40.8478481Z     └─ migration.sql
+2026-11-27T12:22:40.8478864Z   └─ 0025_day_builder/
+2026-11-27T12:22:40.8479417Z     └─ migration.sql
+2026-11-27T12:22:40.8479953Z   └─ 0026_day_builder_dismissal/
+2026-11-27T12:22:40.8480324Z     └─ migration.sql
+2026-11-27T12:22:40.8480672Z   └─ 0027_day_builder_priorities/
+2026-11-27T12:22:40.8481011Z     └─ migration.sql
+2026-11-27T12:22:40.8481371Z   └─ 0028_event_location_plan_persistence/
+2026-11-27T12:22:40.8481752Z     └─ migration.sql
+2026-11-27T12:22:40.8482094Z   └─ 0029_aura_moment_location_name/
+2026-11-27T12:22:40.8482440Z     └─ migration.sql
+2026-11-27T12:22:40.8483055Z   └─ 0030_habit_log_activity_id/
+2026-11-27T12:22:40.8483407Z     └─ migration.sql
+2026-11-27T12:22:40.8483763Z   └─ 0031_planned_activity_activity_id/
+2026-11-27T12:22:40.8484135Z     └─ migration.sql
+2026-11-27T12:22:40.8484475Z   └─ 0032_habit_log_client_request_id/
+2026-11-27T12:22:40.8484830Z     └─ migration.sql
+2026-11-27T12:22:40.8485146Z   └─ 0033_user_activity_preference/
+2026-11-27T12:22:40.8485384Z     └─ migration.sql
+2026-11-27T12:22:40.8485593Z   └─ 0034_user_availability/
+2026-11-27T12:22:40.8485817Z     └─ migration.sql
+2026-11-27T12:22:40.8486008Z   └─ 0035_goals/
+2026-11-27T12:22:40.8486200Z     └─ migration.sql
+2026-11-27T12:22:40.8486395Z   └─ 0036_captures/
+2026-11-27T12:22:40.8486584Z     └─ migration.sql
+2026-11-27T12:22:40.8486809Z   └─ 0037_planned_activity_skipped_at/
+2026-11-27T12:22:40.8487057Z     └─ migration.sql
+2026-11-27T12:22:40.8487295Z   └─ 0038_planned_activity_move_lineage/
+2026-11-27T12:22:40.8487533Z     └─ migration.sql
+2026-11-27T12:22:40.8487786Z   └─ 0039_planned_activity_scheduling_mode/
+2026-11-27T12:22:40.8488157Z     └─ migration.sql
+2026-11-27T12:22:40.8488409Z   └─ 0040_goal_activity_completion_requirement/
+2026-11-27T12:22:40.8488677Z     └─ migration.sql
+2026-11-27T12:22:40.8488902Z   └─ 0041_goal_activity_execution/
+2026-11-27T12:22:40.8489396Z     └─ migration.sql
+2026-11-27T12:22:40.8489723Z   └─ 0042_goal_activity_occurrence/
+2026-11-27T12:22:40.8490054Z     └─ migration.sql
+2026-11-27T12:22:40.8490281Z   └─ 0043_goal_activity_rhythm/
+2026-11-27T12:22:40.8490512Z     └─ migration.sql
+2026-11-27T12:22:40.8490738Z   └─ 0044_user_location_confirmed_at/
+2026-11-27T12:22:40.8490971Z     └─ migration.sql
+2026-11-27T12:22:40.8491191Z   └─ 0045_user_onboarding_resolved_at/
+2026-11-27T12:22:40.8491415Z     └─ migration.sql
+2026-11-27T12:22:40.8491635Z   └─ 0046_planned_activity_moved_at/
+2026-11-27T12:22:40.8491867Z     └─ migration.sql
+2026-11-27T12:22:40.8492117Z   └─ 0047_goal_activity_occurrence_scheduled_week/
+2026-11-27T12:22:40.8492383Z     └─ migration.sql
+2026-11-27T12:22:40.8492649Z   └─ 0048_goal_activity_execution_occurrence_link/
+2026-11-27T12:22:40.8492908Z     └─ migration.sql
+2026-11-27T12:22:40.8493150Z   └─ 0049_habit_log_completion_attribution/
+2026-11-27T12:22:40.8493397Z     └─ migration.sql
+2026-11-27T12:22:40.8493627Z   └─ 0050_user_daily_rhythm_preferences/
+2026-11-27T12:22:40.8493863Z     └─ migration.sql
+2026-11-27T12:22:40.8494115Z   └─ 0051_goal_activity_daily_frequency_foundation/
+2026-11-27T12:22:40.8494371Z     └─ migration.sql
+2026-11-27T12:22:40.8494574Z   └─ 0052_mcp_oauth_state/
+2026-11-27T12:22:40.8494787Z     └─ migration.sql
+2026-11-27T12:22:40.8495025Z   └─ 0053_goal_activity_rhythm_preferences/
+2026-11-27T12:22:40.8495279Z     └─ migration.sql
+2026-11-27T12:22:40.8495519Z   └─ 0054_reminder_dispatch_heartbeat/
+2026-11-27T12:22:40.8495755Z     └─ migration.sql
+2026-11-27T12:22:40.8495948Z   └─ 0055_auth_session/
+2026-11-27T12:22:40.8496155Z     └─ migration.sql
+2026-11-27T12:22:40.8496324Z       
+2026-11-27T12:22:40.8496568Z All migrations have been successfully applied.
+2026-11-27T12:22:40.8896371Z ##[group]Run npx prisma migrate status
+2026-11-27T12:22:40.8896787Z [36;1mnpx prisma migrate status[0m
+2026-11-27T12:22:40.8937106Z shell: /usr/bin/bash -e {0}
+2026-11-27T12:22:40.8937433Z env:
+2026-11-27T12:22:40.8938031Z   DATABASE_URL: ***localhost:5432/aura_ci
+2026-11-27T12:22:40.8938398Z ##[endgroup]
+2026-11-27T12:22:41.4226117Z Prisma schema loaded from prisma/schema.prisma
+2026-11-27T12:22:41.4295916Z Datasource "db": PostgreSQL database "aura_ci", schema "public" at "localhost:5432"
+2026-11-27T12:22:41.5079697Z 
+2026-11-27T12:22:41.5080338Z 55 migrations found in prisma/migrations
+2026-11-27T12:22:41.5080668Z 
+2026-11-27T12:22:41.5080852Z Database schema is up to date!
+2026-11-27T12:22:41.5911181Z ┌─────────────────────────────────────────────────────────┐
+2026-11-27T12:22:41.5911860Z │  Update available 5.22.0 -> 8.0.0-rc.36                 │
+2026-11-27T12:22:41.5912399Z │                                                         │
+2026-11-27T12:22:41.5913089Z │  This is a major update - please follow the guide at    │
+2026-11-27T12:22:41.5913699Z │  https://pris.ly/d/major-version-upgrade                │
+2026-11-27T12:22:41.5914964Z │                                                         │
+2026-11-27T12:22:41.5915474Z │  Run the following to update                            │
+2026-11-27T12:22:41.5916025Z │    npm i --save-dev prisma@latest                       │
+2026-11-27T12:22:41.5916566Z │    npm i @prisma/client@latest                          │
+2026-11-27T12:22:41.5917112Z └─────────────────────────────────────────────────────────┘
+2026-11-27T12:22:41.6178209Z ##[group]Run npm install
+2026-11-27T12:22:41.6178446Z [36;1mnpm install[0m
+2026-11-27T12:22:41.6210663Z shell: /usr/bin/bash -e {0}
+2026-11-27T12:22:41.6210933Z env:
+2026-11-27T12:22:41.6211549Z   DATABASE_URL: ***localhost:5432/aura_ci
+2026-11-27T12:22:41.6211808Z ##[endgroup]
+2026-11-27T12:22:42.3194085Z npm warn deprecated whatwg-encoding@3.1.1: Use @exodus/bytes instead for a more spec-conformant and faster implementation
+2026-11-27T12:22:43.1531365Z 
+2026-11-27T12:22:43.1532131Z added 145 packages, and audited 146 packages in 1s
+2026-11-27T12:22:43.1532634Z 
+2026-11-27T12:22:43.1533080Z 24 packages are looking for funding
+2026-11-27T12:22:43.1533465Z   run `npm fund` for details
+2026-11-27T12:22:43.1540223Z 
+2026-11-27T12:22:43.1540543Z found 0 vulnerabilities
+2026-11-27T12:22:43.1748252Z ##[group]Run npx ts-node test/mcpOAuthPostgresDb.test.ts
+2026-11-27T12:22:43.1748603Z [36;1mnpx ts-node test/mcpOAuthPostgresDb.test.ts[0m
+2026-11-27T12:22:43.1778174Z shell: /usr/bin/bash -e {0}
+2026-11-27T12:22:43.1778390Z env:
+2026-11-27T12:22:43.1778786Z   DATABASE_URL: ***localhost:5432/aura_ci
+2026-11-27T12:22:43.1779565Z ##[endgroup]
+2026-11-27T12:22:45.9730519Z OK   F6 DB: the seeded code is activated through the issuance path (held activation committed)
+2026-11-27T12:22:46.0276631Z OK   F6 DB: 40 concurrent consumes on two pools -> exactly 1 succeeds
+2026-11-27T12:22:46.0277119Z OK   F6 DB: every loser gets ReplayDetectedError (invalid_grant)
+2026-11-27T12:22:46.0286536Z OK   F6 DB: replay revoked every row of the grant
+2026-11-27T12:22:47.2317883Z OK   DB expiry: expired row invisible to find
+2026-11-27T12:22:47.2331239Z OK   DB expiry: expired row cannot be consumed
+2026-11-27T12:22:47.2349307Z OK   DB cleanup: cleanupExpired removes expired rows
+2026-11-27T12:22:47.3281833Z OK   DB multi-instance: authorization alternating between instances completes
+2026-11-27T12:22:47.4014012Z OK   F6 DB: 20 concurrent redemptions across instances -> exactly 1 token
+2026-11-27T12:22:47.4031698Z OK   F6 DB: replay revoked the grant -> winning token dead on both instances
+2026-11-27T12:22:47.4399721Z OK   DB: token from one instance verifies on the other
+2026-11-27T12:22:47.4405107Z OK   DB at rest: no access token, refresh token, code, verifier or provider cookie value stored in clear
+2026-11-27T12:22:47.4408255Z OK   DB at rest: ids are SHA-256 keys and payloads carry no jti
+2026-11-27T12:22:47.4412177Z OK   DB at rest: the access token is findable only by its hash
+2026-11-27T12:22:47.4482675Z OK   DB refresh: rotation on the other instance issues a new refresh token
+2026-11-27T12:22:47.4729761Z OK   DB refresh: 10 concurrent uses of one refresh token -> at most 1 success
+2026-11-27T12:22:47.4752193Z OK   DB refresh: replay of a rotated refresh token -> invalid_grant
+2026-11-27T12:22:47.4757069Z OK   DB refresh: replay revoked the grant (no rows left for it)
+2026-11-27T12:22:47.5252210Z OK   DB connections: list via the other instance
+2026-11-27T12:22:47.5262556Z OK   DB disconnect: one indexed delete revokes the grant
+2026-11-27T12:22:47.5268810Z OK   DB disconnect: access token dead on the other instance
+2026-11-27T12:22:47.5292360Z OK   DB disconnect: refresh token dead
+2026-11-27T12:22:47.6129555Z OK   F1 DB: A connects, then B signs in on the same browser -> B consents and gets B's token, never A's
+2026-11-27T12:22:47.6130472Z OK   F1 DB: A's earlier token never resolves to B (ended with A's provider session)
+2026-11-27T12:22:47.6201429Z OK   F1 DB: after sign-out no code is issued (sign-in required)
+2026-11-27T12:22:47.6676735Z OK   R1-L1: 40 concurrent requests on two instances -> exactly 10 admitted (global, not per process)
+2026-11-27T12:22:47.6680078Z OK   R1-L1: rejected requests did not inflate the counter
+2026-11-27T12:22:47.6702211Z OK   R1-L1: another user is unaffected
+2026-11-27T12:22:47.6702791Z OK   R1-L1: rejection reports the namespace and a Retry-After
+2026-11-27T12:22:47.6843275Z OK   R1-L1: client ceiling admits exactly 7 and rejected requests consume no per-user budget
+2026-11-27T12:22:48.9908064Z OK   R1-L1: window limits across instances, then restarts only after it expires
+2026-11-27T12:22:48.9923648Z OK   R1-L1: cleanupExpired removes expired windows only
+2026-11-27T12:22:48.9935532Z OK   R1-L1: database unavailable -> fail closed (denied, "unavailable")
+2026-11-27T12:22:49.0334989Z OK   F5 + R1-L1: one address gets 6 requests in total across both instances, then 429
+2026-11-27T12:22:49.0338108Z OK   R1-L1 control: per-process limiters admit 12 (2 x 6) -- the gap the shared limiter closes
+2026-11-27T12:22:49.0339576Z OK   logs: no secret value in any console output
+2026-11-27T12:22:49.0582421Z 
+2026-11-27T12:22:49.0585945Z All 36 AURA-MCP-02-I2b Postgres OAuth / rate-limit DB checks passed.
+2026-11-27T12:22:49.1126849Z ##[group]Run npx ts-node test/mcpOAuthStorageProtectionDb.test.ts
+2026-11-27T12:22:49.1127269Z [36;1mnpx ts-node test/mcpOAuthStorageProtectionDb.test.ts[0m
+2026-11-27T12:22:49.1156362Z shell: /usr/bin/bash -e {0}
+2026-11-27T12:22:49.1156571Z env:
+2026-11-27T12:22:49.1156964Z   DATABASE_URL: ***localhost:5432/aura_ci
+2026-11-27T12:22:49.1157197Z ##[endgroup]
+2026-11-27T12:22:51.8179664Z OK   flow: sign-in + consent page reached across instances
+2026-11-27T12:22:51.8194855Z OK   storage: the pending interaction row exists (keyed by hash)
+2026-11-27T12:22:51.8204763Z OK   I2b-R-1: no interaction uid, session id or provider cookie value in any stored row
+2026-11-27T12:22:51.8205794Z OK   I2b-R-1: Interaction payloads carry no session.cookie
+2026-11-27T12:22:51.8208330Z OK   I2b-R-1: Interaction returnTo is sealed (v1.*), not a URL
+2026-11-27T12:22:51.8220724Z OK   I2b-R-1: a store without the keys cannot open the interaction (no returnTo recovered)
+2026-11-27T12:22:51.8233792Z OK   storage: with the keys the provider reads it back
+2026-11-27T12:22:51.8495718Z OK   flow: interaction resume after consent yields a code (sealed returnTo opened)
+2026-11-27T12:22:51.8797484Z OK   flow: token issued for A, verifies on both instances
+2026-11-27T12:22:51.8870017Z OK   refresh intact: rotation works
+2026-11-27T12:22:51.9006169Z OK   refresh intact: replay of the old refresh token -> invalid_grant
+2026-11-27T12:22:51.9042205Z OK   F6 intact: code replay -> invalid_grant
+2026-11-27T12:22:51.9296967Z OK   session continuity: a second authorization in the same browser reuses the provider session
+2026-11-27T12:22:51.9408031Z OK   session expiry: an expired interaction shows the recovery page (no code, no 500)
+2026-11-27T12:22:51.9577860Z OK   tamper (tampered ciphertext): fails closed -- no code, no redirect to an attacker path, no 500
+2026-11-27T12:22:52.0321603Z OK   tamper (sealed value moved from another row): fails closed -- no code, no redirect to an attacker path, no 500
+2026-11-27T12:22:52.0490325Z OK   tamper (plaintext (unsealed) returnTo): fails closed -- no code, no redirect to an attacker path, no 500
+2026-11-27T12:22:52.1249726Z OK   F1 intact: account switch -> B consents and gets B's token
+2026-11-27T12:22:52.1757489Z OK   RR-1 setup: the library account-switch path is reached (resume form, no code issued)
+2026-11-27T12:22:52.1758082Z OK   RR-1: Session.state.postLogoutRedirectUri is sealed (v1.*), not a URL
+2026-11-27T12:22:52.1758581Z OK   RR-1: the live interaction uid is in no stored row after the real account switch
+2026-11-27T12:22:52.1759320Z OK   RR-1: Session.state.secret (real xsrf value) sealed, not in any row
+2026-11-27T12:22:52.1765060Z OK   RR-1: both sealed state fields restore exactly on the other instance
+2026-11-27T12:22:52.1774335Z OK   RR-1 rotation: [new, old] keys still open the switched Session state
+2026-11-27T12:22:52.1781364Z OK   RR-1 rotation: with the old key removed the switched Session reads as missing (fail closed)
+2026-11-27T12:22:52.1793837Z OK   RR-1: a sealed state field moved to another field fails closed (session reads as missing)
+2026-11-27T12:22:52.1803965Z OK   RR-1: a plaintext postLogoutRedirectUri fails closed
+2026-11-27T12:22:52.1836529Z OK   RR-1: the browser continues with no 500 and no attacker redirect after the tampered session
+2026-11-27T12:22:52.2001763Z OK   RR-2 (missing returnTo): confirm and interaction page show the recovery page (400), no code, no redirect, no 500
+2026-11-27T12:22:52.2179179Z OK   RR-2 (returnTo = null): confirm and interaction page show the recovery page (400), no code, no redirect, no 500
+2026-11-27T12:22:52.2342420Z OK   RR-2 (returnTo = number): confirm and interaction page show the recovery page (400), no code, no redirect, no 500
+2026-11-27T12:22:52.2495178Z OK   RR-2 (returnTo = object): confirm and interaction page show the recovery page (400), no code, no redirect, no 500
+2026-11-27T12:22:52.2907595Z OK   RR-2 (returnTo = empty string): confirm and interaction page show the recovery page (400), no code, no redirect, no 500
+2026-11-27T12:22:52.3119929Z OK   RR-2 (returnTo = truncated seal): confirm and interaction page show the recovery page (400), no code, no redirect, no 500
+2026-11-27T12:22:52.3134964Z OK   I2b-R-1: Session state.secret not stored in clear
+2026-11-27T12:22:52.3147799Z OK   storage: Session state.secret restored on read (by id and by uid)
+2026-11-27T12:22:52.3604449Z OK   disconnect intact: tokens dead on both instances after disconnect
+2026-11-27T12:22:52.3618214Z OK   I2b-R-1 (final scan): no collected identifier, code, token or cookie anywhere in McpOAuthPayload
+2026-11-27T12:22:52.3621052Z OK   logs: no identifier, code, token or cookie in console output
+2026-11-27T12:22:52.4417587Z OK   rotation: interaction sealed under the old key completes after rotation to [new, old]
+2026-11-27T12:22:52.4571240Z OK   rotation: after the old key is removed, an old in-flight interaction fails closed (no code, no 500)
+2026-11-27T12:22:52.4572303Z OK   keys: the durable store refuses to start without field keys, with short keys or duplicates
+2026-11-27T12:22:52.5617766Z 
+2026-11-27T12:22:52.5619909Z All 42 AURA-MCP-02-I2b-R1 storage protection DB checks passed.
+2026-11-27T12:22:52.6087592Z ##[group]Run npx ts-node test/mcpOAuthStagingBlockersDb.test.ts
+2026-11-27T12:22:52.6087996Z [36;1mnpx ts-node test/mcpOAuthStagingBlockersDb.test.ts[0m
+2026-11-27T12:22:52.6117934Z shell: /usr/bin/bash -e {0}
+2026-11-27T12:22:52.6118150Z env:
+2026-11-27T12:22:52.6118543Z   DATABASE_URL: ***localhost:5432/aura_ci
+2026-11-27T12:22:52.6118777Z ##[endgroup]
+2026-11-27T12:22:56.7140491Z OK   R-2 hung DB: 20 limiter decisions all deny "unavailable" within 2 s
+2026-11-27T12:22:58.7155416Z OK   R-2 hung DB: store read fails with StoreUnavailableError within 3.5 s (never "not found")
+2026-11-27T12:23:00.9176977Z OK   R-2 hung DB: pool.end() completes
+2026-11-27T12:23:03.2948653Z OK   R-2 lock held: 50 decisions all deny within 1.5 s, 0 admitted while the lock is held
+2026-11-27T12:23:03.2949603Z OK   R-2 lock held: every deny is bounded by the client deadline (fastest and slowest within 1.5 s)
+2026-11-27T12:23:03.2950453Z OK   R-2 lock held: abandoned server-side waits end within lock_timeout (no limiter backend still waiting on the held lock)
+2026-11-27T12:23:03.2954449Z OK   R-2 lock held: counters unchanged by the denied decisions
+2026-11-27T12:23:03.2955022Z OK   R-2 pool isolation: store reads succeed while the limiter pool is saturated
+2026-11-27T12:23:03.2986754Z OK   R-2 recovery: after the lock is released the next decision is admitted on a clean connection
+2026-11-27T12:23:03.2999806Z OK   R-2 hygiene: no limiter connection left idle in a transaction
+2026-11-27T12:23:03.3000462Z OK   timing: held-lock scenario finished promptly
+2026-11-27T12:23:03.6088684Z OK   R-2 terminated mid-update: every decision denies "unavailable" (fail closed)
+2026-11-27T12:23:03.6098476Z OK   R-2 terminated mid-update: no partial increment
+2026-11-27T12:23:03.6189939Z OK   R-2 terminated mid-update: the pool recovers (next decision admitted)
+2026-11-27T12:23:06.8724668Z OK   R-2 store hung: token request -> 503 within 3.5 s, no access or refresh token
+2026-11-27T12:23:06.8725170Z OK   R-2 store hung: authorization -> no code
+2026-11-27T12:23:06.8733901Z OK   R-2 store hung: no access token row written, even after the lock is released (late completion)
+2026-11-27T12:23:06.8734407Z OK   audit: store_unavailable recorded
+2026-11-27T12:23:06.9342718Z OK   R-2 store recovery: a fresh connection completes once the store answers
+2026-11-27T12:23:07.1440417Z OK   I2b-1 exactness: 300 concurrent decisions on 3 instances, one address limit 50 -> exactly 50
+2026-11-27T12:23:07.1445374Z OK   I2b-1 exactness: global shards counted exactly the admitted requests
+2026-11-27T12:23:13.4642574Z   I2b-1 scenario {"case":"healthy #1","envControlMs":499,"env":true,"A":{"ok":true,"reasons":[],"floodMs":805,"maxLatencyMs":773,"admitted":480,"counted":480,"outcomes":{"admitted":480,"preauth-mcp":1520}},"C":{"ok":true,"valid":true,"verdict":"pass","reasons":[],"best":2.43,"controlMedian":304.5,"trials":[{"before":336,"after":407,"limiterMs":978,"ratio":3.21,"correct":true},{"before":317,"after":292,"limiterMs":740,"ratio":2.43,"correct":true},{"before":282,"after":291,"limiterMs":828,"ratio":2.72,"correct":true}]}}
+2026-11-27T12:23:13.4660930Z OK   I2b-1 healthy #1: environment usable, A (safety + deadline) passes, C (performance) passes
+2026-11-27T12:23:13.4662064Z   I2b-1 healthy #1 decision-time evidence: {"decided":2000,"withEvidence":2000,"quota":1520,"quotaSawFull":1520,"admittedSawBelow":480}
+2026-11-27T12:23:13.4663384Z OK   I2b-1 healthy #1: live decision-time evidence for every decided request; every 429 saw its shard full (30), every admission saw it below 30
+2026-11-27T12:23:19.3764780Z   I2b-1 scenario {"case":"healthy #2","envControlMs":275,"env":true,"A":{"ok":true,"reasons":[],"floodMs":745,"maxLatencyMs":724,"admitted":480,"counted":480,"outcomes":{"admitted":480,"preauth-mcp":1520}},"C":{"ok":true,"valid":true,"verdict":"pass","reasons":[],"best":2.72,"controlMedian":281.5,"trials":[{"before":266,"after":277,"limiterMs":1063,"ratio":3.78,"correct":true},{"before":287,"after":286,"limiterMs":766,"ratio":2.72,"correct":true},{"before":276,"after":298,"limiterMs":1236,"ratio":4.39,"correct":true}]}}
+2026-11-27T12:23:19.3767558Z OK   I2b-1 healthy #2: environment usable, A (safety + deadline) passes, C (performance) passes
+2026-11-27T12:23:19.3790564Z   I2b-1 healthy #2 decision-time evidence: {"decided":2000,"withEvidence":2000,"quota":1520,"quotaSawFull":1520,"admittedSawBelow":480}
+2026-11-27T12:23:19.3796227Z OK   I2b-1 healthy #2: live decision-time evidence for every decided request; every 429 saw its shard full (30), every admission saw it below 30
+2026-11-27T12:23:36.7393487Z   I2b-1 scenario {"case":"shared slowdown +2 ms/statement","envControlMs":1422,"env":true,"A":{"ok":true,"reasons":[],"floodMs":1275,"maxLatencyMs":1255,"admitted":480,"counted":480,"outcomes":{"admitted":480,"preauth-mcp":676,"unavailable:deadline":844}},"C":{"ok":true,"valid":true,"verdict":"pass","reasons":[],"best":1.31,"controlMedian":1377.5,"trials":[{"before":1434,"after":1434,"limiterMs":2396,"ratio":1.74,"correct":true},{"before":1413,"after":1336,"limiterMs":1805,"ratio":1.31,"correct":true},{"before":1342,"after":1333,"limiterMs":1939,"ratio":1.41,"correct":true}]}}
+2026-11-27T12:23:36.7400384Z OK   I2b-1 shared slowdown: environment usable, A passes (shedding is legitimate under load), C passes (ratio stays low when both slow)
+2026-11-27T12:23:44.8381165Z   I2b-1 scenario {"case":"residual: fast controls + healthy limiter under temporary contention","envControlMs":275,"env":true,"A":{"ok":true,"reasons":[],"floodMs":1265,"maxLatencyMs":1254,"admitted":385,"counted":385,"outcomes":{"admitted":385,"unavailable:commit_timeout":14,"unavailable:deadline":1601}},"C":{"ok":true,"valid":true,"verdict":"pass","reasons":[],"best":3.32,"controlMedian":284.5,"trials":[{"before":305,"after":291,"limiterMs":2298,"ratio":8.08,"correct":true},{"before":278,"after":293,"limiterMs":1463,"ratio":5.14,"correct":true},{"before":265,"after":278,"limiterMs":944,"ratio":3.32,"correct":true}]}}
+2026-11-27T12:23:44.8384501Z   I2b-1 residual under CI-01 v1 (informational): {"completed":385,"envControlMs":275,"v1Floor":1818,"v1Ok":false,"admitted":385}
+2026-11-27T12:23:44.8386064Z OK   I2b-1 residual reproduced (deterministic replay): CI-01 v1 with fast controls (252 ms -> floor 1,984) FAILS a healthy flood that shed under contention (1,500 completed)
+2026-11-27T12:23:44.8387495Z OK   I2b-1 live residual run: the healthy flood was under real contention (deadline shedding occurred) with exact accounting
+2026-11-27T12:23:44.8388968Z OK   I2b-1 residual corrected: A passes (shedding classified, deadline enforced, accounting exact) and C passes (best of 3 trials unaffected by one contended trial)
+2026-11-27T12:24:06.9701235Z   I2b-1 scenario {"case":"limiter-only degradation (+10 ms/statement in every limiter flood)","envControlMs":272,"env":true,"A":{"ok":true,"reasons":[],"floodMs":1268,"maxLatencyMs":1255,"admitted":211,"counted":211,"outcomes":{"admitted":211,"unavailable:deadline":1789}},"C":{"ok":false,"valid":true,"verdict":"exceeds","reasons":["performance: best ratio 19.36 > 5"],"best":19.36,"controlMedian":315,"trials":[{"before":285,"after":339,"limiterMs":6242,"ratio":19.82,"correct":true},{"before":416,"after":294,"limiterMs":6098,"ratio":19.36,"correct":true},{"before":268,"after":336,"limiterMs":6115,"ratio":19.41,"correct":true}]}}
+2026-11-27T12:24:06.9705961Z OK   I2b-1 limiter-only degradation is DETECTED: a VALID C measurement exceeds R_MAX (best of 3), while A stays safe
+2026-11-27T12:24:16.0854851Z   I2b-1 scenario {"case":"limiter-only degradation (+2 ms/statement in every limiter flood)","envControlMs":298,"env":true,"A":{"ok":true,"reasons":[],"floodMs":1278,"maxLatencyMs":1255,"admitted":480,"counted":480,"outcomes":{"admitted":480,"preauth-mcp":902,"unavailable:deadline":618}},"C":{"ok":false,"valid":true,"verdict":"exceeds","reasons":["performance: best ratio 5.81 > 5"],"best":5.81,"controlMedian":291.5,"trials":[{"before":297,"after":293,"limiterMs":2155,"ratio":7.39,"correct":true},{"before":283,"after":271,"limiterMs":1695,"ratio":5.81,"correct":true},{"before":292,"after":291,"limiterMs":1750,"ratio":6,"correct":true}]}}
+2026-11-27T12:24:16.0914062Z OK   I2b-1 sustained limiter-only +2 ms: a VALID C measurement ranks above both healthy runs (every trial slowed), A stays safe
+2026-11-27T12:24:16.0920369Z   I2b-1 sustained +2 ms vs R_MAX (informational): {"best":5.81,"controlMedian":291.5,"R_MAX":5,"detectedByRMax":true}
+2026-11-27T12:24:16.0928079Z OK   I2b-1 the residual and genuine degradation are DISTINGUISHED (residual passes C, degradation exceeds R_MAX on a valid measurement)
+2026-11-27T12:24:22.8485216Z OK   I2b-1 an unusably slow environment FAILS (control flood above 4x the deadline)
+2026-11-27T12:24:22.8486967Z OK   I2b-1 COMMIT accounting (synthetic): explicitly failed COMMITs add nothing -- 2 admitted + 2 refused, counted 2 PASSES
+2026-11-27T12:24:22.8488491Z OK   I2b-1 COMMIT accounting (synthetic): a refused COMMIT that incremented (counted 3) FAILS
+2026-11-27T12:24:22.8513290Z OK   I2b-1 COMMIT accounting (synthetic): ambiguous late COMMITs may increment within the bound -- 2 admitted, 2 late-confirmed, 1 unknown: counted 4 and 5 PASS
+2026-11-27T12:24:22.8515137Z OK   I2b-1 COMMIT accounting (synthetic): outside the bound FAILS -- counted 3 (< confirmed: under-count) and 6 (> confirmed + unknown)
+2026-11-27T12:24:22.8516599Z OK   I2b-1 COMMIT accounting (synthetic): a duplicate increment (3 admitted, no ambiguity, counted 4) FAILS
+2026-11-27T12:24:22.8518093Z OK   I2b-1 COMMIT accounting (synthetic): refused stays refused -- an explicitly refused COMMIT reported as admitted FAILS
+2026-11-27T12:24:22.8519932Z OK   I2b-1 COMMIT accounting (synthetic): unsafe admission -- admitted with an unconfirmed (unknown) or unsent COMMIT FAILS
+2026-11-27T12:24:22.8521359Z OK   I2b-1 COMMIT accounting (synthetic): misclassification FAILS -- commit_failed on a confirmed COMMIT, commit_timeout where no COMMIT was sent
+2026-11-27T12:24:22.8523053Z OK   I2b-1 COMMIT accounting (synthetic): a refused COMMIT answered after the deadline ("commit_timeout") is not admitted and adds nothing -- counted 0 PASSES, counted 1 FAILS
+2026-11-27T12:24:22.8524785Z OK   I2b-1 COMMIT accounting (synthetic): capacity -- a bucket above its limit FAILS
+2026-11-27T12:24:22.8528335Z OK   I2b-1 attribution (39419 witness): one confirmed transaction increments twice + one unknown acknowledgement that never committed -- the previous aggregate bound ACCEPTS it, attribution REJECTS it
+2026-11-27T12:24:22.8531146Z OK   I2b-1 attribution (synthetic): legitimate outcomes ACCEPTED -- confirmed, committed with late ack, committed with lost ack, explicit rejection, unknown ack that did not commit
+2026-11-27T12:24:22.8533724Z OK   I2b-1 attribution (synthetic): an explicit refusal that contributed FAILS
+2026-11-27T12:24:22.8535025Z OK   I2b-1 attribution (synthetic): duplicate increment across two transactions of one request FAILS
+2026-11-27T12:24:22.8536768Z OK   I2b-1 attribution (synthetic): under-count -- acknowledged COMMIT with no contribution, or stored < attributed, FAILS
+2026-11-27T12:24:22.8538178Z OK   I2b-1 attribution (synthetic): stored count above the attributed sum FAILS (no aggregate slack)
+2026-11-27T12:24:22.8539609Z OK   I2b-1 attribution (synthetic): unsafe admission -- admitted with an unknown, rejected or missing COMMIT FAILS
+2026-11-27T12:24:22.8550757Z OK   I2b-1 attribution (synthetic): committed but answered as an explicit failure ("commit_failed" with a contribution) FAILS
+2026-11-27T12:24:22.8552625Z OK   I2b-1 attribution (synthetic): an UNRESOLVED contribution (no request tag) FAILS -- it cannot silently satisfy the count
+2026-11-27T12:24:22.8554024Z OK   I2b-1 attribution (synthetic): capacity -- a bucket above its limit FAILS
+2026-11-27T12:24:22.8952430Z OK   I2b-1 late-COMMIT injection (in-order acknowledgements, 3 concurrent COMMITs): exactly the 2nd submitted COMMIT is delayed, the 1st refused, the 3rd untouched
+2026-11-27T12:24:22.9356758Z OK   I2b-1 late-COMMIT injection (reverse acknowledgements, 3 concurrent COMMITs): exactly the 2nd submitted COMMIT is delayed, the 1st refused, the 3rd untouched
+2026-11-27T12:24:22.9358124Z OK   I2b-1 late-COMMIT injection: when the intended injection does not occur (only 1 COMMIT), the exact-count verification FAILS
+2026-11-27T12:24:24.2530425Z   I2b-1 aggregate (injected driver faults) diagnostics: {"outcomes":{"admitted":480,"unavailable:driver":153,"preauth-mcp":363,"unavailable:deadline":1004},"A":{"ok":false,"reasons":["153 unexpected failures"],"maxLatencyMs":1258}}
+2026-11-27T12:24:24.2531887Z OK   I2b-1 negative control: injected pre-COMMIT driver faults are classified "driver" and FAIL A
+2026-11-27T12:24:25.6412050Z   I2b-1 aggregate (post-send connection loss) diagnostics: {"outcomes":{"admitted":405,"unavailable:commit_lost":44,"unavailable:deadline":1540,"unavailable:commit_timeout":11},"counted":458,"wire":{"acked":405,"refused":0,"unknown":55},"injected":45,"attribution":{"ok":false,"reasons":["preauth-mcp:global:g480n16:1: stored 29 != 30 attributed contributions","preauth-mcp:global:g480n16:9: stored 27 != 28 attributed contributions","preauth-mcp:global:g480n16:13: stored 28 != 29 attributed contributions"],"tally":{"confirmed":405,"committed_ack_lost":55,"no_commit":1540},"unresolved":0},"A":{"ok":false,"reasons":["44 unexpected failures"]}}
+2026-11-27T12:24:25.6414156Z OK   I2b-1 post-send driver failure: classified "commit_lost" (ambiguous accounting: counted may exceed admitted), never shedding -- it FAILS A
+2026-11-27T12:24:25.6416488Z FAIL I2b-1 post-send connection loss (attribution): every lost acknowledgement is resolved by the transaction evidence (committed, not admitted), stored == attributed per shard, no duplicate, within capacity -- {"attribution":{"ok":false,"reasons":["preauth-mcp:global:g480n16:1: stored 29 != 30 attributed contributions","preauth-mcp:global:g480n16:9: stored 27 != 28 attributed contributions","preauth-mcp:global:g480n16:13: stored 28 != 29 attributed contributions"],"tally":{"confirmed":405,"committed_ack_lost":55,"no_commit":1540},"unresolved":0},"injected":45,"outcomes":{"admitted":405,"unavailable:comm
+2026-11-27T12:24:27.0658628Z   I2b-1 aggregate (explicit COMMIT refusal) diagnostics: {"outcomes":{"admitted":480,"unavailable:commit_failed":51,"preauth-mcp":741,"unavailable:deadline":728},"counted":480,"wire":{"acked":480,"refused":51,"unknown":0},"accounting":{"ok":true,"reasons":[],"admitted":480,"counted":480,"ambiguous":0},"attribution":{"ok":true,"reasons":[],"tally":{"confirmed":480,"rejected":51,"no_commit":1469},"unresolved":0},"A":{"ok":false,"reasons":["51 unexpected failures"]}}
+2026-11-27T12:24:27.0661202Z OK   I2b-1 explicit COMMIT failure (server SQLSTATE): classified "commit_failed", and it FAILS A
+2026-11-27T12:24:27.0663066Z OK   I2b-1 explicit COMMIT failure: refused COMMITs add nothing -- per shard admitted <= confirmed <= counted <= confirmed + unknown, no unsafe admission, no misclassification, every shard within 30
+2026-11-27T12:24:27.0664939Z OK   I2b-1 explicit COMMIT failure (attribution): every rejected COMMIT contributed nothing, every admission is a confirmed committed transaction, stored == attributed per shard, no unresolved contribution
+2026-11-27T12:24:28.7322074Z   I2b-1 COMMIT refusal + late acknowledgement (deterministic) diagnostics: {"outcomes":{"admitted":54,"unavailable:commit_failed":3,"unavailable:commit_timeout":3},"counted":57,"injected":{"refused":[[1],[1],[1]],"late":[[2],[2],[2]]},"refused":3,"lateLanded":3,"accounting":{"ok":true,"reasons":[],"admitted":54,"counted":57,"ambiguous":3},"attribution":{"ok":true,"reasons":[],"tally":{"confirmed":54,"rejected":3,"committed_ack_late":3},"unresolved":0}}
+2026-11-27T12:24:28.7325071Z OK   I2b-1 COMMIT regression (deterministic): exactly the intended injections happened -- per instance the 1st COMMIT refused and the 2nd acknowledged late (ordinals [1] and [2])
+2026-11-27T12:24:28.7326513Z OK   I2b-1 COMMIT regression (deterministic): 3 explicit refusals -> 3 "commit_failed", all refused, none counted
+2026-11-27T12:24:28.7328226Z OK   I2b-1 COMMIT regression (deterministic): exactly the 3 late-acknowledged COMMITs committed unadmitted ("commit_timeout"), attributed as committed_ack_late
+2026-11-27T12:24:28.7329950Z OK   I2b-1 COMMIT regression (deterministic): the pre-CI-02 assertion "counted === admitted" FAILS here (counted = admitted + 3 late)
+2026-11-27T12:24:28.7331647Z OK   I2b-1 COMMIT regression (deterministic): the wire bound PASSES and independent attribution PASSES with every outcome resolved (stored == attributed per shard, within capacity)
+2026-11-27T12:24:28.7540319Z   I2b-1 live attribution (unknown acknowledgement, never committed) diagnostics: {"out":["admitted","unavailable:commit_lost","admitted"],"wire":{"0":"acked","1":"unknown","2":"acked"},"counted":{"preauth-mcp:global:g480n16:0":2},"injected":{"refused":[],"late":[],"duplicate":[],"lostRollback":[1]},"prevBound":true,"attribution":{"ok":true,"reasons":[],"tally":{"confirmed":2,"not_committed_ack_unknown":1},"unresolved":0}}
+2026-11-27T12:24:28.7543589Z OK   I2b-1 live attribution: an unknown acknowledgement whose transaction never committed is resolved as not committed -- 2 confirmed + 1 not committed, stored 2, ACCEPTED
+2026-11-27T12:24:28.7674377Z   I2b-1 live attribution (39419 witness: duplicate + never-committed unknown) diagnostics: {"out":["admitted","unavailable:commit_lost"],"wire":{"0":"acked","1":"unknown"},"counted":{"preauth-mcp:global:g480n16:0":2},"injected":{"refused":[],"late":[],"duplicate":[0],"lostRollback":[1]},"prevBound":true,"attribution":{"ok":false,"reasons":["request 0: duplicate increment (2 in 1 transaction(s))"],"tally":{"confirmed":1,"not_committed_ack_unknown":1},"unresolved":0}}
+2026-11-27T12:24:28.7677268Z OK   I2b-1 live attribution (39419 witness): a confirmed transaction that increments twice + an unknown acknowledgement that never commits -- stored 2 satisfies the previous bound, attribution REJECTS it
+2026-11-27T12:24:28.7700305Z OK   I2b-1 negative control: "0 admitted, 2000 unavailable (checkout)" FAILS A
+2026-11-27T12:24:28.7705186Z OK   I2b-1 negative control: all shed by the deadline (0 admitted) FAILS A (liveness)
+2026-11-27T12:24:28.7711891Z OK   I2b-1 negative control: a limiter that answers 429 to everything FAILS A (429 on shards that are not exactly full, no admission)
+2026-11-27T12:24:28.7722598Z OK   I2b-1 negative control: responses completed long after the deadline FAIL A (response completion not bounded)
+2026-11-27T12:24:28.7755271Z OK   I2b-1 review fixture (A accounting) -- previous checker ACCEPTED it, corrected checker REJECTS: admission charged to the WRONG shard (decision 0 admitted, shard 1 counted 1)
+2026-11-27T12:24:28.7772060Z OK   I2b-1 review fixture (A accounting) -- previous checker ACCEPTED it, corrected checker REJECTS: a shard counted at 31 with 429s on that over-limit shard
+2026-11-27T12:24:28.7785560Z OK   I2b-1 legitimate ambiguity still passes: shard 0 full with 29 admitted + 1 commit_timeout and 429s afterwards
+2026-11-27T12:24:28.7794654Z OK   I2b-1 previous checker shortcoming: it accepted an admission observed at 1,300 ms on the outer clock (250 ms admission slack)
+2026-11-27T12:24:28.7812459Z OK   I2b-1 r5 decision-time fixture: premature 429 at decision-time count 0, then the shard fills to 30 (the review's case) -> reviewed A accepts, corrected A REJECTS
+2026-11-27T12:24:28.7820373Z OK   I2b-1 r5 decision-time fixture: premature 429 below capacity (count 29) on a shard that ends full -> reviewed A accepts, corrected A REJECTS
+2026-11-27T12:24:28.7827967Z OK   I2b-1 r5 decision-time fixture: 429 on a shard that never fills (count 29 final) -> reviewed A rejects, corrected A REJECTS
+2026-11-27T12:24:28.7835935Z OK   I2b-1 r5 decision-time fixture: an ambiguous COMMIT cannot excuse an early 429: 429 decided at 29 before the commit_timeout landed (final 30) -> reviewed A accepts, corrected A REJECTS
+2026-11-27T12:24:28.7843476Z OK   I2b-1 r5 decision-time fixture: a 429 with NO decision-time evidence -> reviewed A accepts, corrected A REJECTS
+2026-11-27T12:24:28.7851651Z OK   I2b-1 r5 decision-time fixture: a 429 whose evidence is for another shard (attribution) -> reviewed A accepts, corrected A REJECTS
+2026-11-27T12:24:28.7858931Z OK   I2b-1 r5 decision-time fixture: legitimate 429 at capacity (count 30) -> reviewed A accepts, corrected A ACCEPTS
+2026-11-27T12:24:28.7866957Z OK   I2b-1 r5 decision-time fixture: legitimate 429s that COMPLETE FIRST: the 429 response (1 ms) precedes every admission response (200-229 ms) and is first in request order -> reviewed A accepts, corrected A ACCEPTS
+2026-11-27T12:24:28.7875353Z OK   I2b-1 r5 decision-time fixture: ambiguous COMMIT that landed: 29 admitted + 1 commit_timeout (saw 29) counted, then 429s at 30 -> reviewed A accepts, corrected A ACCEPTS
+2026-11-27T12:24:28.7882976Z OK   I2b-1 r5 decision-time fixture: ambiguous COMMIT, no 429s: over-count 1 (30 counted, 29 admitted) explained by the commit_timeout -> reviewed A accepts, corrected A ACCEPTS
+2026-11-27T12:24:28.7889959Z OK   I2b-1 r5 decision-time fixture: unexplained over-count (30 counted, 29 admitted, no ambiguous COMMIT) stays rejected -> reviewed A rejects, corrected A REJECTS
+2026-11-27T12:24:28.7893534Z OK   I2b-1 exact admission deadline: COMMIT acknowledged at 1249 ms -> ADMITTED
+2026-11-27T12:24:28.7894356Z OK   I2b-1 exact admission deadline: COMMIT acknowledged at 1250 ms -> refused (commit_late)
+2026-11-27T12:24:28.7895254Z OK   I2b-1 exact admission deadline: COMMIT acknowledged at 1300 ms -> refused (commit_late)
+2026-11-27T12:24:28.7896647Z OK   I2b-1 exact admission deadline: DECIDE acknowledged at 1300 ms -> refused (deadline), COMMIT never sent
+2026-11-27T12:24:28.7897586Z OK   I2b-1 exact admission deadline: ROLLBACK acknowledged at 1300 ms -> refused (deadline), COMMIT never sent
+2026-11-27T12:24:28.7922270Z OK   I2b-1 C fixture: an all-429 trial FAILS C even though another trial is healthy and supplies the best ratio (previous C accepted it)
+2026-11-27T12:24:28.7941146Z OK   I2b-1 C fixture: bracketing controls above the 5 s environment guard FAIL C (previous C accepted ratio 3.0)
+2026-11-27T12:24:28.7955793Z OK   I2b-1 C fixture: one undecided request in a non-best trial FAILS C
+2026-11-27T12:24:28.7972397Z OK   I2b-1 C fixture: one isolated slow control (405 ms) no longer masks a sustained slowdown (previous best 3.83 passed; median-based C FAILS it)
+2026-11-27T12:24:28.8032175Z OK   I2b-1 r5 C validity: an all-429 MEASURED trial (ratio 8) -> verdict INVALID; the reviewed head's degradation assertion ACCEPTED it, the corrected one REJECTS it
+2026-11-27T12:24:28.8033410Z OK   I2b-1 r5 C validity: an all-429 MEASURED trial (ratio 8) -> the reviewed head's sustained-slowdown assertion ACCEPTED it, the corrected one REJECTS it
+2026-11-27T12:24:28.8034804Z OK   I2b-1 r5 C validity: a 5,001 ms AFTER-control (ratio 8; median 100) -> verdict INVALID; the reviewed head's degradation assertion ACCEPTED it, the corrected one REJECTS it
+2026-11-27T12:24:28.8036165Z OK   I2b-1 r5 C validity: a 5,001 ms AFTER-control (ratio 8; median 100) -> the reviewed head's sustained-slowdown assertion ACCEPTED it, the corrected one REJECTS it
+2026-11-27T12:24:28.8037353Z OK   I2b-1 r5 C validity: a VALID measurement above R_MAX (ratio 8) -> verdict EXCEEDS; both degradation assertions accept it
+2026-11-27T12:24:28.8038444Z OK   I2b-1 r5 C validity: a VALID measurement within R_MAX (ratio 2.5) -> verdict PASS (C ok); degradation is NOT detected
+2026-11-27T12:24:28.8048629Z   I2b-1 scenarios summary: [{"case":"healthy #1","envControlMs":499,"A":{"ok":true,"floodMs":805,"maxLatencyMs":773,"admitted":480,"counted":480},"C":{"ok":true,"valid":true,"verdict":"pass","reasons":[],"best":2.43,"controlMedian":304.5,"trials":[{"before":336,"after":407,"limiterMs":978,"ratio":3.21,"correct":true},{"before":317,"after":292,"limiterMs":740,"ratio":2.43,"correct":true},{"before":282,"after":291,"limiterMs":828,"ratio":2.72,"correct":true}]}},{"case":"healthy #2","envControlMs":275,"A":{"ok":true,"floodMs":745,"maxLatencyMs":724,"admitted":480,"counted":480},"C":{"ok":true,"valid":true,"verdict":"pass","reasons":[],"best":2.72,"controlMedian":281.5,"trials":[{"before":266,"after":277,"limiterMs":1063,"ratio":3.78,"correct":true},{"before":287,"after":286,"limiterMs":766,"ratio":2.72,"correct":true},{"before":276,"after":298,"limiterMs":1236,"ratio":4.39,"correct":true}]}},{"case":"shared slowdown +2 ms/statement","envControlMs":1422,"A":{"ok":true,"floodMs":1275,"maxLatencyMs":1255,"admitted":480,"counted":480},"C":{"ok":true,"valid":true,"verdict":"pass","reasons":[],"best":1.31,"controlMedian":1377.5,"trials":[{"before":1434,"after":1434,"limiterMs":2396,"ratio":1.74,"correct":true},{"before":1413,"after":1336,"limiterMs":1805,"ratio":1.31,"correct":true},{"before":1342,"after":1333,"limiterMs":1939,"ratio":1.41,"correct":true}]}},{"case":"residual: fast controls + healthy limiter under temporary contention","envControlMs":275,"A":{"ok":true,"floodMs":1265,"maxLatencyMs":1254,"admitted":385,"counted":385},"C":{"ok":true,"valid":true,"verdict":"pass","reasons":[],"best":3.32,"controlMedian":284.5,"trials":[{"before":305,"after":291,"limiterMs":2298,"ratio":8.08,"correct":true},{"before":278,"after":293,"limiterMs":1463,"ratio":5.14,"correct":true},{"before":265,"after":278,"limiterMs":944,"ratio":3.32,"correct":true}]}},{"case":"limiter-only degradation (+10 ms/statement in every limiter flood)","envControlMs":272,"A":{"ok":true,"floodMs":1268,"maxLatencyMs":1255,"admitted":211,"counted":211},"C":{"ok":false,"valid":true,"verdict":"exceeds","reasons":["performance: best ratio 19.36 > 5"],"best":19.36,"controlMedian":315,"trials":[{"before":285,"after":339,"limiterMs":6242,"ratio":19.82,"correct":true},{"before":416,"after":294,"limiterMs":6098,"ratio":19.36,"correct":true},{"before":268,"after":336,"limiterMs":6115,"ratio":19.41,"correct":true}]}},{"case":"limiter-only degradation (+2 ms/statement in every limiter flood)","envControlMs":298,"A":{"ok":true,"floodMs":1278,"maxLatencyMs":1255,"admitted":480,"counted":480},"C":{"ok":false,"valid":true,"verdict":"exceeds","reasons":["performance: best ratio 5.81 > 5"],"best":5.81,"controlMedian":291.5,"trials":[{"before":297,"after":293,"limiterMs":2155,"ratio":7.39,"correct":true},{"before":283,"after":271,"limiterMs":1695,"ratio":5.81,"correct":true},{"before":292,"after":291,"limiterMs":1750,"ratio":6,"correct":true}]}}]
+2026-11-27T12:24:29.5050591Z   I2b-1 aggregate (explicit budget) diagnostics: {"elapsedMs":698,"outcomes":{"admitted":480,"preauth-mcp":1520}}
+2026-11-27T12:24:29.5080635Z OK   I2b-1 aggregate: 2000 concurrent decisions from 500 networks on 3 instances -> exactly G (480) admitted, never more
+2026-11-27T12:24:29.5082218Z OK   I2b-1 aggregate: every one of the 16 shards stopped at its own limit (30)
+2026-11-27T12:24:29.5083796Z OK   I2b-1 aggregate: rejections were limits (429), not failures
+2026-11-27T12:24:29.5084976Z OK   I2b-1 B exact per-shard accounting under the extended budget: admitted = min(30, completed) per shard, a 429 only on a full shard, invariants hold
+2026-11-27T12:24:29.5166434Z OK   I2b-1 deadlocks precondition: the explicit lock_timeout exceeds deadlock_timeout (a real deadlock reaches the detector)
+2026-11-27T12:24:30.3304786Z OK   I2b-1 deadlocks: 400 opposite-order multi-key decisions on 3 instances (explicit budget) -> all admitted, none failed
+2026-11-27T12:24:30.3305505Z OK   I2b-1 deadlocks: every hot row counted exactly the admitted decisions (400 / 400 / 200 + 200)
+2026-11-27T12:24:30.3306137Z OK   I2b-1 deadlocks: no SQLSTATE 40P01 (deadlock) or 55P03 (lock timeout) and no other error underneath the limiter
+2026-11-27T12:24:30.3306752Z OK   I2b-1 deadlocks: Postgres reports 0 new deadlocks (counter delta after the backends exited)
+2026-11-27T12:24:31.8974703Z OK   I2b-1 deadlock oracle (negative control): a real opposite-order deadlock under the same lock_timeout -> one 40P01, the other commits, counter +1
+2026-11-27T12:24:33.6033751Z   I2b-1 deadlocks regression (production deadline, +6 ms/statement) diagnostics: {"outcomes":{"admitted":158,"unavailable:deadline":241,"unavailable:commit_timeout":1},"counted":159,"sqlstates":[],"deadlocksDelta":0}
+2026-11-27T12:24:33.6035588Z OK   I2b-1 deadlocks regression: a serialized hot-row queue longer than the 1250 ms production deadline sheds -- the pre-CI-02 "all admitted" assertion FAILS here
+2026-11-27T12:24:33.6036640Z OK   I2b-1 timeout attribution (39419 witness): a 57014 on a deadline-refused request does NOT satisfy an unrelated "driver" refusal (previous count matching accepted it)
+2026-11-27T12:24:33.6037517Z OK   I2b-1 timeout attribution (synthetic): a "driver" refusal with its OWN 57014 / 55P03, plus a 57014 on another safely refused request, PASSES
+2026-11-27T12:24:33.6040030Z OK   I2b-1 timeout attribution (synthetic): 40P01 FAILS even on a refused request; an unattributed SQLSTATE FAILS; a bounded-wait code on an ADMITTED request FAILS; an unexpected SQLSTATE FAILS
+2026-11-27T12:24:33.6041417Z OK   I2b-1 deadlocks regression: every shortfall is expected deadline shedding (deadline / commit_timeout / commit_late) or a "driver" refusal attributed to ITS OWN bounded-wait 57014 / 55P03
+2026-11-27T12:24:33.6042803Z OK   I2b-1 deadlocks regression: no 40P01 (deadlock), every SQLSTATE attributed to a safely refused request, and 0 new deadlocks
+2026-11-27T12:24:33.6043965Z OK   I2b-1 deadlocks regression: admitted <= counted <= admitted + ambiguous COMMITs (shedding never admits extra)
+2026-11-27T12:24:33.6125944Z OK   I2b-1 boundary: exactly the limit admitted, limit + 1 denied with Retry-After >= 1
+2026-11-27T12:24:34.9152317Z OK   I2b-1 rollover: after expiry the window restarts at 1 (reset only once expired)
+2026-11-27T12:24:34.9796297Z OK   I2b-1 cleanup race: decisions on a row being cleaned up never fail; exactly the limit admitted
+2026-11-27T12:24:35.5219519Z OK   R-3 rotation: 1,000 addresses inside one /64 share one 120/min budget (120 reach auth, 880 throttled)
+2026-11-27T12:24:35.5240178Z OK   R-3 rotation: the neighbouring /64 has its own budget
+2026-11-27T12:24:35.6822592Z OK   R-3 shared NAT: one IPv4 shares the 120 pre-auth budget (30 of 150 throttled before auth)
+2026-11-27T12:24:35.6823618Z OK   R-3 shared NAT: post-auth limits stay per user (no user exceeds 2; others unaffected)
+2026-11-27T12:24:35.6945261Z OK   Client isolation: client A capped at its ceiling (8 of 12); client B unaffected
+2026-11-27T12:24:35.7075292Z OK   429: over the per-address limit -> 429
+2026-11-27T12:24:36.7103091Z OK   503: limiter blocked by a held lock -> 503 + Retry-After within 1.5 s (not 429, not admitted)
+2026-11-27T12:24:36.7145475Z OK   pools: every pool ends cleanly
+2026-11-27T12:24:36.7396798Z 
+2026-11-27T12:24:36.7397684Z AURA-MCP-02-I2b-S2 staging-blocker DB FAILED (131 checks)
+2026-11-27T12:24:36.7944710Z ##[error]Process completed with exit code 1.
+2026-11-27T12:24:36.8067484Z Post job cleanup.
+2026-11-27T12:24:36.8773846Z [command]/usr/bin/git version
+2026-11-27T12:24:36.8810695Z git version 2.56.1
+2026-11-27T12:24:36.8840173Z Temporarily overriding HOME='/home/runner/work/_temp/9cdbfcbb-6ee2-49c8-9a1a-546c138ed9fb' before making global git config changes
+2026-11-27T12:24:36.8841498Z Adding repository directory to the temporary git global config as a safe directory
+2026-11-27T12:24:36.8843975Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/aura-updated/aura-updated
+2026-11-27T12:24:36.8877801Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-11-27T12:24:36.8908549Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-11-27T12:24:36.9177758Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-11-27T12:24:36.9194173Z http.https://github.com/.extraheader
+2026-11-27T12:24:36.9204557Z [command]/usr/bin/git config --local --unset-all http.https://github.com/.extraheader
+2026-11-27T12:24:36.9237010Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-11-27T12:24:36.9509456Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-11-27T12:24:36.9546698Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-11-27T12:24:36.9890747Z Print service container logs: e1e103e95d77460cbc774b01a8584ac6_postgres16_693998
+2026-11-27T12:24:36.9894164Z ##[command]/usr/bin/docker logs --details 04ce49897e41c2c217d00133d850517845eb2ec6da7af7909a34d4806bc6d9db
+2026-11-27T12:24:37.0020296Z  The files belonging to this database system will be owned by user "postgres".
+2026-11-27T12:24:37.0028896Z  This user must also own the server process.
+2026-11-27T12:24:37.0030558Z  initdb: warning: enabling "trust" authentication for local connections
+2026-11-27T12:24:37.0031045Z  
+2026-11-27T12:24:37.0031804Z  initdb: hint: You can change this by editing pg_hba.conf or using the option -A, or --auth-local and --auth-host, the next time you run initdb.
+2026-11-27T12:24:37.0033035Z  2026-11-27 12:22:19.404 UTC [1] LOG:  starting PostgreSQL 16.16 (Debian 16.16-1.pgdg13+1) on x86_64-pc-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit
+2026-11-27T12:24:37.0034058Z  2026-11-27 12:22:19.404 UTC [1] LOG:  listening on IPv4 address "0.0.0.0", port 5432
+2026-11-27T12:24:37.0034648Z  2026-11-27 12:22:19.404 UTC [1] LOG:  listening on IPv6 address "::", port 5432
+2026-11-27T12:24:37.0035300Z  2026-11-27 12:22:19.405 UTC [1] LOG:  listening on Unix socket "/var/run/postgresql/.s.PGSQL.5432"
+2026-11-27T12:24:37.0036000Z  2026-11-27 12:22:19.408 UTC [64] LOG:  database system was shut down at 2026-11-27 12:22:19 UTC
+2026-11-27T12:24:37.0036658Z  2026-11-27 12:22:19.411 UTC [1] LOG:  database system is ready to accept connections
+2026-11-27T12:24:37.0037298Z  2026-11-27 12:23:01.938 UTC [158] ERROR:  canceling statement due to statement timeout
+2026-11-27T12:24:37.0038038Z  2026-11-27 12:23:01.938 UTC [158] CONTEXT:  while locking tuple (0,3) in relation "McpRateLimitWindow"
+2026-11-27T12:24:37.0038681Z  2026-11-27 12:23:01.938 UTC [158] STATEMENT:  WITH want AS (
+2026-11-27T12:24:37.0040001Z  	    SELECT w."key", w."lim" FROM unnest($1::text[], $2::int[]) AS w("key", "lim")
+2026-11-27T12:24:37.0040488Z  	  ), locked AS (
+2026-11-27T12:24:37.0040744Z  	    SELECT t."key",
+2026-11-27T12:24:37.0041137Z  	           CASE WHEN t."expiresAt" <= now() THEN 0 ELSE t."count" END AS "cnt",
+2026-11-27T12:24:37.0041762Z  	           GREATEST(1, CEIL(EXTRACT(EPOCH FROM (t."expiresAt" - now()))))::int AS "retry"
+2026-11-27T12:24:37.0042472Z  	    FROM "McpRateLimitWindow" t WHERE t."key" = ANY($1::text[]) ORDER BY t."key" FOR UPDATE
+2026-11-27T12:24:37.0043277Z  	  ), verdict AS (
+2026-11-27T12:24:37.0043846Z  	    SELECT (SELECT count(*) FROM locked) = cardinality($1::text[]) AND COALESCE(bool_and(l."cnt" < w."lim"), false) AS "ok"
+2026-11-27T12:24:37.0044522Z  	    FROM locked l JOIN want w ON w."key" = l."key"
+2026-11-27T12:24:37.0044880Z  	  ), bumped AS (
+2026-11-27T12:24:37.0045154Z  	    UPDATE "McpRateLimitWindow" t SET
+2026-11-27T12:24:37.0045607Z  	      "count" = CASE WHEN t."expiresAt" <= now() THEN 1 ELSE t."count" + 1 END,
+2026-11-27T12:24:37.0046235Z  	      "windowStart" = CASE WHEN t."expiresAt" <= now() THEN now() ELSE t."windowStart" END,
+2026-11-27T12:24:37.0047016Z  	      "expiresAt" = CASE WHEN t."expiresAt" <= now() THEN now() + make_interval(secs => $3::int) ELSE t."expiresAt" END
+2026-11-27T12:24:37.0047681Z  	    FROM verdict v WHERE v."ok" AND t."key" = ANY($1::text[])
+2026-11-27T12:24:37.0048080Z  	    RETURNING t."key"
+2026-11-27T12:24:37.0048345Z  	  )
+2026-11-27T12:24:37.0048896Z  	  SELECT l."key", l."cnt", l."retry", (SELECT "ok" FROM verdict) AS "ok", (SELECT count(*) FROM bumped)::int AS "bumped" FROM locked l
+2026-11-27T12:24:37.0049870Z  2026-11-27 12:23:01.943 UTC [159] ERROR:  canceling statement due to statement timeout
+2026-11-27T12:24:37.0050585Z  2026-11-27 12:23:01.943 UTC [159] CONTEXT:  while locking tuple (0,3) in relation "McpRateLimitWindow"
+2026-11-27T12:24:37.0051201Z  2026-11-27 12:23:01.943 UTC [159] STATEMENT:  WITH want AS (
+2026-11-27T12:24:37.0051723Z  	    SELECT w."key", w."lim" FROM unnest($1::text[], $2::int[]) AS w("key", "lim")
+2026-11-27T12:24:37.0052181Z  	  ), locked AS (
+2026-11-27T12:24:37.0052657Z  	    SELECT t."key",
+2026-11-27T12:24:37.0052989Z  	           CASE WHEN t."expiresAt" <= now() THEN 0 ELSE t."count" END AS "cnt",
+2026-11-27T12:24:37.0053495Z  	           GREATEST(1, CEIL(EXTRACT(EPOCH FROM (t."expiresAt" - now()))))::int AS "retry"
+2026-11-27T12:24:37.0054145Z  	    FROM "McpRateLimitWindow" t WHERE t."key" = ANY($1::text[]) ORDER BY t."key" FOR UPDATE
+2026-11-27T12:24:37.0054597Z  	  ), verdict AS (
+2026-11-27T12:24:37.0055109Z  	    SELECT (SELECT count(*) FROM locked) = cardinality($1::text[]) AND COALESCE(bool_and(l."cnt" < w."lim"), false) AS "ok"
+2026-11-27T12:24:37.0055800Z  	    FROM locked l JOIN want w ON w."key" = l."key"
+2026-11-27T12:24:37.0056158Z  	  ), bumped AS (
+2026-11-27T12:24:37.0056432Z  	    UPDATE "McpRateLimitWindow" t SET
+2026-11-27T12:24:37.0057011Z  	      "count" = CASE WHEN t."expiresAt" <= now() THEN 1 ELSE t."count" + 1 END,
+2026-11-27T12:24:37.0057438Z  	      "windowStart" = CASE WHEN t."expiresAt" <= now() THEN now() ELSE t."windowStart" END,
+2026-11-27T12:24:37.0057923Z  	      "expiresAt" = CASE WHEN t."expiresAt" <= now() THEN now() + make_interval(secs => $3::int) ELSE t."expiresAt" END
+2026-11-27T12:24:37.0058368Z  	    FROM verdict v WHERE v."ok" AND t."key" = ANY($1::text[])
+2026-11-27T12:24:37.0058633Z  	    RETURNING t."key"
+2026-11-27T12:24:37.0058812Z  	  )
+2026-11-27T12:24:37.0059471Z  	  SELECT l."key", l."cnt", l."retry", (SELECT "ok" FROM verdict) AS "ok", (SELECT count(*) FROM bumped)::int AS "bumped" FROM locked l
+2026-11-27T12:24:37.0060272Z  2026-11-27 12:23:01.944 UTC [161] ERROR:  canceling statement due to statement timeout
+2026-11-27T12:24:37.0060829Z  2026-11-27 12:23:01.944 UTC [161] STATEMENT:  WITH want AS (
+2026-11-27T12:24:37.0061201Z  	    SELECT w."key", w."lim" FROM unnest($1::text[], $2::int[]) AS w("key", "lim")
+2026-11-27T12:24:37.0061492Z  	  ), locked AS (
+2026-11-27T12:24:37.0061663Z  	    SELECT t."key",
+2026-11-27T12:24:37.0061913Z  	           CASE WHEN t."expiresAt" <= now() THEN 0 ELSE t."count" END AS "cnt",
+2026-11-27T12:24:37.0062301Z  	           GREATEST(1, CEIL(EXTRACT(EPOCH FROM (t."expiresAt" - now()))))::int AS "retry"
+2026-11-27T12:24:37.0062730Z  	    FROM "McpRateLimitWindow" t WHERE t."key" = ANY($1::text[]) ORDER BY t."key" FOR UPDATE
+2026-11-27T12:24:37.0063046Z  	  ), verdict AS (
+2026-11-27T12:24:37.0063391Z  	    SELECT (SELECT count(*) FROM locked) = cardinality($1::text[]) AND COALESCE(bool_and(l."cnt" < w."lim"), false) AS "ok"
+2026-11-27T12:24:37.0063943Z  	    FROM locked l JOIN want w ON w."key" = l."key"
+2026-11-27T12:24:37.0064177Z  	  ), bumped AS (
+2026-11-27T12:24:37.0064366Z  	    UPDATE "McpRateLimitWindow" t SET
+2026-11-27T12:24:37.0064658Z  	      "count" = CASE WHEN t."expiresAt" <= now() THEN 1 ELSE t."count" + 1 END,
+2026-11-27T12:24:37.0065047Z  	      "windowStart" = CASE WHEN t."expiresAt" <= now() THEN now() ELSE t."windowStart" END,
+2026-11-27T12:24:37.0065520Z  	      "expiresAt" = CASE WHEN t."expiresAt" <= now() THEN now() + make_interval(secs => $3::int) ELSE t."expiresAt" END
+2026-11-27T12:24:37.0065935Z  	    FROM verdict v WHERE v."ok" AND t."key" = ANY($1::text[])
+2026-11-27T12:24:37.0066191Z  	    RETURNING t."key"
+2026-11-27T12:24:37.0066372Z  	  )
+2026-11-27T12:24:37.0066717Z  	  SELECT l."key", l."cnt", l."retry", (SELECT "ok" FROM verdict) AS "ok", (SELECT count(*) FROM bumped)::int AS "bumped" FROM locked l
+2026-11-27T12:24:37.0067201Z  2026-11-27 12:23:01.945 UTC [160] ERROR:  canceling statement due to statement timeout
+2026-11-27T12:24:37.0067624Z  2026-11-27 12:23:01.945 UTC [160] CONTEXT:  while locking tuple (0,3) in relation "McpRateLimitWindow"
+2026-11-27T12:24:37.0067997Z  2026-11-27 12:23:01.945 UTC [160] STATEMENT:  WITH want AS (
+2026-11-27T12:24:37.0068319Z  	    SELECT w."key", w."lim" FROM unnest($1::text[], $2::int[]) AS w("key", "lim")
+2026-11-27T12:24:37.0068597Z  	  ), locked AS (
+2026-11-27T12:24:37.0068761Z  	    SELECT t."key",
+2026-11-27T12:24:37.0070241Z  	           CASE WHEN t."expiresAt" <= now() THEN 0 ELSE t."count" END AS "cnt",
+2026-11-27T12:24:37.0071115Z  	           GREATEST(1, CEIL(EXTRACT(EPOCH FROM (t."expiresAt" - now()))))::int AS "retry"
+2026-11-27T12:24:37.0071826Z  	    FROM "McpRateLimitWindow" t WHERE t."key" = ANY($1::text[]) ORDER BY t."key" FOR UPDATE
+2026-11-27T12:24:37.0072347Z  	  ), verdict AS (
+2026-11-27T12:24:37.0072737Z  	    SELECT (SELECT count(*) FROM locked) = cardinality($1::text[]) AND COALESCE(bool_and(l."cnt" < w."lim"), false) AS "ok"
+2026-11-27T12:24:37.0073173Z  	    FROM locked l JOIN want w ON w."key" = l."key"
+2026-11-27T12:24:37.0073406Z  	  ), bumped AS (
+2026-11-27T12:24:37.0073594Z  	    UPDATE "McpRateLimitWindow" t SET
+2026-11-27T12:24:37.0073894Z  	      "count" = CASE WHEN t."expiresAt" <= now() THEN 1 ELSE t."count" + 1 END,
+2026-11-27T12:24:37.0074288Z  	      "windowStart" = CASE WHEN t."expiresAt" <= now() THEN now() ELSE t."windowStart" END,
+2026-11-27T12:24:37.0074763Z  	      "expiresAt" = CASE WHEN t."expiresAt" <= now() THEN now() + make_interval(secs => $3::int) ELSE t."expiresAt" END
+2026-11-27T12:24:37.0075182Z  	    FROM verdict v WHERE v."ok" AND t."key" = ANY($1::text[])
+2026-11-27T12:24:37.0075441Z  	    RETURNING t."key"
+2026-11-27T12:24:37.0075612Z  	  )
+2026-11-27T12:24:37.0075963Z  	  SELECT l."key", l."cnt", l."retry", (SELECT "ok" FROM verdict) AS "ok", (SELECT count(*) FROM bumped)::int AS "bumped" FROM locked l
+2026-11-27T12:24:37.0076459Z  2026-11-27 12:23:01.946 UTC [162] ERROR:  canceling statement due to statement timeout
+2026-11-27T12:24:37.0076884Z  2026-11-27 12:23:01.946 UTC [162] CONTEXT:  while locking tuple (0,3) in relation "McpRateLimitWindow"
+2026-11-27T12:24:37.0077264Z  2026-11-27 12:23:01.946 UTC [162] STATEMENT:  WITH want AS (
+2026-11-27T12:24:37.0077596Z  	    SELECT w."key", w."lim" FROM unnest($1::text[], $2::int[]) AS w("key", "lim")
+2026-11-27T12:24:37.0077885Z  	  ), locked AS (
+2026-11-27T12:24:37.0078054Z  	    SELECT t."key",
+2026-11-27T12:24:37.0078307Z  	           CASE WHEN t."expiresAt" <= now() THEN 0 ELSE t."count" END AS "cnt",
+2026-11-27T12:24:37.0078689Z  	           GREATEST(1, CEIL(EXTRACT(EPOCH FROM (t."expiresAt" - now()))))::int AS "retry"
+2026-11-27T12:24:37.0079324Z  	    FROM "McpRateLimitWindow" t WHERE t."key" = ANY($1::text[]) ORDER BY t."key" FOR UPDATE
+2026-11-27T12:24:37.0079861Z  	  ), verdict AS (
+2026-11-27T12:24:37.0080307Z  	    SELECT (SELECT count(*) FROM locked) = cardinality($1::text[]) AND COALESCE(bool_and(l."cnt" < w."lim"), false) AS "ok"
+2026-11-27T12:24:37.0080884Z  	    FROM locked l JOIN want w ON w."key" = l."key"
+2026-11-27T12:24:37.0081117Z  	  ), bumped AS (
+2026-11-27T12:24:37.0081299Z  	    UPDATE "McpRateLimitWindow" t SET
+2026-11-27T12:24:37.0081594Z  	      "count" = CASE WHEN t."expiresAt" <= now() THEN 1 ELSE t."count" + 1 END,
+2026-11-27T12:24:37.0082001Z  	      "windowStart" = CASE WHEN t."expiresAt" <= now() THEN now() ELSE t."windowStart" END,
+2026-11-27T12:24:37.0082485Z  	      "expiresAt" = CASE WHEN t."expiresAt" <= now() THEN now() + make_interval(secs => $3::int) ELSE t."expiresAt" END
+2026-11-27T12:24:37.0082896Z  	    FROM verdict v WHERE v."ok" AND t."key" = ANY($1::text[])
+2026-11-27T12:24:37.0083147Z  	    RETURNING t."key"
+2026-11-27T12:24:37.0083320Z  	  )
+2026-11-27T12:24:37.0083659Z  	  SELECT l."key", l."cnt", l."retry", (SELECT "ok" FROM verdict) AS "ok", (SELECT count(*) FROM bumped)::int AS "bumped" FROM locked l
+2026-11-27T12:24:37.0084136Z  2026-11-27 12:23:02.951 UTC [163] ERROR:  canceling statement due to statement timeout
+2026-11-27T12:24:37.0084561Z  2026-11-27 12:23:02.951 UTC [163] CONTEXT:  while locking tuple (0,3) in relation "McpRateLimitWindow"
+2026-11-27T12:24:37.0084929Z  2026-11-27 12:23:02.951 UTC [163] STATEMENT:  WITH want AS (
+2026-11-27T12:24:37.0085246Z  	    SELECT w."key", w."lim" FROM unnest($1::text[], $2::int[]) AS w("key", "lim")
+2026-11-27T12:24:37.0085522Z  	  ), locked AS (
+2026-11-27T12:24:37.0085688Z  	    SELECT t."key",
+2026-11-27T12:24:37.0085937Z  	           CASE WHEN t."expiresAt" <= now() THEN 0 ELSE t."count" END AS "cnt",
+2026-11-27T12:24:37.0086416Z  	           GREATEST(1, CEIL(EXTRACT(EPOCH FROM (t."expiresAt" - now()))))::int AS "retry"
+2026-11-27T12:24:37.0086837Z  	    FROM "McpRateLimitWindow" t WHERE t."key" = ANY($1::text[]) ORDER BY t."key" FOR UPDATE
+2026-11-27T12:24:37.0087155Z  	  ), verdict AS (
+2026-11-27T12:24:37.0087487Z  	    SELECT (SELECT count(*) FROM locked) = cardinality($1::text[]) AND COALESCE(bool_and(l."cnt" < w."lim"), false) AS "ok"
+2026-11-27T12:24:37.0087888Z  	    FROM locked l JOIN want w ON w."key" = l."key"
+2026-11-27T12:24:37.0088118Z  	  ), bumped AS (
+2026-11-27T12:24:37.0088297Z  	    UPDATE "McpRateLimitWindow" t SET
+2026-11-27T12:24:37.0088579Z  	      "count" = CASE WHEN t."expiresAt" <= now() THEN 1 ELSE t."count" + 1 END,
+2026-11-27T12:24:37.0088951Z  	      "windowStart" = CASE WHEN t."expiresAt" <= now() THEN now() ELSE t."windowStart" END,
+2026-11-27T12:24:37.0089749Z  	      "expiresAt" = CASE WHEN t."expiresAt" <= now() THEN now() + make_interval(secs => $3::int) ELSE t."expiresAt" END
+2026-11-27T12:24:37.0090172Z  	    FROM verdict v WHERE v."ok" AND t."key" = ANY($1::text[])
+2026-11-27T12:24:37.0090438Z  	    RETURNING t."key"
+2026-11-27T12:24:37.0090614Z  	  )
+2026-11-27T12:24:37.0090947Z  	  SELECT l."key", l."cnt", l."retry", (SELECT "ok" FROM verdict) AS "ok", (SELECT count(*) FROM bumped)::int AS "bumped" FROM locked l
+2026-11-27T12:24:37.0091422Z  2026-11-27 12:23:02.954 UTC [164] ERROR:  canceling statement due to statement timeout
+2026-11-27T12:24:37.0091850Z  2026-11-27 12:23:02.954 UTC [164] CONTEXT:  while locking tuple (0,3) in relation "McpRateLimitWindow"
+2026-11-27T12:24:37.0092232Z  2026-11-27 12:23:02.954 UTC [164] STATEMENT:  WITH want AS (
+2026-11-27T12:24:37.0092555Z  	    SELECT w."key", w."lim" FROM unnest($1::text[], $2::int[]) AS w("key", "lim")
+2026-11-27T12:24:37.0092835Z  	  ), locked AS (
+2026-11-27T12:24:37.0093001Z  	    SELECT t."key",
+2026-11-27T12:24:37.0093240Z  	           CASE WHEN t."expiresAt" <= now() THEN 0 ELSE t."count" END AS "cnt",
+2026-11-27T12:24:37.0093615Z  	           GREATEST(1, CEIL(EXTRACT(EPOCH FROM (t."expiresAt" - now()))))::int AS "retry"
+2026-11-27T12:24:37.0094034Z  	    FROM "McpRateLimitWindow" t WHERE t."key" = ANY($1::text[]) ORDER BY t."key" FOR UPDATE
+2026-11-27T12:24:37.0094348Z  	  ), verdict AS (
+2026-11-27T12:24:37.0094683Z  	    SELECT (SELECT count(*) FROM locked) = cardinality($1::text[]) AND COALESCE(bool_and(l."cnt" < w."lim"), false) AS "ok"
+2026-11-27T12:24:37.0095211Z  	    FROM locked l JOIN want w ON w."key" = l."key"
+2026-11-27T12:24:37.0095441Z  	  ), bumped AS (
+2026-11-27T12:24:37.0095629Z  	    UPDATE "McpRateLimitWindow" t SET
+2026-11-27T12:24:37.0095911Z  	      "count" = CASE WHEN t."expiresAt" <= now() THEN 1 ELSE t."count" + 1 END,
+2026-11-27T12:24:37.0096283Z  	      "windowStart" = CASE WHEN t."expiresAt" <= now() THEN now() ELSE t."windowStart" END,
+2026-11-27T12:24:37.0096743Z  	      "expiresAt" = CASE WHEN t."expiresAt" <= now() THEN now() + make_interval(secs => $3::int) ELSE t."expiresAt" END
+2026-11-27T12:24:37.0097147Z  	    FROM verdict v WHERE v."ok" AND t."key" = ANY($1::text[])
+2026-11-27T12:24:37.0097404Z  	    RETURNING t."key"
+2026-11-27T12:24:37.0097576Z  	  )
+2026-11-27T12:24:37.0097905Z  	  SELECT l."key", l."cnt", l."retry", (SELECT "ok" FROM verdict) AS "ok", (SELECT count(*) FROM bumped)::int AS "bumped" FROM locked l
+2026-11-27T12:24:37.0098377Z  2026-11-27 12:23:02.956 UTC [165] ERROR:  canceling statement due to statement timeout
+2026-11-27T12:24:37.0098786Z  2026-11-27 12:23:02.956 UTC [165] CONTEXT:  while locking tuple (0,3) in relation "McpRateLimitWindow"
+2026-11-27T12:24:37.0099324Z  2026-11-27 12:23:02.956 UTC [165] STATEMENT:  WITH want AS (
+2026-11-27T12:24:37.0099641Z  	    SELECT w."key", w."lim" FROM unnest($1::text[], $2::int[]) AS w("key", "lim")
+2026-11-27T12:24:37.0099919Z  	  ), locked AS (
+2026-11-27T12:24:37.0100084Z  	    SELECT t."key",
+2026-11-27T12:24:37.0100321Z  	           CASE WHEN t."expiresAt" <= now() THEN 0 ELSE t."count" END AS "cnt",
+2026-11-27T12:24:37.0100782Z  	           GREATEST(1, CEIL(EXTRACT(EPOCH FROM (t."expiresAt" - now()))))::int AS "retry"
+2026-11-27T12:24:37.0101199Z  	    FROM "McpRateLimitWindow" t WHERE t."key" = ANY($1::text[]) ORDER BY t."key" FOR UPDATE
+2026-11-27T12:24:37.0101521Z  	  ), verdict AS (
+2026-11-27T12:24:37.0101851Z  	    SELECT (SELECT count(*) FROM locked) = cardinality($1::text[]) AND COALESCE(bool_and(l."cnt" < w."lim"), false) AS "ok"
+2026-11-27T12:24:37.0102252Z  	    FROM locked l JOIN want w ON w."key" = l."key"
+2026-11-27T12:24:37.0102478Z  	  ), bumped AS (
+2026-11-27T12:24:37.0102658Z  	    UPDATE "McpRateLimitWindow" t SET
+2026-11-27T12:24:37.0102943Z  	      "count" = CASE WHEN t."expiresAt" <= now() THEN 1 ELSE t."count" + 1 END,
+2026-11-27T12:24:37.0103317Z  	      "windowStart" = CASE WHEN t."expiresAt" <= now() THEN now() ELSE t."windowStart" END,
+2026-11-27T12:24:37.0103773Z  	      "expiresAt" = CASE WHEN t."expiresAt" <= now() THEN now() + make_interval(secs => $3::int) ELSE t."expiresAt" END
+2026-11-27T12:24:37.0104173Z  	    FROM verdict v WHERE v."ok" AND t."key" = ANY($1::text[])
+2026-11-27T12:24:37.0104422Z  	    RETURNING t."key"
+2026-11-27T12:24:37.0104594Z  	  )
+2026-11-27T12:24:37.0104924Z  	  SELECT l."key", l."cnt", l."retry", (SELECT "ok" FROM verdict) AS "ok", (SELECT count(*) FROM bumped)::int AS "bumped" FROM locked l
+2026-11-27T12:24:37.0105384Z  2026-11-27 12:23:02.957 UTC [166] ERROR:  canceling statement due to statement timeout
+2026-11-27T12:24:37.0105793Z  2026-11-27 12:23:02.957 UTC [166] CONTEXT:  while locking tuple (0,3) in relation "McpRateLimitWindow"
+2026-11-27T12:24:37.0106157Z  2026-11-27 12:23:02.957 UTC [166] STATEMENT:  WITH want AS (
+2026-11-27T12:24:37.0106472Z  	    SELECT w."key", w."lim" FROM unnest($1::text[], $2::int[]) AS w("key", "lim")
+2026-11-27T12:24:37.0106750Z  	  ), locked AS (
+2026-11-27T12:24:37.0106910Z  	    SELECT t."key",
+2026-11-27T12:24:37.0107143Z  	           CASE WHEN t."expiresAt" <= now() THEN 0 ELSE t."count" END AS "cnt",
+2026-11-27T12:24:37.0107512Z  	           GREATEST(1, CEIL(EXTRACT(EPOCH FROM (t."expiresAt" - now()))))::int AS "retry"
+2026-11-27T12:24:37.0107918Z  	    FROM "McpRateLimitWindow" t WHERE t."key" = ANY($1::text[]) ORDER BY t."key" FOR UPDATE
+2026-11-27T12:24:37.0108227Z  	  ), verdict AS (
+2026-11-27T12:24:37.0108561Z  	    SELECT (SELECT count(*) FROM locked) = cardinality($1::text[]) AND COALESCE(bool_and(l."cnt" < w."lim"), false) AS "ok"
+2026-11-27T12:24:37.0109273Z  	    FROM locked l JOIN want w ON w."key" = l."key"
+2026-11-27T12:24:37.0109506Z  	  ), bumped AS (
+2026-11-27T12:24:37.0109693Z  	    UPDATE "McpRateLimitWindow" t SET
+2026-11-27T12:24:37.0109973Z  	      "count" = CASE WHEN t."expiresAt" <= now() THEN 1 ELSE t."count" + 1 END,
+2026-11-27T12:24:37.0110351Z  	      "windowStart" = CASE WHEN t."expiresAt" <= now() THEN now() ELSE t."windowStart" END,
+2026-11-27T12:24:37.0110804Z  	      "expiresAt" = CASE WHEN t."expiresAt" <= now() THEN now() + make_interval(secs => $3::int) ELSE t."expiresAt" END
+2026-11-27T12:24:37.0111205Z  	    FROM verdict v WHERE v."ok" AND t."key" = ANY($1::text[])
+2026-11-27T12:24:37.0111448Z  	    RETURNING t."key"
+2026-11-27T12:24:37.0111623Z  	  )
+2026-11-27T12:24:37.0111950Z  	  SELECT l."key", l."cnt", l."retry", (SELECT "ok" FROM verdict) AS "ok", (SELECT count(*) FROM bumped)::int AS "bumped" FROM locked l
+2026-11-27T12:24:37.0112426Z  2026-11-27 12:23:02.957 UTC [167] ERROR:  canceling statement due to statement timeout
+2026-11-27T12:24:37.0112752Z  2026-11-27 12:23:02.957 UTC [167] STATEMENT:  WITH want AS (
+2026-11-27T12:24:37.0113056Z  	    SELECT w."key", w."lim" FROM unnest($1::text[], $2::int[]) AS w("key", "lim")
+2026-11-27T12:24:37.0113331Z  	  ), locked AS (
+2026-11-27T12:24:37.0113490Z  	    SELECT t."key",
+2026-11-27T12:24:37.0113724Z  	           CASE WHEN t."expiresAt" <= now() THEN 0 ELSE t."count" END AS "cnt",
+2026-11-27T12:24:37.0114092Z  	           GREATEST(1, CEIL(EXTRACT(EPOCH FROM (t."expiresAt" - now()))))::int AS "retry"
+2026-11-27T12:24:37.0114601Z  	    FROM "McpRateLimitWindow" t WHERE t."key" = ANY($1::text[]) ORDER BY t."key" FOR UPDATE
+2026-11-27T12:24:37.0114920Z  	  ), verdict AS (
+2026-11-27T12:24:37.0115250Z  	    SELECT (SELECT count(*) FROM locked) = cardinality($1::text[]) AND COALESCE(bool_and(l."cnt" < w."lim"), false) AS "ok"
+2026-11-27T12:24:37.0115645Z  	    FROM locked l JOIN want w ON w."key" = l."key"
+2026-11-27T12:24:37.0115877Z  	  ), bumped AS (
+2026-11-27T12:24:37.0116052Z  	    UPDATE "McpRateLimitWindow" t SET
+2026-11-27T12:24:37.0116332Z  	      "count" = CASE WHEN t."expiresAt" <= now() THEN 1 ELSE t."count" + 1 END,
+2026-11-27T12:24:37.0116707Z  	      "windowStart" = CASE WHEN t."expiresAt" <= now() THEN now() ELSE t."windowStart" END,
+2026-11-27T12:24:37.0117161Z  	      "expiresAt" = CASE WHEN t."expiresAt" <= now() THEN now() + make_interval(secs => $3::int) ELSE t."expiresAt" END
+2026-11-27T12:24:37.0117567Z  	    FROM verdict v WHERE v."ok" AND t."key" = ANY($1::text[])
+2026-11-27T12:24:37.0117814Z  	    RETURNING t."key"
+2026-11-27T12:24:37.0118041Z  	  )
+2026-11-27T12:24:37.0118363Z  	  SELECT l."key", l."cnt", l."retry", (SELECT "ok" FROM verdict) AS "ok", (SELECT count(*) FROM bumped)::int AS "bumped" FROM locked l
+2026-11-27T12:24:37.0118840Z  2026-11-27 12:23:03.602 UTC [169] FATAL:  terminating connection due to administrator command
+2026-11-27T12:24:37.0119338Z  2026-11-27 12:23:03.602 UTC [169] STATEMENT:  WITH want AS (
+2026-11-27T12:24:37.0119644Z  	    SELECT w."key", w."lim" FROM unnest($1::text[], $2::int[]) AS w("key", "lim")
+2026-11-27T12:24:37.0119917Z  	  ), locked AS (
+2026-11-27T12:24:37.0120079Z  	    SELECT t."key",
+2026-11-27T12:24:37.0120319Z  	           CASE WHEN t."expiresAt" <= now() THEN 0 ELSE t."count" END AS "cnt",
+2026-11-27T12:24:37.0120687Z  	           GREATEST(1, CEIL(EXTRACT(EPOCH FROM (t."expiresAt" - now()))))::int AS "retry"
+2026-11-27T12:24:37.0121093Z  	    FROM "McpRateLimitWindow" t WHERE t."key" = ANY($1::text[]) ORDER BY t."key" FOR UPDATE
+2026-11-27T12:24:37.0121423Z  	  ), verdict AS (
+2026-11-27T12:24:37.0121774Z  	    SELECT (SELECT count(*) FROM locked) = cardinality($1::text[]) AND COALESCE(bool_and(l."cnt" < w."lim"), false) AS "ok"
+2026-11-27T12:24:37.0122178Z  	    FROM locked l JOIN want w ON w."key" = l."key"
+2026-11-27T12:24:37.0122407Z  	  ), bumped AS (
+2026-11-27T12:24:37.0122583Z  	    UPDATE "McpRateLimitWindow" t SET
+2026-11-27T12:24:37.0122982Z  	      "count" = CASE WHEN t."expiresAt" <= now() THEN 1 ELSE t."count" + 1 END,
+2026-11-27T12:24:37.0123358Z  	      "windowStart" = CASE WHEN t."expiresAt" <= now() THEN now() ELSE t."windowStart" END,
+2026-11-27T12:24:37.0123822Z  	      "expiresAt" = CASE WHEN t."expiresAt" <= now() THEN now() + make_interval(secs => $3::int) ELSE t."expiresAt" END
+2026-11-27T12:24:37.0124224Z  	    FROM verdict v WHERE v."ok" AND t."key" = ANY($1::text[])
+2026-11-27T12:24:37.0124473Z  	    RETURNING t."key"
+2026-11-27T12:24:37.0124644Z  	  )
+2026-11-27T12:24:37.0124978Z  	  SELECT l."key", l."cnt", l."retry", (SELECT "ok" FROM verdict) AS "ok", (SELECT count(*) FROM bumped)::int AS "bumped" FROM locked l
+2026-11-27T12:24:37.0125472Z  2026-11-27 12:23:03.602 UTC [170] FATAL:  terminating connection due to administrator command
+2026-11-27T12:24:37.0125812Z  2026-11-27 12:23:03.602 UTC [170] STATEMENT:  WITH want AS (
+2026-11-27T12:24:37.0126120Z  	    SELECT w."key", w."lim" FROM unnest($1::text[], $2::int[]) AS w("key", "lim")
+2026-11-27T12:24:37.0126400Z  	  ), locked AS (
+2026-11-27T12:24:37.0126560Z  	    SELECT t."key",
+2026-11-27T12:24:37.0126799Z  	           CASE WHEN t."expiresAt" <= now() THEN 0 ELSE t."count" END AS "cnt",
+2026-11-27T12:24:37.0127169Z  	           GREATEST(1, CEIL(EXTRACT(EPOCH FROM (t."expiresAt" - now()))))::int AS "retry"
+2026-11-27T12:24:37.0127602Z  	    FROM "McpRateLimitWindow" t WHERE t."key" = ANY($1::text[]) ORDER BY t."key" FOR UPDATE
+2026-11-27T12:24:37.0127909Z  	  ), verdict AS (
+2026-11-27T12:24:37.0128343Z  	    SELECT (SELECT count(*) FROM locked) = cardinality($1::text[]) AND COALESCE(bool_and(l."cnt" < w."lim"), false) AS "ok"
+2026-11-27T12:24:37.0128747Z  	    FROM locked l JOIN want w ON w."key" = l."key"
+2026-11-27T12:24:37.0128974Z  	  ), bumped AS (
+2026-11-27T12:24:37.0129352Z  	    UPDATE "McpRateLimitWindow" t SET
+2026-11-27T12:24:37.0129631Z  	      "count" = CASE WHEN t."expiresAt" <= now() THEN 1 ELSE t."count" + 1 END,
+2026-11-27T12:24:37.0130005Z  	      "windowStart" = CASE WHEN t."expiresAt" <= now() THEN now() ELSE t."windowStart" END,
+2026-11-27T12:24:37.0130455Z  	      "expiresAt" = CASE WHEN t."expiresAt" <= now() THEN now() + make_interval(secs => $3::int) ELSE t."expiresAt" END
+2026-11-27T12:24:37.0130850Z  	    FROM verdict v WHERE v."ok" AND t."key" = ANY($1::text[])
+2026-11-27T12:24:37.0131101Z  	    RETURNING t."key"
+2026-11-27T12:24:37.0131270Z  	  )
+2026-11-27T12:24:37.0131598Z  	  SELECT l."key", l."cnt", l."retry", (SELECT "ok" FROM verdict) AS "ok", (SELECT count(*) FROM bumped)::int AS "bumped" FROM locked l
+2026-11-27T12:24:37.0132081Z  2026-11-27 12:23:03.602 UTC [168] FATAL:  terminating connection due to administrator command
+2026-11-27T12:24:37.0132422Z  2026-11-27 12:23:03.602 UTC [168] STATEMENT:  WITH want AS (
+2026-11-27T12:24:37.0132732Z  	    SELECT w."key", w."lim" FROM unnest($1::text[], $2::int[]) AS w("key", "lim")
+2026-11-27T12:24:37.0133003Z  	  ), locked AS (
+2026-11-27T12:24:37.0133177Z  	    SELECT t."key",
+2026-11-27T12:24:37.0133419Z  	           CASE WHEN t."expiresAt" <= now() THEN 0 ELSE t."count" END AS "cnt",
+2026-11-27T12:24:37.0133783Z  	           GREATEST(1, CEIL(EXTRACT(EPOCH FROM (t."expiresAt" - now()))))::int AS "retry"
+2026-11-27T12:24:37.0134193Z  	    FROM "McpRateLimitWindow" t WHERE t."key" = ANY($1::text[]) ORDER BY t."key" FOR UPDATE
+2026-11-27T12:24:37.0134510Z  	  ), verdict AS (
+2026-11-27T12:24:37.0134845Z  	    SELECT (SELECT count(*) FROM locked) = cardinality($1::text[]) AND COALESCE(bool_and(l."cnt" < w."lim"), false) AS "ok"
+2026-11-27T12:24:37.0135234Z  	    FROM locked l JOIN want w ON w."key" = l."key"
+2026-11-27T12:24:37.0135456Z  	  ), bumped AS (
+2026-11-27T12:24:37.0135633Z  	    UPDATE "McpRateLimitWindow" t SET
+2026-11-27T12:24:37.0135902Z  	      "count" = CASE WHEN t."expiresAt" <= now() THEN 1 ELSE t."count" + 1 END,
+2026-11-27T12:24:37.0136283Z  	      "windowStart" = CASE WHEN t."expiresAt" <= now() THEN now() ELSE t."windowStart" END,
+2026-11-27T12:24:37.0136859Z  	      "expiresAt" = CASE WHEN t."expiresAt" <= now() THEN now() + make_interval(secs => $3::int) ELSE t."expiresAt" END
+2026-11-27T12:24:37.0137276Z  	    FROM verdict v WHERE v."ok" AND t."key" = ANY($1::text[])
+2026-11-27T12:24:37.0137525Z  	    RETURNING t."key"
+2026-11-27T12:24:37.0137694Z  	  )
+2026-11-27T12:24:37.0138026Z  	  SELECT l."key", l."cnt", l."retry", (SELECT "ok" FROM verdict) AS "ok", (SELECT count(*) FROM bumped)::int AS "bumped" FROM locked l
+2026-11-27T12:24:37.0138502Z  2026-11-27 12:23:03.602 UTC [172] FATAL:  terminating connection due to administrator command
+2026-11-27T12:24:37.0138845Z  2026-11-27 12:23:03.602 UTC [172] STATEMENT:  WITH want AS (
+2026-11-27T12:24:37.0139317Z  	    SELECT w."key", w."lim" FROM unnest($1::text[], $2::int[]) AS w("key", "lim")
+2026-11-27T12:24:37.0139597Z  	  ), locked AS (
+2026-11-27T12:24:37.0139754Z  	    SELECT t."key",
+2026-11-27T12:24:37.0139990Z  	           CASE WHEN t."expiresAt" <= now() THEN 0 ELSE t."count" END AS "cnt",
+2026-11-27T12:24:37.0140356Z  	           GREATEST(1, CEIL(EXTRACT(EPOCH FROM (t."expiresAt" - now()))))::int AS "retry"
+2026-11-27T12:24:37.0140758Z  	    FROM "McpRateLimitWindow" t WHERE t."key" = ANY($1::text[]) ORDER BY t."key" FOR UPDATE
+2026-11-27T12:24:37.0141070Z  	  ), verdict AS (
+2026-11-27T12:24:37.0141396Z  	    SELECT (SELECT count(*) FROM locked) = cardinality($1::text[]) AND COALESCE(bool_and(l."cnt" < w."lim"), false) AS "ok"
+2026-11-27T12:24:37.0141789Z  	    FROM locked l JOIN want w ON w."key" = l."key"
+2026-11-27T12:24:37.0142006Z  	  ), bumped AS (
+2026-11-27T12:24:37.0142178Z  	    UPDATE "McpRateLimitWindow" t SET
+2026-11-27T12:24:37.0142561Z  	      "count" = CASE WHEN t."expiresAt" <= now() THEN 1 ELSE t."count" + 1 END,
+2026-11-27T12:24:37.0142933Z  	      "windowStart" = CASE WHEN t."expiresAt" <= now() THEN now() ELSE t."windowStart" END,
+2026-11-27T12:24:37.0143389Z  	      "expiresAt" = CASE WHEN t."expiresAt" <= now() THEN now() + make_interval(secs => $3::int) ELSE t."expiresAt" END
+2026-11-27T12:24:37.0143792Z  	    FROM verdict v WHERE v."ok" AND t."key" = ANY($1::text[])
+2026-11-27T12:24:37.0144035Z  	    RETURNING t."key"
+2026-11-27T12:24:37.0144201Z  	  )
+2026-11-27T12:24:37.0144520Z  	  SELECT l."key", l."cnt", l."retry", (SELECT "ok" FROM verdict) AS "ok", (SELECT count(*) FROM bumped)::int AS "bumped" FROM locked l
+2026-11-27T12:24:37.0144993Z  2026-11-27 12:23:03.602 UTC [171] FATAL:  terminating connection due to administrator command
+2026-11-27T12:24:37.0145426Z  2026-11-27 12:23:03.602 UTC [171] CONTEXT:  while locking tuple (0,5) in relation "McpRateLimitWindow"
+2026-11-27T12:24:37.0145793Z  2026-11-27 12:23:03.602 UTC [171] STATEMENT:  WITH want AS (
+2026-11-27T12:24:37.0146098Z  	    SELECT w."key", w."lim" FROM unnest($1::text[], $2::int[]) AS w("key", "lim")
+2026-11-27T12:24:37.0146372Z  	  ), locked AS (
+2026-11-27T12:24:37.0146528Z  	    SELECT t."key",
+2026-11-27T12:24:37.0146760Z  	           CASE WHEN t."expiresAt" <= now() THEN 0 ELSE t."count" END AS "cnt",
+2026-11-27T12:24:37.0147140Z  	           GREATEST(1, CEIL(EXTRACT(EPOCH FROM (t."expiresAt" - now()))))::int AS "retry"
+2026-11-27T12:24:37.0147543Z  	    FROM "McpRateLimitWindow" t WHERE t."key" = ANY($1::text[]) ORDER BY t."key" FOR UPDATE
+2026-11-27T12:24:37.0147861Z  	  ), verdict AS (
+2026-11-27T12:24:37.0148188Z  	    SELECT (SELECT count(*) FROM locked) = cardinality($1::text[]) AND COALESCE(bool_and(l."cnt" < w."lim"), false) AS "ok"
+2026-11-27T12:24:37.0148583Z  	    FROM locked l JOIN want w ON w."key" = l."key"
+2026-11-27T12:24:37.0148813Z  	  ), bumped AS (
+2026-11-27T12:24:37.0148993Z  	    UPDATE "McpRateLimitWindow" t SET
+2026-11-27T12:24:37.0149498Z  	      "count" = CASE WHEN t."expiresAt" <= now() THEN 1 ELSE t."count" + 1 END,
+2026-11-27T12:24:37.0149884Z  	      "windowStart" = CASE WHEN t."expiresAt" <= now() THEN now() ELSE t."windowStart" END,
+2026-11-27T12:24:37.0150345Z  	      "expiresAt" = CASE WHEN t."expiresAt" <= now() THEN now() + make_interval(secs => $3::int) ELSE t."expiresAt" END
+2026-11-27T12:24:37.0150871Z  	    FROM verdict v WHERE v."ok" AND t."key" = ANY($1::text[])
+2026-11-27T12:24:37.0151138Z  	    RETURNING t."key"
+2026-11-27T12:24:37.0151313Z  	  )
+2026-11-27T12:24:37.0151649Z  	  SELECT l."key", l."cnt", l."retry", (SELECT "ok" FROM verdict) AS "ok", (SELECT count(*) FROM bumped)::int AS "bumped" FROM locked l
+2026-11-27T12:24:37.0152162Z  2026-11-27 12:23:04.859 UTC [182] ERROR:  canceling statement due to lock timeout at character 43
+2026-11-27T12:24:37.0152614Z  2026-11-27 12:23:04.859 UTC [182] STATEMENT:  SELECT "payload", "consumedAt", "id" FROM "McpOAuthPayload"
+2026-11-27T12:24:37.0153113Z  	         WHERE "model" = $1 AND "id" = $2 AND ("expiresAt" IS NULL OR "expiresAt" > now()) LIMIT 1 FOR SHARE
+2026-11-27T12:24:37.0153555Z  2026-11-27 12:23:05.870 UTC [184] ERROR:  canceling statement due to lock timeout at character 13
+2026-11-27T12:24:37.0154137Z  2026-11-27 12:23:05.870 UTC [184] STATEMENT:  INSERT INTO "McpOAuthPayload" ("model", "id", "payload", "grantId", "accountId", "clientId", "uid", "userCode", "expiresAt")
+2026-11-27T12:24:37.0154772Z  	         VALUES ($1, $2, $3::jsonb, $4, $5, $6, $7, $8, CASE WHEN $9::int IS NULL THEN NULL ELSE now() + make_interval(secs => $9::int) END)
+2026-11-27T12:24:37.0155193Z  	         ON CONFLICT ("model", "id") DO UPDATE SET
+2026-11-27T12:24:37.0155573Z  	           "payload" = EXCLUDED."payload", "grantId" = EXCLUDED."grantId", "accountId" = EXCLUDED."accountId",
+2026-11-27T12:24:37.0156050Z  	           "clientId" = EXCLUDED."clientId", "uid" = EXCLUDED."uid", "userCode" = EXCLUDED."userCode",
+2026-11-27T12:24:37.0156399Z  	           "expiresAt" = EXCLUDED."expiresAt"
+2026-11-27T12:24:37.0156852Z  2026-11-27 12:23:38.308 UTC [780] LOG:  unexpected EOF on client connection with an open transaction
+2026-11-27T12:24:37.0157301Z  2026-11-27 12:24:08.551 UTC [1198] LOG:  unexpected EOF on client connection with an open transaction
+2026-11-27T12:24:37.0157740Z  2026-11-27 12:24:24.224 UTC [1516] LOG:  unexpected EOF on client connection with an open transaction
+2026-11-27T12:24:37.0158172Z  2026-11-27 12:24:24.224 UTC [1542] LOG:  unexpected EOF on client connection with an open transaction
+2026-11-27T12:24:37.0158593Z  2026-11-27 12:24:24.227 UTC [1551] LOG:  unexpected EOF on client connection with an open transaction
+2026-11-27T12:24:37.0159182Z  2026-11-27 12:24:24.230 UTC [1549] LOG:  unexpected EOF on client connection with an open transaction
+2026-11-27T12:24:37.0159628Z  2026-11-27 12:24:25.602 UTC [1625] LOG:  unexpected EOF on client connection with an open transaction
+2026-11-27T12:24:37.0160065Z  2026-11-27 12:24:25.604 UTC [1620] LOG:  unexpected EOF on client connection with an open transaction
+2026-11-27T12:24:37.0160491Z  2026-11-27 12:24:25.608 UTC [1629] LOG:  unexpected EOF on client connection with an open transaction
+2026-11-27T12:24:37.0160912Z  2026-11-27 12:24:25.615 UTC [1611] LOG:  unexpected EOF on client connection with an open transaction
+2026-11-27T12:24:37.0161333Z  2026-11-27 12:24:27.009 UTC [1701] LOG:  unexpected EOF on client connection with an open transaction
+2026-11-27T12:24:37.0161764Z  2026-11-27 12:24:27.009 UTC [1683] LOG:  unexpected EOF on client connection with an open transaction
+2026-11-27T12:24:37.0162186Z  2026-11-27 12:24:27.011 UTC [1649] LOG:  unexpected EOF on client connection with an open transaction
+2026-11-27T12:24:37.0162604Z  2026-11-27 12:24:27.011 UTC [1706] LOG:  unexpected EOF on client connection with an open transaction
+2026-11-27T12:24:37.0163019Z  2026-11-27 12:24:27.011 UTC [1709] LOG:  unexpected EOF on client connection with an open transaction
+2026-11-27T12:24:37.0163442Z  2026-11-27 12:24:27.015 UTC [1710] LOG:  unexpected EOF on client connection with an open transaction
+2026-11-27T12:24:37.0163875Z  2026-11-27 12:24:27.015 UTC [1702] LOG:  unexpected EOF on client connection with an open transaction
+2026-11-27T12:24:37.0164296Z  2026-11-27 12:24:27.017 UTC [1705] LOG:  unexpected EOF on client connection with an open transaction
+2026-11-27T12:24:37.0164834Z  2026-11-27 12:24:27.020 UTC [1697] LOG:  unexpected EOF on client connection with an open transaction
+2026-11-27T12:24:37.0165257Z  2026-11-27 12:24:27.021 UTC [1707] LOG:  unexpected EOF on client connection with an open transaction
+2026-11-27T12:24:37.0165616Z  2026-11-27 12:24:31.693 UTC [1790] ERROR:  deadlock detected
+2026-11-27T12:24:37.0166042Z  2026-11-27 12:24:31.693 UTC [1790] DETAIL:  Process 1790 waits for ShareLock on transaction 64544; blocked by process 1789.
+2026-11-27T12:24:37.0166512Z  	Process 1789 waits for ShareLock on transaction 64543; blocked by process 1790.
+2026-11-27T12:24:37.0166899Z  	Process 1790: SELECT 1 FROM "McpRateLimitWindow" WHERE "key" = $1 FOR UPDATE
+2026-11-27T12:24:37.0167260Z  	Process 1789: SELECT 1 FROM "McpRateLimitWindow" WHERE "key" = $1 FOR UPDATE
+2026-11-27T12:24:37.0167604Z  2026-11-27 12:24:31.693 UTC [1790] HINT:  See server log for query details.
+2026-11-27T12:24:37.0168004Z  2026-11-27 12:24:31.693 UTC [1790] CONTEXT:  while locking tuple (0,1) in relation "McpRateLimitWindow"
+2026-11-27T12:24:37.0168470Z  2026-11-27 12:24:31.693 UTC [1790] STATEMENT:  SELECT 1 FROM "McpRateLimitWindow" WHERE "key" = $1 FOR UPDATE
+2026-11-27T12:24:37.0168927Z  2026-11-27 12:24:33.354 UTC [1801] LOG:  unexpected EOF on client connection with an open transaction
+2026-11-27T12:24:37.0169511Z  2026-11-27 12:24:33.358 UTC [1807] LOG:  unexpected EOF on client connection with an open transaction
+2026-11-27T12:24:37.0169944Z  2026-11-27 12:24:33.359 UTC [1791] LOG:  unexpected EOF on client connection with an open transaction
+2026-11-27T12:24:37.0170370Z  2026-11-27 12:24:33.361 UTC [1793] LOG:  unexpected EOF on client connection with an open transaction
+2026-11-27T12:24:37.0170897Z  2026-11-27 12:24:33.362 UTC [1808] LOG:  unexpected EOF on client connection with an open transaction
+2026-11-27T12:24:37.0171337Z  2026-11-27 12:24:33.367 UTC [1795] LOG:  unexpected EOF on client connection with an open transaction
+2026-11-27T12:24:37.0171765Z  2026-11-27 12:24:33.369 UTC [1797] LOG:  unexpected EOF on client connection with an open transaction
+2026-11-27T12:24:37.0172221Z  2026-11-27 12:24:33.370 UTC [1804] LOG:  unexpected EOF on client connection with an open transaction
+2026-11-27T12:24:37.0172651Z  2026-11-27 12:24:33.373 UTC [1800] LOG:  unexpected EOF on client connection with an open transaction
+2026-11-27T12:24:37.0173076Z  2026-11-27 12:24:33.375 UTC [1803] LOG:  unexpected EOF on client connection with an open transaction
+2026-11-27T12:24:37.0173501Z  2026-11-27 12:24:33.376 UTC [1802] LOG:  unexpected EOF on client connection with an open transaction
+2026-11-27T12:24:37.0173923Z  2026-11-27 12:24:33.386 UTC [1792] LOG:  unexpected EOF on client connection with an open transaction
+2026-11-27T12:24:37.0174348Z  2026-11-27 12:24:33.389 UTC [1798] LOG:  unexpected EOF on client connection with an open transaction
+2026-11-27T12:24:37.0174780Z  2026-11-27 12:24:33.392 UTC [1799] LOG:  unexpected EOF on client connection with an open transaction
+2026-11-27T12:24:37.0175209Z  2026-11-27 12:24:33.393 UTC [1805] LOG:  unexpected EOF on client connection with an open transaction
+2026-11-27T12:24:37.0175630Z  2026-11-27 12:24:33.394 UTC [1794] LOG:  unexpected EOF on client connection with an open transaction
+2026-11-27T12:24:37.0176048Z  2026-11-27 12:24:33.395 UTC [1796] LOG:  unexpected EOF on client connection with an open transaction
+2026-11-27T12:24:37.0176454Z  2026-11-27 12:24:36.708 UTC [1866] ERROR:  canceling statement due to statement timeout
+2026-11-27T12:24:37.0176882Z  2026-11-27 12:24:36.708 UTC [1866] CONTEXT:  while locking tuple (0,6) in relation "McpRateLimitWindow"
+2026-11-27T12:24:37.0177257Z  2026-11-27 12:24:36.708 UTC [1866] STATEMENT:  WITH want AS (
+2026-11-27T12:24:37.0177589Z  	    SELECT w."key", w."lim" FROM unnest($1::text[], $2::int[]) AS w("key", "lim")
+2026-11-27T12:24:37.0177868Z  	  ), locked AS (
+2026-11-27T12:24:37.0178037Z  	    SELECT t."key",
+2026-11-27T12:24:37.0178290Z  	           CASE WHEN t."expiresAt" <= now() THEN 0 ELSE t."count" END AS "cnt",
+2026-11-27T12:24:37.0178786Z  	           GREATEST(1, CEIL(EXTRACT(EPOCH FROM (t."expiresAt" - now()))))::int AS "retry"
+2026-11-27T12:24:37.0179346Z  	    FROM "McpRateLimitWindow" t WHERE t."key" = ANY($1::text[]) ORDER BY t."key" FOR UPDATE
+2026-11-27T12:24:37.0179663Z  	  ), verdict AS (
+2026-11-27T12:24:37.0180005Z  	    SELECT (SELECT count(*) FROM locked) = cardinality($1::text[]) AND COALESCE(bool_and(l."cnt" < w."lim"), false) AS "ok"
+2026-11-27T12:24:37.0180412Z  	    FROM locked l JOIN want w ON w."key" = l."key"
+2026-11-27T12:24:37.0180646Z  	  ), bumped AS (
+2026-11-27T12:24:37.0180827Z  	    UPDATE "McpRateLimitWindow" t SET
+2026-11-27T12:24:37.0181114Z  	      "count" = CASE WHEN t."expiresAt" <= now() THEN 1 ELSE t."count" + 1 END,
+2026-11-27T12:24:37.0181495Z  	      "windowStart" = CASE WHEN t."expiresAt" <= now() THEN now() ELSE t."windowStart" END,
+2026-11-27T12:24:37.0181959Z  	      "expiresAt" = CASE WHEN t."expiresAt" <= now() THEN now() + make_interval(secs => $3::int) ELSE t."expiresAt" END
+2026-11-27T12:24:37.0182373Z  	    FROM verdict v WHERE v."ok" AND t."key" = ANY($1::text[])
+2026-11-27T12:24:37.0182622Z  	    RETURNING t."key"
+2026-11-27T12:24:37.0182798Z  	  )
+2026-11-27T12:24:37.0183140Z  	  SELECT l."key", l."cnt", l."retry", (SELECT "ok" FROM verdict) AS "ok", (SELECT count(*) FROM bumped)::int AS "bumped" FROM locked l
+2026-11-27T12:24:37.0183605Z  The database cluster will be initialized with locale "en_US.utf8".
+2026-11-27T12:24:37.0183945Z  The default database encoding has accordingly been set to "UTF8".
+2026-11-27T12:24:37.0184279Z  The default text search configuration will be set to "english".
+2026-11-27T12:24:37.0184533Z  
+2026-11-27T12:24:37.0184848Z  Data page checksums are disabled.
+2026-11-27T12:24:37.0185049Z  
+2026-11-27T12:24:37.0185284Z  fixing permissions on existing directory /var/lib/postgresql/data ... ok
+2026-11-27T12:24:37.0185589Z  creating subdirectories ... ok
+2026-11-27T12:24:37.0185847Z  selecting dynamic shared memory implementation ... posix
+2026-11-27T12:24:37.0186140Z  selecting default max_connections ... 100
+2026-11-27T12:24:37.0186401Z  selecting default shared_buffers ... 128MB
+2026-11-27T12:24:37.0186637Z  selecting default time zone ... Etc/UTC
+2026-11-27T12:24:37.0186861Z  creating configuration files ... ok
+2026-11-27T12:24:37.0187080Z  running bootstrap script ... ok
+2026-11-27T12:24:37.0187321Z  performing post-bootstrap initialization ... ok
+2026-11-27T12:24:37.0187562Z  syncing data to disk ... ok
+2026-11-27T12:24:37.0187742Z  
+2026-11-27T12:24:37.0187885Z  
+2026-11-27T12:24:37.0188068Z  Success. You can now start the database server using:
+2026-11-27T12:24:37.0188304Z  
+2026-11-27T12:24:37.0188501Z      pg_ctl -D /var/lib/postgresql/data -l logfile start
+2026-11-27T12:24:37.0188745Z  
+2026-11-27T12:24:37.0189386Z  waiting for server to start....2026-11-27 12:22:18.926 UTC [48] LOG:  starting PostgreSQL 16.16 (Debian 16.16-1.pgdg13+1) on x86_64-pc-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit
+2026-11-27T12:24:37.0190040Z  2026-11-27 12:22:18.938 UTC [48] LOG:  listening on Unix socket "/var/run/postgresql/.s.PGSQL.5432"
+2026-11-27T12:24:37.0190470Z  2026-11-27 12:22:18.947 UTC [51] LOG:  database system was shut down at 2026-11-27 12:22:18 UTC
+2026-11-27T12:24:37.0190860Z  2026-11-27 12:22:19.008 UTC [48] LOG:  database system is ready to accept connections
+2026-11-27T12:24:37.0191150Z   done
+2026-11-27T12:24:37.0191302Z  server started
+2026-11-27T12:24:37.0191467Z  CREATE DATABASE
+2026-11-27T12:24:37.0191628Z  
+2026-11-27T12:24:37.0191767Z  
+2026-11-27T12:24:37.0192017Z  /usr/local/bin/docker-entrypoint.sh: ignoring /docker-entrypoint-initdb.d/*
+2026-11-27T12:24:37.0192322Z  
+2026-11-27T12:24:37.0192547Z  2026-11-27 12:22:19.185 UTC [48] LOG:  received fast shutdown request
+2026-11-27T12:24:37.0192949Z  waiting for server to shut down....2026-11-27 12:22:19.186 UTC [48] LOG:  aborting any active transactions
+2026-11-27T12:24:37.0193526Z  2026-11-27 12:22:19.187 UTC [48] LOG:  background worker "logical replication launcher" (PID 54) exited with exit code 1
+2026-11-27T12:24:37.0194071Z  2026-11-27 12:22:19.188 UTC [49] LOG:  shutting down
+2026-11-27T12:24:37.0194375Z  2026-11-27 12:22:19.188 UTC [49] LOG:  checkpoint starting: shutdown immediate
+2026-11-27T12:24:37.0195193Z  2026-11-27 12:22:19.285 UTC [49] LOG:  checkpoint complete: wrote 935 buffers (5.7%); 0 WAL file(s) added, 0 removed, 0 recycled; write=0.094 s, sync=0.002 s, total=0.098 s; sync files=301, longest=0.001 s, average=0.001 s; distance=4346 kB, estimate=4346 kB; lsn=0/1943080, redo lsn=0/1943080
+2026-11-27T12:24:37.0195980Z  2026-11-27 12:22:19.292 UTC [48] LOG:  database system is shut down
+2026-11-27T12:24:37.0196235Z   done
+2026-11-27T12:24:37.0196398Z  server stopped
+2026-11-27T12:24:37.0196563Z  
+2026-11-27T12:24:37.0196765Z  PostgreSQL init process complete; ready for start up.
+2026-11-27T12:24:37.0197014Z  
+2026-11-27T12:24:37.0201827Z Stop and remove container: e1e103e95d77460cbc774b01a8584ac6_postgres16_693998
+2026-11-27T12:24:37.0205629Z ##[command]/usr/bin/docker rm --force 04ce49897e41c2c217d00133d850517845eb2ec6da7af7909a34d4806bc6d9db
+2026-11-27T12:24:37.1547663Z 04ce49897e41c2c217d00133d850517845eb2ec6da7af7909a34d4806bc6d9db
+2026-11-27T12:24:37.1578653Z Remove container network: github_network_f821774b4c864b9e841471ea45a0a3ac
+2026-11-27T12:24:37.1582969Z ##[command]/usr/bin/docker network rm github_network_f821774b4c864b9e841471ea45a0a3ac
+2026-11-27T12:24:37.2131351Z github_network_f821774b4c864b9e841471ea45a0a3ac
+2026-11-27T12:24:37.2214079Z Cleaning up orphan processes
