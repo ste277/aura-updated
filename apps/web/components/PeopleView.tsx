@@ -6,7 +6,8 @@ import type { CityOption } from '../lib/cities';
 import * as theme from './theme';
 import { colors, spacing, typography } from './theme';
 import { SurfaceCard, PrimaryButton, SecondaryButton, DestructiveButton, EmptyState, FieldLabel, FieldHint, TextInput, TextAreaInput, SelectInput } from './ui';
-import { ComingUpList, SpecialDaysSection, KIND_ICON, birthdayFromChartDate, formatSavedDay, nextLine, occasionTitle, type OccasionRow, type UpcomingRow } from './MyPeopleOccasions';
+import { ComingUpList, SpecialDaysSection, KIND_ICON, birthdayFromChartDate, formatSavedDay, occasionTitle, type OccasionRow, type UpcomingRow } from './MyPeopleOccasions';
+import { COMING_UP_DAYS, LIST_NEXT_OCCASION_DAYS, personNextOccasionLine } from '../lib/myPeopleOccasionUi';
 import { isMyPeopleClientEffective, isMyPeoplePresentationEnabled, MY_PEOPLE_CAPABILITY_HEADER } from '../lib/myPeopleGate';
 
 export type RelationshipType = 'PARTNER' | 'SPOUSE' | 'FAMILY' | 'FRIEND' | 'OTHER' | 'PARENT' | 'CHILD' | 'SIBLING';
@@ -100,7 +101,8 @@ export function PeopleView({ onBack }: PeopleViewProps) {
   // valid only when the server has My People enabled); presentation only
   // decides which options are shown.
   const [serverEnabled, setServerEnabled] = useState(false);
-  // AURA-MP-2: the next 30 days of special days (My People only).
+  // AURA-MP-2: upcoming special days (My People only): 60 days for the list's
+  // leap-day annotation; Coming up shows the first 30.
   const [upcoming, setUpcoming] = useState<UpcomingRow[]>([]);
 
   const loadPeople = async () => {
@@ -113,7 +115,7 @@ export function PeopleView({ onBack }: PeopleViewProps) {
       setServerEnabled(res.headers?.get(MY_PEOPLE_CAPABILITY_HEADER) === 'enabled');
       setPeople(await res.json());
       if (effective) {
-        const up = await fetch('/api/people/occasions/upcoming?days=30').catch(() => null);
+        const up = await fetch(`/api/people/occasions/upcoming?days=${LIST_NEXT_OCCASION_DAYS}`).catch(() => null);
         setUpcoming(up && up.ok ? await up.json() : []);
       } else {
         setUpcoming([]);
@@ -248,7 +250,7 @@ function MyPeopleList({ people, upcoming, onAddPerson, onViewPerson }: { people:
   }
   return (
     <>
-      <ComingUpList items={upcoming} onOpenPerson={onViewPerson} />
+      <ComingUpList items={upcoming.filter((u) => u.daysUntil <= COMING_UP_DAYS)} onOpenPerson={onViewPerson} />
       <div style={typography.sectionEyebrow}>People</div>
       {people.map((person) => (
         <SurfaceCard key={person.id}>
@@ -258,9 +260,9 @@ function MyPeopleList({ people, upcoming, onAddPerson, onViewPerson }: { people:
               <div style={{ minWidth: 0 }}>
                 <div style={{ fontSize: 15, fontWeight: 800, color: colors.textPrimary, overflowWrap: 'anywhere' }}>{person.name}</div>
                 <div style={{ fontSize: 12, color: colors.textFaint, marginTop: 3 }}>{relationshipLine(person)}</div>
-                {person.nextOccasion && person.nextOccasion.daysUntil <= 60 && (
+                {person.nextOccasion && person.nextOccasion.daysUntil <= LIST_NEXT_OCCASION_DAYS && (
                   <div style={{ fontSize: 12, color: colors.textSecondary, marginTop: 3 }}>
-                    {KIND_ICON[person.nextOccasion.kind]} {occasionTitle(person.nextOccasion.kind, person.nextOccasion.label)} · {nextLine({ ...person.nextOccasion, observedFromLeapDay: false })}
+                    {KIND_ICON[person.nextOccasion.kind]} {occasionTitle(person.nextOccasion.kind, person.nextOccasion.label)} · {personNextOccasionLine(person.nextOccasion, upcoming)}
                   </div>
                 )}
               </div>

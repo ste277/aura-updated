@@ -164,6 +164,10 @@ jobs:
       # cleared payload contract.
       - name: Run AURA-MP-2 My People special-day UI helpers test
         run: npx ts-node test/myPeopleMp2Ui.test.ts
+      # AURA-MP-2 (62016 completion) -- the people list annotates a 29 February
+      # day observed on 28 February "(for 29 Feb)" like Coming up and detail.
+      - name: Run AURA-MP-2 My People leap-day list (jsdom) test
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/myPeopleMp2LeapDayJsdom.test.ts
       # AURA-MP-1 -- special-day date logic: unknown year, 29 Feb, rollover,
       # the user's local midnight, surfacing windows. Pure, no database.
       - name: Run AURA-MP-1 special-day date logic test

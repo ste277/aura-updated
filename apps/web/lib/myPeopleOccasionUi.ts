@@ -179,3 +179,27 @@ export function birthdayFromChartDate(birthDate: string | null | undefined): { m
   return { year: Number(m[1]), month: Number(m[2]), day: Number(m[3]) };
 }
 
+
+/** "Coming up" shows the next 30 days (design 4.2 default). */
+export const COMING_UP_DAYS = 30;
+/**
+ * The people list shows a person's next special day when it is within 60
+ * days -- the upcoming API's maximum window, so every day the list shows is
+ * also in the upcoming data, which carries the 29 Feb flag (D4).
+ */
+export const LIST_NEXT_OCCASION_DAYS = 60;
+
+/**
+ * The people-list line for a person's next special day, with the same
+ * "(for 29 Feb)" annotation as Coming up and the detail page. The list API
+ * item does not carry the leap-day flag, so it is taken from the upcoming
+ * data for the same occasion (never inferred from the date alone: a real
+ * 28 February is not annotated).
+ */
+export function personNextOccasionLine(
+  next: { id: string; date: string; daysUntil: number },
+  upcoming: Array<Pick<UpcomingRow, 'occasionId' | 'observedFromLeapDay'>>
+): string {
+  const observedFromLeapDay = upcoming.find((u) => u.occasionId === next.id)?.observedFromLeapDay ?? false;
+  return nextLine({ date: next.date, daysUntil: next.daysUntil, observedFromLeapDay });
+}

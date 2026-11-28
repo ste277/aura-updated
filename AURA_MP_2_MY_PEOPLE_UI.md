@@ -37,8 +37,18 @@ MP-2 is UI only. It builds on the MP-1 API (#400) and design AURA-MP-01 §5.1–
   - the switch: server off, public flag off, and re-enabled.
 - **Existing suites:** all MP-1 suites (R1–R4) and SavedPerson pass unchanged.
 
+## Scope decisions (62016 completion, 2026-11-28)
+
+- **Accepted as is:** the relationship dropdown and the form with all fields shown at once.
+- **Moved to MP-3:** the Plan "+ Add someone" quick-add.
+- **Deferred:** editing location and interests. Existing stored values are preserved, because the UI never sends those fields.
+- **Corrected:** the people list now shows "(for 29 Feb)" like Coming up and the detail page.
+  - How: the list reads the leap-day flag from the upcoming API over its maximum 60-day window, which is the same window the list uses. Coming up still shows 30 days.
+  - Scope: UI only; no API change.
+  - Test: `test/myPeopleMp2LeapDayJsdom.test.ts`.
+
 ## Not in MP-2
 
-- **Later phases:** MP-3 (Home card, Plan/Find a Time with a person, "Not this year" dismissal) and MP-4 (rhythms).
-- **Excluded:** push notifications, contact import, invitations, location and interest editing.
-- **Plan "+ Add someone" quick-add:** listed in design §8 for MP-2, but not in the 62016 brief.
+- **MP-3:** Home card, Plan / Find a Time with a person, "Not this year" dismissal, Plan quick-add.
+- **MP-4:** rhythms.
+- **Excluded:** push notifications, contact import, invitations.
