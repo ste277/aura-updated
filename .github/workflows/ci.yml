@@ -992,6 +992,12 @@ jobs:
         env:
           PALM_BROWSER_CHANNEL: chrome
         run: npx ts-node test/palm04I2TracingBrowser.test.ts
+      - name: Run feature review and confirmation component tests (PALM-04-I3, jsdom)
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/palm04I3ReviewJsdom.test.ts
+      - name: Run feature review and confirmation browser tests (PALM-04-I3, runner's installed Google Chrome, synthetic harness, no network)
+        env:
+          PALM_BROWSER_CHANNEL: chrome
+        run: npx ts-node test/palm04I3ReviewBrowser.test.ts
       # PALM-03-E1: development-only personalised interpretation engine (synthetic
       # observations only; unreviewed content). The package suite compares the engine
       # with the unmodified C1 reference oracle (python3, preinstalled on the runner):

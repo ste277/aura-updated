@@ -63,6 +63,8 @@ function drawSyntheticPalm(w: number, h: number, hand: P[]): HTMLCanvasElement {
 }
 
 const SIZE = (window as any).__PALM_HARNESS_SIZE ?? { w: 960, h: 1280 };
+/** Synthetic G5 quality codes for the context (default none); lets a test produce uncertain measurements. */
+const QUALITY = (window as any).__PALM_HARNESS_QUALITY ?? [];
 const W = Number(SIZE.w);
 const H = Number(SIZE.h);
 
@@ -75,7 +77,7 @@ function makeContext(shift = 0) {
   generation += 1;
   const hand = HAND.map((p) => ({ x: p.x + shift, y: p.y }));
   const gen = generation;
-  const made = createConstructionContext({ imageWidth: W, imageHeight: H, landmarks: hand, handednessLabel: 'Left', rotationDeg: 0, qualityIssues: [] }, gen, () => true);
+  const made = createConstructionContext({ imageWidth: W, imageHeight: H, landmarks: hand, handednessLabel: 'Left', rotationDeg: 0, qualityIssues: QUALITY }, gen, () => true);
   if (!made) throw new Error('synthetic context refused');
   return { ...made, image: drawSyntheticPalm(W, H, hand) };
 }

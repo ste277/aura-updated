@@ -28,7 +28,7 @@ const argShots = process.argv.indexOf('--shots');
 const SHOTS = argShots > 0 ? process.argv[argShots + 1] : null;
 
 // ---------------------------------------------------------------- in-memory bundle
-type Mutation = 'none' | 'stretch' | 'container' | 'bypass' | 'original' | 'stale-gesture' | 'ignore-release' | 'retain-revoked' | 'unhandled-limit' | 'r1-head' | 'tap-boundary-bypass' | 'r2-head' | 'filter-before-validate' | 'ignore-coalesced' | 'r3-head' | 'skip-unmappable';
+type Mutation = 'none' | 'stretch' | 'container' | 'bypass' | 'original' | 'stale-gesture' | 'ignore-release' | 'retain-revoked' | 'unhandled-limit' | 'r1-head' | 'tap-boundary-bypass' | 'r2-head' | 'filter-before-validate' | 'ignore-coalesced' | 'r3-head' | 'skip-unmappable' | 'stale-confirmation' | 'silent-missing';
 /** The R3 head reviewed by the R3 focused review (9463431): the R4 geometry-loss witness must fail on it. */
 const R3_HEAD = '94634312f4249e5edb72e008795fceabb2cca86c';
 /** The R2 head reviewed by 50351 (6ddaa65): the R3 sample-pipeline witness must fail on it. */
@@ -61,6 +61,9 @@ const MUTATIONS: Record<Exclude<Mutation, 'none' | 'original' | 'r1-head' | 'r2-
   // R2 negative control (filled in with the R2 implementation)
   // R3 negative control (filled in with the R3 implementation)
   // R4 negative control (filled in with the R4 implementation)
+  // P4-I3 negative controls (used by test/palm04I3ReviewBrowser.test.ts)
+  'stale-confirmation': [{ file: 'apps/web/components/palm-scan/PalmImageInput.tsx', from: 'const confirmedValid = !!confirmed && confirmed.key === reviewKey && !cleared;', to: 'const confirmedValid = !!confirmed && !cleared;' }],
+  'silent-missing': [{ file: 'apps/web/components/palm-scan/PalmImageInput.tsx', from: "else if (v.status === 'not-started' && REVIEW_PRIMARY_LINES.includes(v.line)) out.push(", to: 'else if (false) out.push(' }],
   'skip-unmappable': [
     { file: 'apps/web/components/palm-scan/PalmImageInput.tsx', from: "if (!p) { invalidateSample(g, 'unverifiable'); continue; }", to: 'if (!p) continue;' },
     { file: 'apps/web/components/palm-scan/PalmImageInput.tsx', from: "if (!release) invalidateSample(g, 'unverifiable');", to: '' },
@@ -133,12 +136,12 @@ window.__privacy = [];
   ['log', 'info', 'debug', 'warn', 'error'].forEach(function (m) { var o = console[m].bind(console); console[m] = function () { window.__privacy.push('console.' + m + ':' + String(arguments[0]).slice(0, 120)); return o.apply(null, arguments); }; });
 })();`;
 
-function page(mutation: Mutation, w: number, h: number): string {
+function page(mutation: Mutation, w: number, h: number, extra: Record<string, unknown> = {}): string {
   const app = bundle(path.join(ROOT, 'test/palm04I2Harness.tsx'), mutation);
   const esc = (s: string) => s.replace(/<\/script/gi, '<\\/script');
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <style>html,body{margin:0;background:#0b1020;color:#f8fafc;font-family:system-ui,sans-serif}</style>
-<script>${esc(SPIES)}</script><script>window.process = { env: { NODE_ENV: 'development' } };window.__PALM_HARNESS_SIZE=${JSON.stringify({ w, h })};</script>
+<script>${esc(SPIES)}</script><script>window.process = { env: { NODE_ENV: 'development' } };window.__PALM_HARNESS_SIZE=${JSON.stringify({ w, h })};${Object.entries(extra).map(([k, v]) => `window.${k}=${JSON.stringify(v)};`).join('')}</script>
 <script>${esc(reactUmd)}</script><script>${esc(reactDomUmd)}</script></head><body><div id="root"></div><script>${esc(app)}</script></body></html>`;
 }
 
@@ -1202,5 +1205,6 @@ async function main() {
   if (!ok) process.exit(1);
 }
 
-export { bundle, page };
+export { bundle, page, oracleContent };
+export type { Mutation, Box };
 if (require.main === module) main().catch((e) => { console.log(`FAIL (uncaught) ${e?.stack ?? e}`); process.exit(1); });
