@@ -43,7 +43,9 @@ function controllableEnv(extra: Partial<PalmCameraEnv> = {}) {
   return { env, calls, pending };
 }
 class FakeVideo implements PalmVideoLike {
-  srcObject: unknown = null;
+  private src: unknown = null;
+  get srcObject(): unknown { return this.src; }
+  set srcObject(v: unknown) { if (v && this.failAttach) throw domErr('TypeError'); this.src = v; }
   muted = false;
   playsInline = false;
   videoWidth = 0;
@@ -53,7 +55,17 @@ class FakeVideo implements PalmVideoLike {
   pauses = 0;
   attrs: Record<string, string> = {};
   setAttribute(n: string, v: string) { this.attrs[n] = v; }
-  play() { this.plays++; return Promise.resolve(); }
+  /** R1: how play() behaves -- resolve (default), reject, throw, or a promise the test settles later */
+  playMode: 'ok' | 'reject' | 'throw' | 'manual' = 'ok';
+  pendingPlays: Array<{ resolve: () => void; reject: (e: unknown) => void }> = [];
+  failAttach = false;
+  play(): Promise<void> {
+    this.plays++;
+    if (this.playMode === 'throw') throw domErr('NotSupportedError');
+    if (this.playMode === 'reject') return Promise.reject(domErr('NotSupportedError'));
+    if (this.playMode === 'manual') return new Promise((resolve, reject) => this.pendingPlays.push({ resolve, reject }));
+    return Promise.resolve();
+  }
   pause() { this.pauses++; }
   ready(w = 1280, h = 720) { this.videoWidth = w; this.videoHeight = h; this.readyState = 4; }
 }
@@ -266,6 +278,112 @@ async function run() {
     const after = session.getState();
     check('F4. clearing the session leaves no frame, result or construction context', after.frame === null && after.result === null && session.getConstructionContext() === null);
     session.dispose();
+  }
+  // ------------------------------------------------------------------ G. R1 (50362 F1): preview failure is terminal for its stream
+  for (const mode of ['reject', 'throw', 'attach'] as const) {
+    const g = controllableEnv();
+    const cam = createPalmCamera(g.env);
+    const video = new FakeVideo();
+    if (mode === 'attach') video.failAttach = true; else video.playMode = mode;
+    cam.attach(video);
+    const p = cam.start();
+    const s = streamOf('video');
+    g.pending[0].resolve(s.stream);
+    await p;
+    await tick();
+    const st = cam.getState();
+    check(`G1-${mode}. a preview that cannot start (${mode === 'attach' ? 'attaching the stream throws' : `play() ${mode === 'reject' ? 'rejects' : 'throws'}`}) stops every track of that stream, detaches it and reports camera-preview-failed (retryable)`, s.tracks.every((t) => t.stops === 1 && t.readyState === 'ended') && video.srcObject === null && st.phase === 'error' && st.error?.code === 'camera-preview-failed' && st.error?.retryable === true && cam.liveTrackCount() === 0, { st, tracks: s.tracks.map((t) => t.readyState), attached: video.srcObject !== null });
+    check(`G2-${mode}. after a preview failure no frame can be taken (nothing live to read)`, cam.frame() === null);
+    video.playMode = 'ok'; video.failAttach = false;
+    const p2 = cam.start();
+    check(`G3-${mode}. the user can try again: one new request`, g.calls.length === 2);
+    const s2 = streamOf('video');
+    g.pending[1].resolve(s2.stream);
+    await p2; await tick();
+    check(`G4-${mode}. the retry is live and shown`, cam.getState().phase === 'live' && video.srcObject === s2.stream && s2.tracks[0].readyState === 'live');
+    cam.dispose();
+  }
+  {
+    // a STALE playback failure: stream A's play() rejects only after A was stopped and stream B is live
+    const g = controllableEnv();
+    const cam = createPalmCamera(g.env);
+    const video = new FakeVideo();
+    video.playMode = 'manual';
+    cam.attach(video);
+    const pa = cam.start(); const a = streamOf('video'); g.pending[0].resolve(a.stream); await pa;
+    const playA = video.pendingPlays[0];
+    cam.stop('cancel');
+    const pb = cam.start(); const b = streamOf('video'); g.pending[1].resolve(b.stream); await pb;
+    video.pendingPlays[1].resolve();
+    playA.reject(domErr('NotSupportedError'));
+    await tick(); await tick();
+    check('G5. a late playback failure from an OLDER stream does not stop, detach or invalidate the newer live stream', cam.getState().phase === 'live' && cam.getState().error === null && video.srcObject === b.stream && b.tracks.every((t) => t.stops === 0 && t.readyState === 'live') && a.tracks.every((t) => t.stops === 1));
+    // the same stream re-shown in another element: the first element's late failure is superseded too
+    const v2 = new FakeVideo(); v2.playMode = 'manual';
+    const playB1 = video.pendingPlays.length;
+    cam.attach(v2);
+    void playB1;
+    v2.pendingPlays[0].resolve();
+    await tick();
+    check('G6. a late failure of a superseded preview start (re-attached to another element) is ignored', cam.getState().phase === 'live' && v2.srcObject === b.stream && b.tracks[0].readyState === 'live');
+    v2.playMode = 'manual';
+    cam.attach(v2); // re-show in the same element: a newer preview start
+    v2.pendingPlays[0].reject(domErr('AbortError')); // the earlier start's play() is interrupted by the newer one
+    await tick();
+    check('G7. a play() interrupted by a newer preview start in the same element does not stop the stream', cam.getState().phase === 'live' && b.tracks[0].readyState === 'live');
+    v2.pendingPlays[1].reject(domErr('NotSupportedError'));
+    await tick();
+    check('G8. but the CURRENT preview start failing is terminal for the current stream', cam.getState().error?.code === 'camera-preview-failed' && b.tracks.every((t) => t.readyState === 'ended') && v2.srcObject === null);
+    cam.dispose();
+  }
+  {
+    // cancellation, photo and teardown still work with a preview whose play() is still pending
+    const g = controllableEnv();
+    const cam = createPalmCamera(g.env);
+    const video = new FakeVideo(); video.playMode = 'manual';
+    cam.attach(video);
+    const p = cam.start(); const s = streamOf('video'); g.pending[0].resolve(s.stream); await p;
+    video.ready();
+    const f = cam.frame();
+    cam.stop('done');
+    video.pendingPlays[0].reject(domErr('AbortError'));
+    await tick();
+    check('G9. photo then a late play() rejection: the camera stays cleanly off (idle, no error), every track ended', !!f && cam.getState().phase === 'idle' && cam.getState().error === null && s.tracks.every((t) => t.readyState === 'ended'));
+    cam.dispose();
+  }
+
+  // ------------------------------------------------------------------ H. R1 (50362 F2): the DEFAULT browser surface, behaviourally
+  {
+    const g = globalThis as { navigator?: unknown; isSecureContext?: unknown };
+    const savedNav = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+    const savedSecure = Object.getOwnPropertyDescriptor(globalThis, 'isSecureContext');
+    let acquisitions = 0;
+    const handed: Array<ReturnType<typeof streamOf>> = [];
+    let next: 'video' | 'mixed' = 'video';
+    Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { mediaDevices: { getUserMedia: (c: unknown) => { acquisitions++; void c; const s = next === 'mixed' ? streamOf('video', 'audio') : streamOf('video'); handed.push(s); return Promise.resolve(s.stream); } } } });
+    Object.defineProperty(globalThis, 'isSecureContext', { configurable: true, value: true });
+    try {
+      check('H1. the default environment finds the (installed) browser camera API', palmCameraSupport() === 'available');
+      const cam = createPalmCamera();
+      check('H2. creating the camera requests nothing', acquisitions === 0);
+      await cam.start();
+      check('H3. exactly ONE browser acquisition request for one explicit start (default surface)', acquisitions === 1 && cam.getState().phase === 'live', { acquisitions });
+      await cam.start(); await cam.start();
+      check('H4. further start() calls while live request nothing more', acquisitions === 1);
+      cam.stop('done');
+      await cam.start();
+      check('H5. one more request per accepted explicit start (2 starts -> 2 requests), every earlier track stopped', acquisitions === 2 && handed[0].tracks.every((t) => t.readyState === 'ended'));
+      cam.stop('done');
+      next = 'mixed';
+      await cam.start();
+      const mixed = handed[handed.length - 1];
+      check('H6. a mixed video+audio stream from the browser is rejected and EVERY acquired track (video and audio) is stopped', acquisitions === 3 && cam.getState().error?.code === 'camera-failed' && mixed.tracks.length === 2 && mixed.tracks.every((t) => t.stops === 1 && t.readyState === 'ended') && cam.liveTrackCount() === 0);
+      cam.dispose();
+      check('H7. no track handed out by the browser is left live', handed.every((h) => h.tracks.every((t) => t.readyState === 'ended')));
+    } finally {
+      if (savedNav) Object.defineProperty(globalThis, 'navigator', savedNav); else delete g.navigator;
+      if (savedSecure) Object.defineProperty(globalThis, 'isSecureContext', savedSecure); else delete g.isSecureContext;
+    }
   }
   await tick();
 }

@@ -37,6 +37,7 @@ export type PalmCameraErrorCode =
   | 'camera-busy' // the camera could not be started (in use elsewhere, or a hardware error)
   | 'camera-failed' // any other failure, or a stream that is not video-only
   | 'camera-ended' // the camera stopped by itself while it was on
+  | 'camera-preview-failed' // R1: the live preview could not be started (playback refused or the stream could not be attached)
   | 'camera-not-ready'; // a photo was requested before the first frame arrived
 
 export const PALM_CAMERA_ERROR_TEXT: Readonly<Record<PalmCameraErrorCode, string>> = Object.freeze({
@@ -47,11 +48,12 @@ export const PALM_CAMERA_ERROR_TEXT: Readonly<Record<PalmCameraErrorCode, string
   'camera-busy': 'The camera could not be started. It may be in use by another app. Close it and try again, or upload a photo instead.',
   'camera-failed': 'The camera could not be used. Try again, or upload a photo instead.',
   'camera-ended': 'The camera stopped. Try again, or upload a photo instead.',
+  'camera-preview-failed': 'The camera preview could not be started, so the camera was turned off. Try again, or upload a photo instead.',
   'camera-not-ready': 'The camera is still starting. Wait a moment, then take the photo again.',
 });
 
 /** Errors after which trying the camera again can help (denied, unsupported, insecure and not-found cannot). */
-export const PALM_CAMERA_RETRYABLE: readonly PalmCameraErrorCode[] = Object.freeze(['camera-busy', 'camera-failed', 'camera-ended', 'camera-not-ready']);
+export const PALM_CAMERA_RETRYABLE: readonly PalmCameraErrorCode[] = Object.freeze(['camera-busy', 'camera-failed', 'camera-ended', 'camera-preview-failed', 'camera-not-ready']);
 
 export type PalmCameraPhase = 'idle' | 'requesting' | 'live' | 'error';
 export type PalmCameraStopReason = 'cancel' | 'done' | 'hidden' | 'pagehide' | 'error' | 'unmount' | 'restart';
@@ -145,6 +147,7 @@ export function createPalmCamera(env: PalmCameraEnv = defaultPalmCameraEnv()): P
   let stream: PalmStreamLike | null = null;
   let video: PalmVideoLike | null = null;
   let onEnded: (() => void) | null = null;
+  let showSeq = 0; // R1: each preview start; a failure from an earlier one is ignored
   const live = new Set<PalmTrackLike>();
   const listeners = new Set<(s: PalmCameraState) => void>();
 
@@ -170,18 +173,33 @@ export function createPalmCamera(env: PalmCameraEnv = defaultPalmCameraEnv()): P
     try { el.srcObject = null; } catch { /* ignore */ }
   };
 
+  /**
+   * Show the live stream in the attached element. R1 (50362 F1): a preview that cannot start is TERMINAL for its
+   * stream -- an attach that throws, a play() that throws, or a play() that rejects stops every track of THAT stream,
+   * detaches it and reports camera-preview-failed (retryable; upload stays available). The failure counts only while
+   * the same stream, element, epoch and preview start are still current, so a late failure from an older stream or an
+   * earlier preview start (one that stop(), a newer start() or a re-attach superseded) can never stop, detach or
+   * invalidate a newer stream.
+   */
   const show = () => {
     if (!video || !stream || state.phase !== 'live') return;
     const el = video;
-    el.muted = true;
-    el.playsInline = true;
-    try { el.setAttribute?.('playsinline', ''); el.setAttribute?.('muted', ''); } catch { /* ignore */ }
-    el.srcObject = stream;
+    const s = stream;
+    const epoch = state.epoch;
+    const seq = ++showSeq;
+    const failed = () => {
+      if (stream === s && video === el && state.epoch === epoch && showSeq === seq && state.phase === 'live') release('error', 'camera-preview-failed');
+    };
     try {
-      const p = el.play?.();
-      // a video stopped or detached before playback starts rejects play(); there is nothing to restore
-      if (p && typeof (p as Promise<void>).catch === 'function') (p as Promise<void>).catch(() => undefined);
-    } catch { /* ignore */ }
+      el.muted = true;
+      el.playsInline = true;
+      el.setAttribute?.('playsinline', '');
+      el.setAttribute?.('muted', '');
+      el.srcObject = s;
+    } catch { failed(); return; }
+    let p: Promise<void> | void;
+    try { p = el.play?.(); } catch { failed(); return; }
+    if (p && typeof (p as Promise<void>).then === 'function') (p as Promise<void>).then(undefined, failed);
   };
 
   /** Release everything this camera holds; `phase` is what the camera shows afterwards. */

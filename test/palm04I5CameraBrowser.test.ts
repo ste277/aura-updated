@@ -207,8 +207,55 @@ async function journey(browser: any, L: Layout) {
   await A.ctx.close();
 }
 
+/** R1: the camera preview's play() -- 'always' rejects every time; 'first-late' holds the FIRST call's promise until the
+ *  test calls window.__rejectFirstPlay() (deterministic: no timer races), and plays every later call normally. */
+const PLAY_FAILURE = (mode: 'always' | 'first-late') => `(function(){var n=0;var play=HTMLMediaElement.prototype.play;HTMLMediaElement.prototype.play=function(){
+  if(!this.dataset||this.dataset.testid!=='palm-camera-video')return play.apply(this,arguments);
+  n++;window.__playCalls=n;
+  if('${mode}'==='always')return Promise.reject(new DOMException('synthetic preview playback refusal','NotSupportedError'));
+  if(n===1){play.apply(this,arguments).catch(function(){});return new Promise(function(_r,rej){window.__rejectFirstPlay=function(){rej(new DOMException('late synthetic playback refusal','NotSupportedError'));};});}
+  return play.apply(this,arguments);};})();`;
+
+/** R1 (50362 F1): preview playback failure, in a real browser with a real MediaStream. */
+async function previewFailure(browser: any, L: Layout, mutation: Mutation = 'none'): Promise<{ terminal: boolean; stale: boolean }> {
+  const T = `[${L.name}${mutation === 'none' ? '' : `, control ${mutation}`}]`;
+  const out = { terminal: false, stale: false };
+  {
+    const A = await open(browser, L, { init: PLAY_FAILURE('always'), mutation });
+    await A.press('palm-camera-button');
+    await A.pg.waitForFunction(() => ((window as any).__playCalls ?? 0) > 0, undefined, { timeout: 4000 }).catch(() => undefined);
+    await sleep(200); await A.settle();
+    const snap = await A.pg.evaluate(() => ({ tracks: ((window as any).__camTracks as MediaStreamTrack[]).map((t) => t.readyState), attached: Array.from(document.querySelectorAll('video')).some((v) => !!(v as HTMLVideoElement).srcObject), video: !!document.querySelector('[data-testid="palm-camera-video"]'), code: document.querySelector('[data-testid="palm-camera-message"]')?.getAttribute('data-code') ?? null }));
+    out.terminal = snap.tracks.length === 1 && snap.tracks.every((t: string) => t === "ended") && !snap.attached && !snap.video && snap.code === 'camera-preview-failed';
+    if (mutation === 'none') {
+      check(`F1a ${T} preview playback fails: the stream's track is ENDED, no video holds the stream, camera-preview-failed is shown`, out.terminal, snap);
+      check(`F1b ${T} the user can try again or upload instead`, (await A.text('palm-camera-button')) === 'Try the camera again' && (await A.has('palm-upload-button')));
+    }
+    await A.ctx.close();
+  }
+  {
+    const A = await open(browser, L, { init: PLAY_FAILURE('first-late'), mutation });
+    await A.press('palm-camera-button'); // stream 1: its play() stays pending
+    await A.pg.waitForFunction(() => typeof (window as any).__rejectFirstPlay === 'function', undefined, { timeout: 4000 }).catch(() => undefined);
+    await A.press('palm-camera-cancel');
+    const live2 = await A.cameraOn(); // stream 2: plays normally
+    await A.pg.evaluate(() => (window as any).__rejectFirstPlay?.()); // NOW stream 1's playback failure arrives
+    await sleep(200); await A.settle();
+    const snap = await A.pg.evaluate(() => { const v = document.querySelector('[data-testid="palm-camera-video"]') as HTMLVideoElement | null; const ts = (window as any).__camTracks as MediaStreamTrack[]; return { tracks: ts.map((t) => t.readyState), attachedNewest: !!v && v.srcObject instanceof MediaStream && (v.srcObject as MediaStream).getVideoTracks()[0] === ts[ts.length - 1], phase: document.querySelector('[data-testid="palm-camera"]')?.getAttribute('data-phase') ?? null, code: document.querySelector('[data-testid="palm-camera-message"]')?.getAttribute('data-code') ?? null }; });
+    out.stale = live2 && snap.tracks.length === 2 && snap.tracks[0] === 'ended' && snap.tracks[1] === 'live' && snap.attachedNewest && snap.phase === 'live' && snap.code === null;
+    if (mutation === 'none') {
+      check(`F1c ${T} a LATE playback failure from the older (cancelled) stream leaves the newer stream live, attached and error-free`, out.stale, snap);
+      await A.takePhoto();
+      check(`F1d ${T} the newer stream still takes the photo, then its track ends`, (await A.liveTracks()) === 0 && (await A.has('palm-preview-canvas')));
+    }
+    await A.ctx.close();
+  }
+  return out;
+}
+
 async function scenarios(browser: any, L: Layout, png: Buffer) {
   const T = `[${L.name}]`;
+  await previewFailure(browser, L);
   // ------------------------------------------------ privacy over a full camera session
   {
     const A = await open(browser, L);
@@ -354,6 +401,9 @@ async function controls(browser: any) {
     await A.ctx.close();
   }
   detected['poll-only'] = !(await throttled(browser, 'poll-only'));
+  // R1 (50362 F1) controls
+  detected['preview-failure-ignored'] = !(await previewFailure(browser, L, 'preview-failure-ignored')).terminal;
+  detected['stale-playback-unguarded'] = !(await previewFailure(browser, L, 'stale-playback-unguarded')).stale;
   for (const [m, d] of Object.entries(detected)) check(`X ${m}: the negative control is detected`, d);
 }
 

@@ -28,7 +28,7 @@ const argShots = process.argv.indexOf('--shots');
 const SHOTS = argShots > 0 ? process.argv[argShots + 1] : null;
 
 // ---------------------------------------------------------------- in-memory bundle
-type Mutation = 'none' | 'stretch' | 'container' | 'bypass' | 'original' | 'stale-gesture' | 'ignore-release' | 'retain-revoked' | 'unhandled-limit' | 'r1-head' | 'tap-boundary-bypass' | 'r2-head' | 'filter-before-validate' | 'ignore-coalesced' | 'r3-head' | 'skip-unmappable' | 'stale-confirmation' | 'silent-missing' | 'camera-keep-on' | 'camera-late-grant' | 'camera-ignore-hidden' | 'camera-audio' | 'poll-only';
+type Mutation = 'none' | 'stretch' | 'container' | 'bypass' | 'original' | 'stale-gesture' | 'ignore-release' | 'retain-revoked' | 'unhandled-limit' | 'r1-head' | 'tap-boundary-bypass' | 'r2-head' | 'filter-before-validate' | 'ignore-coalesced' | 'r3-head' | 'skip-unmappable' | 'stale-confirmation' | 'silent-missing' | 'camera-keep-on' | 'camera-late-grant' | 'camera-ignore-hidden' | 'camera-audio' | 'poll-only' | 'preview-failure-ignored' | 'stale-playback-unguarded';
 /** The R3 head reviewed by the R3 focused review (9463431): the R4 geometry-loss witness must fail on it. */
 const R3_HEAD = '94634312f4249e5edb72e008795fceabb2cca86c';
 /** The R2 head reviewed by 50351 (6ddaa65): the R3 sample-pipeline witness must fail on it. */
@@ -77,6 +77,9 @@ const MUTATIONS: Record<Exclude<Mutation, 'none' | 'original' | 'r1-head' | 'r2-
   'camera-late-grant': [{ file: 'apps/web/lib/palm-analysis/camera.ts', from: 'if (disposed || state.epoch !== epoch) { stopTracks(s); return; } // a late grant is stopped at once, never shown', to: '' }],
   'camera-ignore-hidden': [{ file: 'apps/web/components/palm-scan/PalmImageInput.tsx', from: "      cam.stop('hidden');", to: '' }],
   'camera-audio': [{ file: 'apps/web/lib/palm-analysis/camera.ts', from: 'audio: false as const,', to: 'audio: true as unknown as false,' }],
+  // P4-I5-R1 negative controls (50362 F1)
+  'preview-failure-ignored': [{ file: 'apps/web/lib/palm-analysis/camera.ts', from: '(p as Promise<void>).then(undefined, failed);', to: '(p as Promise<void>).then(undefined, () => undefined);' }],
+  'stale-playback-unguarded': [{ file: 'apps/web/lib/palm-analysis/camera.ts', from: "if (stream === s && video === el && state.epoch === epoch && showSeq === seq && state.phase === 'live') release('error', 'camera-preview-failed');", to: "release('error', 'camera-preview-failed');" }],
   'poll-only': [{ file: 'apps/web/components/palm-scan/PalmImageInput.tsx', from: "    document.addEventListener('visibilitychange', onLifecycle);\n    document.addEventListener('freeze', onLeave);\n    document.addEventListener('resume', onLifecycle);\n    window.addEventListener('pagehide', onLeave);\n    window.addEventListener('pageshow', onLifecycle);\n    window.addEventListener('focus', onLifecycle);", to: '' }],
 };
 

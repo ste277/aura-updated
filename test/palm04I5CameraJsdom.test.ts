@@ -9,7 +9,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { React, mount, click, flush, act } from './jsdomReactHarness';
-import { makeHand, makePixels } from './palmG5I1Fixtures';
+import { makeHand, makePixels, makePng } from './palmG5I1Fixtures';
 
 const { PalmImageInput, PALM_CAMERA_NOTE, CAMERA_HIDDEN_TEXT, CAMERA_CANCEL_TEXT } = require('../apps/web/components/palm-scan/PalmImageInput');
 const ROOT = path.join(__dirname, '..');
@@ -39,7 +39,8 @@ Object.defineProperty((window as any).HTMLMediaElement.prototype, 'srcObject', {
 Object.defineProperty((window as any).HTMLVideoElement.prototype, 'videoWidth', { configurable: true, get() { return this.__src ? 1280 : 0; } });
 Object.defineProperty((window as any).HTMLVideoElement.prototype, 'videoHeight', { configurable: true, get() { return this.__src ? 960 : 0; } });
 Object.defineProperty((window as any).HTMLMediaElement.prototype, 'readyState', { configurable: true, get() { return this.__src ? 4 : 0; } });
-(window as any).HTMLMediaElement.prototype.play = function () { return Promise.resolve(); };
+let playFails = false; // R1: a terminal preview playback failure
+(window as any).HTMLMediaElement.prototype.play = function () { return playFails ? Promise.reject(Object.assign(new Error('mock preview failure'), { name: 'NotSupportedError' })) : Promise.resolve(); };
 (window as any).HTMLMediaElement.prototype.pause = function () {};
 
 type Track = { kind: string; readyState: string; stops: number; stop(): void; addEventListener(): void; removeEventListener(): void };
@@ -66,19 +67,68 @@ function mockCamera(opts: { reject?: string; delayed?: boolean } = {}) {
 }
 async function settle(n = 8) { for (let i = 0; i < n; i++) await flush(); }
 const q = (c: HTMLElement, id: string) => c.querySelector<HTMLElement>(`[data-testid="${id}"]`);
-const press = async (c: HTMLElement, id: string) => { await click(q(c, id)!); await settle(4); };
+/** Press a control; a missing control is a recorded failure (never an uncaught crash that hides later checks). */
+const press = async (c: HTMLElement, id: string) => { const el = q(c, id); if (!el) { check(`(control ${id} is present)`, false); return; } await click(el); await settle(4); };
 const strip = (src: string) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '').replace(/([^:'"`])\/\/[^\n'"`]*$/gm, '$1');
 
+/** A camera-CAPABLE environment that counts every acquisition request. */
+function countingCamera() {
+  const m = mockCamera();
+  return m;
+}
+async function choosePng(c: HTMLElement) {
+  const input = c.querySelector<HTMLInputElement>('[data-testid="palm-file-input"]');
+  if (!input) { check('(file input is present)', false); return; }
+  Object.defineProperty(input, 'files', { value: [new File([Buffer.from(makePng(400, 300))], 'palm.png', { type: 'image/png' })], configurable: true });
+  await act(async () => { input.dispatchEvent(new Event('change', { bubbles: true })); });
+  await settle(10);
+}
+
 async function run() {
+  // ---- R1 (50362 F3): automatic start, with a camera-CAPABLE environment
+  for (const [runtime, flag] of [['production', 'g5-i1-dev'], ['development', undefined]] as Array<[string, string | undefined]>) {
+    process.env.NODE_ENV = runtime;
+    if (flag) process.env.NEXT_PUBLIC_AURA_PALM_IMAGE_INPUT = flag; else delete process.env.NEXT_PUBLIC_AURA_PALM_IMAGE_INPUT;
+    const m = countingCamera();
+    const hh = await mount(React.createElement(PalmImageInput, { sessionDeps: deps, cameraEnv: m.env }));
+    await settle();
+    check(`J20. development gate CLOSED (${runtime}, flag ${flag ?? 'unset'}) with a camera available: nothing renders and the camera is never requested`, hh.container.innerHTML === '' && m.calls.length === 0);
+    await hh.unmount();
+  }
   process.env.NODE_ENV = 'development';
   process.env.NEXT_PUBLIC_AURA_PALM_IMAGE_INPUT = 'g5-i1-dev';
+  {
+    const m = countingCamera();
+    const hh = await mount(React.createElement(PalmImageInput, { sessionDeps: deps, cameraEnv: m.env }));
+    const c0 = hh.container;
+    await settle(10);
+    check('J21. gate OPEN, camera available: mounting makes ZERO acquisition requests (and nothing is live)', m.calls.length === 0 && m.tracks.length === 0 && !!q(c0, 'palm-camera-button'));
+    let picker = 0;
+    const input = c0.querySelector<HTMLInputElement>('[data-testid="palm-file-input"]');
+    if (input) input.click = () => { picker++; };
+    await press(c0, 'palm-upload-button');
+    check('J22. pressing Upload photo opens the picker and makes ZERO acquisition requests', picker === 1 && m.calls.length === 0);
+    check('J23. the file input still has no capture attribute', !!input && !input.hasAttribute('capture'));
+    await choosePng(c0);
+    check('J24. choosing and analysing an uploaded photo makes ZERO acquisition requests', !!q(c0, 'palm-result') && m.calls.length === 0);
+    await press(c0, 'palm-trace-button');
+    await press(c0, 'palm-scanner-restart');
+    check('J25. Start over (restart) makes ZERO acquisition requests', !q(c0, 'palm-result') && !q(c0, 'palm-tracing') && m.calls.length === 0);
+    await choosePng(c0);
+    await press(c0, 'palm-remove-button');
+    check('J26. Remove photo makes ZERO acquisition requests', !q(c0, 'palm-preview-canvas') && m.calls.length === 0);
+    await press(c0, 'palm-camera-button');
+    check('J27. only the explicit Use camera choice requests the camera: exactly one request, video only', m.calls.length === 1 && m.calls[0].audio === false);
+    await press(c0, 'palm-camera-cancel');
+    await hh.unmount();
+  }
 
   // ---- unavailable (jsdom has no camera API): the G5 upload-only page is unchanged
   {
-    const h = await mount(React.createElement(PalmImageInput, { sessionDeps: deps }));
+    const h = await mount(React.createElement(PalmImageInput, { sessionDeps: deps, cameraEnv: { secureContext: true, getUserMedia: null } }));
     const c = h.container;
     await settle();
-    check('J1. no camera API: no camera control at all, an explanation instead, and upload unchanged', !Array.from(c.querySelectorAll('button')).some((b) => /camera/i.test(b.textContent ?? '')) && q(c, 'palm-camera-unavailable')?.getAttribute('data-support') === 'unsupported' && q(c, 'palm-upload-button')?.textContent === 'Upload photo');
+    check('J1. explicitly camera-UNSUPPORTED fixture (no camera API): no camera control at all, an explanation instead, and upload unchanged', !Array.from(c.querySelectorAll('button')).some((b) => /camera/i.test(b.textContent ?? '')) && q(c, 'palm-camera-unavailable')?.getAttribute('data-support') === 'unsupported' && q(c, 'palm-upload-button')?.textContent === 'Upload photo');
     await h.unmount();
   }
 
@@ -137,6 +187,24 @@ async function run() {
     await settle();
     await press(hh.container, 'palm-camera-button');
     check(`J18. ${name}: the camera message has ${code}, and it is announced in the live region`, q(hh.container, 'palm-camera-message')?.getAttribute('data-code') === code && (q(hh.container, 'palm-status')?.textContent ?? '').length > 0 && !!q(hh.container, 'palm-upload-button'));
+    await hh.unmount();
+  }
+  // ---- R1 (50362 F1): a terminal preview playback failure
+  {
+    const m = mockCamera();
+    const hh = await mount(React.createElement(PalmImageInput, { sessionDeps: deps, cameraEnv: m.env }));
+    const c2 = hh.container;
+    await settle();
+    playFails = true;
+    await press(c2, 'palm-camera-button');
+    await settle(6);
+    check('J28. preview playback fails: the stream\'s track is stopped, the video is gone (detached) and camera-preview-failed is shown', m.tracks.length === 1 && m.tracks[0].readyState === 'ended' && m.tracks[0].stops === 1 && !q(c2, 'palm-camera-video') && q(c2, 'palm-camera-message')?.getAttribute('data-code') === 'camera-preview-failed');
+    check('J29. after a preview failure the user can try again or upload', q(c2, 'palm-camera-button')?.textContent === 'Try the camera again' && !!q(c2, 'palm-upload-button'));
+    playFails = false;
+    await press(c2, 'palm-camera-button');
+    check('J30. trying again starts a fresh, live preview (one new request)', m.calls.length === 2 && q(c2, 'palm-camera')?.getAttribute('data-phase') === 'live' && m.tracks[1].readyState === 'live');
+    await press(c2, 'palm-camera-take');
+    check('J31. and that preview takes a photo normally (camera off afterwards)', m.live() === 0 && !!q(c2, 'palm-preview-canvas'));
     await hh.unmount();
   }
   // ---- delayed grant after unmount

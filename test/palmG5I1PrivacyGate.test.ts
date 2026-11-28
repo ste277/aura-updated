@@ -247,5 +247,47 @@ const userCopy = [read(`${UI_DIR}/PalmImageInput.tsx`), read(`${LIB_DIR}/analyze
 check('F6. no claim that palm lines were detected', !/lines? (were|was|have been|has been) (detected|found)|detected (your )?(palm )?lines|line detection complete/i.test(userCopy));
 check('F7. no personality / relationship / career / future / medical / identity claims in user copy', !/personality|relationship|career|your future|destiny|lifespan|diagnos|medical|identif(y|ies) you|biometric/i.test(userCopy));
 
-console.log(`\n${passed} passed, ${failed} failed`);
-process.exit(failed > 0 ? 1 : 0);
+// ============================================================ A4c behavioural (AURA-PALM-04-I5-R1, 50362 F2)
+// The A4c static checks above are kept; these run the REAL camera adapter in this process against an installed fake
+// browser camera surface (navigator.mediaDevices), so an extra or disguised acquisition, or a disabled non-video
+// refusal, is caught by behaviour rather than by source text.
+async function cameraBehaviour(): Promise<void> {
+  type T = { kind: string; readyState: string; stops: number; stop(): void };
+  const track = (kind: string): T => ({ kind, readyState: 'live', stops: 0, stop() { this.stops++; this.readyState = 'ended'; } });
+  let requests = 0;
+  const handed: T[][] = [];
+  let mixed = false;
+  const savedNav = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+  const savedSecure = Object.getOwnPropertyDescriptor(globalThis, 'isSecureContext');
+  const constraints: unknown[] = [];
+  Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { mediaDevices: { getUserMedia: (c: unknown) => { requests++; constraints.push(JSON.parse(JSON.stringify(c))); const ts = mixed ? [track('video'), track('audio')] : [track('video')]; handed.push(ts); return Promise.resolve({ getTracks: () => ts.slice() }); } } } });
+  Object.defineProperty(globalThis, 'isSecureContext', { configurable: true, value: true });
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { createPalmCamera } = require('../apps/web/lib/palm-analysis/camera');
+    const cam = createPalmCamera();
+    check('A4c-5. behaviour: creating the camera makes no browser acquisition request', requests === 0);
+    await cam.start();
+    check('A4c-6. behaviour: exactly ONE browser acquisition request per accepted explicit start, video only', requests === 1 && constraints.every((c: any) => c && c.audio === false && !!c.video) && cam.getState().phase === 'live');
+    await cam.start();
+    check('A4c-7. behaviour: start() while live is not accepted and requests nothing', requests === 1);
+    cam.stop('done');
+    await cam.start();
+    check('A4c-8. behaviour: a second accepted start makes exactly one more request; the first stream\'s tracks are all stopped', requests === 2 && handed[0].every((t) => t.readyState === 'ended'));
+    cam.stop('done');
+    mixed = true;
+    await cam.start();
+    const last = handed[handed.length - 1];
+    check('A4c-9. behaviour: an unexpected mixed video/audio stream is REJECTED and every acquired track is stopped', cam.getState().phase === 'error' && last.length === 2 && last.every((t) => t.stops === 1 && t.readyState === 'ended'));
+    cam.dispose();
+    check('A4c-10. behaviour: after teardown no acquired track is live', handed.every((ts) => ts.every((t) => t.readyState === 'ended')));
+  } finally {
+    if (savedNav) Object.defineProperty(globalThis, 'navigator', savedNav); else delete (globalThis as any).navigator;
+    if (savedSecure) Object.defineProperty(globalThis, 'isSecureContext', savedSecure); else delete (globalThis as any).isSecureContext;
+  }
+}
+
+cameraBehaviour().catch((e) => check(`A4c behaviour (uncaught: ${String(e).slice(0, 120)})`, false)).then(() => {
+  console.log(`\n${passed} passed, ${failed} failed`);
+  process.exit(failed > 0 ? 1 : 0);
+});

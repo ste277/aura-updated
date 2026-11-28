@@ -1043,6 +1043,9 @@ jobs:
         env:
           PALM_BROWSER_CHANNEL: chrome
         run: npx ts-node test/palm04I5CameraBrowser.test.ts
+      # PALM-04-I5-R1: the 50362 negative controls on the fast suites (in-memory source mutation, subprocess runs)
+      - name: Run camera negative controls (PALM-04-I5-R1, in-memory mutations, synthetic)
+        run: npx ts-node test/palm04I5R1Controls.test.ts
       # PALM-03-E1: development-only personalised interpretation engine (synthetic
       # observations only; unreviewed content). The package suite compares the engine
       # with the unmodified C1 reference oracle (python3, preinstalled on the runner):
