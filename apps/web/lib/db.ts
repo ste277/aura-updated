@@ -29,6 +29,7 @@ import {
   resolveGoalActivityRhythmSettingsUpdate,
   toPersistedGoalActivityRhythmPreferences,
   type GoalActivityRhythmSettingsUpdate,
+  type GoalActivityRhythmPreferences,
 } from './goalActivityRhythmPreferences';
 import { getDatePartsInTimezone } from './timezone';
 import { canonicalizeCivilBirthDate } from './birthDate';
@@ -501,6 +502,22 @@ export async function deleteSavedPerson(ownerUserId: string, personId: string): 
     // that DELETE ran and outlive the day (62019).
     await client.query(
       `SELECT id FROM "PersonOccasion" WHERE "savedPersonId" = $1 AND "ownerUserId" = $2 ORDER BY id FOR UPDATE`,
+      [personId, ownerUserId]
+    );
+    // AURA-MP-4 (design D7): the person's Life Rhythms are PAUSED and
+    // unlinked in this same transaction, so Aura never keeps proposing time
+    // with someone who was removed. The rhythm, its goal, occurrences and
+    // plans are kept (history); resuming later is the user's explicit
+    // choice. Lock order: person -> special days -> rhythms -> (cascade)
+    // plans. Every rhythm writer that touches a person takes the person lock
+    // first (lockLinkedPeopleForGoalActivities, createPersonRhythm), so this
+    // never inverts. The GoalActivity foreign key is NO ACTION (0058): a
+    // linked rhythm left behind would make the DELETE below fail, never
+    // leave a rhythm pointing at nobody.
+    await client.query(
+      `UPDATE "GoalActivity"
+          SET "rhythmPausedAt" = COALESCE("rhythmPausedAt", now()), "savedPersonId" = NULL, "updatedAt" = now()
+        WHERE "savedPersonId" = $1 AND "userId" = $2`,
       [personId, ownerUserId]
     );
 
@@ -3440,6 +3457,9 @@ export interface GoalActivity {
   rhythmPreferredWeekdays: number[];
   rhythmPreferredTimeOfDay: string | null;
   rhythmPreferredDurationMinutes: number | null;
+  // AURA-MP-4 (migration 0058) -- the owner's saved person this rhythm is
+  // with, or null (every rhythm not set up from My People).
+  savedPersonId: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -3735,9 +3755,145 @@ export async function addGoalActivity(userId: string, goalId: string, input: { t
   return result.rows[0];
 }
 
+/**
+ * AURA-MP-4 -- a Relationship Rhythm: an N_PER_WEEK GoalActivity linked to
+ * one of the owner's saved people (design 6.2). Created ONLY by this explicit
+ * call (the user chose "Keep in touch ... Save"); adding or editing a person
+ * never creates a goal or a rhythm (R1).
+ *
+ * The goal is either a NEW visible goal whose title the user saw and could
+ * edit ("Stay close to {name}"), or an EXISTING active goal of the same
+ * owner. One READ COMMITTED transaction:
+ *   1. the person, owner-scoped, FOR KEY SHARE -- the person-before-rhythm
+ *      lock order (deleteSavedPerson takes the person first, then pauses its
+ *      rhythms). A concurrent person delete either commits first (-> the
+ *      person is gone: PERSON_NOT_FOUND, nothing written) or waits for this
+ *      COMMIT and then pauses and unlinks the new rhythm too;
+ *   2. an existing goal FOR SHARE (owner, ACTIVE), the same lock planning
+ *      takes against a concurrent archive; or a new Goal row;
+ *   3. the GoalActivity, with savedPersonId (composite FK: same owner).
+ * The rhythm/preferences are validated by the caller with the existing
+ * Life Rhythm validators.
+ */
+export type CreatePersonRhythmResult =
+  | { status: 'CREATED'; goal: Goal; activity: GoalActivity; goalCreated: boolean }
+  | { status: 'PERSON_NOT_FOUND' }
+  | { status: 'GOAL_NOT_FOUND' }
+  | { status: 'GOAL_NOT_ACTIVE' };
+
+export async function createPersonRhythm(
+  ownerUserId: string,
+  personId: string,
+  input: {
+    title: string;
+    activityId: string | null;
+    rhythm: GoalActivityRhythm;
+    preferences: GoalActivityRhythmPreferences;
+    goal: { kind: 'NEW'; title: string } | { kind: 'EXISTING'; goalId: string };
+  }
+): Promise<CreatePersonRhythmResult> {
+  const client = await pool.connect();
+  try {
+    await client.query(BEGIN_READ_COMMITTED);
+    const person = await client.query(`SELECT id FROM "SavedPerson" WHERE id = $1 AND "ownerUserId" = $2 FOR KEY SHARE`, [personId, ownerUserId]);
+    if (person.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return { status: 'PERSON_NOT_FOUND' };
+    }
+    let goal: Goal;
+    let goalCreated = false;
+    if (input.goal.kind === 'EXISTING') {
+      const found = await client.query(`SELECT ${GOAL_COLUMNS} FROM "Goal" WHERE id = $1 AND "userId" = $2 FOR SHARE`, [input.goal.goalId, ownerUserId]);
+      if (found.rows.length === 0) {
+        await client.query('ROLLBACK');
+        return { status: 'GOAL_NOT_FOUND' };
+      }
+      if (found.rows[0].status !== 'ACTIVE') {
+        await client.query('ROLLBACK');
+        return { status: 'GOAL_NOT_ACTIVE' };
+      }
+      goal = found.rows[0];
+    } else {
+      const created = await client.query(
+        `INSERT INTO "Goal" (id, "userId", title, "targetDate") VALUES ($1, $2, $3, NULL) RETURNING ${GOAL_COLUMNS}`,
+        [randomUUID(), ownerUserId, input.goal.title]
+      );
+      goal = created.rows[0];
+      goalCreated = true;
+    }
+    const persistedCompletion = toPersistedCompletionRequirement({ kind: 'DONE' });
+    const persistedRhythm = toPersistedGoalActivityRhythm(input.rhythm);
+    const persistedPreferences = toPersistedGoalActivityRhythmPreferences(input.preferences);
+    const activity = await client.query(
+      `INSERT INTO "GoalActivity" (id, "userId", "goalId", title, "activityId", "completionKind", "completionTargetValue", "completionUnit",
+         "rhythmKind", "rhythmTargetPerWeek", "rhythmPreferredWeekdays", "rhythmPreferredTimeOfDay", "rhythmPreferredDurationMinutes", "savedPersonId")
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::integer[], $12, $13, $14) RETURNING *`,
+      [
+        randomUUID(), ownerUserId, goal.id, input.title, input.activityId,
+        persistedCompletion.completionKind, persistedCompletion.completionTargetValue, persistedCompletion.completionUnit,
+        persistedRhythm.rhythmKind, persistedRhythm.rhythmTargetPerWeek,
+        persistedPreferences.rhythmPreferredWeekdays, persistedPreferences.rhythmPreferredTimeOfDay, persistedPreferences.rhythmPreferredDurationMinutes,
+        personId,
+      ]
+    );
+    await client.query('COMMIT');
+    return { status: 'CREATED', goal, activity: activity.rows[0], goalCreated };
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/** AURA-MP-4 -- the owner's live (not removed) rhythms with this person,
+ * under ACTIVE goals, oldest first. Owner-scoped on both tables. */
+export async function listPersonRhythms(ownerUserId: string, personId: string): Promise<Array<GoalActivity & { goalTitle: string }>> {
+  const result = await pool.query(
+    `SELECT ga.*, g.title AS "goalTitle"
+       FROM "GoalActivity" ga
+       JOIN "Goal" g ON g.id = ga."goalId" AND g."userId" = ga."userId"
+      WHERE ga."userId" = $1 AND ga."savedPersonId" = $2 AND ga.status <> 'DISMISSED' AND g.status = 'ACTIVE'
+      ORDER BY ga."createdAt" ASC, ga.id ASC`,
+    [ownerUserId, personId]
+  );
+  return result.rows;
+}
+
+/**
+ * AURA-MP-4 -- a plan made FOR a person-linked rhythm (Plan, Home rhythm
+ * suggestions, weekly rhythm acceptance and Plan My Day all link a plan to
+ * its GoalActivity here) carries that person, so the association follows the
+ * whole planning lifecycle (Move then keeps it, MP-3). Runs on the planning
+ * transaction after the GoalActivity link succeeded. An explicit person the
+ * user already chose for the plan is never replaced. The person row is
+ * already locked FOR KEY SHARE by lockLinkedPeopleForGoalActivities, so the
+ * plan's foreign-key check takes no lock out of order; if the person was
+ * deleted first, the rhythm is unlinked and this writes nothing.
+ */
+export async function carryGoalActivityPersonToPlan(userId: string, goalActivityId: string, plannedActivityId: string, client: PoolClient): Promise<PlannedActivity | null> {
+  const carried = await client.query(
+    `UPDATE "PlannedActivity" p
+        SET "savedPersonId" = ga."savedPersonId", "updatedAt" = now()
+       FROM "GoalActivity" ga
+      WHERE p.id = $1 AND p."userId" = $2 AND p."savedPersonId" IS NULL
+        AND ga.id = $3 AND ga."userId" = $2 AND ga."savedPersonId" IS NOT NULL
+      RETURNING p.*`,
+    [plannedActivityId, userId, goalActivityId]
+  );
+  // AURA-MP-4-R1 (F2): the persisted row when a person was carried, so the
+  // caller's success response reports the committed association; null when
+  // nothing changed (the plan as inserted is already current).
+  return carried.rows[0] ?? null;
+}
+
 export type UpdateGoalActivityRhythmSettingsResult =
   | { status: 'UPDATED'; activity: GoalActivity }
   | { status: 'NOT_FOUND' }
+  // AURA-MP-4-R1 -- the request was made for a person-linked rhythm whose
+  // person was removed (and the rhythm paused, D7) before this update could
+  // apply. Nothing is written; the caller answers 409.
+  | { status: 'PERSON_LINK_CHANGED' }
   | { status: 'INVALID'; error: string };
 
 /**
@@ -3763,11 +3919,40 @@ export type UpdateGoalActivityRhythmSettingsResult =
  * client value first (validateGoalActivityRhythm,
  * parseGoalActivityRhythmPreferencesPatch).
  */
-export async function updateGoalActivityRhythmSettings(userId: string, goalId: string, goalActivityId: string, update: GoalActivityRhythmSettingsUpdate): Promise<UpdateGoalActivityRhythmSettingsResult> {
+/** AURA-MP-4-R1 -- the person the caller acted for (My People passes it). */
+export interface UpdateGoalActivityRhythmSettingsOptions {
+  expectedSavedPersonId?: string;
+}
+
+/**
+ * AURA-MP-4-R1/R2 -- the ONE stale-person-association rule for every
+ * relationship rhythm mutation (edit, pause, resume: updateGoalActivityRhythmSettings;
+ * remove: dismissGoalActivity). `linkedBefore` is read before the row lock,
+ * `linkedNow` under it (READ COMMITTED). The mutation must not apply when the
+ * link vanished in between (a concurrent person DELETE paused and unlinked the
+ * rhythm, D7) or differs from the person the caller acted for.
+ */
+function personLinkChangedUnderLock(linkedBefore: string | null, linkedNow: string | null, options?: UpdateGoalActivityRhythmSettingsOptions): boolean {
+  return (linkedBefore !== null && linkedNow !== linkedBefore) || (options?.expectedSavedPersonId !== undefined && linkedNow !== options.expectedSavedPersonId);
+}
+
+export async function updateGoalActivityRhythmSettings(userId: string, goalId: string, goalActivityId: string, update: GoalActivityRhythmSettingsUpdate, options?: UpdateGoalActivityRhythmSettingsOptions): Promise<UpdateGoalActivityRhythmSettingsResult> {
   const client = await beginTransaction();
   try {
+    // AURA-MP-4-R1 (D7): a person DELETE pauses and unlinks this rhythm while
+    // holding its row lock. This update must not undo that pause after waiting
+    // for the lock, so the person link is read BEFORE the lock and compared
+    // with the locked row: a link that vanished in between means the request
+    // was based on a person who no longer exists -> PERSON_LINK_CHANGED, no
+    // write. READ COMMITTED is explicit (MP-3-R2) so the locked read sees the
+    // committed deletion rather than failing on a REPEATABLE READ default. A
+    // rhythm already unlinked when the request starts can still be resumed
+    // deliberately; a caller that knows the person it acted for (My People)
+    // also passes expectedSavedPersonId, which covers a stale screen.
+    await client.query('SET TRANSACTION ISOLATION LEVEL READ COMMITTED');
+    const linkBeforeLock = await client.query(`SELECT "savedPersonId" FROM "GoalActivity" WHERE id = $1 AND "goalId" = $2 AND "userId" = $3`, [goalActivityId, goalId, userId]);
     const current = await client.query(
-      `SELECT "rhythmKind", "rhythmTargetPerWeek", "rhythmPreferredWeekdays", "rhythmPreferredTimeOfDay", "rhythmPreferredDurationMinutes", "dailyFrequencyKind", "dailyFrequencyLimit"
+      `SELECT "rhythmKind", "rhythmTargetPerWeek", "rhythmPreferredWeekdays", "rhythmPreferredTimeOfDay", "rhythmPreferredDurationMinutes", "dailyFrequencyKind", "dailyFrequencyLimit", "savedPersonId"
        FROM "GoalActivity" WHERE id = $1 AND "goalId" = $2 AND "userId" = $3 FOR UPDATE`,
       [goalActivityId, goalId, userId]
     );
@@ -3776,6 +3961,10 @@ export async function updateGoalActivityRhythmSettings(userId: string, goalId: s
       return { status: 'NOT_FOUND' };
     }
     const row = current.rows[0];
+    if (personLinkChangedUnderLock(linkBeforeLock.rows[0]?.savedPersonId ?? null, row.savedPersonId ?? null, options)) {
+      await client.query('ROLLBACK');
+      return { status: 'PERSON_LINK_CHANGED' };
+    }
     const resolved = resolveGoalActivityRhythmSettingsUpdate(
       {
         rhythm: normalizeGoalActivityRhythm({ rhythmKind: row.rhythmKind, rhythmTargetPerWeek: row.rhythmTargetPerWeek }),
@@ -3816,12 +4005,44 @@ export async function updateGoalActivityRhythmSettings(userId: string, goalId: s
  * status). Scoped by userId AND goalId AND id together, so a
  * goalActivityId belonging to a different Goal or a different user's Goal
  * never matches -- returns null rather than throwing. */
-export async function dismissGoalActivity(userId: string, goalId: string, goalActivityId: string): Promise<GoalActivity | null> {
-  const result = await pool.query(
-    `UPDATE "GoalActivity" SET status = 'DISMISSED' WHERE id = $1 AND "goalId" = $2 AND "userId" = $3 RETURNING *`,
-    [goalActivityId, goalId, userId]
-  );
-  return result.rows[0] ?? null;
+/** AURA-MP-4-R2 -- thrown by dismissGoalActivity (nothing written) when the
+ * rhythm's person link changed under it; the route answers 409. */
+export class PersonLinkChangedError extends Error {
+  constructor() {
+    super('PERSON_LINK_CHANGED');
+    this.name = 'PersonLinkChangedError';
+  }
+}
+
+export async function dismissGoalActivity(userId: string, goalId: string, goalActivityId: string, options?: UpdateGoalActivityRhythmSettingsOptions): Promise<GoalActivity | null> {
+  // AURA-MP-4-R2 -- the same stale-association protection as
+  // updateGoalActivityRhythmSettings (personLinkChangedUnderLock): link read
+  // before the row lock and under it, explicit READ COMMITTED, nothing
+  // written on a change. Only the rhythm row is locked (lock order kept).
+  const client = await beginTransaction();
+  try {
+    await client.query('SET TRANSACTION ISOLATION LEVEL READ COMMITTED');
+    const linkBeforeLock = await client.query(`SELECT "savedPersonId" FROM "GoalActivity" WHERE id = $1 AND "goalId" = $2 AND "userId" = $3`, [goalActivityId, goalId, userId]);
+    const locked = await client.query(`SELECT "savedPersonId" FROM "GoalActivity" WHERE id = $1 AND "goalId" = $2 AND "userId" = $3 FOR UPDATE`, [goalActivityId, goalId, userId]);
+    if (locked.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return null;
+    }
+    if (personLinkChangedUnderLock(linkBeforeLock.rows[0]?.savedPersonId ?? null, locked.rows[0].savedPersonId ?? null, options)) {
+      throw new PersonLinkChangedError(); // rolled back below
+    }
+    const result = await client.query(
+      `UPDATE "GoalActivity" SET status = 'DISMISSED' WHERE id = $1 AND "goalId" = $2 AND "userId" = $3 RETURNING *`,
+      [goalActivityId, goalId, userId]
+    );
+    await client.query('COMMIT');
+    return result.rows[0] ?? null;
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 /**
@@ -4760,6 +4981,30 @@ export async function linkGoalActivityToPlannedActivity(
     [plannedActivityId, goalActivityId, userId]
   );
   return (result.rowCount ?? 0) === 1;
+}
+
+/**
+ * AURA-MP-4 -- lock order for planning a person-linked GoalActivity: the
+ * people these activities are with, FOR KEY SHARE, ordered by id, BEFORE any
+ * GoalActivity or plan row is written. That is the person-first order a
+ * person DELETE uses (person -> special days -> rhythms -> plans), so a plan
+ * made for a person-linked rhythm (carryGoalActivityPersonToPlan) can never
+ * deadlock with that person's deletion. A GoalActivity's link is set only
+ * when it is created and is otherwise only cleared, so an activity read here
+ * either links a person locked here or none. Called by both planning
+ * transactions (POST /api/plans, Day Constructor acceptance) immediately
+ * before lockGoalParentLifecycleForPlanning. Read-only apart from the lock.
+ */
+export async function lockLinkedPeopleForGoalActivities(userId: string, goalActivityIds: readonly string[], client: PoolClient): Promise<void> {
+  if (goalActivityIds.length === 0) return;
+  await client.query(
+    `SELECT sp.id FROM "SavedPerson" sp
+      WHERE sp."ownerUserId" = $1
+        AND sp.id IN (SELECT ga."savedPersonId" FROM "GoalActivity" ga WHERE ga."userId" = $1 AND ga.id = ANY($2::text[]) AND ga."savedPersonId" IS NOT NULL)
+      ORDER BY sp.id
+      FOR KEY SHARE OF sp`,
+    [userId, [...goalActivityIds]]
+  );
 }
 
 /**

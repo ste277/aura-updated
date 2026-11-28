@@ -66,8 +66,20 @@ export async function PATCH(req: NextRequest, { params }: { params: { goalId: st
     return NextResponse.json({ error: 'At least one of rhythm, preferences or paused is required.' }, { status: 400 });
   }
 
-  const result = await updateGoalActivityRhythmSettings(session.userId, params.goalId, params.goalActivityId, update);
+  // AURA-MP-4-R1 -- optional: the person the caller acted for (My People
+  // sends it), so a change made from a stale person screen cannot apply to a
+  // rhythm whose person was removed.
+  let expectedSavedPersonId: string | undefined;
+  if (body.savedPersonId !== undefined) {
+    if (typeof body.savedPersonId !== 'string' || !body.savedPersonId.trim()) return NextResponse.json({ error: 'savedPersonId must be a person id.' }, { status: 400 });
+    expectedSavedPersonId = body.savedPersonId.trim();
+  }
+
+  const result = await updateGoalActivityRhythmSettings(session.userId, params.goalId, params.goalActivityId, update, { expectedSavedPersonId });
   if (result.status === 'NOT_FOUND') return NextResponse.json({ error: 'Goal activity not found.' }, { status: 404 });
+  if (result.status === 'PERSON_LINK_CHANGED') {
+    return NextResponse.json({ error: 'This rhythm was paused because the person it was with was removed. Nothing was changed.', code: 'PERSON_LINK_CHANGED' }, { status: 409 });
+  }
   if (result.status === 'INVALID') return NextResponse.json({ error: result.error }, { status: 400 });
 
   const activity = result.activity;

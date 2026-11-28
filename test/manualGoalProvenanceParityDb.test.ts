@@ -142,6 +142,10 @@ async function main() {
     const gArch = (await createGoalWithActivities({ userId: A.id, title: 'Archived goal', targetDate: null, activities: [] })).goal;
     const R = (await addGoalActivity(A.id, g1.id, { title: 'Cardio', activityId: 'workout' }))!;
     await setRhythm(R.id, 3);
+    // AURA-MP-4-R1 (F2) -- R is a person-linked rhythm (a direct fixture row; no switch needed).
+    const linkedPersonId = `mp4r1-person-${A.id}`;
+    await sql('INSERT INTO "SavedPerson" (id, "ownerUserId", name) VALUES ($1, $2, $3)', [linkedPersonId, A.id, 'Synthetic Plan My Day person']);
+    await sql('UPDATE "GoalActivity" SET "savedPersonId" = $1 WHERE id = $2', [linkedPersonId, R.id]);
     const R2 = (await addGoalActivity(A.id, g1.id, { title: 'Strength', activityId: 'workout' }))!;
     await setRhythm(R2.id, 3);
     // HPG3-A2 -- the "reverse order" scenario below deliberately accepts a
@@ -245,6 +249,10 @@ async function main() {
     check('the real client accept body links the canonical manual row exactly as it links an automatic row', JSON.stringify(manualBody.goalActivityLinks) === JSON.stringify([{ intentId: idOf(R), goalActivityId: R.id }]));
     const accepted = await accept(A.id, manualBody);
     check('acceptance is SAVED (signed canonical id -> provenance authorization -> persistence)', accepted.status === 'SAVED');
+    {
+      const persisted = (await sql('SELECT "savedPersonId" FROM "PlannedActivity" WHERE id = $1', [accepted.plans?.[0]?.id]))[0];
+      check('AURA-MP-4-R1: the Plan My Day plan for a person-linked rhythm is stored with the person, and the success response reports exactly that committed association', persisted?.savedPersonId === linkedPersonId && accepted.plans[0].savedPersonId === persisted.savedPersonId);
+    }
     const afterAccept = await counts(R.id);
     check('exactly ONE occurrence and ONE PlannedActivity created', before.occ === 0 && afterAccept.occ === 1 && afterAccept.plans === 1);
     const occ = (await sql(`SELECT * FROM "GoalActivityOccurrence" WHERE "goalActivityId" = $1`, [R.id]))[0];
