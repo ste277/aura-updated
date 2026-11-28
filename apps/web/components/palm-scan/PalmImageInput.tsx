@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { PALM_SCOPE_NOTE } from '../../lib/palm-analysis/analyze';
+import { createPalmCamera, palmCameraSupport, PALM_CAMERA_VERSION, type PalmCamera, type PalmCameraEnv, type PalmCameraState, type PalmCameraSupport, type PalmVideoLike } from '../../lib/palm-analysis/camera';
 import { isPalmImageInputEnabled } from '../../lib/palm-analysis/gate';
 import { createMediaPipeHandDetector } from '../../lib/palm-analysis/mediapipeDetector';
 import { createPalmAnalysisSession, type PalmAnalysisSession, type PalmSessionDeps, type PalmSessionState } from '../../lib/palm-analysis/session';
@@ -31,10 +32,21 @@ import { SectionHeader, StatusBadge, SurfaceCard } from '../ui';
  * AURA-PALM-G5-I1 -- "Upload Photo": the first palm-image input inside the
  * Palmistry screen. DEVELOPMENT ONLY (see lib/palm-analysis/gate.ts).
  *
- * Acquisition only: this component picks a file and shows state. Every
- * processing step lives in the shared lib/palm-analysis pipeline, which the
- * G5-I2 camera adapter will reuse unchanged. There is deliberately NO camera
- * button and the file input has NO `capture` attribute.
+ * Acquisition only: this component picks a file (or, since AURA-PALM-04-I5,
+ * takes a still photo with the camera) and shows state. Every processing step
+ * lives in the shared lib/palm-analysis pipeline: a camera photo goes through
+ * session.submitDrawable() and the same normalisation and quality check as an
+ * upload. The file input still has NO `capture` attribute.
+ *
+ * AURA-PALM-04-I5 camera rules (lib/palm-analysis/camera.ts does the camera
+ * work; this file never calls the browser camera API itself):
+ *   - the camera is asked for only when the user chooses "Use camera";
+ *   - video only, never the microphone; nothing is recorded, stored or sent;
+ *   - every track is stopped as soon as the photo is taken, on Cancel, on any
+ *     error, when the page is hidden, frozen or left, and on unmount;
+ *   - opening the camera closes tracing (its traces are dropped, as with Close
+ *     tracing); taking a new photo replaces the old one, which revokes its
+ *     construction context and so every trace and confirmation made on it.
  */
 
 export { isPalmImageInputEnabled };
@@ -45,7 +57,16 @@ export const PALM_UPLOAD_HINT = 'Use a well-lit photo of one open palm, fingers 
 export interface PalmImageInputProps {
   /** Test seam: replace the detector / decoder / canvas factory. */
   sessionDeps?: Partial<PalmSessionDeps>;
+  /** AURA-PALM-04-I5 test seam: replace the browser camera (mocked streams in tests). */
+  cameraEnv?: PalmCameraEnv;
 }
+
+/** AURA-PALM-04-I5 -- shown next to the camera button; also the camera's release-exclusion sentinel. */
+export const PALM_CAMERA_NOTE = 'The camera turns on only when you choose Use camera, takes one still photo on this device and then turns off. No video is recorded, the microphone is not used, and nothing is uploaded or saved.';
+export const CAMERA_REQUEST_TEXT = 'Waiting for the camera. Your browser may ask for permission.';
+export const CAMERA_LIVE_TEXT = 'Camera on. Hold one open palm in the frame, fingers pointing up, then choose Take photo.';
+export const CAMERA_HIDDEN_TEXT = 'The camera was turned off because you left this page. Choose Use camera to turn it on again.';
+export const CAMERA_CANCEL_TEXT = 'Camera turned off. No photo was taken.';
 
 export function PalmImageInput(props: PalmImageInputProps) {
   // Gate first: in any non-development or non-opted-in environment nothing
@@ -63,7 +84,7 @@ const STATUS_TEXT: Record<PalmSessionState['phase'], string> = {
   error: '',
 };
 
-function PalmImageInputEnabled({ sessionDeps }: PalmImageInputProps) {
+function PalmImageInputEnabled({ sessionDeps, cameraEnv }: PalmImageInputProps) {
   const ids = useId();
   const hintId = `${ids}-hint`;
   const privacyId = `${ids}-privacy`;
@@ -79,6 +100,13 @@ function PalmImageInputEnabled({ sessionDeps }: PalmImageInputProps) {
   const previewRef = useRef<HTMLDivElement | null>(null);
   const resultHeadingRef = useRef<HTMLHeadingElement | null>(null);
   const lastPhase = useRef<PalmSessionState['phase']>('idle');
+  // AURA-PALM-04-I5: the camera (one per mount), its state, and a note about why it last turned off.
+  const cameraRef = useRef<PalmCamera | null>(null);
+  const [camera, setCamera] = useState<PalmCameraState | null>(null);
+  const [cameraNote, setCameraNote] = useState('');
+  // Read after mount (never during the server render), so the first client render matches the server's.
+  const [cameraSupport, setCameraSupport] = useState<PalmCameraSupport | null>(null);
+  const cameraButtonRef = useRef<HTMLButtonElement | null>(null);
 
   // One session per mount. Created in an effect so React StrictMode's
   // mount/unmount/mount cycle disposes the first one cleanly.
@@ -90,17 +118,38 @@ function PalmImageInputEnabled({ sessionDeps }: PalmImageInputProps) {
       setState(s);
       setConstruction(session.getConstructionContext());
     });
-    // Leaving the page (tab close, navigation, bfcache) clears the image.
-    const onPageHide = () => session.clear();
+    // AURA-PALM-04-I5: the camera is created idle; nothing asks for it until the user chooses Use camera.
+    const cam = createPalmCamera(cameraEnv);
+    cameraRef.current = cam;
+    setCamera(cam.getState());
+    setCameraSupport(palmCameraSupport(cameraEnv));
+    const unsubscribeCamera = cam.subscribe(setCamera);
+    const cameraOnNow = () => { const ph = cam.getState().phase; return ph === 'requesting' || ph === 'live'; };
+    // Leaving the page (tab close, navigation, bfcache, a frozen or discarded tab) turns the camera off and clears
+    // the image; these are events, not the panel's polling.
+    const onPageHide = () => { cam.stop('pagehide'); session.clear(); };
+    // A hidden page (another tab or app, a locked screen) never keeps the camera on.
+    const onVisibility = () => {
+      if (document.visibilityState !== 'hidden' || !cameraOnNow()) return;
+      cam.stop('hidden');
+      setCameraNote(CAMERA_HIDDEN_TEXT);
+    };
     window.addEventListener('pagehide', onPageHide);
+    document.addEventListener('freeze', onPageHide);
+    document.addEventListener('visibilitychange', onVisibility);
     return () => {
       window.removeEventListener('pagehide', onPageHide);
+      document.removeEventListener('freeze', onPageHide);
+      document.removeEventListener('visibilitychange', onVisibility);
+      unsubscribeCamera();
+      cam.dispose(); // stops every camera track and detaches the video
+      cameraRef.current = null;
       unsubscribe();
       session.dispose(); // releases the frame, revokes the construction context and closes the model
       sessionRef.current = null;
       if (previewRef.current) previewRef.current.replaceChildren();
     };
-    // sessionDeps is a test seam and intentionally read once per mount.
+    // sessionDeps and cameraEnv are test seams and intentionally read once per mount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -137,16 +186,54 @@ function PalmImageInputEnabled({ sessionDeps }: PalmImageInputProps) {
 
   const openPicker = useCallback(() => inputRef.current?.click(), []);
 
+  /** Turn the camera off (if it is on or showing an error). */
+  const cameraOff = useCallback((reason: 'cancel' | 'restart' = 'cancel') => {
+    const cam = cameraRef.current;
+    if (cam && cam.getState().phase !== 'idle') cam.stop(reason);
+  }, []);
+
   const onFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = ''; // allow choosing the same file again; drops the input's reference
-    if (file) void sessionRef.current?.submitFile(file);
-  }, []);
+    if (file) { cameraOff(); setCameraNote(''); void sessionRef.current?.submitFile(file); }
+  }, [cameraOff]);
 
   const remove = useCallback(() => {
+    cameraOff('restart');
+    setCameraNote('');
     sessionRef.current?.clear();
     setTimeout(() => uploadButtonRef.current?.focus(), 0);
+  }, [cameraOff]);
+
+  // ---------------------------------------------------------------- AURA-PALM-04-I5 camera
+  /** Only this explicit user action ever asks for the camera. Opening it closes tracing (its traces are dropped). */
+  const openCamera = useCallback(() => {
+    setTracing(false);
+    setCameraNote('');
+    void cameraRef.current?.start();
   }, []);
+  /** One still frame into the shared pipeline, then the camera turns off at once. */
+  const takePhoto = useCallback(() => {
+    const cam = cameraRef.current;
+    const session = sessionRef.current;
+    if (!cam || !session) return;
+    const shot = cam.frame();
+    if (!shot) return; // not ready yet: the camera says so and stays on
+    // submitDrawable draws the frame into the pipeline's own canvas synchronously, before its first await; replacing
+    // the photo revokes the old construction context, so every trace and confirmation on it is withdrawn.
+    void session.submitDrawable(shot.drawable, shot.width, shot.height, 'camera');
+    cam.stop('done');
+    setCameraNote('');
+  }, []);
+  const cancelCamera = useCallback(() => {
+    cameraOff('cancel');
+    setCameraNote(CAMERA_CANCEL_TEXT);
+    setTimeout(() => cameraButtonRef.current?.focus(), 0);
+  }, [cameraOff]);
+  const attachVideo = useCallback((el: HTMLVideoElement | null) => { cameraRef.current?.attach(el as unknown as PalmVideoLike | null); }, []);
+  const cameraPhase = camera?.phase ?? 'idle';
+  const cameraOn = cameraPhase === 'requesting' || cameraPhase === 'live';
+  const cameraError = camera?.error ?? null;
 
   const retry = useCallback(() => void sessionRef.current?.retry(), []);
 
@@ -155,7 +242,10 @@ function PalmImageInputEnabled({ sessionDeps }: PalmImageInputProps) {
   const result = state?.result ?? null;
   const error = state?.error ?? null;
   const aspect = frame && frame.height > 0 ? frame.width / frame.height : 1;
-  const statusText = busy ? STATUS_TEXT[phase] : phase === 'result' && result ? result.headline : phase === 'error' && error ? error.message : '';
+  const photoStatusText = busy ? STATUS_TEXT[phase] : phase === 'result' && result ? result.headline : phase === 'error' && error ? error.message : '';
+  const cameraText = cameraError ? cameraError.message : cameraPhase === 'requesting' ? CAMERA_REQUEST_TEXT : cameraPhase === 'live' ? CAMERA_LIVE_TEXT : cameraNote;
+  const statusText = cameraText || photoStatusText;
+  const fromCamera = hasImage && frame?.source === 'camera';
 
   return (
     <SurfaceCard accentColor={colors.traditional} padding={spacing.md}>
@@ -184,7 +274,7 @@ function PalmImageInputEnabled({ sessionDeps }: PalmImageInputProps) {
           style={visuallyHidden}
         />
 
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: spacing.sm }}>
+        {!cameraOn && <div style={{ display: 'flex', flexWrap: 'wrap', gap: spacing.sm }}>
           <button
             ref={uploadButtonRef}
             type="button"
@@ -205,7 +295,39 @@ function PalmImageInputEnabled({ sessionDeps }: PalmImageInputProps) {
               Try again
             </button>
           )}
-        </div>
+          {cameraSupport === 'available' && (
+            <button ref={cameraButtonRef} type="button" onClick={openCamera} disabled={busy} aria-describedby={`${ids}-camera-note`} data-testid="palm-camera-button" style={busy ? { ...secondaryButtonStyle, opacity: 0.5 } : secondaryButtonStyle}>
+              {fromCamera ? 'Retake with camera' : cameraError?.retryable ? 'Try the camera again' : 'Use camera'}
+            </button>
+          )}
+        </div>}
+        {cameraSupport === null ? null : cameraSupport === 'available'
+          ? <p id={`${ids}-camera-note`} data-testid="palm-camera-note" data-version={PALM_CAMERA_VERSION} style={{ ...typography.caption, margin: 0 }}>{PALM_CAMERA_NOTE}</p>
+          : <p data-testid="palm-camera-unavailable" data-support={cameraSupport} style={{ ...typography.caption, margin: 0 }}>{cameraSupport === 'insecure-context' ? 'The camera can only be used on a secure (https) page, so only photo upload is offered here.' : 'This browser offers no camera here, so only photo upload is offered.'}</p>}
+
+        {cameraOn && (
+          <div data-testid="palm-camera" data-phase={cameraPhase} style={{ display: 'flex', flexDirection: 'column', gap: spacing.sm }}>
+            <video
+              ref={attachVideo}
+              data-testid="palm-camera-video"
+              aria-label="Live camera view (not recorded)"
+              muted
+              playsInline
+              autoPlay
+              style={{ display: 'block', width: '100%', maxHeight: '62vh', objectFit: 'contain', background: 'rgba(2, 6, 23, 0.6)', borderRadius: radius.md }}
+            />
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: spacing.sm }}>
+              <button type="button" onClick={takePhoto} disabled={cameraPhase !== 'live'} data-testid="palm-camera-take" style={cameraPhase === 'live' ? primaryButtonStyle : { ...primaryButtonStyle, opacity: 0.5 }}>Take photo</button>
+              <button type="button" onClick={cancelCamera} data-testid="palm-camera-cancel" style={secondaryButtonStyle}>Cancel</button>
+            </div>
+          </div>
+        )}
+        {!cameraOn && (cameraError || cameraNote) && (
+          <p data-testid="palm-camera-message" data-code={cameraError?.code ?? undefined} style={{ ...typography.body, margin: 0, borderLeft: `3px solid ${cameraError ? colors.caution : colors.borderDefault}`, paddingLeft: spacing.sm }}>{cameraError ? cameraError.message : cameraNote}</p>
+        )}
+        {cameraOn && cameraError && (
+          <p data-testid="palm-camera-message" data-code={cameraError.code} style={{ ...typography.body, margin: 0, borderLeft: `3px solid ${colors.caution}`, paddingLeft: spacing.sm }}>{cameraError.message}</p>
+        )}
 
         {/* Single polite live region for every state change. */}
         <p role="status" aria-live="polite" data-testid="palm-status" style={busy ? { ...typography.body, margin: 0, color: colors.textSecondary } : visuallyHidden}>
@@ -215,8 +337,8 @@ function PalmImageInputEnabled({ sessionDeps }: PalmImageInputProps) {
         <div
           data-testid="palm-preview"
           aria-busy={busy || undefined}
-          hidden={showTracing || undefined}
-          style={{ position: 'relative', width: '100%', maxWidth: hasImage ? `min(100%, ${Math.round(360 * aspect)}px)` : undefined, alignSelf: 'center', opacity: busy ? 0.7 : 1, display: showTracing ? 'none' : undefined }}
+          hidden={showTracing || cameraOn || undefined}
+          style={{ position: 'relative', width: '100%', maxWidth: hasImage ? `min(100%, ${Math.round(360 * aspect)}px)` : undefined, alignSelf: 'center', opacity: busy ? 0.7 : 1, display: showTracing || cameraOn ? 'none' : undefined }}
         >
           <div ref={previewRef} />
           {hasImage && phase === 'result' && result?.palmBox && (
@@ -237,7 +359,7 @@ function PalmImageInputEnabled({ sessionDeps }: PalmImageInputProps) {
           )}
         </div>
 
-        {phase === 'result' && result && (
+        {phase === 'result' && result && !cameraOn && (
           <div data-testid="palm-result" data-status={result.status} style={{ display: 'flex', flexDirection: 'column', gap: spacing.sm }}>
             <SectionHeader label="Photo check" color={colors.traditional} />
             <h3 ref={resultHeadingRef} tabIndex={-1} data-testid="palm-result-heading" style={{ ...typography.bodyStrong, margin: 0, color: result.status === 'accepted' ? colors.positive : colors.textPrimary }}>
@@ -273,11 +395,11 @@ function PalmImageInputEnabled({ sessionDeps }: PalmImageInputProps) {
             context={construction}
             imageSource={frame.canvas as unknown as CanvasImageSource}
             onClose={() => { setTracing(false); setTimeout(() => traceButtonRef.current?.focus(), 0); }}
-            onRestart={() => { setTracing(false); sessionRef.current?.clear(); setTimeout(() => uploadButtonRef.current?.focus(), 0); }}
+            onRestart={() => { setTracing(false); cameraOff('restart'); setCameraNote(''); sessionRef.current?.clear(); setTimeout(() => uploadButtonRef.current?.focus(), 0); }}
           />
         )}
 
-        {phase === 'error' && error && (
+        {phase === 'error' && error && !cameraOn && (
           <div role="alert" data-testid="palm-error" data-code={error.code} style={{ borderLeft: `3px solid ${colors.caution}`, paddingLeft: spacing.sm }}>
             <h3 ref={resultHeadingRef} tabIndex={-1} data-testid="palm-error-heading" style={{ ...typography.bodyStrong, margin: 0 }}>
               {error.message}
@@ -546,7 +668,11 @@ export function PalmTracingPanel({ context, imageSource, onClose, onRestart }: P
   const modelRef = useRef<TracingModel | null>(model);
   modelRef.current = model;
 
-  const data = useMemo(() => context.read(), [context]);
+  // P4-I5: the panel's copy of the landmarks is held in state so that clearing the panel really drops it (it used to
+  // stay referenced until the panel unmounted). A new context reads its own copy.
+  const [held, setHeld] = useState<{ context: PalmConstructionContext; data: ReturnType<PalmConstructionContext['read']> }>(() => ({ context, data: context.read() }));
+  if (held.context !== context) setHeld({ context, data: context.read() });
+  const data = held.context === context ? held.data : null;
   const imgW = data?.imageWidth ?? 0;
   const imgH = data?.imageHeight ?? 0;
 
@@ -588,12 +714,15 @@ export function PalmTracingPanel({ context, imageSource, onClose, onRestart }: P
     const v = readViews(model);
     setViews(v);
     try { setGuides(model ? model.guides() : null); } catch { setGuides(null); }
-    setCleared(!v || !data);
-  }, [model, data, readViews, invalidateGesture]);
+    setCleared(!v || !held.data);
+    // runs for a NEW context only (held.context), never when markCleared drops the landmark copy
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [model, held.context, readViews, invalidateGesture]);
 
   const markCleared = useCallback(() => {
     invalidateGesture();
     try { modelRef.current?.lines(); } catch { /* a revoked model discards its own traces on this call */ }
+    setHeld((h) => (h.data === null ? h : { context: h.context, data: null })); // P4-I5: drop the landmark copy now
     setViews(null);
     setGuides(null);
     setConfirmed(null); setAcknowledged(null); setMode('trace');
@@ -625,8 +754,26 @@ export function PalmTracingPanel({ context, imageSource, onClose, onRestart }: P
     if (cleared || !model) return;
     const watch = () => { if (!model.isActive()) markCleared(); };
     const timer = setInterval(watch, 250);
-    return () => clearInterval(timer);
-  }, [model, cleared, markCleared]);
+    // P4-I5: the 250 ms poll is only a backstop (timers are throttled in hidden tabs). Every lifecycle event checks at
+    // once, and a page that is hidden, frozen or left never completes a gesture that was held across it.
+    const onLifecycle = () => { if (typeof document !== 'undefined' && document.visibilityState === 'hidden') invalidateGesture(); watch(); };
+    const onLeave = () => { invalidateGesture(); watch(); };
+    document.addEventListener('visibilitychange', onLifecycle);
+    document.addEventListener('freeze', onLeave);
+    document.addEventListener('resume', onLifecycle);
+    window.addEventListener('pagehide', onLeave);
+    window.addEventListener('pageshow', onLifecycle);
+    window.addEventListener('focus', onLifecycle);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener('visibilitychange', onLifecycle);
+      document.removeEventListener('freeze', onLeave);
+      document.removeEventListener('resume', onLifecycle);
+      window.removeEventListener('pagehide', onLeave);
+      window.removeEventListener('pageshow', onLifecycle);
+      window.removeEventListener('focus', onLifecycle);
+    };
+  }, [model, cleared, markCleared, invalidateGesture]);
 
   // ---------------------------------------------------------------- layout (one geometry for drawing and input)
   const canvasRef = useRef<HTMLCanvasElement | null>(null);

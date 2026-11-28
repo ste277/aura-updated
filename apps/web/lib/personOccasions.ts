@@ -166,3 +166,43 @@ export function listUpcomingOccasions(
   }
   return out.sort((a, b) => a.daysUntil - b.daysUntil || a.personName.localeCompare(b.personName));
 }
+
+/* ------------------------------------------------------------------ */
+/* AURA-MP-3 -- Home special-day card (design 4.4 / 5.7)                */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The Home card shows a SURFACED special day (0 <= daysUntil <=
+ * remindDaysBefore) at most once ahead and once on the day:
+ *   - ahead (daysUntil > 0): "Not now" hides it until the day itself;
+ *     "Not this year" hides it for this occurrence;
+ *   - on the day (daysUntil = 0): either choice ends it for this occurrence.
+ * Each choice is one ReminderAttention row keyed by the RESOLVED occurrence
+ * date (calendar-neutral), so the dismissal never carries into next year
+ * and a changed date is a new occurrence.
+ */
+export type OccasionDismissScope = 'NOT_NOW' | 'NOT_THIS_YEAR';
+
+export function occasionDismissalKeys(occurrenceDate: string): { yearKey: string; aheadKey: string } {
+  const { year, month, day } = parseCivilDate(occurrenceDate);
+  const dayBefore = new Date(Date.UTC(year, month - 1, day - 1));
+  return {
+    // "Not this year" / handled on the day (design: reminderAt = the occurrence date).
+    yearKey: `${occurrenceDate}T00:00:00.000Z`,
+    // "Not now" ahead of the day: a distinct, deterministic key for the same occurrence.
+    aheadKey: `${dayBefore.toISOString().slice(0, 10)}T12:00:00.000Z`,
+  };
+}
+
+/** Which key a dismissal writes. On the day, "Not now" also ends it for the year. */
+export function dismissalKeyFor(occurrenceDate: string, daysUntil: number, scope: OccasionDismissScope): string {
+  const keys = occasionDismissalKeys(occurrenceDate);
+  return scope === 'NOT_NOW' && daysUntil > 0 ? keys.aheadKey : keys.yearKey;
+}
+
+/** Hidden from Home right now, given the owner's stored keys (ISO strings). */
+export function isOccasionDismissedOnHome(occurrenceDate: string, daysUntil: number, storedKeys: Set<string>): boolean {
+  const keys = occasionDismissalKeys(occurrenceDate);
+  if (storedKeys.has(keys.yearKey)) return true;
+  return daysUntil > 0 && storedKeys.has(keys.aheadKey);
+}

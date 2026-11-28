@@ -164,6 +164,10 @@ jobs:
       # cleared payload contract.
       - name: Run AURA-MP-2 My People special-day UI helpers test
         run: npx ts-node test/myPeopleMp2Ui.test.ts
+      # AURA-MP-3 (62018) -- pure rules: Home card selection (one card, reminder
+      # windows), "Not now" / "Not this year" keys, plan hand-offs, wording.
+      - name: Run AURA-MP-3 My People Home and plan hand-off rules test
+        run: npx ts-node test/myPeopleMp3Ui.test.ts
       # AURA-MP-1 -- special-day date logic: unknown year, 29 Feb, rollover,
       # the user's local midnight, surfacing windows. Pure, no database.
       - name: Run AURA-MP-1 special-day date logic test
@@ -359,6 +363,12 @@ jobs:
       # People null-chart test above.)
       - name: Run AURA-MP-2 My People leap-day list (jsdom) test
         run: npx ts-node --project tsconfig.jsdom-tests.json test/myPeopleMp2LeapDayJsdom.test.ts
+      # AURA-MP-3 (62018) -- the real Plan tab planning with a person: main Find
+      # route while My People is on (shared route unchanged while off), link
+      # saved only on "Use this time", quick-add keeps the planning context.
+      # (jsdom: after the apps/web dependency install.)
+      - name: Run AURA-MP-3 My People plan with a person (jsdom) test
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/myPeopleMp3PlanJsdom.test.ts
       # AURA-REM-01 (PV-F03) -- mounted DeviceNotificationSettings in every
       # permission/availability state (never "on" without a running
       # scheduler), dispatch auth, too-late cutoff, no page-load prompt.
@@ -1173,6 +1183,19 @@ jobs:
         run: npx ts-node test/palm04I4JourneyBrowser.test.ts
       - name: Run synthetic feature-to-reading journey through the standalone E1 preview harness (PALM-04-I4)
         run: npx ts-node test/palm04I4FeatureToReading.test.ts
+      # PALM-04-I5: camera capture. Mocked streams (canvas.captureStream of a drawn synthetic palm) and Chrome's
+      # built-in fake camera device only -- no real camera, no photograph, no network.
+      - name: Run camera adapter tests (PALM-04-I5, mocked streams)
+        run: npx ts-node test/palm04I5CameraAdapter.test.ts
+      - name: Run camera component tests (PALM-04-I5, jsdom, mocked camera)
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/palm04I5CameraJsdom.test.ts
+      - name: Run camera journey browser tests (PALM-04-I5, runner's installed Google Chrome, mocked streams and fake device, no network)
+        env:
+          PALM_BROWSER_CHANNEL: chrome
+        run: npx ts-node test/palm04I5CameraBrowser.test.ts
+      # PALM-04-I5-R1: the 50362 negative controls on the fast suites (in-memory source mutation, subprocess runs)
+      - name: Run camera negative controls (PALM-04-I5-R1, in-memory mutations, synthetic)
+        run: npx ts-node test/palm04I5R1Controls.test.ts
       # PALM-03-E1: development-only personalised interpretation engine (synthetic
       # observations only; unreviewed content). The package suite compares the engine
       # with the unmodified C1 reference oracle (python3, preinstalled on the runner):
@@ -1987,3 +2010,17 @@ jobs:
       # isolation, deletion cascade and the feature switch.
       - name: Run AURA-MP-2 My People journeys DB test
         run: npx ts-node --project tsconfig.jsdom-tests.json test/myPeopleMp2Db.test.ts
+      # AURA-MP-3 (62018) -- Home card + dismissal route, linked plans, Move
+      # keeping the link, deletion, isolation and the switch (real routes + DB).
+      - name: Run AURA-MP-3 My People linked plans and Home guidance DB test
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/myPeopleMp3Db.test.ts
+      # AURA-MP-3-R1 (62020) -- forced interleavings, both orders: dismissal vs
+      # special-day / person DELETE (no orphan), person DELETE vs Move, Home
+      # Move and Recomposition (person-before-plan lock order: no deadlock).
+      - name: Run AURA-MP-3-R1 My People concurrency DB test
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/myPeopleMp3R1ConcurrencyDb.test.ts
+      # AURA-MP-3-R2 (62022) -- the same dismissal / deletion races with
+      # REPEATABLE READ as this process's connection default (session option,
+      # nothing global): the transactions must still run at READ COMMITTED.
+      - name: Run AURA-MP-3-R2 My People isolation DB test
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/myPeopleMp3R2IsolationDb.test.ts

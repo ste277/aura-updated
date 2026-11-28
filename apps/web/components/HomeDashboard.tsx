@@ -50,6 +50,8 @@ import { createRecompositionStore, initialRecompositionState, shouldOfferRecompo
 import { formatGoalActivityCompletion } from '../lib/goalActivityExecution';
 import { DailyBriefingCard } from './DailyBriefingCard';
 import { GoalRhythmSuggestionsCard } from './GoalRhythmSuggestionsCard';
+import { MyPeopleHomeCard } from './MyPeopleHomeCard';
+import type { PersonPlanHandoff } from '../lib/myPeopleOccasionUi';
 import { excludeGoalRhythmSuggestionsDuplicatingActivities, type HomeGoalRhythmSuggestion, type HomePausedGoalRhythm } from '../lib/homeGoalRhythmSuggestions';
 import { captureAccountBinding } from '../lib/accountBoundFetch';
 
@@ -253,6 +255,9 @@ interface HomeDashboardProps {
     durationMinutes: number;
     candidateStart: string;
   }) => Promise<TimingSearchResponse>;
+  /** AURA-MP-3 -- the My People special-day card's actions (card hidden when absent). */
+  onPlanWithPerson?: (handoff: PersonPlanHandoff) => void;
+  onOpenMyPeople?: () => void;
 }
 
 interface HomeDayWindow {
@@ -491,6 +496,8 @@ export function HomeDashboard({
   onOpenBirthProfile,
   onTimingSearch,
   onExploreClick,
+  onPlanWithPerson,
+  onOpenMyPeople,
 }: HomeDashboardProps) {
   const effectiveTimezone = timezone ?? FALLBACK_HOME_TZ;
 
@@ -2038,6 +2045,8 @@ export function HomeDashboard({
           )}
         </div>
       )}
+      {/* AURA-MP-3 (design 5.7) -- at most one My People card, after Starting soon and before Goal Rhythm suggestions. */}
+      {onPlanWithPerson && onOpenMyPeople && <MyPeopleHomeCard onPlan={onPlanWithPerson} onOpenMyPeople={onOpenMyPeople} />}
       {(dedupedGoalRhythmSuggestions.length > 0 || (pausedGoalRhythms?.length ?? 0) > 0) && (
         <GoalRhythmSuggestionsCard suggestions={dedupedGoalRhythmSuggestions} dismissedIds={dismissedGoalRhythmIds} onDismiss={handleDismissGoalRhythmSuggestion} timezone={effectiveTimezone} onWeeklyReviewClosed={onGoalRhythmChanged} pausedRhythms={pausedGoalRhythms} />
       )}
