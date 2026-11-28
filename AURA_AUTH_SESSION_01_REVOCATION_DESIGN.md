@@ -1,6 +1,7 @@
 # AURA-AUTH-SESSION-01 — Server-Side Session Revocation Design (Rev 3, FINAL)
 
 **Date:** 2026-11-26 · **Status:** **DESIGN TICKET CLOSED.** All decisions D1–D8 are accepted. I1 is **on HOLD** until the REL-05 cut and explicit implementation authorization.
+**Rev 4 amendment (2026-11-28, owner decision 39249/39250):** B3 for **MCP consent only** — see the B3 row and §3.1. Every other Rev 3 decision is unchanged.
 **Rev 3 changes:** §4.2–4.3 cutover and rollback safeguards (D3 conditions) · §8.1 database-enforced lookup bounds · §9.1 native device verification · §10 migration coordination with My People MP-1, and the docs travel in the I1 PR.
 **Worktree / branch:** `.claude/worktrees/auth-session-01`. Written on `docs/aura-auth-session-01-revocation-design` (from `main` `3feff03`). Committed with the I1 implementation on `feature/aura-auth-session-01-i1`; see `AURA_AUTH_SESSION_01_I1_VERIFICATION_HANDOVER.md`.
 **Companion:** `AURA_AUTH_SESSION_01_I1_TICKET.md` (the first implementation ticket) · `AURA_AUTH_SESSION_01_EVIDENCE/` (benchmark script and output).
@@ -99,10 +100,21 @@ It adds `withSession()` and `sessionUnavailableResponse()`, which returns 503 wi
 |---|---|
 | **B1** | Every request whose session lookup statement **starts after** that commit gets **401**. This is guaranteed by READ COMMITTED, since each statement takes a fresh snapshot, and there is no cache. |
 | **B2** | A request whose lookup **finished before** that commit may complete. It is bounded by that request's own run time, which is capped by the function's maximum duration. This is accepted for ordinary reads and writes, because the user already held a valid session when the request began. |
-| **B3** | **Session-sensitive operations** re-check the session **inside their own transaction** with `SELECT 1 FROM "AuthSession" WHERE … FOR SHARE`: account deletion, revoke-all, and MCP consent approval (D6). Logout's `UPDATE` conflicts with `FOR SHARE`, so the order is strict: either the operation commits before the logout, or the logout commits first and the operation fails with 401. |
+| **B3** | **Session-sensitive operations** re-check the session **inside their own transaction** with `SELECT 1 FROM "AuthSession" WHERE … FOR SHARE`: account deletion and revoke-all. Logout's `UPDATE` conflicts with `FOR SHARE`, so the order is strict: either the operation commits before the logout, or the logout commits first and the operation fails with 401. **Rev 4:** MCP consent approval (D6) uses the authorization-finalization guarantee in §3.1 instead, because its grant is written to the separate MCP OAuth database. |
 | **B4** | **Only sign-in sets the session cookie.** There is no sliding renewal and no re-issue on any other response. So a concurrent in-flight response can never put a cookie back after logout cleared it. |
 | **B5** | Account deletion: concurrent writes either commit before the deletion transaction locks the `User` row (`FOR UPDATE`), in which case they are deleted with it, or they wait and then fail their FK check. No data is left behind. |
 | **B6** | The client stops sending authenticated calls once logout starts, and treats any 401 after that as expected rather than as an error. |
+
+
+### 3.1 Rev 4: MCP consent authorization finalization (replaces B3 for MCP consent)
+**Guarantee:** an incomplete MCP consent operation associated with a revoked Aura session never becomes a usable authorization, even if its OAuth grant write commits after logout. Legitimately completed authorizations survive ordinary logout; logout does not revoke MCP connections.
+- **Authoritative state:** `McpConsentFinalization` in the **Aura** database (migration 0057). A row binds a grant to its exact account, client and complete authorization. The MCP OAuth database stays separate and its schema is unchanged.
+- **Linearization point:** the COMMIT of one conditional insert that selects the approving `AuthSession` row `FOR SHARE`. That row must not be revoked, must not be expired by the database clock, and must be the row the token was issued for. If logout commits first, the insert writes no row.
+- **Enforcement:** the OAuth store's `Grant` model returns a grant only with a covering finalization. That is the single point used by consent resume and code issuance, code redemption, refresh, MCP resource access and connection listing (oidc-provider 9.13.3, pinned).
+- **Consent flow:** every consent creates a new grant (no reuse). The interaction is finished only after a confirmed finalization; an ambiguous COMMIT finishes nothing.
+- **Outages:** an Aura-database outage fails closed with 503 and revokes nothing.
+- **Deadline (F2):** one 2 000 ms consent budget, starting before session verification, covers acquisition, the grant save, finalization and completion. Finalization is not attempted with less than 300 ms remaining.
+- **No dependence on:** compensating revocation, connection liveness or timeout ordering.
 
 ---
 

@@ -128,7 +128,7 @@ const { GuestFindClient } = require('../apps/web/app/find/GuestFindClient');
   // Structural guards
   const strip = (s: string) => s.replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
   const guest = strip(fs.readFileSync(path.join(__dirname, '..', 'apps/web/app/find/GuestFindClient.tsx'), 'utf8'));
-  check('R1. signed-in visitors still route to the authenticated Plan flow on selection', /if \(isAuthenticated\) \{\s*routeExistingUserToPlan\(/.test(guest));
+  check('R1. signed-in visitors still route to the authenticated Plan flow on selection (AUTH-SESSION-01-I2-R1: only on a definitive signed-in answer; an unknown session decides nothing)', /const auth = await resolveAuthState\(\);\s*if \(auth === null\) return;[\s\S]{0,400}if \(auth === 'signed_in'\) \{\s*routeExistingUserToPlan\(/.test(guest));
   check('R2. every discovery surface selects via the single existing handleSelectActivity', (guest.match(/onClick=\{\(\) => handleSelectActivity\(a\.id\)\}/g) ?? []).length === 3);
   check('R3. guest endpoint and email save path unchanged', /'\/api\/guest\/timing-search'/.test(guest) && /Continue with email/.test(guest));
   const onboarding = strip(fs.readFileSync(path.join(__dirname, '..', 'apps/web/components/OnboardingJourney.tsx'), 'utf8'));

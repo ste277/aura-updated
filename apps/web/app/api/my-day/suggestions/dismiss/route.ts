@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSessionFromRequest } from '../../../../../lib/session';
-import { getUserById, getSavedPersonForOwner, createDayBuilderDismissal } from '../../../../../lib/db';
+import { SESSION_UNAVAILABLE, sessionUnavailableResponse, getSessionWithUserFromRequest } from '../../../../../lib/session';
+import { getSavedPersonForOwner, createDayBuilderDismissal } from '../../../../../lib/db';
 import { parseJsonObject } from '../../../../../lib/request';
 import { getDatePartsInTimezone } from '../../../../../lib/timezone';
 import { resolveRequestNow } from '../../../../../lib/testTimeOverride';
@@ -23,10 +23,11 @@ import { FULL_ACTIVITY_CATALOG } from '../../../../../../../packages/recommendat
 const MAX_ACTIVITY_ID_LENGTH = 100;
 
 export async function POST(req: NextRequest) {
-  const session = getSessionFromRequest(req);
+  const session = await getSessionWithUserFromRequest(req);
+  if (session === SESSION_UNAVAILABLE) return sessionUnavailableResponse();
   if (!session) return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 });
 
-  const user = await getUserById(session.userId);
+  const user = session.user;
   if (!user) return NextResponse.json({ error: 'User not found.' }, { status: 404 });
 
   const body = await parseJsonObject(req);

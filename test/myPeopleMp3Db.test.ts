@@ -15,7 +15,8 @@
 import { React, mount, click, act } from './jsdomReactHarness';
 import { Pool } from 'pg';
 
-const { createSessionToken } = require('../apps/web/lib/auth');
+// AURA-AUTH-SESSION-01-I2: real database-backed v2 sessions (the v1 token API was removed).
+const { createTestSessionToken, TEST_SESSION_COOKIE } = require('./authSessionTestSupport');
 const db = require('../apps/web/lib/db');
 const { getDatePartsInTimezone } = require('../apps/web/lib/timezone');
 const { occasionDismissalKeys } = require('../apps/web/lib/personOccasions');
@@ -42,7 +43,7 @@ const TZ = 'Asia/Kolkata';
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 let token = '';
 const req = (body: unknown, url: string, as: string | null = token): any => ({
-  cookies: { get: (n: string) => (n === 'as_session' && as ? { value: as } : undefined) },
+  cookies: { get: (n: string) => (n === TEST_SESSION_COOKIE && as ? { value: as } : undefined) },
   json: async () => body,
   headers: new Headers(),
   nextUrl: new URL(`http://localhost${url}`),
@@ -86,8 +87,8 @@ async function main() {
   const tag = `mp3-${Date.now()}`;
   const user = await db.upsertUserByEmail({ email: `${tag}@mp3.aura.local`, cityName: 'Chennai', latitude: 13.08, longitude: 80.27, timezone: TZ });
   const other = await db.upsertUserByEmail({ email: `${tag}-o@mp3.aura.local`, cityName: 'Chennai', latitude: 13.08, longitude: 80.27, timezone: TZ });
-  token = createSessionToken(user.id, user.email);
-  const otherToken = createSessionToken(other.id, other.email);
+  token = await createTestSessionToken(user.id, user.email);
+  const otherToken = await createTestSessionToken(other.id, other.email);
   const today = getDatePartsInTimezone(TZ, new Date()).dateStr as string;
   const d0 = addDays(today, 0), d3 = addDays(today, 3), d20 = addDays(today, 20), d5 = addDays(today, 5), d2 = addDays(today, 2);
 

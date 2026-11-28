@@ -22,7 +22,7 @@ import type { RemoteMcpConfig } from '../../../packages/mcp-tools/src/http/remot
  *   5. the explicit opt-in AURA_MCP_AUTH_MODE=local-dev missing;
  *   5b. (I2a-R1 F14) AUTH_SECRET missing, shorter than 32 characters, or
  *      equal to the development fallback published in lib/auth.ts -- the
- *      OAuth consent flow trusts the `as_session` cookie, so a publicly
+ *      OAuth consent flow trusts the Aura session cookie, so a publicly
  *      known signing key must never authenticate OAuth users;
  *   6. remote MCP config disabled (AURA_MCP_REMOTE_ENABLED != "1");
  *   7. resource or issuer not a loopback http(s) URL, issuer not an origin,

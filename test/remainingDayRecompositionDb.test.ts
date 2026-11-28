@@ -7,9 +7,10 @@
 import {
   upsertUserByEmail, updateBirthProfile, getUserById, createPlannedActivity, createCapture, beginTransaction,
 } from '../apps/web/lib/db';
-import { createSessionToken } from '../apps/web/lib/auth';
+
 import { createRealRecompositionDeps, handleRemainingDayRecompositionRequest } from '../apps/web/lib/remainingDayRecompositionServer';
 import { POST as recomposeRoute } from '../apps/web/app/api/day/recompose/route';
+import { createTestSessionToken, TEST_SESSION_COOKIE } from './authSessionTestSupport';
 
 let allPassed = true;
 function check(label: string, condition: boolean) {
@@ -37,7 +38,7 @@ async function main() {
   const mk = async (label: string) => {
     const U = await upsertUserByEmail({ email: `test-recompose-${label}@example.com`, cityName: 'Chennai', latitude: 13.0827, longitude: 80.2707, timezone: TZ });
     await updateBirthProfile(U.id, { birthDate: '1990-06-15', birthTime: '08:30', birthCityName: 'Chennai', birthLatitude: 13.0827, birthLongitude: 80.2707, birthTimezone: TZ });
-    return { U, tok: createSessionToken(U.id, U.email) };
+    return { U, tok: await createTestSessionToken(U.id, U.email) };
   };
   const A = await mk('a');
   const B = await mk('b');
@@ -73,7 +74,7 @@ async function main() {
       totals: await sql(`SELECT (SELECT count(*) FROM "PlannedActivity") AS plans, (SELECT count(*) FROM "AuraMoment") AS moments, (SELECT count(*) FROM "HabitLog") AS habits`),
     });
     const post = async (user: typeof A | null, body: unknown = {}) => {
-      const req: any = { cookies: { get: (n: string) => (user && n === 'as_session' ? { value: user.tok } : undefined) }, json: async () => { throw new Error('the request body must never be read'); }, headers: new Headers() };
+      const req: any = { cookies: { get: (n: string) => (user && n === TEST_SESSION_COOKIE ? { value: user.tok } : undefined) }, json: async () => { throw new Error('the request body must never be read'); }, headers: new Headers() };
       void body;
       const res = await recomposeRoute(req);
       return { status: res.status, json: await res.json() };

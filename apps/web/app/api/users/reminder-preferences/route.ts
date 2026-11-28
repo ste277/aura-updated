@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSessionFromRequest } from '../../../../lib/session';
-import { getUserById, updateUserReminderPrefs } from '../../../../lib/db';
+import { SESSION_UNAVAILABLE, sessionUnavailableResponse, getSessionWithUserFromRequest } from '../../../../lib/session';
+import { updateUserReminderPrefs } from '../../../../lib/db';
 import { parseJsonObject } from '../../../../lib/request';
 
 /**
@@ -13,7 +13,8 @@ import { parseJsonObject } from '../../../../lib/request';
  * here (section 15's own reduced-scope option).
  */
 export async function PATCH(req: NextRequest) {
-  const session = getSessionFromRequest(req);
+  const session = await getSessionWithUserFromRequest(req);
+  if (session === SESSION_UNAVAILABLE) return sessionUnavailableResponse();
   if (!session) return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 });
 
   const body = await parseJsonObject(req);
@@ -21,7 +22,7 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: 'remindersEnabled (boolean) is required.' }, { status: 400 });
   }
 
-  const user = await getUserById(session.userId);
+  const user = session.user;
   if (!user) return NextResponse.json({ error: 'User not found.' }, { status: 404 });
 
   const updated = await updateUserReminderPrefs(session.userId, {

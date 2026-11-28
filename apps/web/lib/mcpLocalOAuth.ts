@@ -12,13 +12,17 @@ import {
   type AddressUnresolvedReason,
   type ClientAddressSource,
 } from '../../../packages/mcp-tools/src/security/clientAddress';
-import { MCP_PG_POOL_BOUNDS } from '../../../packages/mcp-tools/src/security/deadline';
+import { MCP_PG_POOL_BOUNDS, requestBudgetRemainingMs, StoreUnavailableError } from '../../../packages/mcp-tools/src/security/deadline';
+import { SessionVerificationUnavailableError } from './sessionErrors';
 import { randomBytes } from 'crypto';
 import { createPostgresRateLimiter } from '../../../packages/mcp-tools/src/security/postgresRateLimit';
 import { createBucketHasher, deriveBucketKey, type BucketHasher } from '../../../packages/mcp-tools/src/security/preAuthRules';
 import { createFixedWindowRateLimiter, type McpRateLimiter } from '../../../packages/mcp-tools/src/security/rateLimit';
 import type { RemoteMcpConfig } from '../../../packages/mcp-tools/src/http/remoteMcpHandler';
-import { SESSION_COOKIE_NAME, verifySessionToken } from './auth';
+import { getSessionFromCookieHeader, getSessionPool, sessionRowRefFromCookieHeader } from './session';
+import { finalizeConsent, isConsentFinalized } from './mcpConsentFinalization';
+import { SESSION_LOOKUP_BOUNDS, SESSION_WRITE_BOUNDS, SYSTEM_SESSION_CLOCK } from './authSessionDb';
+import type { ConsentFinalizationHooks } from '../../../packages/mcp-tools/src/auth/consentFinalization';
 import { resolveRuntimeMcpAuthMode } from './mcpAuthGate';
 
 /**
@@ -29,8 +33,11 @@ import { resolveRuntimeMcpAuthMode } from './mcpAuthGate';
  * apps/web/pages/api/oauth/[...oidc].ts and the I2b connection routes), and
  * it re-checks the gate itself before constructing anything.
  *
- * Login reuses Aura's existing session cookie (`as_session`, verified by the
- * unchanged lib/auth.ts verifier). Nothing here changes Aura's authentication.
+ * Login reuses Aura's session (AURA-AUTH-SESSION-01-I2, D6): the v2 session
+ * cookie, verified against the database by lib/session.ts -- the same central
+ * validation as every route. Consent approval saves a new grant and finalizes
+ * it against the live session in the Aura database; only finalized grants are
+ * usable (design Rev 4 B3, AURA-AUTH-SESSION-01-I2-R2).
  *
  * Storage (I2b):
  *   - default: in memory (lost on restart);
@@ -109,21 +116,55 @@ function boundedPool(connectionString: string, role: 'store' | 'limiter'): Pool 
 // Survives Next dev hot reloads within one process.
 const globalRef = globalThis as typeof globalThis & { __auraMcpLocalOAuth?: LocalState };
 
-export function readSessionCookieValue(cookieHeader: string | null | undefined): string | null {
-  if (!cookieHeader) return null;
-  for (const part of cookieHeader.split(';')) {
-    const i = part.indexOf('=');
-    if (i > 0 && part.slice(0, i).trim() === SESSION_COOKIE_NAME) return decodeURIComponent(part.slice(i + 1).trim());
-  }
-  return null;
-}
 
-/** Aura user id from a Cookie header, or null. */
-export function sessionUserFromCookie(cookieHeader: string | null | undefined): string | null {
-  const token = readSessionCookieValue(cookieHeader);
-  const session = token ? verifySessionToken(token) : null;
+/**
+ * Aura user id from a Cookie header (database-backed, lib/session.ts), or
+ * null when not authenticated. Throws SessionVerificationUnavailableError
+ * when the session cannot be verified (callers answer 503 / fail closed).
+ */
+export async function sessionUserFromCookie(cookieHeader: string | null | undefined): Promise<string | null> {
+  const session = await getSessionFromCookieHeader(cookieHeader);
   return session?.userId ?? null;
 }
+
+/**
+ * B3 (design §3) for consent approval: the grant is issued only while the
+ * approving user's session row is held FOR SHARE after a live re-check, so a
+ * concurrent logout is strictly ordered before (no grant: null) or after it.
+ */
+/** The caller deadline (session clock) = what remains of this request's OAuth budget, capped by `capMs`. */
+function budgetDeadlineAt(capMs: number): number {
+  return SYSTEM_SESSION_CLOCK.now() + Math.min(capMs, requestBudgetRemainingMs());
+}
+
+/** Session-store outage -> the OAuth server's 503 (never "signed out" / "not authorized"). */
+async function asStoreOutcome<T>(work: () => Promise<T>): Promise<T> {
+  try {
+    return await work();
+  } catch (err) {
+    if (err instanceof SessionVerificationUnavailableError) throw new StoreUnavailableError(err.reason === 'deadline' ? 'timeout' : 'error');
+    throw err;
+  }
+}
+
+/**
+ * Rev 4 B3 (AURA-AUTH-SESSION-01-I2-R2): session-bound consent finalization.
+ * finalize: binds the freshly saved grant to its exact account, client and
+ * authorization, conditional on the approving Aura session being live, in
+ * one Aura-database statement (lib/mcpConsentFinalization.ts). isFinalized:
+ * the check the OAuth server's Grant model applies on every grant use.
+ * Both run inside the request's OAuth budget (the consent POST's is 2 s).
+ */
+const consentFinalization: ConsentFinalizationHooks = {
+  finalize: ({ req, grantId, accountId, clientId, authorization, grantLifetimeSeconds }) =>
+    asStoreOutcome(async () => {
+      const session = sessionRowRefFromCookieHeader((req as IncomingMessage).headers.cookie);
+      if (!session || session.userId !== accountId) return 'refused';
+      return finalizeConsent(getSessionPool(), { grantId, userId: accountId, clientId, authorization, grantLifetimeSeconds, session, deadlineAt: budgetDeadlineAt(SESSION_WRITE_BOUNDS.deadlineMs) });
+    }),
+  isFinalized: ({ grantId, accountId, clientId, authorization }) =>
+    asStoreOutcome(() => isConsentFinalized(getSessionPool(), { grantId, accountId, clientId, authorization, deadlineAt: budgetDeadlineAt(SESSION_LOOKUP_BOUNDS.deadlineMs) })),
+};
 
 /** Only an explicit loopback database may hold local OAuth state. */
 export function localOAuthDatabaseUrl(env: Record<string, string | undefined>): string {
@@ -179,10 +220,12 @@ export function getLocalMcpAuth(config: RemoteMcpConfig): LocalState {
     issuer: config.authorizationServer,
     resourceUrl: config.resourceUrl,
     clients: LOCAL_CLIENTS,
-    resolveSessionUser: (req: IncomingMessage) => {
-      const userId = sessionUserFromCookie(req.headers.cookie);
-      return userId ? { userId } : null;
+    resolveSessionUser: async (req: IncomingMessage) => {
+      // Inside the request's OAuth budget (consent POST: 2 s, Rev 4 / F2).
+      const session = await getSessionFromCookieHeader(req.headers.cookie, { deadlineAt: budgetDeadlineAt(SESSION_LOOKUP_BOUNDS.deadlineMs) });
+      return session ? { userId: session.userId } : null;
     },
+    consentFinalization,
     signInUrl: (returnTo) => `/connect/sign-in?returnTo=${encodeURIComponent(returnTo)}`,
     connectionsUrl: '/connect/apps',
     audit,

@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSessionFromRequest } from '../../../../../lib/session';
+import { getSessionFromRequest, SESSION_UNAVAILABLE, sessionUnavailableResponse } from '../../../../../lib/session';
 import { logPlannedActivity } from '../../../../../lib/db';
 import { parseJsonObject } from '../../../../../lib/request';
 
 export async function POST(req: NextRequest, { params }: { params: { planId: string } }) {
-  const session = getSessionFromRequest(req);
+  const session = await getSessionFromRequest(req);
+  if (session === SESSION_UNAVAILABLE) return sessionUnavailableResponse();
   if (!session) return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 });
 
   // Goals V2 G2.2.2 -- OPTIONAL body. parseJsonObject returns null for no

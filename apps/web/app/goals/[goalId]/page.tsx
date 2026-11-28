@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import { cookies } from 'next/headers';
-import { verifySessionToken, SESSION_COOKIE_NAME } from '../../../lib/auth';
-import { getUserById } from '../../../lib/db';
+import { getSessionWithUserFromCookieStore } from '../../../lib/session';
+import { pageSessionOrUnavailable } from '../../../lib/sessionPage';
 import { GoalDetailClient } from './GoalDetailClient';
 
 /**
@@ -18,16 +18,14 @@ export const metadata: Metadata = {
   title: 'Goal — Aura',
 };
 
-async function resolveAuthenticated(): Promise<boolean> {
-  const token = cookies().get(SESSION_COOKIE_NAME)?.value;
-  if (!token) return false;
-  const session = verifySessionToken(token);
-  if (!session) return false;
-  const user = await getUserById(session.userId);
-  return user !== null;
+// AURA-AUTH-SESSION-01-I2 (E2): database-backed verification through
+// lib/session.ts (the joined session + user lookup). An outage answers
+// 503 with Retry-After (lib/sessionPage.ts, I2-R1), never signed out.
+async function resolveAuthenticated(goalId: string): Promise<boolean> {
+  return (await pageSessionOrUnavailable(() => getSessionWithUserFromCookieStore(cookies()), `/goals/${encodeURIComponent(goalId)}`)) !== null;
 }
 
 export default async function GoalDetailPage({ params }: { params: { goalId: string } }) {
-  const authenticated = await resolveAuthenticated();
+  const authenticated = await resolveAuthenticated(params.goalId);
   return <GoalDetailClient goalId={params.goalId} authenticated={authenticated} />;
 }

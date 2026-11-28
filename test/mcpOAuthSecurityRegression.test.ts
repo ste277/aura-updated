@@ -266,7 +266,11 @@ async function main(): Promise<void> {
       const first = await connect(h, b);
       const second = await connect(h, b);
       check('F1.6a A re-authorizes: consent shown again, token for A', second.userId === USER_A && second.outcome.consentShown, second.outcome);
-      check('F1.6b both of A\'s tokens remain valid', (await mcpStatus(h, first.token!)) === 200 && (await mcpStatus(h, second.token!)) === 200);
+      // AURA-AUTH-SESSION-01-I2-R2 (Rev 4 B3, approved: a NEW grant per consent, no reuse): an access token
+      // WITHOUT offline_access is bound by oidc-provider to the browser session's CURRENT grant for the client
+      // (expiresWithSession), so re-authorizing in the same browser supersedes it; the new token is valid.
+      // Refresh-capable (offline_access) connections are not session-bound and are unaffected.
+      check('F1.6b re-authorization: the new token is valid; the earlier session-bound token is superseded (no grant reuse)', (await mcpStatus(h, second.token!)) === 200 && (await mcpStatus(h, first.token!)) === 401);
     }
 
     // ------------------------------------------------------------ F13: leftover provider session does not block another user

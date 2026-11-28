@@ -70,22 +70,18 @@ export function verifyMagicLinkToken(token: string): MagicLinkPayload | null {
   return verify<MagicLinkPayload>(token);
 }
 
-export interface SessionPayload {
-  userId: string;
-  email: string;
-  exp: number;
-}
+// AURA-AUTH-SESSION-01-I2 -- the v1 session token (`as_session`: HMAC over
+// {userId, email, exp} with this key, no session id) is REMOVED. Sessions are
+// v2 tokens bound to a database row (lib/session.ts, lib/authSessionToken.ts,
+// lib/authSessionStore.ts); `as_session` is only ever cleared, never read.
 
-export function createSessionToken(userId: string, email: string): string {
-  const payload: SessionPayload = { userId, email, exp: Date.now() + 30 * 24 * 60 * 60 * 1000 }; // 30 days
-  return sign(payload);
+/**
+ * The configured AUTH_SECRET (validated above). Used only to derive the v2
+ * session key (HKDF, lib/session.ts) -- never sent, logged or stored.
+ */
+export function getAuthSecret(): string {
+  return SECRET;
 }
-
-export function verifySessionToken(token: string): SessionPayload | null {
-  return verify<SessionPayload>(token);
-}
-
-export const SESSION_COOKIE_NAME = 'as_session';
 
 // --- One-time sign-in codes -------------------------------------------------
 // The 6-digit code exists because magic-link emails open in the system

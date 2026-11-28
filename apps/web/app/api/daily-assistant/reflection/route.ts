@@ -1,16 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDailyReflection, getUserById, upsertDailyReflection } from '../../../../lib/db';
-import { getSessionFromRequest } from '../../../../lib/session';
+import { getDailyReflection, upsertDailyReflection } from '../../../../lib/db';
+import { SESSION_UNAVAILABLE, sessionUnavailableResponse, getSessionWithUserFromRequest } from '../../../../lib/session';
 import { parseJsonObject } from '../../../../lib/request';
 import { getDatePartsInTimezone } from '../../../../lib/timezone';
 
 const OUTPUT_LEVELS = new Set(['LOW', 'MODERATE', 'PEAK_FLOW']);
 
 export async function GET(req: NextRequest) {
-  const session = getSessionFromRequest(req);
+  const session = await getSessionWithUserFromRequest(req);
+  if (session === SESSION_UNAVAILABLE) return sessionUnavailableResponse();
   if (!session) return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 });
 
-  const user = await getUserById(session.userId);
+  const user = session.user;
   if (!user) return NextResponse.json({ error: 'User not found.' }, { status: 404 });
 
   const date = getReflectionDate(req.nextUrl.searchParams.get('date'), user.timezone);
@@ -19,10 +20,11 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const session = getSessionFromRequest(req);
+  const session = await getSessionWithUserFromRequest(req);
+  if (session === SESSION_UNAVAILABLE) return sessionUnavailableResponse();
   if (!session) return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 });
 
-  const user = await getUserById(session.userId);
+  const user = session.user;
   if (!user) return NextResponse.json({ error: 'User not found.' }, { status: 404 });
 
   const body = await parseJsonObject(req);

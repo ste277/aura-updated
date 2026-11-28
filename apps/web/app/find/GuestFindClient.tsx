@@ -14,6 +14,7 @@ import { SignInCodeActions } from '../../components/SignInCodeActions';
 import { colors, spacing, radius, typography } from '../../components/theme';
 import { PrimaryButton, SecondaryButton, TextButton, ActivityChip, DurationChip, StatusBadge, EmptyState, TextInput, SelectInput, FieldLabel, type StatusTone } from '../../components/ui';
 import { useAndroidBackToHome } from '../../lib/useAndroidBackToHome';
+import { fetchSessionBootstrap } from '../../lib/sessionClient';
 import {
   POPULAR_ACTIVITY_IDS,
   ACTIVITY_DISCOVERY_CATEGORIES,
@@ -32,6 +33,8 @@ import {
  * Plan flow uses) and lib/guestState.ts for how a chosen result survives
  * the magic-link auth round trip.
  */
+
+type FindAuthState = 'unknown' | 'signed_in' | 'signed_out';
 
 type Phase =
   | 'CHECKING_SESSION'
@@ -103,7 +106,26 @@ function formatCandidateWhen(startIso: string, endIso: string, timezone: string)
 export function GuestFindClient({ initialSource, initialRestoreToken }: { initialSource: 'AURA_MOMENT' | 'DIRECT'; initialRestoreToken: string | null }) {
   useAndroidBackToHome();
   const [phase, setPhase] = useState<Phase>('CHECKING_SESSION');
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  // AURA-AUTH-SESSION-01-I2-R1 (39246-05/N7): 'unknown' after a session-store
+  // 503 or no network -- never read as signed out. Every decision that depends
+  // on it (guest search / signup vs. the signed-in Plan flow) re-checks first.
+  const [authState, setAuthState] = useState<FindAuthState>('unknown');
+  const [authNotice, setAuthNotice] = useState(false);
+  const setIsAuthenticated = (authed: boolean) => setAuthState(authed ? 'signed_in' : 'signed_out');
+
+  /** The known state, or a fresh check while it is unknown (null = still unknown). */
+  async function resolveAuthState(): Promise<'signed_in' | 'signed_out' | null> {
+    if (authState !== 'unknown') return authState;
+    const boot = await fetchSessionBootstrap((input, init) => fetch(input, init));
+    if (boot.kind === 'unknown') {
+      setAuthNotice(true);
+      return null;
+    }
+    const next = boot.kind === 'signed_in' ? 'signed_in' : 'signed_out';
+    setAuthState(next);
+    setAuthNotice(false);
+    return next;
+  }
   const [error, setError] = useState('');
 
   const [activityQuery, setActivityQuery] = useState('');
@@ -161,10 +183,13 @@ export function GuestFindClient({ initialSource, initialRestoreToken }: { initia
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch('/api/auth/session');
-        const data = await res.json().catch(() => ({ user: null }));
+        // AURA-AUTH-SESSION-01-I2 / I2-R1: 503 = the session could not be
+        // verified -- 'unknown', not signed out. The picker is shown, nothing
+        // is restored, cleared or decided, and the next choice re-checks.
+        const boot = await fetchSessionBootstrap((input, init) => fetch(input, init));
         if (cancelled) return;
-        const authed = Boolean(data?.user);
+        if (boot.kind === 'unknown') throw new Error('session check unavailable');
+        const authed = boot.kind === 'signed_in';
         setIsAuthenticated(authed);
 
         if (initialRestoreToken) {
@@ -253,12 +278,15 @@ export function GuestFindClient({ initialSource, initialRestoreToken }: { initia
     return res.json();
   }
 
-  const handleSelectActivity = (id: string) => {
+  const handleSelectActivity = async (id: string) => {
     const found = FULL_ACTIVITY_CATALOG.find((a) => a.id === id);
+    // I2-R1: never take the guest path on an unknown session.
+    const auth = await resolveAuthState();
+    if (auth === null) return;
     // Section 8: an already-signed-in visitor never enters guest search --
     // straight into the authenticated Plan flow, activity prefilled, their
     // acquisition intent preserved instead of thrown away.
-    if (isAuthenticated) {
+    if (auth === 'signed_in') {
       routeExistingUserToPlan(found?.title ?? id);
       return;
     }
@@ -299,7 +327,10 @@ export function GuestFindClient({ initialSource, initialRestoreToken }: { initia
   const handleSaveClick = async () => {
     if (!selectedCandidate || !activityId) return;
 
-    if (isAuthenticated) {
+    // I2-R1: never offer guest signup on an unknown session.
+    const auth = await resolveAuthState();
+    if (auth === null) return;
+    if (auth === 'signed_in') {
       await performSave();
       return;
     }
@@ -422,6 +453,11 @@ export function GuestFindClient({ initialSource, initialRestoreToken }: { initia
   return (
     <div style={{ minHeight: '100vh', background: 'var(--as-bg)', color: colors.textPrimary, fontFamily: 'var(--as-font-body)', display: 'flex', justifyContent: 'center', padding: `${spacing.xxxl}px ${spacing.lg}px` }}>
       <div style={{ width: '100%', maxWidth: 420 }}>
+        {authNotice && (
+          <p role="status" data-testid="find-session-unknown" style={{ ...typography.body, color: colors.textSecondary, textAlign: 'center', marginBottom: spacing.lg }}>
+            We couldn't check whether you're signed in just now. Try again in a moment.
+          </p>
+        )}
         {phase === 'EXPIRED' && (
           <EmptyState
             title="Your previous search expired."

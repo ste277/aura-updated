@@ -19,8 +19,8 @@
  */
 import { React, mount, click, typeInto, act } from './jsdomReactHarness';
 import { Pool } from 'pg';
+import { createTestSessionToken, TEST_SESSION_COOKIE } from './authSessionTestSupport';
 
-const { createSessionToken } = require('../apps/web/lib/auth');
 const db = require('../apps/web/lib/db');
 const peopleRoute = require('../apps/web/app/api/people/route');
 const personRoute = require('../apps/web/app/api/people/[personId]/route');
@@ -40,7 +40,7 @@ let token = '';
 let ownerId = '';
 const sent: Array<{ method: string; url: string; body: any; status: number }> = [];
 const routeReq = (body: unknown, url: string): any => ({
-  cookies: { get: (n: string) => (n === 'as_session' ? { value: token } : undefined) },
+  cookies: { get: (n: string) => (n === TEST_SESSION_COOKIE ? { value: token } : undefined) },
   json: async () => body,
   headers: new Headers(),
   nextUrl: new URL(`http://localhost${url}`),
@@ -158,7 +158,7 @@ async function main() {
   const tag = `mp1r4-${Date.now()}`;
   const user = await db.upsertUserByEmail({ email: `${tag}@mp1.aura.local`, cityName: 'Chicago', latitude: 41.88, longitude: -87.63, timezone: 'America/Chicago' });
   ownerId = user.id;
-  token = createSessionToken(user.id, user.email);
+  token = await createTestSessionToken(user.id, user.email);
   const CHART = ['birthDate', 'birthTime', 'birthTimezone'];
   const CHART_CITY = ['birthCityName', 'birthDate', 'birthLatitude', 'birthLongitude', 'birthTime', 'birthTimezone'];
   const CHART_COORDS = ['birthDate', 'birthLatitude', 'birthLongitude', 'birthTime', 'birthTimezone'];

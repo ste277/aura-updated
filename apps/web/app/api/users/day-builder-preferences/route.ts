@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSessionFromRequest } from '../../../../lib/session';
-import { getUserById, getSavedPersonForOwner, updateUserDayBuilderPrefs } from '../../../../lib/db';
+import { SESSION_UNAVAILABLE, sessionUnavailableResponse, getSessionWithUserFromRequest } from '../../../../lib/session';
+import { getSavedPersonForOwner, updateUserDayBuilderPrefs } from '../../../../lib/db';
 import { parseJsonObject } from '../../../../lib/request';
 import { INTENTION_GROUPS, DailyIntentionGroupId } from '../../../../lib/dailyIntentions';
 import { USER_PRIORITY_GROUPS, UserPriorityGroup } from '../../../../lib/dayBuilder';
@@ -23,13 +23,14 @@ const MAX_PRIORITIES = 3;
 const MAX_PRIORITY_PEOPLE = 10;
 
 export async function PATCH(req: NextRequest) {
-  const session = getSessionFromRequest(req);
+  const session = await getSessionWithUserFromRequest(req);
+  if (session === SESSION_UNAVAILABLE) return sessionUnavailableResponse();
   if (!session) return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 });
 
   const body = await parseJsonObject(req);
   if (!body) return NextResponse.json({ error: 'A valid JSON request body is required.' }, { status: 400 });
 
-  const user = await getUserById(session.userId);
+  const user = session.user;
   if (!user) return NextResponse.json({ error: 'User not found.' }, { status: 404 });
 
   const dayBuilderEnabled = body.dayBuilderEnabled !== undefined ? body.dayBuilderEnabled : user.dayBuilderEnabled;

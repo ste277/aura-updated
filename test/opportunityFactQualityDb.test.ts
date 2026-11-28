@@ -200,7 +200,7 @@ async function main() {
     check('Kolkata at the same instant (already Monday 10-12): the next period, six later days', oa2.horizonStartDate === '2026-10-12' && oa2.afterStartEvaluatedDays === 6 && oa2.afterStartViableDays === 4);
 
     console.log('=== manual / automatic parity of the NEW facts (P0a canonical identity) ===');
-    const realBoot = { getSessionToken: () => 'tok', verifySession: () => ({ userId: A.id }) };
+    const realBoot = { verifySession: () => ({ userId: A.id }) };
     const handoff = await resolveGoalActivityHandoff({ ...realBoot, listGoalActivities: (uid, gid) => listGoalActivitiesWithLinkedPlanStatus(uid, gid), loadGoalActivityRhythmFacts: (uid, gaId, tz) => loadGoalActivityRhythmFacts(uid, gaId, tz) }, g.id, R.id, WED, KOLKATA);
     const autoDemand = await resolveAutomaticGoalDemand({ ...realBoot, ...createRealGoalDemandCandidatesDeps() }, WED, KOLKATA, handoff.map((h) => h.id));
     const marked = markCanonicalGoalDemandHandoff(handoff, autoDemand.status === 'OK' ? autoDemand.manualCanonicalGoalActivityIds : []);

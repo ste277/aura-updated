@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSessionFromRequest } from '../../../../lib/session';
+import { getSessionFromRequest, SESSION_UNAVAILABLE, sessionUnavailableResponse } from '../../../../lib/session';
 import { getGoalForUser, listGoalActivitiesWithLinkedPlanStatus, deleteGoal, getUserById, loadGoalActivityRhythmFactsForActivities } from '../../../../lib/db';
 import { deriveGoalActivityState, computeGoalProgress } from '../../../../lib/goals';
 import { normalizeGoalActivityCompletionRequirement } from '../../../../lib/goalCompletion';
@@ -10,7 +10,8 @@ import { getDatePartsInTimezone } from '../../../../lib/timezone';
 import { goalHasOngoingRhythmActivity, type GoalActivityRhythmView } from '../../../../lib/goalsPresentation';
 
 export async function GET(req: NextRequest, { params }: { params: { goalId: string } }) {
-  const session = getSessionFromRequest(req);
+  const session = await getSessionFromRequest(req);
+  if (session === SESSION_UNAVAILABLE) return sessionUnavailableResponse();
   if (!session) return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 });
 
   const goal = await getGoalForUser(session.userId, params.goalId);
@@ -92,7 +93,8 @@ export async function GET(req: NextRequest, { params }: { params: { goalId: stri
 }
 
 export async function DELETE(req: NextRequest, { params }: { params: { goalId: string } }) {
-  const session = getSessionFromRequest(req);
+  const session = await getSessionFromRequest(req);
+  if (session === SESSION_UNAVAILABLE) return sessionUnavailableResponse();
   if (!session) return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 });
 
   const result = await deleteGoal(session.userId, params.goalId);

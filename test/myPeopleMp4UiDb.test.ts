@@ -13,7 +13,8 @@
 import { React, mount, click, typeInto, act } from './jsdomReactHarness';
 import { Pool } from 'pg';
 
-const { createSessionToken } = require('../apps/web/lib/auth');
+// AURA-AUTH-SESSION-01-I2: real database-backed v2 sessions (the v1 token API was removed).
+const { createTestSessionToken, TEST_SESSION_COOKIE } = require('./authSessionTestSupport');
 const db = require('../apps/web/lib/db');
 const peopleRoute = require('../apps/web/app/api/people/route');
 const personRoute = require('../apps/web/app/api/people/[personId]/route');
@@ -36,7 +37,7 @@ function check(label: string, condition: boolean, detail?: unknown) {
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 let token = '';
 const req = (body: unknown, url: string): any => ({
-  cookies: { get: (n: string) => (n === 'as_session' && token ? { value: token } : undefined) },
+  cookies: { get: (n: string) => (n === TEST_SESSION_COOKIE && token ? { value: token } : undefined) },
   json: async () => body,
   headers: new Headers(),
   nextUrl: new URL(`http://localhost${url}`),
@@ -83,7 +84,7 @@ async function openPerson(name: string) {
 async function main() {
   const tag = `mp4ui-${Date.now()}`;
   const user = await db.upsertUserByEmail({ email: `${tag}@mp4.aura.local`, cityName: 'Chennai', latitude: 13.08, longitude: 80.27, timezone: 'Asia/Kolkata' });
-  token = createSessionToken(user.id, user.email);
+  token = await createTestSessionToken(user.id, user.email);
   const goals = async () => (await pool.query(`SELECT id, title FROM "Goal" WHERE "userId" = $1 ORDER BY "createdAt"`, [user.id])).rows;
   const acts = async () => (await pool.query(`SELECT * FROM "GoalActivity" WHERE "userId" = $1 ORDER BY "createdAt"`, [user.id])).rows;
 

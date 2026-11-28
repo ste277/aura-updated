@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSessionFromRequest } from '../../../../lib/session';
+import { getSessionFromRequest, SESSION_UNAVAILABLE, sessionUnavailableResponse } from '../../../../lib/session';
 import { parseJsonObject } from '../../../../lib/request';
 import {
   validateActivityId,
@@ -32,7 +32,8 @@ import {
  */
 
 export async function PUT(req: NextRequest, { params }: { params: { activityId: string } }) {
-  const session = getSessionFromRequest(req);
+  const session = await getSessionFromRequest(req);
+  if (session === SESSION_UNAVAILABLE) return sessionUnavailableResponse();
   if (!session) return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 });
 
   const body = await parseJsonObject(req);
@@ -56,7 +57,8 @@ export async function PUT(req: NextRequest, { params }: { params: { activityId: 
 }
 
 export async function DELETE(req: NextRequest, { params }: { params: { activityId: string } }) {
-  const session = getSessionFromRequest(req);
+  const session = await getSessionFromRequest(req);
+  if (session === SESSION_UNAVAILABLE) return sessionUnavailableResponse();
   if (!session) return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 });
 
   let activityId: string;

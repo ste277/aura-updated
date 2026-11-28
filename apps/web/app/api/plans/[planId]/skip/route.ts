@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSessionFromRequest } from '../../../../../lib/session';
+import { getSessionFromRequest, SESSION_UNAVAILABLE, sessionUnavailableResponse } from '../../../../../lib/session';
 import { skipPlannedActivity, PlanSkipError } from '../../../../../lib/db';
 
 /**
@@ -9,7 +9,8 @@ import { skipPlannedActivity, PlanSkipError } from '../../../../../lib/db';
  * row with its original skippedAt.
  */
 export async function POST(req: NextRequest, { params }: { params: { planId: string } }) {
-  const session = getSessionFromRequest(req);
+  const session = await getSessionFromRequest(req);
+  if (session === SESSION_UNAVAILABLE) return sessionUnavailableResponse();
   if (!session) return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 });
 
   try {

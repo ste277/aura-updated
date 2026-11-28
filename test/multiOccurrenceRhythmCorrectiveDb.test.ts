@@ -31,7 +31,7 @@
  *   DATABASE_URL="postgresql://..." npx ts-node test/multiOccurrenceRhythmCorrectiveDb.test.ts
  */
 import { upsertUserByEmail, updateBirthProfile, createGoalWithActivities, addGoalActivity, deleteGoal, deletePlannedActivity, loadGoalContextsForPlanIds, listGoalActivitiesWithLinkedPlanStatus, beginTransaction } from '../apps/web/lib/db';
-import { createSessionToken } from '../apps/web/lib/auth';
+
 import { movePlannedActivity, MovePlanError } from '../apps/web/lib/planMove';
 import { persistAcceptedConstructedDay } from '../apps/web/lib/dayConstructorAcceptancePersistence';
 import { loadEligibleGoalDemand, createRealGoalDemandCandidatesDeps } from '../apps/web/lib/goalDemandCandidates';
@@ -39,6 +39,7 @@ import { resolveGoalActivityHandoff } from '../apps/web/lib/planDayBootstrap';
 import { loadGoalActivityRhythmFacts } from '../apps/web/lib/db';
 import { GET as getGoalDetail } from '../apps/web/app/api/goals/[goalId]/route';
 import type { AcceptConstructedDayRequest } from '../apps/web/lib/dayConstructorAcceptance';
+import { createTestSessionToken, TEST_SESSION_COOKIE } from './authSessionTestSupport';
 
 let allPassed = true;
 function check(label: string, condition: boolean) {
@@ -57,7 +58,7 @@ function iso(s: string): Date { return new Date(s); }
 function window(date: string, start: string, end: string) { return { date, start: iso(start), end: iso(end), timezone: TZ, source: 'EXPLICIT_RANGE' as const }; }
 function item(intentId: string, start: string, end: string) { return { intentId, title: 'Strength training', placementSource: 'SELECTED_CANDIDATE' as const, start: iso(start), end: iso(end) }; }
 function fakeRequest(cookie?: string): any {
-  return { cookies: { get: (name: string) => (cookie !== undefined && name === 'as_session' ? { value: cookie } : undefined) } };
+  return { cookies: { get: (name: string) => (cookie !== undefined && name === TEST_SESSION_COOKIE ? { value: cookie } : undefined) } };
 }
 async function getGoalDetailBody(token: string, goalId: string): Promise<any> {
   const res: any = await getGoalDetail(fakeRequest(token), { params: { goalId } });
@@ -69,7 +70,7 @@ const planStatus = async (planId: string): Promise<string> => (await sql(`SELECT
 async function main() {
   const user = await upsertUserByEmail({ email: 'test-pr2-corrective@example.com', cityName: 'Chennai', latitude: 13.0827, longitude: 80.2707, timezone: TZ });
   await updateBirthProfile(user.id, { birthDate: '1990-06-15', birthTime: '08:30', birthCityName: 'Chennai', birthLatitude: 13.0827, birthLongitude: 80.2707, birthTimezone: TZ });
-  const token = createSessionToken(user.id, 'test-pr2-corrective@example.com');
+  const token = await createTestSessionToken(user.id, 'test-pr2-corrective@example.com');
 
   const createdGoalIds: string[] = [];
   const cleanup = async () => {
@@ -174,7 +175,7 @@ async function main() {
     const activityAfter1 = detailAfter1.activities.find((a: any) => a.id === gaC!.id);
     check('C. 1 of 5 committed: derivedState is PLANNED, and the canonical rhythm.eligibleForAnotherOccurrence (feeding GoalDetailClient\'s isSelectable) is TRUE -- selectable', activityAfter1.derivedState === 'PLANNED' && activityAfter1.rhythm.eligibleForAnotherOccurrence === true && activityAfter1.rhythm.remainingThisWeek === 4);
     const manualHandoff1 = await resolveGoalActivityHandoff(
-      { getSessionToken: () => token, verifySession: () => ({ userId: user.id }), listGoalActivities: (uid: string, gid: string) => listGoalActivitiesWithLinkedPlanStatus(uid, gid), loadGoalActivityRhythmFacts: (uid: string, gaId: string, tz: string) => loadGoalActivityRhythmFacts(uid, gaId, tz) } as any,
+      { verifySession: () => ({ userId: user.id }), listGoalActivities: (uid: string, gid: string) => listGoalActivitiesWithLinkedPlanStatus(uid, gid), loadGoalActivityRhythmFacts: (uid: string, gaId: string, tz: string) => loadGoalActivityRhythmFacts(uid, gaId, tz) } as any,
       goalC.id, gaC!.id, '2026-10-07', TZ
     );
     check('C. resolveGoalActivityHandoff (the manual path) ALSO admits it -- manual and automatic paths agree', manualHandoff1.some((h) => h.id === gaC!.id));
@@ -191,7 +192,7 @@ async function main() {
     const activityAfter5 = detailAfter5.activities.find((a: any) => a.id === gaC!.id);
     check('C. 5 of 5 committed: rhythm.eligibleForAnotherOccurrence is FALSE -- not selectable', activityAfter5.derivedState === 'PLANNED' && activityAfter5.rhythm.eligibleForAnotherOccurrence === false && activityAfter5.rhythm.remainingThisWeek === 0);
     const manualHandoff5 = await resolveGoalActivityHandoff(
-      { getSessionToken: () => token, verifySession: () => ({ userId: user.id }), listGoalActivities: (uid: string, gid: string) => listGoalActivitiesWithLinkedPlanStatus(uid, gid), loadGoalActivityRhythmFacts: (uid: string, gaId: string, tz: string) => loadGoalActivityRhythmFacts(uid, gaId, tz) } as any,
+      { verifySession: () => ({ userId: user.id }), listGoalActivities: (uid: string, gid: string) => listGoalActivitiesWithLinkedPlanStatus(uid, gid), loadGoalActivityRhythmFacts: (uid: string, gaId: string, tz: string) => loadGoalActivityRhythmFacts(uid, gaId, tz) } as any,
       goalC.id, gaC!.id, '2026-10-07', TZ
     );
     check('C. with capacity exhausted, resolveGoalActivityHandoff correctly refuses it too -- still agrees with automatic discovery', manualHandoff5.length === 0);

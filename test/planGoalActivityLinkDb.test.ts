@@ -5,7 +5,7 @@
 // applied).
 import { POST as plansRoute } from '../apps/web/app/api/plans/route';
 import { upsertUserByEmail, createGoalWithActivities, beginTransaction } from '../apps/web/lib/db';
-import { createSessionToken } from '../apps/web/lib/auth';
+import { createTestSessionToken, TEST_SESSION_COOKIE } from './authSessionTestSupport';
 
 let allPassed = true;
 function check(label: string, condition: boolean) {
@@ -15,7 +15,7 @@ function check(label: string, condition: boolean) {
 
 function req(tok: string, body: Record<string, unknown>): any {
   return {
-    cookies: { get: (n: string) => (n === 'as_session' ? { value: tok } : undefined) },
+    cookies: { get: (n: string) => (n === TEST_SESSION_COOKIE ? { value: tok } : undefined) },
     headers: new Headers(),
     nextUrl: new URL('http://localhost/api/plans'),
     json: async () => body,
@@ -48,9 +48,9 @@ async function main() {
   await sql(`DELETE FROM "User" WHERE email = ANY($1)`, [[emailA, emailB]]).catch(() => {});
 
   const userA = await upsertUserByEmail({ email: emailA, cityName: 'Chennai', latitude: 13.0827, longitude: 80.2707, timezone: 'Asia/Kolkata' });
-  const tokA = createSessionToken(userA.id, userA.email);
+  const tokA = await createTestSessionToken(userA.id, userA.email);
   const userB = await upsertUserByEmail({ email: emailB, cityName: 'Chennai', latitude: 13.0827, longitude: 80.2707, timezone: 'Asia/Kolkata' });
-  const tokB = createSessionToken(userB.id, userB.email);
+  const tokB = await createTestSessionToken(userB.id, userB.email);
 
   const { goal: goalA, activities: activitiesA } = await createGoalWithActivities({
     userId: userA.id,

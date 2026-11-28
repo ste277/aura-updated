@@ -42,7 +42,6 @@ const setRhythm = (goalActivityId: string, targetPerWeek: number) =>
 
 function depsFor(userId: string): AutomaticGoalDemandBootstrapDeps {
   return {
-    getSessionToken: () => 'tok',
     verifySession: () => ({ userId }),
     ...createRealGoalDemandCandidatesDeps(),
   };
@@ -93,7 +92,6 @@ async function main() {
 
     const manualHandoff = await resolveGoalActivityHandoff(
       {
-        getSessionToken: () => 'tok',
         verifySession: () => ({ userId: user.id }),
         listGoalActivities: (userId, goalId) => listGoalActivitiesWithLinkedPlanStatus(userId, goalId),
       },
@@ -121,7 +119,6 @@ async function main() {
     // ============================================================
     const bogusHandoff = await resolveGoalActivityHandoff(
       {
-        getSessionToken: () => 'tok',
         verifySession: () => ({ userId: user.id }),
         listGoalActivities: (userId, goalId) => listGoalActivitiesWithLinkedPlanStatus(userId, goalId),
       },
@@ -172,7 +169,6 @@ async function main() {
     let factsCalls = 0;
     const real = createRealGoalDemandCandidatesDeps();
     const countingDeps: AutomaticGoalDemandBootstrapDeps = {
-      getSessionToken: () => 'tok',
       verifySession: () => ({ userId: user.id }),
       loadCandidateGoalActivities: async (userId) => {
         discoveryCalls += 1;

@@ -8,8 +8,9 @@
  *   DATABASE_URL="postgresql://..." npx ts-node test/dailyRhythmPreferencesApiDb.test.ts
  */
 import { upsertUserByEmail } from '../apps/web/lib/db';
-import { createSessionToken } from '../apps/web/lib/auth';
+
 import { GET as getDailyRhythm, PUT as saveDailyRhythm, DELETE as clearDailyRhythm } from '../apps/web/app/api/users/daily-rhythm-preferences/route';
+import { createTestSessionToken, TEST_SESSION_COOKIE } from './authSessionTestSupport';
 
 let allPassed = true;
 function check(label: string, condition: boolean) {
@@ -24,7 +25,7 @@ interface FakeRequestOptions {
 
 function fakeRequest(opts: FakeRequestOptions = {}): any {
   return {
-    cookies: { get: (name: string) => (opts.cookie !== undefined && name === 'as_session' ? { value: opts.cookie } : undefined) },
+    cookies: { get: (name: string) => (opts.cookie !== undefined && name === TEST_SESSION_COOKIE ? { value: opts.cookie } : undefined) },
     json: async () => opts.jsonBody,
   };
 }
@@ -38,8 +39,8 @@ const TZ = 'Asia/Kolkata';
 async function main() {
   const userA = await upsertUserByEmail({ email: 'test-daily-rhythm-preferences-api-owner-a@example.com', cityName: 'Chennai', latitude: 13.0827, longitude: 80.2707, timezone: TZ });
   const userB = await upsertUserByEmail({ email: 'test-daily-rhythm-preferences-api-owner-b@example.com', cityName: 'Chennai', latitude: 13.0827, longitude: 80.2707, timezone: TZ });
-  const tokenA = createSessionToken(userA.id, userA.email);
-  const tokenB = createSessionToken(userB.id, userB.email);
+  const tokenA = await createTestSessionToken(userA.id, userA.email);
+  const tokenB = await createTestSessionToken(userB.id, userB.email);
 
   try {
     // Clean slate.

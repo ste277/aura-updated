@@ -8,7 +8,7 @@ import {
   upsertUserByEmail, updateBirthProfile, createPlannedActivity, createCapture, getCaptureWithLinkedPlanStatus, createGoalWithActivities, addGoalActivity, deleteGoal,
   listGoalActivitiesWithLinkedPlanStatus, getUserById, beginTransaction, logPlannedActivity,
 } from '../apps/web/lib/db';
-import { createSessionToken, sign } from '../apps/web/lib/auth';
+import { sign } from '../apps/web/lib/auth';
 import { signRecompositionProposal } from '../apps/web/lib/remainingDayRecompositionIntegrity';
 import { acceptRemainingDayRecomposition, realRecompositionAcceptanceDeps, type RecompositionAcceptanceDeps } from '../apps/web/lib/remainingDayRecompositionAcceptance';
 import { movePlannedActivity } from '../apps/web/lib/planMove';
@@ -19,6 +19,7 @@ import { getDatePartsInTimezone } from '../apps/web/lib/timezone';
 import { POST as acceptRoute } from '../apps/web/app/api/day/recompose/accept/route';
 import { POST as recomposeRoute } from '../apps/web/app/api/day/recompose/route';
 import { POST as skipRoute } from '../apps/web/app/api/plans/[planId]/skip/route';
+import { createTestSessionToken, TEST_SESSION_COOKIE } from './authSessionTestSupport';
 
 let allPassed = true;
 function check(label: string, condition: boolean) {
@@ -30,7 +31,7 @@ async function sql(t: string, p: unknown[] = []): Promise<any[]> {
   const c = await beginTransaction();
   try { const r = await c.query(t, p); await c.query('COMMIT'); return r.rows; } catch (e) { await c.query('ROLLBACK').catch(() => {}); throw e; } finally { c.release(); }
 }
-const fakeReq = (cookie: string | undefined, body: unknown): any => ({ cookies: { get: (n: string) => (cookie !== undefined && n === 'as_session' ? { value: cookie } : undefined) }, json: async () => { if (body === '__BAD_JSON__') throw new Error('bad'); return body; }, headers: new Headers() });
+const fakeReq = (cookie: string | undefined, body: unknown): any => ({ cookies: { get: (n: string) => (cookie !== undefined && n === TEST_SESSION_COOKIE ? { value: cookie } : undefined) }, json: async () => { if (body === '__BAD_JSON__') throw new Error('bad'); return body; }, headers: new Headers() });
 function earlyDayZone(now: Date): string {
   for (const tz of ['Pacific/Kiritimati', 'Pacific/Auckland', 'Australia/Sydney', 'Asia/Tokyo', 'Asia/Kolkata', 'Europe/London', 'America/New_York', 'America/Los_Angeles', 'Pacific/Honolulu', 'Etc/GMT+12', 'Pacific/Pago_Pago']) {
     const hour = Number(new Intl.DateTimeFormat('en-GB', { timeZone: tz, hour: '2-digit', hourCycle: 'h23' }).format(now));
@@ -45,7 +46,7 @@ async function main() {
   const mkUser = async (label: string) => {
     const U = await upsertUserByEmail({ email: `test-recompose-accept-${label}@example.com`, cityName: 'Chennai', latitude: 13.0827, longitude: 80.2707, timezone: TZ });
     await updateBirthProfile(U.id, { birthDate: '1990-06-15', birthTime: '08:30', birthCityName: 'Chennai', birthLatitude: 13.0827, birthLongitude: 80.2707, birthTimezone: TZ });
-    return { U, tok: createSessionToken(U.id, U.email) };
+    return { U, tok: await createTestSessionToken(U.id, U.email) };
   };
   const A = await mkUser('a');
   const B = await mkUser('b');

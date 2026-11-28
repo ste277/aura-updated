@@ -7,9 +7,10 @@
 // Run with: npx ts-node test/planGoalActivityCompletionIntegrityDb.test.ts
 import { POST as plansRoute } from '../apps/web/app/api/plans/route';
 import { upsertUserByEmail, createGoalWithActivities, logPlannedActivity, beginTransaction } from '../apps/web/lib/db';
-import { createSessionToken } from '../apps/web/lib/auth';
+
 import { movePlannedActivity } from '../apps/web/lib/planMove';
 import { deriveGoalActivityState, computeGoalProgress } from '../apps/web/lib/goals';
+import { createTestSessionToken, TEST_SESSION_COOKIE } from './authSessionTestSupport';
 
 let allPassed = true;
 function check(label: string, condition: boolean) {
@@ -19,7 +20,7 @@ function check(label: string, condition: boolean) {
 
 function req(tok: string, body: Record<string, unknown>): any {
   return {
-    cookies: { get: (n: string) => (n === 'as_session' ? { value: tok } : undefined) },
+    cookies: { get: (n: string) => (n === TEST_SESSION_COOKIE ? { value: tok } : undefined) },
     headers: new Headers(),
     nextUrl: new URL('http://localhost/api/plans'),
     json: async () => body,
@@ -46,7 +47,7 @@ async function main() {
   await sql(`DELETE FROM "User" WHERE email = $1`, [email]).catch(() => {});
 
   const user = await upsertUserByEmail({ email, cityName: 'Chennai', latitude: 13.0827, longitude: 80.2707, timezone: 'Asia/Kolkata' });
-  const tok = createSessionToken(user.id, user.email);
+  const tok = await createTestSessionToken(user.id, user.email);
 
   const { goal, activities } = await createGoalWithActivities({ userId: user.id, title: 'Fitness', targetDate: null, activities: [{ title: 'Morning Run', activityId: 'workout' }] });
   const morningRun = activities[0];

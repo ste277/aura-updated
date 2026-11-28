@@ -380,15 +380,16 @@ export async function runDayConstructorPreview(
 // ============================================================
 
 /** The only fact this file needs out of a verified session -- never the
- * full `SessionPayload` (auth.ts), so this file has no reason to import
+ * full verified session (lib/session.ts), so this file has no reason to import
  * anything from `./auth`. */
 export interface DayConstructorPreviewSession {
   userId: string;
 }
 
 export interface DayConstructorPreviewBoundaryDeps {
-  /** `() => getSessionFromRequest(req)` in production -- synchronous,
-   * matching `getSessionFromRequest`'s own real signature exactly. */
+  /** In production: the session the route ALREADY verified against the
+   * database (AURA-AUTH-SESSION-01-I2, lib/session.ts getSessionFromRequest,
+   * whose 503 outcome the route answers itself) -- `() => session`. */
   getSession: () => DayConstructorPreviewSession | null;
   /** `getUserById` in production, passed by reference (same signature). */
   getUser: (userId: string) => Promise<User | null>;

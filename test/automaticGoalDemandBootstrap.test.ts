@@ -25,7 +25,6 @@ function row(overrides: Partial<CandidateGoalActivityForRhythmDemandRow> & { goa
 
 function makeDeps(overrides: Partial<AutomaticGoalDemandBootstrapDeps> = {}): AutomaticGoalDemandBootstrapDeps {
   return {
-    getSessionToken: () => 'tok',
     verifySession: () => ({ userId: 'user-1' }),
     loadCandidateGoalActivities: async () => [],
     loadRhythmFacts: async () => new Map<string, readonly GoalActivityRhythmOccurrenceFact[]>(),
@@ -146,7 +145,7 @@ async function main() {
   // established "fails closed to an empty OK result" convention.
   // ============================================================
   {
-    const deps = makeDeps({ getSessionToken: () => undefined, loadCandidateGoalActivities: async () => [row({ goalActivityId: 'ga-1' })] });
+    const deps = makeDeps({ verifySession: () => null, loadCandidateGoalActivities: async () => [row({ goalActivityId: 'ga-1' })] });
     const result = await resolveAutomaticGoalDemand(deps, '2026-10-06', TZ, []);
     check('no session token -> OK empty result, never seeds anything, never LOAD_FAILED', result.status === 'OK' && result.suggestions.length === 0);
   }

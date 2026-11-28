@@ -17,8 +17,8 @@
  */
 import { React, mount, click, typeInto, act } from './jsdomReactHarness';
 import { Pool } from 'pg';
+import { createTestSessionToken, TEST_SESSION_COOKIE } from './authSessionTestSupport';
 
-const { createSessionToken } = require('../apps/web/lib/auth');
 const db = require('../apps/web/lib/db');
 const peopleRoute = require('../apps/web/app/api/people/route');
 const personRoute = require('../apps/web/app/api/people/[personId]/route');
@@ -39,7 +39,7 @@ const submitted: Array<{ method: string; url: string; body: any; status: number 
   const method = init.method ?? 'GET';
   const body = init.body ? JSON.parse(init.body) : undefined;
   const req: any = {
-    cookies: { get: (n: string) => (n === 'as_session' ? { value: token } : undefined) },
+    cookies: { get: (n: string) => (n === TEST_SESSION_COOKIE ? { value: token } : undefined) },
     json: async () => body,
     headers: new Headers(init.headers ?? {}),
     nextUrl: new URL(`http://localhost${url}`),
@@ -90,7 +90,7 @@ const options = (root: HTMLElement) => Array.from((root.querySelector('#person-r
 async function main() {
   const tag = `mp1r1ed-${Date.now()}`;
   const user = await db.upsertUserByEmail({ email: `${tag}@mp1.aura.local`, cityName: 'Chennai', latitude: 13.0827, longitude: 80.2707, timezone: 'Asia/Kolkata' });
-  token = createSessionToken(user.id, user.email);
+  token = await createTestSessionToken(user.id, user.email);
 
   // Seed with My People ENABLED: three My People types with notes/interests/special days.
   setFlags(true, true);

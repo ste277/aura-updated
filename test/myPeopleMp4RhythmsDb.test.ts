@@ -16,7 +16,8 @@
  */
 import { Pool, type PoolClient } from 'pg';
 
-const { createSessionToken } = require('../apps/web/lib/auth');
+// AURA-AUTH-SESSION-01-I2: real database-backed v2 sessions (the v1 token API was removed).
+const { createTestSessionToken, TEST_SESSION_COOKIE } = require('./authSessionTestSupport');
 const db = require('../apps/web/lib/db');
 const peopleRoute = require('../apps/web/app/api/people/route');
 const personRoute = require('../apps/web/app/api/people/[personId]/route');
@@ -45,7 +46,7 @@ const HOUR = 60 * MINUTE;
 
 type Res = { status: number; body: any };
 const req = (as: string | null, body?: unknown, url = 'http://localhost/'): any => ({
-  cookies: { get: (n: string) => (n === 'as_session' && as ? { value: as } : undefined) },
+  cookies: { get: (n: string) => (n === TEST_SESSION_COOKIE && as ? { value: as } : undefined) },
   json: async () => body,
   headers: new Headers(),
   nextUrl: new URL(url),
@@ -134,8 +135,8 @@ async function main() {
   const tz = zones.find((z) => Number(new Intl.DateTimeFormat('en-GB', { timeZone: z, hour: '2-digit', hourCycle: 'h23' }).format(new Date())) <= 8)!;
   const user = await db.upsertUserByEmail({ email: `${tag}@mp4.aura.local`, cityName: 'Test', latitude: 0, longitude: 0, timezone: tz });
   const other = await db.upsertUserByEmail({ email: `${tag}-o@mp4.aura.local`, cityName: 'Test', latitude: 0, longitude: 0, timezone: tz });
-  const token = createSessionToken(user.id, user.email);
-  const otherToken = createSessionToken(other.id, other.email);
+  const token = await createTestSessionToken(user.id, user.email);
+  const otherToken = await createTestSessionToken(other.id, other.email);
   const on = () => { process.env.AURA_MY_PEOPLE_ENABLED = '1'; };
   const off = () => { delete process.env.AURA_MY_PEOPLE_ENABLED; };
   on();
@@ -464,7 +465,7 @@ async function main() {
     const activeOrphanPlans = Number((await q(`SELECT count(*) FROM "PlannedActivity" pa WHERE pa."savedPersonId" IS NOT NULL AND NOT EXISTS (SELECT 1 FROM "SavedPerson" sp WHERE sp.id = pa."savedPersonId")`)).rows[0].count);
     check('Invariant: no rhythm or plan links to a missing or foreign person', dangling === 0 && activeOrphanPlans === 0, { dangling, activeOrphanPlans });
     const temp = await db.upsertUserByEmail({ email: `${tag}-gone@mp4.aura.local`, cityName: 'Test', latitude: 0, longitude: 0, timezone: tz });
-    const tempToken = createSessionToken(temp.id, temp.email);
+    const tempToken = await createTestSessionToken(temp.id, temp.email);
     const tp = await mkPerson('Temp', tempToken);
     const tr = await createRhythm(tp, newGoalBody('Temp', 'Call Temp'), tempToken)();
     let accountDelete = 'ok';

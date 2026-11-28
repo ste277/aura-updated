@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSessionFromRequest } from '../../../../lib/session';
+import { getSessionFromRequest, sessionUnavailableResponse, SESSION_UNAVAILABLE } from '../../../../lib/session';
 import { getUserById, loadGoalContextsForPlanIds } from '../../../../lib/db';
 import { createRealRecompositionDeps, handleRemainingDayRecompositionRequest } from '../../../../lib/remainingDayRecompositionServer';
 
@@ -12,8 +12,12 @@ import { createRealRecompositionDeps, handleRemainingDayRecompositionRequest } f
  * a Goal-linked decision (see remainingDayRecompositionServer.ts's own header). Purely additive presentation.
  */
 export async function POST(req: NextRequest) {
+  // AURA-AUTH-SESSION-01-I2 (E5): the session is verified once, here, against
+  // the database; the injected seam only hands that result on (null = 401).
+  const session = await getSessionFromRequest(req);
+  if (session === SESSION_UNAVAILABLE) return sessionUnavailableResponse();
   const result = await handleRemainingDayRecompositionRequest({
-    getSession: () => getSessionFromRequest(req),
+    getSession: () => session,
     getUser: (userId) => getUserById(userId),
     now: () => new Date(),
     createDeps: createRealRecompositionDeps,

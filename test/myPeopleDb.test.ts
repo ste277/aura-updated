@@ -21,7 +21,7 @@
  *   F. EXPORT: A's export holds exactly A's people, notes and special days.
  */
 import { Pool } from 'pg';
-import { createSessionToken } from '../apps/web/lib/auth';
+
 import { createSavedPerson, deleteSavedPerson, getSavedPersonForOwner, upsertUserByEmail } from '../apps/web/lib/db';
 import { GET as listPeople, POST as createPerson } from '../apps/web/app/api/people/route';
 import { GET as getPerson, PATCH as patchPerson, DELETE as deletePerson } from '../apps/web/app/api/people/[personId]/route';
@@ -30,6 +30,7 @@ import { PATCH as patchOccasion, DELETE as deleteOccasion } from '../apps/web/ap
 import { GET as upcoming } from '../apps/web/app/api/people/occasions/upcoming/route';
 import { GET as exportData } from '../apps/web/app/api/users/export/route';
 import { POST as createPlan } from '../apps/web/app/api/plans/route';
+import { createTestSessionToken, TEST_SESSION_COOKIE } from './authSessionTestSupport';
 
 let allPassed = true;
 function check(label: string, condition: boolean, detail?: unknown) {
@@ -41,7 +42,7 @@ const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const sql = async (text: string, params: unknown[] = []) => (await pool.query(text, params)).rows;
 
 const fakeReq = (token: string | undefined, body?: unknown, url = 'http://localhost/api/people'): any => ({
-  cookies: { get: (n: string) => (token !== undefined && n === 'as_session' ? { value: token } : undefined) },
+  cookies: { get: (n: string) => (token !== undefined && n === TEST_SESSION_COOKIE ? { value: token } : undefined) },
   json: async () => body,
   headers: new Headers(),
   nextUrl: new URL(url),
@@ -60,7 +61,7 @@ async function main() {
   const tag = `mp1-${Date.now()}`;
   const mk = async (key: string) => {
     const u = await upsertUserByEmail({ email: `${key}-${tag}@mp1.aura.local`, cityName: 'Chennai', latitude: 13.0827, longitude: 80.2707, timezone: 'Asia/Kolkata' });
-    return { ...u, token: createSessionToken(u.id, u.email) };
+    return { ...u, token: await createTestSessionToken(u.id, u.email) };
   };
   const A = await mk('a');
   const B = await mk('b');

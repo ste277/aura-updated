@@ -30,7 +30,7 @@ import {
   loadGoalActivityRhythmFacts,
   createPlannedActivity,
 } from '../apps/web/lib/db';
-import { createSessionToken } from '../apps/web/lib/auth';
+
 import { createRealDayConstructorOrchestratorDeps } from '../apps/web/lib/dayConstructorOrchestrator';
 import { handleDayConstructorPreviewRequest } from '../apps/web/lib/dayConstructorPreviewRequest';
 import { loadGoalDecisionFacts } from '../apps/web/lib/goalDecisionFactsProvider';
@@ -43,6 +43,7 @@ import { buildAcceptRequestBody } from '../apps/web/lib/acceptConstructedDay';
 import { POST as acceptRoute } from '../apps/web/app/api/day-constructor/accept/route';
 import { localDateTimeToUTC } from '../apps/web/lib/timezone';
 import { fixtureAnchorMonday, addCivilDays, realClockReferenceForFixture } from './lifecycleFixtureCalendar';
+import { createTestSessionToken } from './authSessionTestSupport';
 
 let allPassed = true;
 function check(label: string, condition: boolean) {
@@ -125,8 +126,8 @@ async function main() {
   };
   const rowsToBody = (rows: PlanDayIntentRow[], extra: Record<string, unknown> = {}) => ({ intents: buildRequestedIntentsForSubmission(rows, TZ, DATE), ...extra });
   const facts = (preview: any, id: string) => preview.preview?.resolvedIntents?.find((r: any) => r.requestedIntentId === id)?.dayIntent?.decisionFacts;
-  const fakeReq = (userId: string, body: unknown): any => ({ cookies: { get: () => ({ value: createSessionToken(userId, 'ignored@example.com') }) }, json: async () => body, headers: new Headers() });
-  const accept = async (userId: string, body: unknown) => (await acceptRoute(fakeReq(userId, body))).json();
+  const fakeReq = async (userId: string, body: unknown): Promise<any> => { const token = await createTestSessionToken(userId); return { cookies: { get: () => ({ value: token }) }, json: async () => body, headers: new Headers() }; };
+  const accept = async (userId: string, body: unknown) => (await acceptRoute(await fakeReq(userId, body))).json();
   let n = 0;
   const acceptBodyFor = (preview: any, rows: PlanDayIntentRow[]) => JSON.parse(JSON.stringify(buildAcceptRequestBody(preview.preview, `p0a-${ANCHOR_MONDAY}-${n++}`, buildGoalActivityLinksForAccept(rows, preview.preview.constructedDay.proposedItems))));
   const counts = async (goalActivityId: string) => ({
@@ -168,7 +169,7 @@ async function main() {
     await setRhythm(RB.id, 2);
 
     const idOf = (ga: { id: string }) => encodeGoalDemandIntentId(DATE, ga.id);
-    const realBootstrapDeps = (userId: string) => ({ getSessionToken: () => 'tok', verifySession: () => ({ userId }) });
+    const realBootstrapDeps = (userId: string) => ({ verifySession: () => ({ userId }) });
 
     // ------------------------------------------------------------------
     console.log('=== server marking through the REAL handoff + bootstrap ===');

@@ -20,11 +20,12 @@
  *   DATABASE_URL="postgresql://..." npx ts-node test/scheduleWriteManualSerializationDb.test.ts
  */
 import { upsertUserByEmail, updateBirthProfile, beginTransaction, createPlannedActivity, getUserById } from '../apps/web/lib/db';
-import { createSessionToken } from '../apps/web/lib/auth';
+
 import { persistAcceptedConstructedDay } from '../apps/web/lib/dayConstructorAcceptancePersistence';
 import { movePlannedActivity } from '../apps/web/lib/planMove';
 import { localDateTimeToUTC } from '../apps/web/lib/timezone';
 import { POST as plansRoute } from '../apps/web/app/api/plans/route';
+import { createTestSessionToken, TEST_SESSION_COOKIE } from './authSessionTestSupport';
 
 let allPassed = true;
 function check(label: string, condition: boolean) {
@@ -53,7 +54,7 @@ async function sql(text: string, params: unknown[] = []): Promise<any[]> {
     c.release();
   }
 }
-const fakeReq = (cookie: string | undefined, body: unknown): any => ({ cookies: { get: (n: string) => (cookie !== undefined && n === 'as_session' ? { value: cookie } : undefined) }, json: async () => body, headers: new Headers() });
+const fakeReq = (cookie: string | undefined, body: unknown): any => ({ cookies: { get: (n: string) => (cookie !== undefined && n === TEST_SESSION_COOKIE ? { value: cookie } : undefined) }, json: async () => body, headers: new Headers() });
 
 type Ev = { t: number; ev: string; pid?: number; title?: string; tx?: boolean };
 
@@ -62,7 +63,7 @@ async function main() {
     const u = await upsertUserByEmail({ email: `test-s2-${key}@example.com`, cityName: 'City', latitude: 13.0827, longitude: 80.2707, timezone: TZ });
     await sql(`UPDATE "User" SET timezone = $1 WHERE id = $2`, [TZ, u.id]);
     await updateBirthProfile(u.id, { birthDate: '1990-06-15', birthTime: '08:30', birthCityName: 'City', birthLatitude: 13.0827, birthLongitude: 80.2707, birthTimezone: TZ });
-    return { ...u, token: createSessionToken(u.id, u.email) };
+    return { ...u, token: await createTestSessionToken(u.id, u.email) };
   };
   const X = await mk('x');
   const Y = await mk('y');

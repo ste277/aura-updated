@@ -2811,8 +2811,13 @@ export async function spendAuthCodeAttempt(
  * must NOT issue a session in that case, or two concurrent redemptions of the
  * same code would both mint sessions.
  */
-export async function consumeAuthCode(id: string): Promise<boolean> {
-  const result = await pool.query(
+/**
+ * AURA-AUTH-SESSION-01-I2 (design §2.4) -- the same single-use consume, on the
+ * CALLER's client inside its open transaction (with the AuthSession INSERT),
+ * so the code and the session commit or roll back together.
+ */
+export async function consumeAuthCodeInTransaction(client: PoolClient, id: string): Promise<boolean> {
+  const result = await client.query(
     `UPDATE "AuthCode" SET "consumedAt" = now() WHERE id = $1 AND "consumedAt" IS NULL RETURNING id`,
     [id]
   );

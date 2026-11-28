@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { dispatchDueReminderPushes } from '../../../../../lib/reminderDelivery';
 import { dispatchSecrets, isDispatchAuthorized } from '../../../../../lib/reminderDispatchAuth';
+import { cleanupAuthSessions } from '../../../../../lib/authSessionStore';
+import { getSessionPool } from '../../../../../lib/session';
+import { cleanupConsentFinalizations } from '../../../../../lib/mcpConsentFinalization';
 
 /**
  * Web Push V1 (brief section 19/32) -- the scheduler's trigger point.
@@ -34,12 +37,35 @@ export async function POST(req: NextRequest) {
   const result = await dispatchDueReminderPushes(new Date());
   const durationMs = Date.now() - startedAt;
 
+  // AURA-AUTH-SESSION-01-I2 (design §2.4) -- the daily, bounded AuthSession
+  // cleanup (rows expired or revoked for more than 7 days, at most 5 000 per
+  // run; statement 5 s, deadline 6 s). Background only and independent of the
+  // dispatch result: a failure is reported, never thrown. Because sessions
+  // are an allowlist, deleting rows can never re-enable one.
+  let authSessionCleanup: { deleted: number } | { error: 'unavailable' };
+  try {
+    authSessionCleanup = { deleted: await cleanupAuthSessions(getSessionPool()) };
+  } catch {
+    console.error('[auth-session] daily cleanup unavailable');
+    authSessionCleanup = { error: 'unavailable' };
+  }
+  // AURA-AUTH-SESSION-01-I2-R2 (Rev 4 B3): expired MCP consent finalizations
+  // (past the grant's maximum lifetime + 1 day), bounded batch. An unexpired
+  // row is never deleted, so no live connection loses its finalization.
+  let mcpConsentCleanup: { deleted: number } | { error: 'unavailable' };
+  try {
+    mcpConsentCleanup = { deleted: await cleanupConsentFinalizations(getSessionPool()) };
+  } catch {
+    console.error('[mcp-consent] daily cleanup unavailable');
+    mcpConsentCleanup = { error: 'unavailable' };
+  }
+
   // Brief section 48: the exact counts a performance report needs, plus
   // total wall-clock duration -- no Panchang/Muhurtham/Timing
   // Search/natal computation happens anywhere in this path.
   // AURA-REM-01: 503 (not 200) when Web Push isn't configured, so a
   // scheduler's run history shows the misconfiguration instead of "success".
-  return NextResponse.json({ ...result, durationMs }, { status: result.configured ? 200 : 503 });
+  return NextResponse.json({ ...result, durationMs, authSessionCleanup, mcpConsentCleanup }, { status: result.configured ? 200 : 503 });
 }
 
 // Vercel Cron Jobs invoke via GET by default; support both so the same

@@ -22,7 +22,8 @@ const RR_URL = `${baseUrl}${baseUrl.includes('?') ? '&' : '?'}options=${encodeUR
 process.env.DATABASE_URL = RR_URL;
 delete process.env.AURA_DATABASE_URL;
 
-const { createSessionToken } = require('../apps/web/lib/auth');
+// AURA-AUTH-SESSION-01-I2: real database-backed v2 sessions (the v1 token API was removed).
+const { createTestSessionToken, TEST_SESSION_COOKIE } = require('./authSessionTestSupport');
 const db = require('../apps/web/lib/db');
 const { getDatePartsInTimezone } = require('../apps/web/lib/timezone');
 const peopleRoute = require('../apps/web/app/api/people/route');
@@ -45,7 +46,7 @@ const GATE_KEY = 620221;
 
 type Res = { status: number; body: any };
 const req = (as: string, body?: unknown): any => ({
-  cookies: { get: (n: string) => (n === 'as_session' ? { value: as } : undefined) },
+  cookies: { get: (n: string) => (n === TEST_SESSION_COOKIE ? { value: as } : undefined) },
   json: async () => body,
   headers: new Headers(),
   nextUrl: new URL('http://localhost/'),
@@ -124,7 +125,7 @@ async function main() {
   const TZ = 'Asia/Kolkata';
   const user = await db.upsertUserByEmail({ email: `${tag}@mp3r2.aura.local`, cityName: 'Test', latitude: 0, longitude: 0, timezone: TZ });
   const other = await db.upsertUserByEmail({ email: `${tag}-o@mp3r2.aura.local`, cityName: 'Test', latitude: 0, longitude: 0, timezone: TZ });
-  const token = createSessionToken(user.id, user.email);
+  const token = await createTestSessionToken(user.id, user.email);
   const [, tm, td] = (getDatePartsInTimezone(TZ, new Date()).dateStr as string).split('-').map(Number);
   process.env.AURA_MY_PEOPLE_ENABLED = '1';
 

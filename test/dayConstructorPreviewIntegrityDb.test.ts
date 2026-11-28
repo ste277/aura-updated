@@ -7,7 +7,7 @@
 import {
   upsertUserByEmail, updateBirthProfile, getUserById, createCapture, getCaptureWithLinkedPlanStatus, beginTransaction,
 } from '../apps/web/lib/db';
-import { createSessionToken } from '../apps/web/lib/auth';
+
 import { handleDayConstructorPreviewRequest } from '../apps/web/lib/dayConstructorPreviewRequest';
 import { createRealDayConstructorOrchestratorDeps } from '../apps/web/lib/dayConstructorOrchestrator';
 import { parsePreviewResponseBody } from '../apps/web/lib/dayConstructorPreviewClient';
@@ -16,6 +16,7 @@ import { getDatePartsInTimezone } from '../apps/web/lib/timezone';
 import { signPreviewItem } from '../apps/web/lib/dayConstructorPreviewIntegrity';
 import { sign } from '../apps/web/lib/auth';
 import { POST as acceptRoute } from '../apps/web/app/api/day-constructor/accept/route';
+import { createTestSessionToken, TEST_SESSION_COOKIE } from './authSessionTestSupport';
 
 let allPassed = true;
 function check(label: string, condition: boolean) {
@@ -23,7 +24,7 @@ function check(label: string, condition: boolean) {
   if (!condition) allPassed = false;
 }
 const HOUR = 3600000; const MIN = 60000;
-const fakeReq = (cookie: string | undefined, body: unknown): any => ({ cookies: { get: (n: string) => (cookie !== undefined && n === 'as_session' ? { value: cookie } : undefined) }, json: async () => body, headers: new Headers() });
+const fakeReq = (cookie: string | undefined, body: unknown): any => ({ cookies: { get: (n: string) => (cookie !== undefined && n === TEST_SESSION_COOKIE ? { value: cookie } : undefined) }, json: async () => body, headers: new Headers() });
 async function sql(t: string, p: unknown[] = []): Promise<any[]> {
   const c = await beginTransaction();
   try { const r = await c.query(t, p); await c.query('COMMIT'); return r.rows; } catch (e) { await c.query('ROLLBACK').catch(() => {}); throw e; } finally { c.release(); }
@@ -43,7 +44,7 @@ async function main() {
   const mkUser = async (label: string) => {
     const U = await upsertUserByEmail({ email: `test-preview-integrity-${label}@example.com`, cityName: 'Chennai', latitude: 13.0827, longitude: 80.2707, timezone: TZ });
     await updateBirthProfile(U.id, { birthDate: '1990-06-15', birthTime: '08:30', birthCityName: 'Chennai', birthLatitude: 13.0827, birthLongitude: 80.2707, birthTimezone: TZ });
-    return { U, tok: createSessionToken(U.id, U.email) };
+    return { U, tok: await createTestSessionToken(U.id, U.email) };
   };
   const A = await mkUser('a');
   const B = await mkUser('b');

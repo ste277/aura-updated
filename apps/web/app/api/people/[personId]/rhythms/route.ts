@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSessionFromRequest } from '../../../../../lib/session';
+import { getSessionFromRequest, SESSION_UNAVAILABLE, sessionUnavailableResponse } from '../../../../../lib/session';
 import { createPersonRhythm, getSavedPersonForOwner, listPersonRhythms, type GoalActivity } from '../../../../../lib/db';
 import { parseJsonObject } from '../../../../../lib/request';
 import { isMyPeopleServerEnabled } from '../../../../../lib/myPeopleGate';
@@ -36,7 +36,8 @@ const view = (a: GoalActivity & { goalTitle?: string }) => ({
 
 export async function GET(req: NextRequest, { params }: { params: { personId: string } }) {
   if (!isMyPeopleServerEnabled()) return NextResponse.json({ error: 'Not found.' }, { status: 404 });
-  const session = getSessionFromRequest(req);
+  const session = await getSessionFromRequest(req);
+  if (session === SESSION_UNAVAILABLE) return sessionUnavailableResponse();
   if (!session) return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 });
   const person = await getSavedPersonForOwner(session.userId, params.personId);
   if (!person) return NextResponse.json({ error: 'Person not found.' }, { status: 404 });
@@ -46,7 +47,8 @@ export async function GET(req: NextRequest, { params }: { params: { personId: st
 
 export async function POST(req: NextRequest, { params }: { params: { personId: string } }) {
   if (!isMyPeopleServerEnabled()) return NextResponse.json({ error: 'Not found.' }, { status: 404 });
-  const session = getSessionFromRequest(req);
+  const session = await getSessionFromRequest(req);
+  if (session === SESSION_UNAVAILABLE) return sessionUnavailableResponse();
   if (!session) return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 });
   const body = await parseJsonObject(req);
   if (!body) return NextResponse.json({ error: 'A valid JSON request body is required.' }, { status: 400 });

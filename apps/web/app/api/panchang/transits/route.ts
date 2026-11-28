@@ -1,16 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSessionFromRequest } from '../../../../lib/session';
+import { SESSION_UNAVAILABLE, sessionUnavailableResponse, getSessionWithUserFromRequest } from '../../../../lib/session';
 import { getUserById } from '../../../../lib/db';
 import { localDateTimeToUTC } from '../../../../lib/timezone';
 import { calculateDailyTransits } from '../../../../../../packages/vedic/src/transits';
 
 export async function GET(req: NextRequest) {
-  const session = getSessionFromRequest(req);
+  const session = await getSessionWithUserFromRequest(req);
+  if (session === SESSION_UNAVAILABLE) return sessionUnavailableResponse();
   if (!session?.userId) {
     return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 });
   }
 
-  const user = await getUserById(session.userId);
+  const user = session.user;
   if (!user || !user.birthDate || !user.birthTime || !user.birthTimezone) {
     return NextResponse.json({ error: 'Birth profile incomplete.' }, { status: 400 });
   }

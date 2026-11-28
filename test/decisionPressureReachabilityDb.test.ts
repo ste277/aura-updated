@@ -84,7 +84,7 @@ async function main() {
     const ids = [...goalActivityId.keys()]; // 42 catalog activities + one untyped
     const gaId = (key: string) => goalActivityId.get(key)!;
     const intentId = (date: string, key: string) => encodeGoalDemandIntentId(date, gaId(key));
-    const bootstrap = { getSessionToken: () => 'tok', verifySession: () => ({ userId: u.id }) };
+    const bootstrap = { verifySession: () => ({ userId: u.id }) };
 
     const previewOn = async (date: string, rows: PlanDayIntentRow[]) => {
       lastEvidence = undefined;

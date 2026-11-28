@@ -1,19 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
-import {
-  createSessionToken,
-  hashAuthCode,
-  authCodeHashesEqual,
-  SESSION_COOKIE_NAME,
-  AUTH_CODE_MAX_ATTEMPTS,
-  emailLogRef,
-} from '../../../../lib/auth';
+import { hashAuthCode, authCodeHashesEqual, AUTH_CODE_MAX_ATTEMPTS, emailLogRef } from '../../../../lib/auth';
 import { errorForLog } from '../../../../lib/authLog';
 import {
   findActiveAuthCode,
   spendAuthCodeAttempt,
-  consumeAuthCode,
+  consumeAuthCodeInTransaction,
   getOrCreateUserForAuth,
 } from '../../../../lib/db';
+import { createSignInSession, setSessionCookie } from '../../../../lib/session';
 import { readJsonObject } from '../../../../lib/request';
 
 // One message for every "your input didn't verify" outcome, so an
@@ -72,21 +66,25 @@ export async function POST(req: NextRequest) {
 
     // Single-use: only the request that flips consumedAt gets a session. A
     // concurrent duplicate submission loses the race and is rejected here.
-    const consumed = await consumeAuthCode(row.id);
-    if (!consumed) {
+    // AURA-AUTH-SESSION-01-I2 (design §2.4): the consume and the AuthSession
+    // INSERT commit in ONE transaction; the cookie is set only after an
+    // acknowledged, transaction-bound COMMIT. Any other outcome is 503 with no
+    // cookie (a rolled-back transaction also leaves the code unconsumed).
+    const signIn = await createSignInSession(user.id, (client) => consumeAuthCodeInTransaction(client, row.id));
+    if (signIn.kind === 'rejected') {
       console.warn('[auth] verify-code: code already consumed', { emailRef: emailLogRef(email) });
       return NextResponse.json(REJECTED, { status: 401 });
     }
+    if (signIn.kind !== 'issued') {
+      console.error('[auth] verify-code: session not established', { emailRef: emailLogRef(email) });
+      return NextResponse.json(
+        { error: 'Sign-in is temporarily unavailable. Please try again in a moment.' },
+        { status: 503, headers: { 'Retry-After': '2' } }
+      );
+    }
 
-    const sessionToken = createSessionToken(user.id, user.email);
     const response = NextResponse.json({ ok: true });
-    response.cookies.set(SESSION_COOKIE_NAME, sessionToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      path: '/',
-      maxAge: 30 * 24 * 60 * 60,
-    });
+    setSessionCookie(response, signIn.session);
     return response;
   } catch (err) {
     console.error('[auth] verify-code failed', { emailRef: emailLogRef(email), err: errorForLog(err) });

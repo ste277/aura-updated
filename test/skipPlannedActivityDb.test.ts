@@ -12,7 +12,7 @@ import {
   listPlannedActivities, listPlannedActivitiesForDay, listPlannedActivitiesForReminders, skipPlannedActivity, logPlannedActivity,
   type PlannedActivity,
 } from '../apps/web/lib/db';
-import { createSessionToken } from '../apps/web/lib/auth';
+
 import { persistAcceptedConstructedDay } from '../apps/web/lib/dayConstructorAcceptancePersistence';
 import type { AcceptConstructedDayRequest, AcceptedProposedItem } from '../apps/web/lib/dayConstructorAcceptance';
 import { deriveCaptureState } from '../apps/web/lib/captures';
@@ -26,6 +26,7 @@ import { buildDailyReflection } from '../apps/web/lib/dailyReflection';
 import { deriveAuraReminders } from '../apps/web/lib/auraReminders';
 import { POST as skipRoute } from '../apps/web/app/api/plans/[planId]/skip/route';
 import { POST as logRoute } from '../apps/web/app/api/plans/[planId]/log/route';
+import { createTestSessionToken, TEST_SESSION_COOKIE } from './authSessionTestSupport';
 
 let allPassed = true;
 function check(label: string, condition: boolean) {
@@ -34,7 +35,7 @@ function check(label: string, condition: boolean) {
 }
 const TZ = 'Asia/Kolkata';
 const iso = (s: string) => new Date(s);
-const fakeReq = (cookie?: string): any => ({ cookies: { get: (n: string) => (cookie !== undefined && n === 'as_session' ? { value: cookie } : undefined) }, json: async () => ({}) });
+const fakeReq = (cookie?: string): any => ({ cookies: { get: (n: string) => (cookie !== undefined && n === TEST_SESSION_COOKIE ? { value: cookie } : undefined) }, json: async () => ({}) });
 async function sql(t: string, p: unknown[] = []): Promise<any[]> {
   const c = await beginTransaction();
   try { const r = await c.query(t, p); await c.query('COMMIT'); return r.rows; } catch (e) { await c.query('ROLLBACK').catch(() => {}); throw e; } finally { c.release(); }
@@ -49,8 +50,8 @@ async function main() {
   const A = await upsertUserByEmail({ email: 'test-skip-a@example.com', cityName: 'Chennai', latitude: 13.0827, longitude: 80.2707, timezone: TZ });
   const B = await upsertUserByEmail({ email: 'test-skip-b@example.com', cityName: 'Chennai', latitude: 13.0827, longitude: 80.2707, timezone: TZ });
   for (const u of [A, B]) await updateBirthProfile(u.id, { birthDate: '1990-06-15', birthTime: '08:30', birthCityName: 'Chennai', birthLatitude: 13.0827, birthLongitude: 80.2707, birthTimezone: TZ });
-  const tokA = createSessionToken(A.id, A.email);
-  const tokB = createSessionToken(B.id, B.email);
+  const tokA = await createTestSessionToken(A.id, A.email);
+  const tokB = await createTestSessionToken(B.id, B.email);
   const planIds: string[] = []; const goalIds: string[] = [];
   const habitCount = async () => Number((await sql(`SELECT count(*)::int AS n FROM "HabitLog" WHERE "userId" = $1`, [A.id]))[0].n);
   const skip = async (planId: string, token: string | null = tokA) => { const res = await skipRoute(fakeReq(token ?? undefined), { params: { planId } }); return { status: res.status, body: await res.json() }; };

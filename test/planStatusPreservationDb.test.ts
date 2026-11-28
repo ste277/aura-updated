@@ -8,12 +8,13 @@
 import fs from 'fs';
 import path from 'path';
 import { upsertUserByEmail, cancelPlannedActivity, beginTransaction } from '../apps/web/lib/db';
-import { createSessionToken } from '../apps/web/lib/auth';
+
 import { createGuestStateToken } from '../apps/web/lib/guestState';
 import { POST as plansPost } from '../apps/web/app/api/plans/route';
 import { POST as skipRoute } from '../apps/web/app/api/plans/[planId]/skip/route';
 import { POST as logRoute } from '../apps/web/app/api/plans/[planId]/log/route';
 import { mapPlanRow, mapPersistedPlanStatus, isActionableUpcomingPlan, isCompletedPlan, type PersistedPlanStatus } from '../apps/web/lib/planFormatting';
+import { createTestSessionToken, TEST_SESSION_COOKIE } from './authSessionTestSupport';
 
 let allPassed = true;
 function check(label: string, condition: boolean) {
@@ -26,7 +27,7 @@ async function sql(t: string, p: unknown[] = []): Promise<any[]> {
   const c = await beginTransaction();
   try { const r = await c.query(t, p); await c.query('COMMIT'); return r.rows; } catch (e) { await c.query('ROLLBACK').catch(() => {}); throw e; } finally { c.release(); }
 }
-const req = (tok: string | null, body: any = {}): any => ({ cookies: { get: (n: string) => (tok && n === 'as_session' ? { value: tok } : undefined) }, json: async () => body, headers: new Headers() });
+const req = (tok: string | null, body: any = {}): any => ({ cookies: { get: (n: string) => (tok && n === TEST_SESSION_COOKIE ? { value: tok } : undefined) }, json: async () => body, headers: new Headers() });
 
 // ---- pure: direct mapper, exhaustive ----
 const base = { id: 'x', title: 'T', plannedStartAt: '2026-06-10T17:00:00Z', plannedEndAt: '2026-06-10T18:00:00Z', durationMinutes: 60 };
@@ -47,7 +48,7 @@ check('24. handleLogPlan refuses LOGGED/CANCELLED/SKIPPED/MOVED rows', /handleLo
 
 async function main() {
   const u = await upsertUserByEmail({ email: 'test-status-preserve@example.com', cityName: 'Chennai', latitude: 13.0827, longitude: 80.2707, timezone: 'Asia/Kolkata' });
-  const tok = createSessionToken(u.id, u.email);
+  const tok = await createTestSessionToken(u.id, u.email);
   const habits = async () => Number((await sql(`SELECT count(*)::int AS n FROM "HabitLog" WHERE "userId" = $1`, [u.id]))[0].n);
   const plansCount = async () => Number((await sql(`SELECT count(*)::int AS n FROM "PlannedActivity" WHERE "userId" = $1`, [u.id]))[0].n);
   const row = async (id: string) => (await sql(`SELECT status, "loggedAt", "skippedAt", "habitLogId", "updatedAt" FROM "PlannedActivity" WHERE id = $1`, [id]))[0];

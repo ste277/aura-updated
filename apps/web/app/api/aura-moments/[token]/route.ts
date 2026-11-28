@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSessionFromRequest } from '../../../../lib/session';
+import { getSessionFromRequest, SESSION_UNAVAILABLE, sessionUnavailableResponse } from '../../../../lib/session';
 import { deleteAuraMoment } from '../../../../lib/db';
 
 /**
@@ -9,7 +9,8 @@ import { deleteAuraMoment } from '../../../../lib/db';
  * cleared away. Authenticated + ownership-scoped, same pattern as revoke.
  */
 export async function DELETE(req: NextRequest, { params }: { params: { token: string } }) {
-  const session = getSessionFromRequest(req);
+  const session = await getSessionFromRequest(req);
+  if (session === SESSION_UNAVAILABLE) return sessionUnavailableResponse();
   if (!session) return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 });
 
   try {

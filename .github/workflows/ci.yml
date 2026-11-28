@@ -960,13 +960,25 @@ jobs:
         run: npx ts-node --project tsconfig.jsdom-tests.json test/ios02LocationErrorsAndPrivacy.test.ts
       # AURA-AUTH-SESSION-01-I1 -- dormant session store foundation (no auth
       # behaviour change): v2 token, HKDF key, cookie helpers and SQL literal
-      # guards; plus the static guard that nothing in the app imports the I1
-      # modules yet, that they read no env and do no work at import, and that
-      # migration 0055 is additive only. No database.
+      # guards. No database.
       - name: Run session token primitives test (AUTH-SESSION-01-I1)
         run: npx ts-node test/authSessionToken.test.ts
-      - name: Run session store dormancy guard (AUTH-SESSION-01-I1)
-        run: npx ts-node test/authSessionDormancy.test.ts
+      # AURA-AUTH-SESSION-01-I2 -- the I1 dormancy guard is replaced (by design) by
+      # the static session-coverage scanner: no v1 session API, every route /
+      # page / seam / MCP consent path authenticates through lib/session.ts with
+      # the 503 outcome handled, only sign-in issues, PUBLIC routes classified,
+      # no import-time work; with negative fixtures. Plus the client outcome
+      # logic (503 = unknown, sign-out only on 200). No database.
+      - name: Run session coverage guard (AUTH-SESSION-01-I2)
+        run: npx ts-node test/authSessionCoverage.test.ts
+      - name: Run session client outcome test (AUTH-SESSION-01-I2)
+        run: npx ts-node test/authSessionClient.test.ts
+      # AURA-AUTH-SESSION-01-I2-R1 (39247) F5/F6 -- the Home sign-out fence with
+      # overlapping refresh / logout / re-authentication (deferred fetches), and
+      # the real /find client after a session-store 503 (never the guest path on
+      # an unknown session). jsdom; after "Install web deps". No database.
+      - name: Run session client logout-race and unknown-state test (AUTH-SESSION-01-I2-R1)
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/authSessionI2R1ClientJsdom.test.ts
       # AURA-AUTH-SESSION-01-I1 R1 (39233) -- controlled-clock tests of the single
       # absolute caller deadline / outcome classification / revoke retry, and the
       # compile-time provisional-vs-committed result contract. No database.
@@ -1349,6 +1361,64 @@ jobs:
       # raw-id release counts, deterministic barriers and the loopback fault proxy.
       - name: Run session R3 transaction binding and single-use release DB test (AUTH-SESSION-01-I1 R3)
         run: npx ts-node test/authSessionR3Db.test.ts
+      # AURA-AUTH-SESSION-01-I2 -- end-to-end session integration on the same
+      # disposable database: real routes and NextRequest/NextResponse; sign-in
+      # issuance (transactional code + session, single use, concurrency, COMMIT
+      # faults), E1/E3/E4, isolation, tampering, v1 tokens incl. the CURRENT
+      # secret, DB-clock expiry, D8 logout, B1, B3 ordering, DB failure and
+      # timeout (503), the production __Host- cookie contract and the cron cleanup.
+      - name: Run session I2 integration DB test (AUTH-SESSION-01-I2)
+        run: npx ts-node test/authSessionI2Db.test.ts
+      # AURA-AUTH-SESSION-01-I2-R1 (39247) F2 -- ONE 2 s sign-in budget across
+      # acquisition, pre-commit work, COMMIT and release read-back (latency proxy,
+      # real routes); F3 -- a session-store outage is 503 + Retry-After at MCP
+      # consent (real local authorization server) and at E2 pages, never sign-in.
+      - name: Run session I2-R1 shared sign-in deadline DB test (AUTH-SESSION-01-I2-R1)
+        run: npx ts-node test/authSessionI2R1DeadlineDb.test.ts
+      - name: Run session I2-R1 outage outcome DB test (AUTH-SESSION-01-I2-R1)
+        env:
+          # Synthetic, CI-only: the local MCP gate refuses the public development fallback.
+          AUTH_SECRET: ci-i2r1-synthetic-session-secret-0123456789
+        run: npx ts-node test/authSessionI2R1OutageDb.test.ts
+      # AURA-AUTH-SESSION-01-I2-R2 (39250, design Rev 4 B3) -- session-bound MCP
+      # consent finalization across TWO databases, as deployed: the Aura database
+      # (sessions + McpConsentFinalization, migration 0057) and a SEPARATE MCP
+      # OAuth database. Real consent / token / resource handlers; both
+      # finalization-vs-logout orders, connection termination, idle timeout, late
+      # grant commits, expiry, ambiguous COMMIT, outages at consent / token /
+      # resource, a SIGKILLed consent process, retry and resume, scope extension
+      # and reuse, every grant-use path, revocation, account deletion and the
+      # 2 s consent budget at each stage.
+      - name: Create the separate disposable MCP OAuth database (AUTH-SESSION-01-I2-R2)
+        run: PGPASSWORD=aura_ci psql -h localhost -U aura_ci -d aura_ci -v ON_ERROR_STOP=1 -c 'CREATE DATABASE aura_ci_mcp_oauth'
+      - name: Apply the migration chain to the MCP OAuth database (AUTH-SESSION-01-I2-R2)
+        working-directory: apps/web
+        env:
+          DATABASE_URL: postgresql://aura_ci:aura_ci@localhost:5432/aura_ci_mcp_oauth
+        run: npx prisma migrate deploy
+      - name: Run MCP consent finalization two-database DB test (AUTH-SESSION-01-I2-R2)
+        env:
+          AURA_MCP_OAUTH_DATABASE_URL: postgresql://aura_ci:aura_ci@localhost:5432/aura_ci_mcp_oauth
+          # Synthetic, CI-only: the local MCP gate refuses the public development fallback.
+          AUTH_SECRET: ci-i2r2-synthetic-session-secret-0123456789
+        run: npx ts-node test/mcpConsentFinalizationDb.test.ts
+      # AURA-AUTH-SESSION-01-I2-R3 (39253): natural session expiry at the
+      # finalization boundary (incl. a row-lock wait), GET /api/mcp/connections
+      # 503 on a listing outage (real route), and the consent body read inside
+      # the 2 s consent deadline (delayed delivery). Same two databases.
+      - name: Run session I2-R3 focused regression DB test (AUTH-SESSION-01-I2-R3)
+        env:
+          AURA_MCP_OAUTH_DATABASE_URL: postgresql://aura_ci:aura_ci@localhost:5432/aura_ci_mcp_oauth
+          AUTH_SECRET: ci-i2r3-synthetic-session-secret-0123456789
+        run: npx ts-node test/authSessionI2R3Db.test.ts
+      # AURA-AUTH-SESSION-01-I2-R4 (39255): absolute consent deadline rechecked
+      # after body completion (late timer), and the initial session-outage 503
+      # + Retry-After on GET/POST /api/mcp/connections. Same two databases.
+      - name: Run session I2-R4 focused regression DB test (AUTH-SESSION-01-I2-R4)
+        env:
+          AURA_MCP_OAUTH_DATABASE_URL: postgresql://aura_ci:aura_ci@localhost:5432/aura_ci_mcp_oauth
+          AUTH_SECRET: ci-i2r4-synthetic-session-secret-0123456789
+        run: npx ts-node test/authSessionI2R4Db.test.ts
       - name: Verify every repository migration was recorded as applied
         run: |
           set -euo pipefail

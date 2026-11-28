@@ -26,7 +26,7 @@ import {
   deletePlannedActivity,
   beginTransaction,
 } from '../apps/web/lib/db';
-import { createSessionToken } from '../apps/web/lib/auth';
+
 import { persistAcceptedConstructedDay } from '../apps/web/lib/dayConstructorAcceptancePersistence';
 import type { AcceptConstructedDayRequest, AcceptedProposedItem } from '../apps/web/lib/dayConstructorAcceptance';
 import { movePlannedActivity } from '../apps/web/lib/planMove';

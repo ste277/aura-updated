@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSessionFromRequest } from '../../../../../../../lib/session';
+import { getSessionFromRequest, SESSION_UNAVAILABLE, sessionUnavailableResponse } from '../../../../../../../lib/session';
 import { dismissGoalActivity, PersonLinkChangedError } from '../../../../../../../lib/db';
 
 export async function POST(req: NextRequest, { params }: { params: { goalId: string; goalActivityId: string } }) {
-  const session = getSessionFromRequest(req);
+  const session = await getSessionFromRequest(req);
+  if (session === SESSION_UNAVAILABLE) return sessionUnavailableResponse();
   if (!session) return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 });
 
   // AURA-MP-4-R2 -- an optional body { savedPersonId }: the person the caller

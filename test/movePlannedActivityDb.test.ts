@@ -10,7 +10,7 @@ import {
   deleteGoal, listGoalActivitiesWithLinkedPlanStatus, beginTransaction, logPlannedActivity, cancelPlannedActivity, skipPlannedActivity, listPlannedActivitiesForDay,
   type PlannedActivity,
 } from '../apps/web/lib/db';
-import { createSessionToken } from '../apps/web/lib/auth';
+
 import { movePlannedActivity, MovePlanError, type MovePlanErrorCode, type MovePlanResult } from '../apps/web/lib/planMove';
 import { persistAcceptedConstructedDay } from '../apps/web/lib/dayConstructorAcceptancePersistence';
 import type { AcceptConstructedDayRequest, AcceptedProposedItem } from '../apps/web/lib/dayConstructorAcceptance';
@@ -18,6 +18,7 @@ import { deriveCaptureState } from '../apps/web/lib/captures';
 import { deriveGoalActivityState } from '../apps/web/lib/goals';
 import { buildDailyAgenda } from '../apps/web/lib/dailyAgenda';
 import { DELETE as deleteRoute } from '../apps/web/app/api/plans/[planId]/route';
+import { createTestSessionToken, TEST_SESSION_COOKIE } from './authSessionTestSupport';
 
 let allPassed = true;
 function check(label: string, condition: boolean) {
@@ -27,7 +28,7 @@ function check(label: string, condition: boolean) {
 const TZ = 'Asia/Kolkata';
 const MIN = 60000; const HOUR = 3600000; const DAY = 86400000;
 const minute = (ms: number) => Math.floor(ms / MIN) * MIN;
-const fakeReq = (cookie?: string): any => ({ cookies: { get: (n: string) => (cookie !== undefined && n === 'as_session' ? { value: cookie } : undefined) }, json: async () => ({}) });
+const fakeReq = (cookie?: string): any => ({ cookies: { get: (n: string) => (cookie !== undefined && n === TEST_SESSION_COOKIE ? { value: cookie } : undefined) }, json: async () => ({}) });
 async function sql(t: string, p: unknown[] = []): Promise<any[]> {
   const c = await beginTransaction();
   try { const r = await c.query(t, p); await c.query('COMMIT'); return r.rows; } catch (e) { await c.query('ROLLBACK').catch(() => {}); throw e; } finally { c.release(); }
@@ -225,7 +226,7 @@ async function main() {
     check('57. unknown plan id -> NOT_FOUND', (await codeOf(() => move('no-such-plan', dst()))) === 'NOT_FOUND');
 
     // ---- 41 DELETE ----
-    const tokA = createSessionToken(A.id, A.email);
+    const tokA = await createTestSessionToken(A.id, A.email);
     const del = await deleteRoute(fakeReq(tokA), { params: { planId: a1.id } });
     check('41. DELETE cannot remove a MOVED plan (rejected 400; row and successor lineage intact)', del.status === 400 && (await row(a1.id)).status === 'MOVED' && (await row(r1.to.id)).rescheduledFromPlanId === a1.id);
 

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSessionFromRequest } from '../../../../../lib/session';
-import { getAuraMomentForOwner, getUserById } from '../../../../../lib/db';
+import { SESSION_UNAVAILABLE, sessionUnavailableResponse, getSessionWithUserFromRequest } from '../../../../../lib/session';
+import { getAuraMomentForOwner } from '../../../../../lib/db';
 import { buildPersonalMuhurtaContextForUser } from '../../../../../lib/natalContext';
 import { getSavedPersonNatalContext } from '../../../../../lib/savedPersonNatalContext';
 import { findAuraMomentAlternatives } from '../../../../../lib/auraMomentAlternatives';
@@ -27,10 +27,11 @@ import { DailyAssistantContext } from '../../../../../../../packages/recommendat
  * gracefully instead).
  */
 export async function POST(req: NextRequest, { params }: { params: { token: string } }) {
-  const session = getSessionFromRequest(req);
+  const session = await getSessionWithUserFromRequest(req);
+  if (session === SESSION_UNAVAILABLE) return sessionUnavailableResponse();
   if (!session) return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 });
 
-  const user = await getUserById(session.userId);
+  const user = session.user;
   if (!user) return NextResponse.json({ error: 'User not found.' }, { status: 404 });
 
   const moment = await getAuraMomentForOwner(session.userId, params.token);

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSessionFromRequest } from '../../../../lib/session';
+import { getSessionFromRequest, SESSION_UNAVAILABLE, sessionUnavailableResponse } from '../../../../lib/session';
 import { getUserById } from '../../../../lib/db';
 import { getDatePartsInTimezone, addDaysToDateStr } from '../../../../lib/timezone';
 import { isValidCalendarDateString } from '../../../../../../packages/panchang/src/localDate';
@@ -79,7 +79,8 @@ function resolveRequestedLocalDate(rawDate: string | null, timezone: string): Da
 
 export async function GET(req: NextRequest) {
   try {
-    const session = getSessionFromRequest(req);
+    const session = await getSessionFromRequest(req);
+    if (session === SESSION_UNAVAILABLE) return sessionUnavailableResponse();
     if (!session) {
       return NextResponse.json({ status: 'AUTH_REQUIRED', error: 'Not authenticated.' }, { status: 401, headers: NO_STORE_HEADERS });
     }

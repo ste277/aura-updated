@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { verifyMagicLinkToken, createSessionToken, SESSION_COOKIE_NAME } from '../../../../lib/auth';
+import { verifyMagicLinkToken } from '../../../../lib/auth';
 import { getOrCreateUserForAuth } from '../../../../lib/db';
 import { magicLinksEnabled, MAGIC_LINK_DISABLED_MESSAGE } from '../../../../lib/magicLinkGate';
+import { createSignInSession, setSessionCookie } from '../../../../lib/session';
 
 export async function GET(req: NextRequest) {
   // AURA-AUTH-02 -- outside authorized local development no magic link is
@@ -22,7 +23,15 @@ export async function GET(req: NextRequest) {
   }
 
   const user = await getOrCreateUserForAuth(payload.email);
-  const sessionToken = createSessionToken(user.id, user.email);
+  // AURA-AUTH-SESSION-01-I2: the same committed-session issuance as
+  // verify-code (no code to consume here: local development only).
+  const signIn = await createSignInSession(user.id, async () => true);
+  if (signIn.kind !== 'issued') {
+    return NextResponse.json(
+      { error: 'Sign-in is temporarily unavailable. Please try again in a moment.' },
+      { status: 503, headers: { 'Retry-After': '2' } }
+    );
+  }
 
   // Recipient Conversion V1 (brief section 10/24) -- a guest search state
   // token riding along on this link (see api/auth/request-link/route.ts)
@@ -33,12 +42,6 @@ export async function GET(req: NextRequest) {
   const redirectUrl = guestStateToken ? new URL(`/find?restore=${encodeURIComponent(guestStateToken)}`, req.url) : new URL('/', req.url);
 
   const response = NextResponse.redirect(redirectUrl);
-  response.cookies.set(SESSION_COOKIE_NAME, sessionToken, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
-    path: '/',
-    maxAge: 30 * 24 * 60 * 60,
-  });
+  setSessionCookie(response, signIn.session);
   return response;
 }

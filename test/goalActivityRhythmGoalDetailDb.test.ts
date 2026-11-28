@@ -19,10 +19,11 @@
  *   DATABASE_URL="postgresql://..." npx ts-node test/goalActivityRhythmGoalDetailDb.test.ts
  */
 import { upsertUserByEmail, updateBirthProfile, createGoalWithActivities, createPlannedActivity, beginTransaction } from '../apps/web/lib/db';
-import { createSessionToken } from '../apps/web/lib/auth';
+
 import { getDatePartsInTimezone } from '../apps/web/lib/timezone';
 import { localCalendarWeekStart } from '../apps/web/lib/goalActivityRhythm';
 import { GET } from '../apps/web/app/api/goals/[goalId]/route';
+import { createTestSessionToken, TEST_SESSION_COOKIE } from './authSessionTestSupport';
 
 let allPassed = true;
 function check(label: string, condition: boolean) {
@@ -49,7 +50,7 @@ async function sql(text: string, params: unknown[] = []): Promise<any[]> {
 /** Duck-typed stand-in for NextRequest -- see activityPreferencesApi.test.ts's
  * own header comment for why a real NextRequest is never imported here. */
 function fakeRequest(cookie?: string): any {
-  return { cookies: { get: (name: string) => (cookie !== undefined && name === 'as_session' ? { value: cookie } : undefined) } };
+  return { cookies: { get: (name: string) => (cookie !== undefined && name === TEST_SESSION_COOKIE ? { value: cookie } : undefined) } };
 }
 
 async function getGoalDetail(token: string, goalId: string): Promise<{ status: number; body: any }> {
@@ -87,8 +88,8 @@ async function main() {
   const userB = await upsertUserByEmail({ email: 'test-rhythm-goal-detail-b@example.com', cityName: 'Chennai', latitude: 13.0827, longitude: 80.2707, timezone: TZ });
   await updateBirthProfile(userA.id, { birthDate: '1990-06-15', birthTime: '08:30', birthCityName: 'Chennai', birthLatitude: 13.0827, birthLongitude: 80.2707, birthTimezone: TZ });
   await updateBirthProfile(userB.id, { birthDate: '1990-06-15', birthTime: '08:30', birthCityName: 'Chennai', birthLatitude: 13.0827, birthLongitude: 80.2707, birthTimezone: TZ });
-  const tokenA = createSessionToken(userA.id, userA.email);
-  const tokenB = createSessionToken(userB.id, userB.email);
+  const tokenA = await createTestSessionToken(userA.id, userA.email);
+  const tokenB = await createTestSessionToken(userB.id, userB.email);
 
   const todayLocalDate = getDatePartsInTimezone(TZ, new Date()).dateStr;
   const thisWeekStart = localCalendarWeekStart(todayLocalDate);

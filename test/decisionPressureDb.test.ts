@@ -65,7 +65,7 @@ async function main() {
     await sql(`UPDATE "GoalActivity" SET "rhythmKind" = 'N_PER_WEEK', "rhythmTargetPerWeek" = 3 WHERE id = $1`, [R.id]);
     const F = (await addGoalActivity(u.id, g.id, { title: 'Finite task', activityId: null }))!;
     const idOf = (date: string) => encodeGoalDemandIntentId(date, R.id);
-    const bootstrap = { getSessionToken: () => 'tok', verifySession: () => ({ userId: u.id }) };
+    const bootstrap = { verifySession: () => ({ userId: u.id }) };
 
     const previewOn = async (date: string, rows: PlanDayIntentRow[]) => {
       lastEvidence = undefined;

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSessionFromRequest } from '../../../../../lib/session';
+import { getSessionFromRequest, SESSION_UNAVAILABLE, sessionUnavailableResponse } from '../../../../../lib/session';
 import { listAllPersonOccasionsForOwner, listPersonOccasionDismissals, listSavedPeople } from '../../../../../lib/db';
 import { isMyPeopleServerEnabled } from '../../../../../lib/myPeopleGate';
 import { isOccasionDismissedOnHome, listUpcomingOccasions } from '../../../../../lib/personOccasions';
@@ -18,7 +18,8 @@ export const dynamic = 'force-dynamic';
 
 export async function GET(req: NextRequest) {
   if (!isMyPeopleServerEnabled()) return NextResponse.json({ error: 'Not found.' }, { status: 404 });
-  const session = getSessionFromRequest(req);
+  const session = await getSessionFromRequest(req);
+  if (session === SESSION_UNAVAILABLE) return sessionUnavailableResponse();
   if (!session) return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 });
 
   const rawDays = req.nextUrl?.searchParams.get('days');

@@ -20,7 +20,8 @@
  */
 import { Pool, type PoolClient } from 'pg';
 
-const { createSessionToken } = require('../apps/web/lib/auth');
+// AURA-AUTH-SESSION-01-I2: real database-backed v2 sessions (the v1 token API was removed).
+const { createTestSessionToken, TEST_SESSION_COOKIE } = require('./authSessionTestSupport');
 const db = require('../apps/web/lib/db');
 const { getDatePartsInTimezone } = require('../apps/web/lib/timezone');
 const { createPlanExecutor } = require('../apps/web/lib/homeCompletion');
@@ -50,7 +51,7 @@ const HOUR = 60 * MINUTE;
 
 type Res = { status: number; body: any };
 const req = (as: string, body?: unknown): any => ({
-  cookies: { get: (n: string) => (n === 'as_session' ? { value: as } : undefined) },
+  cookies: { get: (n: string) => (n === TEST_SESSION_COOKIE ? { value: as } : undefined) },
   json: async () => body,
   headers: new Headers(),
   nextUrl: new URL('http://localhost/'),
@@ -139,7 +140,7 @@ async function main() {
   const tz = zones.find((z) => Number(new Intl.DateTimeFormat('en-GB', { timeZone: z, hour: '2-digit', hourCycle: 'h23' }).format(nowAtStart)) <= 8)!;
   const user = await db.upsertUserByEmail({ email: `${tag}@mp3r1.aura.local`, cityName: 'Test', latitude: 0, longitude: 0, timezone: tz });
   const other = await db.upsertUserByEmail({ email: `${tag}-o@mp3r1.aura.local`, cityName: 'Test', latitude: 0, longitude: 0, timezone: tz });
-  const token = createSessionToken(user.id, user.email);
+  const token = await createTestSessionToken(user.id, user.email);
   const today = getDatePartsInTimezone(tz, new Date()).dateStr as string;
   const [ty, tm, td] = today.split('-').map(Number);
   process.env.AURA_MY_PEOPLE_ENABLED = '1';

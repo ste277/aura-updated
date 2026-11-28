@@ -25,11 +25,12 @@ import {
   cancelPlannedActivity,
   deletePlannedActivity,
 } from '../apps/web/lib/db';
-import { createSessionToken } from '../apps/web/lib/auth';
+
 import { movePlannedActivity, MovePlanError } from '../apps/web/lib/planMove';
 import { persistAcceptedConstructedDay } from '../apps/web/lib/dayConstructorAcceptancePersistence';
 import type { AcceptConstructedDayRequest } from '../apps/web/lib/dayConstructorAcceptance';
 import { fixtureAnchorMonday, addCivilDays, realClockReferenceForFixture } from './lifecycleFixtureCalendar';
+import { createTestSessionToken, TEST_SESSION_COOKIE } from './authSessionTestSupport';
 
 let allPassed = true;
 function check(label: string, condition: boolean) {
@@ -41,7 +42,7 @@ const TZ = 'Asia/Kolkata';
 
 function req(tok: string, body: Record<string, unknown>): any {
   return {
-    cookies: { get: (n: string) => (n === 'as_session' ? { value: tok } : undefined) },
+    cookies: { get: (n: string) => (n === TEST_SESSION_COOKIE ? { value: tok } : undefined) },
     headers: new Headers(),
     nextUrl: new URL('http://localhost/api/plans'),
     json: async () => body,
@@ -82,7 +83,7 @@ async function freshUserAndGoal(emailTag: string, activityTitle: string, rhythm?
   await sql(`DELETE FROM "Goal" WHERE "userId" IN (SELECT id FROM "User" WHERE email = $1)`, [email]).catch(() => {});
   await sql(`DELETE FROM "User" WHERE email = $1`, [email]).catch(() => {});
   const user = await upsertUserByEmail({ email, cityName: 'Chennai', latitude: 13.0827, longitude: 80.2707, timezone: TZ });
-  const tok = createSessionToken(user.id, user.email);
+  const tok = await createTestSessionToken(user.id, user.email);
   const { goal, activities } = await createGoalWithActivities({ userId: user.id, title: `Goal ${emailTag}`, targetDate: null, activities: [{ title: activityTitle, activityId: null, rhythm }] });
   const ga = activities[0];
   if (dailyFrequencyKind) {

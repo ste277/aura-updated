@@ -29,11 +29,12 @@
  */
 import { upsertUserByEmail, updateBirthProfile, createGoalWithActivities, addGoalActivity, beginTransaction, cancelPlannedActivity } from '../apps/web/lib/db';
 import { movePlannedActivity } from '../apps/web/lib/planMove';
-import { createSessionToken } from '../apps/web/lib/auth';
+
 import { getDatePartsInTimezone } from '../apps/web/lib/timezone';
 import { localCalendarWeekBounds } from '../apps/web/lib/goalActivityRhythm';
 import { addCivilDays } from './lifecycleFixtureCalendar';
 import { POST as weeklyAcceptRoute } from '../apps/web/app/api/daily-assistant/goal-rhythm/weekly-accept/route';
+import { createTestSessionToken, TEST_SESSION_COOKIE } from './authSessionTestSupport';
 
 let allPassed = true;
 function check(label: string, condition: boolean) {
@@ -44,7 +45,7 @@ function check(label: string, condition: boolean) {
 const TZ = 'Asia/Kolkata'; // UTC+5:30
 
 const fakeReq = (cookie: string | undefined, body: unknown): any => ({
-  cookies: { get: (n: string) => (cookie !== undefined && n === 'as_session' ? { value: cookie } : undefined) },
+  cookies: { get: (n: string) => (cookie !== undefined && n === TEST_SESSION_COOKIE ? { value: cookie } : undefined) },
   json: async () => body,
   headers: new Headers(),
 });
@@ -85,7 +86,7 @@ async function main() {
   const mkUser = async (label: string) => {
     const U = await upsertUserByEmail({ email: `hgr3bh-weekly-accept-${label}-${Date.now()}@example.com`, cityName: 'Chennai', latitude: 13.0827, longitude: 80.2707, timezone: TZ });
     await updateBirthProfile(U.id, { birthDate: '1990-06-15', birthTime: '08:30', birthCityName: 'Chennai', birthLatitude: 13.0827, birthLongitude: 80.2707, birthTimezone: TZ });
-    return { U, tok: createSessionToken(U.id, U.email) };
+    return { U, tok: await createTestSessionToken(U.id, U.email) };
   };
 
   const plansOf = async (userId: string) => sql(`SELECT id, title, "plannedStartAt", "plannedEndAt", "activityId" FROM "PlannedActivity" WHERE "userId" = $1 ORDER BY "plannedStartAt"`, [userId]);

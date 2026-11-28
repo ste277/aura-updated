@@ -13,11 +13,12 @@
  * today-clipping never interferes.
  */
 import { upsertUserByEmail, beginTransaction, createGoalWithActivities, createUserAvailabilityPeriod, setDailyWorkPreferences } from '../apps/web/lib/db';
-import { createSessionToken } from '../apps/web/lib/auth';
+
 import { localDateTimeToUTC, getDatePartsInTimezone, addDaysToDateStr } from '../apps/web/lib/timezone';
 import { getWeekdayForDateStr } from '../apps/web/lib/availabilityContext';
 import { POST as plansRoute } from '../apps/web/app/api/plans/route';
 import { POST as timingSearchRoute } from '../apps/web/app/api/timing-search/route';
+import { createTestSessionToken, TEST_SESSION_COOKIE } from './authSessionTestSupport';
 
 let allPassed = true;
 let count = 0;
@@ -43,7 +44,7 @@ async function sql(text: string, params: unknown[] = []): Promise<any[]> {
     c.release();
   }
 }
-const fakeReq = (cookie: string | undefined, body: unknown): any => ({ cookies: { get: (n: string) => (cookie !== undefined && n === 'as_session' ? { value: cookie } : undefined) }, json: async () => body, headers: new Headers() });
+const fakeReq = (cookie: string | undefined, body: unknown): any => ({ cookies: { get: (n: string) => (cookie !== undefined && n === TEST_SESSION_COOKIE ? { value: cookie } : undefined) }, json: async () => body, headers: new Headers() });
 async function call(route: (req: any) => Promise<Response>, token: string, body: unknown): Promise<{ status: number; body: any }> {
   const res = await route(fakeReq(token, body));
   return { status: res.status, body: await res.json() };
@@ -62,7 +63,7 @@ async function main() {
   const mk = async (key: string) => {
     const u = await upsertUserByEmail({ email: `hpg5-${key}-${tag}@e2e.aura.local`, cityName: 'Chennai', latitude: 13.0827, longitude: 80.2707, timezone: TZ });
     await sql(`UPDATE "User" SET timezone = $1 WHERE id = $2`, [TZ, u.id]);
-    return { ...u, token: createSessionToken(u.id, u.email) };
+    return { ...u, token: await createTestSessionToken(u.id, u.email) };
   };
   const A = await mk('a'); // configured availability
   const B = await mk('b'); // unconfigured

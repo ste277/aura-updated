@@ -104,9 +104,19 @@ const SESSION_STORE_TIMEOUT_MODULE = 'authSessionDb.ts';
 // lib/sessionErrors.ts only NAMES the 'statement_timeout' / 'lock_timeout'
 // failure reasons (diagnostic labels); it contains no SQL (asserted below).
 const SESSION_ERROR_LABELS_MODULE = 'sessionErrors.ts';
-const I1_TIMEOUT_EXEMPT = [SESSION_STORE_TIMEOUT_MODULE, SESSION_ERROR_LABELS_MODULE];
-check('no lock timeout was introduced anywhere in production code (re-baselined by AURA-AUTH-SESSION-01-I1: only lib/authSessionDb.ts may set one, for session queries; lib/sessionErrors.ts only names the reasons)', !allLib.some((x) => !I1_TIMEOUT_EXEMPT.includes(x.f) && /lock_timeout/i.test(x.src)));
+// AURA-AUTH-SESSION-01-I2: lib/session.ts bounds its own SESSION transactions
+// (sign-in code + AuthSession insert; the B3 FOR SHARE re-check) with SET LOCAL
+// timeouts. It never touches the schedule-write lock (asserted below).
+const SESSION_TRANSACTION_MODULE = 'session.ts';
+// AURA-AUTH-SESSION-01-I2-R2 (Rev 4 B3): lib/mcpConsentFinalization.ts bounds its own
+// consent-finalization transactions on the SESSION pool with SET LOCAL timeouts. It never
+// touches the schedule-write lock and takes no NOWAIT / SKIP LOCKED (asserted below).
+const MCP_CONSENT_FINALIZATION_MODULE = 'mcpConsentFinalization.ts';
+const I1_TIMEOUT_EXEMPT = [SESSION_STORE_TIMEOUT_MODULE, SESSION_ERROR_LABELS_MODULE, SESSION_TRANSACTION_MODULE, MCP_CONSENT_FINALIZATION_MODULE];
+check('I2-R2: the MCP consent finalization module exists, never touches the schedule-write lock and takes no NOWAIT / SKIP LOCKED', allLib.some((x) => x.f === MCP_CONSENT_FINALIZATION_MODULE) && !allLib.some((x) => x.f === MCP_CONSENT_FINALIZATION_MODULE && /pg_advisory|day-constructor-accept:|NOWAIT|SKIP LOCKED/i.test(x.src)));
+check('no lock timeout was introduced anywhere in production code (re-baselined by AURA-AUTH-SESSION-01-I1: only lib/authSessionDb.ts may set one, for session queries; lib/sessionErrors.ts only names the reasons; re-baselined by AURA-AUTH-SESSION-01-I2: lib/session.ts for its own session transactions; by I2-R2: lib/mcpConsentFinalization.ts for consent finalization)', !allLib.some((x) => !I1_TIMEOUT_EXEMPT.includes(x.f) && /lock_timeout/i.test(x.src)));
 check('the session-store timeout module never touches the schedule-write lock (no advisory lock, no "day-constructor-accept:" key)', !allLib.some((x) => x.f === SESSION_STORE_TIMEOUT_MODULE && /pg_advisory|day-constructor-accept:/.test(x.src)));
+check('I2: the session transaction module never touches the schedule-write lock and takes no NOWAIT / SKIP LOCKED', allLib.some((x) => x.f === SESSION_TRANSACTION_MODULE) && !allLib.some((x) => x.f === SESSION_TRANSACTION_MODULE && /pg_advisory|day-constructor-accept:|NOWAIT|SKIP LOCKED/i.test(x.src)));
 check('the session error-label module contains no SQL at all (it cannot set a timeout)', !allLib.some((x) => x.f === SESSION_ERROR_LABELS_MODULE && /SET\s+LOCAL|\.query\s*\(|SELECT\s|UPDATE\s|INSERT\s|DELETE\s/i.test(x.src)));
 check('Move and Recomposition acceptance are untouched in kind: they still use their own overlap-correct findBlockingPlanForRange', /findBlockingPlanForRange/.test(allLib.find((x) => x.f === 'planMove.ts')!.src) && /findBlockingPlanForRange/.test(allLib.find((x) => x.f === 'remainingDayRecompositionAcceptance.ts')!.src));
 check('no database exclusion constraint or schema change for plans: the schema has no exclusion/overlap construct', !/EXCLUDE USING|tstzrange|btree_gist/i.test(read('apps/web/prisma/schema.prisma')) && !fs.readdirSync(path.join(root, 'apps/web/prisma/migrations')).some((d) => d !== 'migration_lock.toml' && fs.existsSync(path.join(root, 'apps/web/prisma/migrations', d, 'migration.sql')) && /EXCLUDE USING|btree_gist/i.test(fs.readFileSync(path.join(root, 'apps/web/prisma/migrations', d, 'migration.sql'), 'utf8'))));

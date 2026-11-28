@@ -3,7 +3,7 @@
 // pointed at a disposable local Postgres with migrations applied).
 import { GET as dailyBriefingRoute } from '../apps/web/app/api/daily-briefing/today/route';
 import { upsertUserByEmail, updateBirthProfile, beginTransaction } from '../apps/web/lib/db';
-import { createSessionToken } from '../apps/web/lib/auth';
+import { createTestSessionToken, TEST_SESSION_COOKIE } from './authSessionTestSupport';
 
 let allPassed = true;
 function check(label: string, condition: boolean) {
@@ -15,7 +15,7 @@ function check(label: string, condition: boolean) {
 // this mock must supply one even when this file never itself passes a
 // date, exactly like a real NextRequest always does.
 const req = (tok: string | null): any => ({
-  cookies: { get: (n: string) => (tok && n === 'as_session' ? { value: tok } : undefined) },
+  cookies: { get: (n: string) => (tok && n === TEST_SESSION_COOKIE ? { value: tok } : undefined) },
   headers: new Headers(),
   nextUrl: new URL('http://localhost/api/daily-briefing/today'),
 });
@@ -31,14 +31,14 @@ async function main() {
 
   const complete = await upsertUserByEmail({ email: 'test-db2-complete@example.com', cityName: 'Chennai', latitude: 13.0827, longitude: 80.2707, timezone: TZ_IST });
   await updateBirthProfile(complete.id, { birthDate: '1990-06-15', birthTime: '08:30', birthCityName: 'Chennai', birthLatitude: 13.0827, birthLongitude: 80.2707, birthTimezone: TZ_IST });
-  const completeTok = createSessionToken(complete.id, complete.email);
+  const completeTok = await createTestSessionToken(complete.id, complete.email);
 
   const completeNeg = await upsertUserByEmail({ email: 'test-db2-complete-neg@example.com', cityName: 'New York', latitude: 40.7128, longitude: -74.006, timezone: TZ_NEG });
   await updateBirthProfile(completeNeg.id, { birthDate: '1985-12-01', birthTime: '14:45', birthCityName: 'New York', birthLatitude: 40.7128, birthLongitude: -74.006, birthTimezone: TZ_NEG });
-  const completeNegTok = createSessionToken(completeNeg.id, completeNeg.email);
+  const completeNegTok = await createTestSessionToken(completeNeg.id, completeNeg.email);
 
   const incomplete = await upsertUserByEmail({ email: 'test-db2-incomplete@example.com', cityName: 'Chennai', latitude: 13.0827, longitude: 80.2707, timezone: TZ_IST });
-  const incompleteTok = createSessionToken(incomplete.id, incomplete.email);
+  const incompleteTok = await createTestSessionToken(incomplete.id, incomplete.email);
 
   try {
     // ---- 1. Authenticated success (IST) ----

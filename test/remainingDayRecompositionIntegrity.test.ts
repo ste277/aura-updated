@@ -8,7 +8,7 @@ import path from 'path';
 import { signRecompositionProposal, verifyRecompositionProposalToken, RECOMPOSITION_TOKEN_VERSION } from '../apps/web/lib/remainingDayRecompositionIntegrity';
 import { validateDestinations } from '../apps/web/lib/remainingDayRecompositionAcceptance';
 import { signPreviewItem, verifyPreviewItem } from '../apps/web/lib/dayConstructorPreviewIntegrity';
-import { sign, createSessionToken, verifySessionToken } from '../apps/web/lib/auth';
+import { sign, verify } from '../apps/web/lib/auth';
 
 let allPassed = true;
 function check(label: string, condition: boolean) {
@@ -76,9 +76,9 @@ check('49. purpose separation both ways: an F1 preview token is not a proposal t
   const window = { date: '2026-09-16', timezone: 'UTC', source: 'REMAINING_TODAY' as const, start: at(9), end: at(17) };
   const item = { intentId: 'i', title: 'T', start: at(10), end: at(11), placementSource: 'FIXED_CONSTRAINT' as const };
   const preview = signPreviewItem({ userId: 'user-a', window, item });
-  return !verifyRecompositionProposalToken('user-a', preview).ok && !verifyPreviewItem({ userId: 'user-a', window, item }, t1).ok && !verifyRecompositionProposalToken('user-a', createSessionToken('user-a', 'a@example.com')).ok;
+  return !verifyRecompositionProposalToken('user-a', preview).ok && !verifyPreviewItem({ userId: 'user-a', window, item }, t1).ok && !verifyRecompositionProposalToken('user-a', sign({ userId: 'user-a', email: 'a@example.com', exp: Date.now() + 60_000 })).ok;
 })());
-check('8. the token carries no userId/email key, so it is not a session lookalike', (() => { const payload = JSON.parse(Buffer.from(t1.split('.')[0], 'base64url').toString('utf8')); return Object.keys(payload).sort().join() === 'f,k,v' && (verifySessionToken(t1) as any)?.userId === undefined; })());
+check('8. the token carries no userId/email key, so it is not a session lookalike', (() => { const payload = JSON.parse(Buffer.from(t1.split('.')[0], 'base64url').toString('utf8')); return Object.keys(payload).sort().join() === 'f,k,v' && (verify<any>(t1) as any)?.userId === undefined; })());
 
 // ---------- 26/27/56/57/58/22/24/59-60/67. pure final-state destination validation ----------
 {

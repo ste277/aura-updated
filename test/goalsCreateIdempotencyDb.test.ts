@@ -7,8 +7,9 @@
  *   DATABASE_URL="postgresql://..." npx ts-node test/goalsCreateIdempotencyDb.test.ts
  */
 import { upsertUserByEmail, updateBirthProfile, beginTransaction } from '../apps/web/lib/db';
-import { createSessionToken } from '../apps/web/lib/auth';
+
 import { POST as createGoal } from '../apps/web/app/api/goals/route';
+import { createTestSessionToken, TEST_SESSION_COOKIE } from './authSessionTestSupport';
 
 let allPassed = true;
 function check(label: string, condition: boolean) {
@@ -33,7 +34,7 @@ async function sql(text: string, params: unknown[] = []): Promise<any[]> {
 }
 
 function fakeRequest(cookie: string, jsonBody: unknown): any {
-  return { cookies: { get: (name: string) => (name === 'as_session' ? { value: cookie } : undefined) }, json: async () => jsonBody };
+  return { cookies: { get: (name: string) => (name === TEST_SESSION_COOKIE ? { value: cookie } : undefined) }, json: async () => jsonBody };
 }
 async function callCreateGoal(token: string, body: unknown): Promise<{ status: number; body: any }> {
   const res: any = await createGoal(fakeRequest(token, body));
@@ -51,8 +52,8 @@ async function main() {
   const userB = await upsertUserByEmail({ email: 'test-b3-1-idempotency-b@example.com', cityName: 'Chennai', latitude: 13.0827, longitude: 80.2707, timezone: TZ });
   await updateBirthProfile(userA.id, { birthDate: '1990-06-15', birthTime: '08:30', birthCityName: 'Chennai', birthLatitude: 13.0827, birthLongitude: 80.2707, birthTimezone: TZ });
   await updateBirthProfile(userB.id, { birthDate: '1990-06-15', birthTime: '08:30', birthCityName: 'Chennai', birthLatitude: 13.0827, birthLongitude: 80.2707, birthTimezone: TZ });
-  const tokenA = createSessionToken(userA.id, userA.email);
-  const tokenB = createSessionToken(userB.id, userB.email);
+  const tokenA = await createTestSessionToken(userA.id, userA.email);
+  const tokenB = await createTestSessionToken(userB.id, userB.email);
 
   const cleanup = async () => {
     await sql(`DELETE FROM "GoalActivity" WHERE "userId" = ANY($1::text[])`, [[userA.id, userB.id]]);

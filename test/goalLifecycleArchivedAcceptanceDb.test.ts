@@ -30,7 +30,7 @@ import {
   createPlannedActivity,
   logPlannedActivity,
 } from '../apps/web/lib/db';
-import { createSessionToken } from '../apps/web/lib/auth';
+
 import { createRealDayConstructorOrchestratorDeps } from '../apps/web/lib/dayConstructorOrchestrator';
 import { handleDayConstructorPreviewRequest } from '../apps/web/lib/dayConstructorPreviewRequest';
 import { loadGoalDecisionFacts } from '../apps/web/lib/goalDecisionFactsProvider';
@@ -43,6 +43,7 @@ import { buildAcceptRequestBody } from '../apps/web/lib/acceptConstructedDay';
 import { POST as acceptRoute } from '../apps/web/app/api/day-constructor/accept/route';
 import { localDateTimeToUTC } from '../apps/web/lib/timezone';
 import { fixtureAnchorMonday, addCivilDays, realClockReferenceForFixture } from './lifecycleFixtureCalendar';
+import { createTestSessionToken } from './authSessionTestSupport';
 
 let allPassed = true;
 function check(label: string, condition: boolean) {
@@ -110,8 +111,8 @@ async function main() {
   };
   const evening = { constructionWindowSource: 'EXPLICIT_RANGE', explicitStart: localDateTimeToUTC(DATE, '10:00', TZ).toISOString(), explicitEnd: localDateTimeToUTC(DATE, '23:00', TZ).toISOString() };
   const bodyOf = (rows: PlanDayIntentRow[]) => ({ ...evening, intents: buildRequestedIntentsForSubmission(rows, TZ, DATE) });
-  const fakeReq = (userId: string, body: unknown): any => ({ cookies: { get: () => ({ value: createSessionToken(userId, 'ignored@example.com') }) }, json: async () => body, headers: new Headers() });
-  const accept = async (userId: string, body: unknown) => (await acceptRoute(fakeReq(userId, body))).json();
+  const fakeReq = async (userId: string, body: unknown): Promise<any> => { const token = await createTestSessionToken(userId); return { cookies: { get: () => ({ value: token }) }, json: async () => body, headers: new Headers() }; };
+  const accept = async (userId: string, body: unknown) => (await acceptRoute(await fakeReq(userId, body))).json();
   let n = 0;
   const acceptBody = (preview: any, rows: PlanDayIntentRow[], clientRequestId = `lc-${ANCHOR_MONDAY}-${n++}`) => JSON.parse(JSON.stringify(buildAcceptRequestBody(preview.preview, clientRequestId, buildGoalActivityLinksForAccept(rows, preview.preview.constructedDay.proposedItems))));
   const facts = (preview: any, id: string) => preview.preview?.resolvedIntents?.find((r: any) => r.requestedIntentId === id)?.dayIntent?.decisionFacts;
@@ -166,7 +167,7 @@ async function main() {
     console.log('=== MANUAL CANONICAL (P0a identity) -> ARCHIVE -> ACCEPT ===');
     const g2 = await goalOf(A.id, 'Goal two');
     const r2 = await recurring(A.id, g2.id, 'Cardio two');
-    const realBoot = { getSessionToken: () => 'tok', verifySession: () => ({ userId: A.id }) };
+    const realBoot = { verifySession: () => ({ userId: A.id }) };
     const handoff = await resolveGoalActivityHandoff({ ...realBoot, listGoalActivities: (uid, gid) => listGoalActivitiesWithLinkedPlanStatus(uid, gid), loadGoalActivityRhythmFacts: (uid, gaId, tz) => loadGoalActivityRhythmFacts(uid, gaId, tz) }, g2.id, r2.id, DATE, TZ);
     const demand = await resolveAutomaticGoalDemand({ ...realBoot, ...createRealGoalDemandCandidatesDeps() }, DATE, TZ, handoff.map((h) => h.id));
     const marked = markCanonicalGoalDemandHandoff(handoff, demand.status === 'OK' ? demand.manualCanonicalGoalActivityIds : []);

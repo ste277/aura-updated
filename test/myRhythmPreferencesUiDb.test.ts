@@ -16,11 +16,12 @@ import { GET as goalDetailRoute } from '../apps/web/app/api/goals/[goalId]/route
 import { POST as proposalRoute } from '../apps/web/app/api/daily-assistant/goal-rhythm/weekly-proposal/route';
 import { POST as plansRoute } from '../apps/web/app/api/plans/route';
 import { upsertUserByEmail, updateBirthProfile, createGoalWithActivities, beginTransaction, listGoalActivitiesWithLinkedPlanStatus, loadGoalActivityRhythmFacts } from '../apps/web/lib/db';
-import { createSessionToken, verifySessionToken } from '../apps/web/lib/auth';
+
 import { getDatePartsInTimezone } from '../apps/web/lib/timezone';
 import { getWeekdayForDateStr } from '../apps/web/lib/availabilityContext';
 import { resolveGoalActivityHandoff } from '../apps/web/lib/planDayBootstrap';
 import { buildRhythmSettingsPatch, draftFromSaved, savedRhythmSettingsFromActivity, type RhythmSettingsDraft } from '../apps/web/lib/rhythmPreferencesDraft';
+import { createTestSessionToken, TEST_SESSION_COOKIE, verifyTestSessionToken } from './authSessionTestSupport';
 
 let allPassed = true;
 function check(label: string, condition: boolean) {
@@ -31,7 +32,7 @@ const IST = 'Asia/Kolkata';
 const EMAIL = 'mr3-ui-db@example.com';
 
 function req(token: string, body?: unknown): any {
-  return { cookies: { get: (n: string) => (n === 'as_session' ? { value: token } : undefined) }, headers: new Headers(), nextUrl: new URL('http://localhost/x'), json: async () => body };
+  return { cookies: { get: (n: string) => (n === TEST_SESSION_COOKIE ? { value: token } : undefined) }, headers: new Headers(), nextUrl: new URL('http://localhost/x'), json: async () => body };
 }
 async function sql(text: string, params: unknown[] = []): Promise<any[]> {
   const c = await beginTransaction();
@@ -58,7 +59,7 @@ async function main() {
     const user = await upsertUserByEmail({ email: EMAIL, cityName: 'Chennai', latitude: 13.0827, longitude: 80.2707, timezone: IST });
     await sql(`UPDATE "User" SET timezone = $2 WHERE id = $1`, [user.id, IST]);
     await updateBirthProfile(user.id, { birthDate: '1990-06-15', birthTime: '08:30', birthCityName: 'Chennai', birthLatitude: 13.0827, birthLongitude: 80.2707, birthTimezone: IST });
-    const tok = createSessionToken(user.id, user.email);
+    const tok = await createTestSessionToken(user.id, user.email);
 
     const { goal, activities } = await createGoalWithActivities({ userId: user.id, title: 'MR3 Strength', targetDate: null, activities: [
       { title: 'Strength training', activityId: 'workout', rhythm: { kind: 'N_PER_WEEK', targetPerWeek: 2 } },
@@ -143,7 +144,7 @@ async function main() {
     check('D15. proposing (and then cancelling) creates no plan', (await planRows()) === plansBefore);
 
     const today = getDatePartsInTimezone(IST, new Date()).dateStr;
-    const handoffDeps = { getSessionToken: () => tok, verifySession: (t: string) => { const s = verifySessionToken(t); return s ? { userId: s.userId } : null; }, listGoalActivities: listGoalActivitiesWithLinkedPlanStatus, loadGoalActivityRhythmFacts };
+    const handoffDeps = { verifySession: () => verifyTestSessionToken(tok), listGoalActivities: listGoalActivitiesWithLinkedPlanStatus, loadGoalActivityRhythmFacts };
     const handoff = await resolveGoalActivityHandoff(handoffDeps as any, goal.id, strength.id, today, IST);
     check('D16. "Just today" / Plan with Aura handoff carries the 45-minute duration and Morning preference', handoff.length === 1 && handoff[0].preferences?.preferredDurationMinutes === 45 && handoff[0].preferences?.preferredTimeOfDay === 'MORNING');
 

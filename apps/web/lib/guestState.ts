@@ -55,7 +55,7 @@ export function verifyGuestStateToken(token: string): GuestStateTokenPayload | n
  * GuestConversionRedemption in lib/db.ts), derived from the token itself
  * rather than storing the (already-signed, already-unguessable) token
  * verbatim. A plain hash is sufficient here -- this isn't proving knowledge
- * of a secret the way createSessionToken/createMagicLinkToken's HMAC is,
+ * of a secret the way createMagicLinkToken's HMAC is,
  * just deriving a fixed-size DB key from an already-tamper-evident value. */
 export function hashGuestConversionToken(token: string): string {
   return createHash('sha256').update(token).digest('base64url');

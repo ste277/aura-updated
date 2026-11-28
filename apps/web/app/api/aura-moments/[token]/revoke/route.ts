@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSessionFromRequest } from '../../../../../lib/session';
+import { getSessionFromRequest, SESSION_UNAVAILABLE, sessionUnavailableResponse } from '../../../../../lib/session';
 import { revokeAuraMoment } from '../../../../../lib/db';
 
 /**
@@ -9,7 +9,8 @@ import { revokeAuraMoment } from '../../../../../lib/db';
  * token is otherwise bearer-access for viewing/responding.
  */
 export async function POST(req: NextRequest, { params }: { params: { token: string } }) {
-  const session = getSessionFromRequest(req);
+  const session = await getSessionFromRequest(req);
+  if (session === SESSION_UNAVAILABLE) return sessionUnavailableResponse();
   if (!session) return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 });
 
   try {

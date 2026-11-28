@@ -16,8 +16,8 @@
 import fs from 'fs';
 import { React, mount, click, typeInto, act } from './jsdomReactHarness';
 import { Pool } from 'pg';
+import { createTestSessionToken, TEST_SESSION_COOKIE } from './authSessionTestSupport';
 
-const { createSessionToken } = require('../apps/web/lib/auth');
 const db = require('../apps/web/lib/db');
 const { getDatePartsInTimezone } = require('../apps/web/lib/timezone');
 const peopleRoute = require('../apps/web/app/api/people/route');
@@ -40,7 +40,7 @@ const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 let token = '';
 const sent: Array<{ method: string; url: string; body: any; status: number }> = [];
 const routeReq = (body: unknown, url: string, as = token): any => ({
-  cookies: { get: (n: string) => (n === 'as_session' ? { value: as } : undefined) },
+  cookies: { get: (n: string) => (n === TEST_SESSION_COOKIE ? { value: as } : undefined) },
   json: async () => body,
   headers: new Headers(),
   nextUrl: new URL(`http://localhost${url}`),
@@ -149,8 +149,8 @@ async function main() {
   const tag = `mp2-${Date.now()}`;
   const user = await db.upsertUserByEmail({ email: `${tag}@mp2.aura.local`, cityName: 'Chennai', latitude: 13.08, longitude: 80.27, timezone: TZ });
   const other = await db.upsertUserByEmail({ email: `${tag}-other@mp2.aura.local`, cityName: 'Chennai', latitude: 13.08, longitude: 80.27, timezone: TZ });
-  token = createSessionToken(user.id, user.email);
-  const otherToken = createSessionToken(other.id, other.email);
+  token = await createTestSessionToken(user.id, user.email);
+  const otherToken = await createTestSessionToken(other.id, other.email);
   const today = getDatePartsInTimezone(TZ, new Date()).dateStr as string;
   const thisYear = Number(today.slice(0, 4));
   const in3 = addDays(today, 3);

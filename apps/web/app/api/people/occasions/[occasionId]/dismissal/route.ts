@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSessionFromRequest } from '../../../../../../lib/session';
+import { getSessionFromRequest, SESSION_UNAVAILABLE, sessionUnavailableResponse } from '../../../../../../lib/session';
 import { dismissPersonOccasionForOwner } from '../../../../../../lib/db';
 import { parseJsonObject } from '../../../../../../lib/request';
 import { isMyPeopleServerEnabled } from '../../../../../../lib/myPeopleGate';
@@ -24,7 +24,8 @@ const SCOPES = new Set<OccasionDismissScope>(['NOT_NOW', 'NOT_THIS_YEAR']);
 
 export async function POST(req: NextRequest, { params }: { params: { occasionId: string } }) {
   if (!isMyPeopleServerEnabled()) return NextResponse.json({ error: 'Not found.' }, { status: 404 });
-  const session = getSessionFromRequest(req);
+  const session = await getSessionFromRequest(req);
+  if (session === SESSION_UNAVAILABLE) return sessionUnavailableResponse();
   if (!session) return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 });
 
   const body = await parseJsonObject(req);

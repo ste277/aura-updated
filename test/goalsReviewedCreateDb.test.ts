@@ -9,9 +9,10 @@
  *   DATABASE_URL="postgresql://..." npx ts-node test/goalsReviewedCreateDb.test.ts
  */
 import { upsertUserByEmail, updateBirthProfile, beginTransaction } from '../apps/web/lib/db';
-import { createSessionToken } from '../apps/web/lib/auth';
+
 import { loadEligibleGoalDemand, createRealGoalDemandCandidatesDeps } from '../apps/web/lib/goalDemandCandidates';
 import { POST as createGoal } from '../apps/web/app/api/goals/route';
+import { createTestSessionToken, TEST_SESSION_COOKIE } from './authSessionTestSupport';
 
 let allPassed = true;
 function check(label: string, condition: boolean) {
@@ -40,7 +41,7 @@ async function sql(text: string, params: unknown[] = []): Promise<any[]> {
  * real NextRequest is never imported here. */
 function fakeRequest(cookie: string | undefined, jsonBody: unknown): any {
   return {
-    cookies: { get: (name: string) => (cookie !== undefined && name === 'as_session' ? { value: cookie } : undefined) },
+    cookies: { get: (name: string) => (cookie !== undefined && name === TEST_SESSION_COOKIE ? { value: cookie } : undefined) },
     json: async () => jsonBody,
   };
 }
@@ -54,7 +55,7 @@ async function main() {
   const user = await upsertUserByEmail({ email: 'test-b3-reviewed-create@example.com', cityName: 'Chennai', latitude: 13.0827, longitude: 80.2707, timezone: TZ });
   const other = await upsertUserByEmail({ email: 'test-b3-reviewed-create-other@example.com', cityName: 'Chennai', latitude: 13.0827, longitude: 80.2707, timezone: TZ });
   await updateBirthProfile(user.id, { birthDate: '1990-06-15', birthTime: '08:30', birthCityName: 'Chennai', birthLatitude: 13.0827, birthLongitude: 80.2707, birthTimezone: TZ });
-  const token = createSessionToken(user.id, user.email);
+  const token = await createTestSessionToken(user.id, user.email);
 
   const cleanup = async () => {
     await sql(`DELETE FROM "GoalActivity" WHERE "userId" = ANY($1::text[])`, [[user.id, other.id]]);
